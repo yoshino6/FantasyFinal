@@ -1,7 +1,7 @@
-import { Format, logger, useEvent, useMessage, useRoute } from 'alemonjs';
+import { logger, useEvent, useMessage, useRoute } from 'alemonjs';
 import { addPoints, confirmAllocation, resetAllocation } from '../game/character.service';
 import { attributeAliases } from '../game/constants';
-import { allocationFormat, allocationText, characterText, sendWithTextFallback } from '../game/message';
+import { allocationFormat, allocationText, characterText, messageFormat, sendWithTextFallback } from '../game/message';
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : '操作失败，请稍后重试。';
 
@@ -17,7 +17,7 @@ export const add = async () => {
     await sendWithTextFallback(message, allocationFormat(allocation), allocationText(allocation));
   } catch (error) {
     logger.warn({ err: error, userId: event.current.UserId }, 'allocation add rejected');
-    await message.send({ format: Format.create().addText(errorText(error)) });
+    await message.send({ format: messageFormat('加点失败', errorText(error)) });
   }
 };
 
@@ -29,7 +29,7 @@ export const reset = async () => {
     await sendWithTextFallback(message, allocationFormat(allocation), allocationText(allocation));
   } catch (error) {
     logger.warn({ err: error, userId: event.current.UserId }, 'allocation reset rejected');
-    await message.send({ format: Format.create().addText(errorText(error)) });
+    await message.send({ format: messageFormat('重置失败', errorText(error)) });
   }
 };
 
@@ -38,9 +38,9 @@ export const confirm = async () => {
   const [message] = useMessage();
   try {
     const character = await confirmAllocation(event.current.UserId, event.current.UserName);
-    await message.send({ format: Format.create().addText(`穿越完成！\n\n${characterText(character.name, character, character, character.regionName, character.x, character.y, character.z)}`) });
+    await message.send({ format: messageFormat(`穿越完成 · ${character.name}`, characterText(character, character, character.regionName, character.x, character.y, character.z)) });
   } catch (error) {
     logger.warn({ err: error, userId: event.current.UserId }, 'allocation confirm rejected');
-    await message.send({ format: Format.create().addText(errorText(error)) });
+    await message.send({ format: messageFormat('确认失败', errorText(error)) });
   }
 };

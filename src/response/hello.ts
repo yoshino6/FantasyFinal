@@ -1,26 +1,15 @@
-import { useMention, useMessage, Format } from 'alemonjs';
+import { logger, useMention, useMessage } from 'alemonjs';
+import { messageFormat } from '../game/message';
 
 export default async () => {
   const [message] = useMessage();
   const [mention] = useMention();
-  const format = Format.create();
-
   const userRes = await mention.findOne();
   if (!userRes.count || !userRes.data) {
-    // 没有找到用户
     logger.warn('没有找到@用户');
-    format.addText('没有找到@用户');
-    message.send({
-      format
-    });
+    await message.send({ format: messageFormat('问候失败', '没有找到可问候的用户。') });
     return;
   }
   const user = userRes.data;
-
-  format.addText(`hello, ${user.UserName || user.UserId}!`);
-
-  // 发送消息
-  message.send({
-    format
-  });
+  await message.send({ format: messageFormat('问候', `你好，${user.UserName || user.UserId}！`) });
 };
