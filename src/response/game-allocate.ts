@@ -1,7 +1,7 @@
 import { Format, logger, useEvent, useMessage, useRoute } from 'alemonjs';
 import { addPoints, confirmAllocation, resetAllocation } from '../game/character.service';
 import { attributeAliases } from '../game/constants';
-import { allocationFormat, characterText } from '../game/message';
+import { allocationFormat, allocationText, characterText, sendWithTextFallback } from '../game/message';
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : '操作失败，请稍后重试。';
 
@@ -13,7 +13,8 @@ export const add = async () => {
     const attribute = attributeAliases[String(route.param('attribute') ?? '')];
     const points = Number(route.param('points'));
     if (!attribute || !Number.isInteger(points)) throw new Error('属性或点数无效。');
-    await message.send({ format: allocationFormat(await addPoints(event.current.UserId, attribute, points)) });
+    const allocation = await addPoints(event.current.UserId, attribute, points);
+    await sendWithTextFallback(message, allocationFormat(allocation), allocationText(allocation));
   } catch (error) {
     logger.warn({ err: error, userId: event.current.UserId }, 'allocation add rejected');
     await message.send({ format: Format.create().addText(errorText(error)) });
@@ -24,7 +25,8 @@ export const reset = async () => {
   const [event] = useEvent();
   const [message] = useMessage();
   try {
-    await message.send({ format: allocationFormat(await resetAllocation(event.current.UserId)) });
+    const allocation = await resetAllocation(event.current.UserId);
+    await sendWithTextFallback(message, allocationFormat(allocation), allocationText(allocation));
   } catch (error) {
     logger.warn({ err: error, userId: event.current.UserId }, 'allocation reset rejected');
     await message.send({ format: Format.create().addText(errorText(error)) });
