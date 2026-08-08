@@ -250,7 +250,7 @@ qq-bot:
   app_id: '你的 AppID'
   secret: '你的 AppSecret'
   sandbox: true # 联调通过后改为 false
-  markdownToText: true # 没有 QQ Markdown 权限时自动降级为文字
+  markdownToText: false # 设为 true 会将互动按钮降级为不可点击的纯文字
   hideUnsupported: 1
 
 FantasyFinal:

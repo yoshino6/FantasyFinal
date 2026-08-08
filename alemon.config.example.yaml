@@ -2,7 +2,7 @@ qq-bot:
   app_id: '你的 AppID'
   secret: '你的 AppSecret'
   sandbox: true
-  markdownToText: true
+  markdownToText: false # true 会将互动按钮降级为不可点击的纯文字
   hideUnsupported: 1
 
 FantasyFinal:

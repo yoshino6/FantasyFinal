@@ -5,7 +5,7 @@ import { attributes, type Allocation, type DerivedStats } from './types';
 const percent = (bp: number) => `${(bp / 100).toFixed(2)}%`;
 
 export const storyFormat = () => Format.create()
-  .addText('【异界序章】\n\n当最后一缕现实的光从眼前散去，你在世界树的低语中醒来。远方的幽暗密林正等待第一位旅者。\n\n命运尚未落笔。请继续，决定你的天赋。')
+  .addText('【异界序章】\n\n当最后一缕现实的光从眼前散去，你在世界树的低语中醒来。远方的幽暗密林正等待第一位旅者。\n\n命运尚未落笔。点击下方“继续”；若按钮不可用，请发送 /注册 继续。')
   .addButtonGroup(Format.createButtonGroup().addRow().addButton('继续', '/注册 继续', { type: 'command', autoEnter: true }));
 
 export const allocationFormat = (allocation: Allocation) => {
