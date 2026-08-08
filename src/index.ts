@@ -28,6 +28,7 @@ const appGroup = router.group({ // 精准规则匹配，复杂度 O1，稳定 �
 
 appGroup.use("hello", () => import('./response/hello'))
 appGroup.use("help", () => import('./response/help'))
+appGroup.use('菜单', () => import('./response/help'))
 appGroup.use('注册', () => import('./response/game-register'))
 appGroup.use('注册 继续', () => import('./response/game-continue'))
 appGroup.use({
