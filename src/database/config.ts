@@ -11,13 +11,15 @@ export type DatabaseConfig = {
 
 type AppConfig = {
   FantasyFinal?: { database?: Partial<DatabaseConfig> };
+  /** 兼容项目原有的数据库配置；新配置优先使用 FantasyFinal.database。 */
+  mysql?: Partial<DatabaseConfig>;
 };
 
 export const getDatabaseConfig = (): DatabaseConfig => {
   const value = getConfigValue<AppConfig>();
-  const database = value.FantasyFinal?.database;
+  const database = value.FantasyFinal?.database ?? value.mysql;
   if (!database?.host || !database.database || !database.user || !database.password) {
-    throw new Error('缺少 FantasyFinal.database 数据库配置');
+    throw new Error('缺少数据库配置：请填写 FantasyFinal.database（或兼容的 mysql）');
   }
   return {
     host: database.host,
