@@ -4,12 +4,16 @@ qq-bot:
   sandbox: false
   markdownToText: true
   hideUnsupported: 1
+mysql:
+  host: 127.0.0.1
+  port: 3306
+  user: root
+  password: root
+  database: fantasy
+redis:
+  host: 127.0.0.1
+  port: 16379
+  user: root
+  db: 6
 
-FantasyFinal:
-  database:
-    host: '127.0.0.1'
-    port: 3306
-    database: 'fantasy_final'
-    user: 'fantasy_app'
-    password: '替换为应用数据库密码'
-    connectionLimit: 10
+login: 'qq-bot'
