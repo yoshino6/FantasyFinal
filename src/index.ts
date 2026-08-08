@@ -1,6 +1,7 @@
 import { Router, logger, defineChildren } from 'alemonjs';
 import expose from './expose';
 import koaRouter from 'koa-router';
+import { getPool } from './database/pool';
 
 const r = new koaRouter({
   prefix: '/api'
@@ -54,5 +55,8 @@ export default defineChildren({
   // 当准备好时
   onReady() {
     logger.info('本地测试启动');
+    void getPool()
+      .then(() => logger.info('游戏数据库与初始地图已就绪'))
+      .catch(error => logger.error({ err: error }, '游戏数据库初始化失败'));
   }
 });

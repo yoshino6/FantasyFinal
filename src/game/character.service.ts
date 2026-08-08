@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
-import { withTransaction } from '../database/pool';
+import { getPool, withTransaction } from '../database/pool';
 import { ATTRIBUTE_CAP, INITIAL_ATTRIBUTE_POINTS, SESSION_TTL_MINUTES, calculateDerivedStats } from './constants';
 import { attributes, emptyAllocation, type Allocation, type AttributeKey, type DerivedStats } from './types';
 
@@ -110,7 +110,7 @@ export const confirmAllocation = async (qqUserId: string, nickname?: string): Pr
 });
 
 export const getCharacter = async (qqUserId: string): Promise<CharacterView | null> => {
-  const [rows] = await (await import('../database/pool')).getPool().execute<(RowDataPacket & CharacterView)[]>(
+  const [rows] = await (await getPool()).execute<(RowDataPacket & CharacterView)[]>(
     'SELECT c.name, c.constitution, c.spirit, c.strength, c.intelligence, c.agility, c.perception, c.hp_max AS hpMax, c.mp_max AS mpMax, c.physical_attack AS physicalAttack, c.magic_attack AS magicAttack, c.physical_defense AS physicalDefense, c.magic_defense AS magicDefense, c.accuracy, c.evasion, c.crit_rate_bp AS critRateBp, c.crit_damage_bp AS critDamageBp, c.crit_resist_bp AS critResistBp, c.crit_damage_reduction_bp AS critDamageReductionBp, c.tenacity, c.speed, r.name AS regionName, c.pos_x AS x, c.pos_y AS y, c.pos_z AS z FROM characters c JOIN players p ON p.id = c.player_id JOIN map_regions r ON r.id = c.current_region_id WHERE p.qq_user_id = ? LIMIT 1',
     [qqUserId]
   );
