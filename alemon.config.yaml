@@ -2,7 +2,7 @@ qq-bot:
   app_id: '102057736'
   secret: 'qWCtaI0jSCwhSE0naOC1qgXOG81uoidY'
   sandbox: false
-  markdownToText: true
+  markdownToText: false
   hideUnsupported: 1
 mysql:
   host: 127.0.0.1
