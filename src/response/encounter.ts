@@ -1,0 +1,1 @@
+export { encounterHandler } from './adventure';

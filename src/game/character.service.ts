@@ -103,6 +103,14 @@ export const confirmAllocation = async (qqUserId: string, nickname?: string): Pr
     'INSERT INTO characters (player_id, name, constitution, spirit, strength, intelligence, agility, perception, hp_max, mp_max, physical_attack, magic_attack, physical_defense, magic_defense, accuracy, evasion, crit_rate_bp, crit_damage_bp, crit_resist_bp, crit_damage_reduction_bp, tenacity, speed, current_region_id, pos_x, pos_y, pos_z) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [player.id, name, ...attributes.map(key => allocation[key]), stats.hpMax, stats.mpMax, stats.physicalAttack, stats.magicAttack, stats.physicalDefense, stats.magicDefense, stats.accuracy, stats.evasion, stats.critRateBp, stats.critDamageBp, stats.critResistBp, stats.critDamageReductionBp, stats.tenacity, stats.speed, region.id, x, y, z]
   );
+  const [newCharacters] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM characters WHERE player_id=?', [player.id]);
+  const characterId = newCharacters[0].id;
+  await connection.execute(`INSERT INTO player_skills (character_id,skill_id,quick_slot)
+    SELECT ?, id, CASE code WHEN 'arcane_bolt' THEN 1 WHEN 'heavy_strike' THEN 2 END FROM skill_definitions WHERE code IN ('arcane_bolt','heavy_strike')`, [characterId]);
+  await connection.execute(`INSERT INTO player_inventory (character_id,item_id,quantity)
+    SELECT ?, id, 3 FROM item_definitions WHERE code='healing_herb'`, [characterId]);
+  await connection.execute(`INSERT INTO player_quick_items (character_id,quick_slot,item_id)
+    SELECT ?, 1, id FROM item_definitions WHERE code='healing_herb'`, [characterId]);
   await connection.execute('UPDATE players SET status = \'active\' WHERE id = ?', [player.id]);
   await connection.execute('DELETE FROM registration_sessions WHERE id = ?', [session.id]);
   await connection.execute('INSERT INTO player_events (player_id, event_type, payload) VALUES (?, \'character.created\', ?)', [player.id, JSON.stringify({ region: region.name, x, y, z })]);

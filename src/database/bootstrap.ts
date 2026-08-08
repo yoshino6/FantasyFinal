@@ -43,6 +43,66 @@ const schemaStatements = [
     PRIMARY KEY (id), KEY idx_player_events_player_created (player_id, created_at),
     CONSTRAINT fk_event_player FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS item_definitions (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, code VARCHAR(64) NOT NULL, name VARCHAR(64) NOT NULL,
+    description TEXT NOT NULL, item_type ENUM('consumable','material','equipment') NOT NULL DEFAULT 'material',
+    weight DECIMAL(8,2) NOT NULL DEFAULT 0, stack_limit INT UNSIGNED NOT NULL DEFAULT 99,
+    effect_json JSON NULL, PRIMARY KEY (id), UNIQUE KEY uk_item_code (code)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_inventory (
+    character_id BIGINT UNSIGNED NOT NULL, item_id BIGINT UNSIGNED NOT NULL, quantity INT UNSIGNED NOT NULL,
+    PRIMARY KEY (character_id, item_id), CONSTRAINT fk_inventory_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
+    CONSTRAINT fk_inventory_item FOREIGN KEY (item_id) REFERENCES item_definitions(id)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_quick_items (
+    character_id BIGINT UNSIGNED NOT NULL, quick_slot TINYINT UNSIGNED NOT NULL, item_id BIGINT UNSIGNED NOT NULL,
+    PRIMARY KEY (character_id, quick_slot), UNIQUE KEY uk_quick_item (character_id, item_id),
+    CONSTRAINT fk_quick_item_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
+    CONSTRAINT fk_quick_item_definition FOREIGN KEY (item_id) REFERENCES item_definitions(id)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS skill_definitions (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, code VARCHAR(64) NOT NULL, name VARCHAR(64) NOT NULL,
+    category ENUM('physical','magic','utility') NOT NULL, mana_cost INT UNSIGNED NOT NULL DEFAULT 0, cooldown_turns TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    power INT UNSIGNED NOT NULL DEFAULT 100, description TEXT NOT NULL, PRIMARY KEY (id), UNIQUE KEY uk_skill_code (code)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_skills (
+    character_id BIGINT UNSIGNED NOT NULL, skill_id BIGINT UNSIGNED NOT NULL, level TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    quick_slot TINYINT UNSIGNED NULL, PRIMARY KEY (character_id, skill_id), UNIQUE KEY uk_quick_slot (character_id, quick_slot),
+    CONSTRAINT fk_player_skill_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
+    CONSTRAINT fk_player_skill_definition FOREIGN KEY (skill_id) REFERENCES skill_definitions(id)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS monster_templates (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, code VARCHAR(64) NOT NULL, name VARCHAR(64) NOT NULL,
+    monster_class ENUM('normal','elite','boss') NOT NULL DEFAULT 'normal', level INT UNSIGNED NOT NULL DEFAULT 1,
+    hp_max INT UNSIGNED NOT NULL, attack INT UNSIGNED NOT NULL, defense INT UNSIGNED NOT NULL, speed INT UNSIGNED NOT NULL,
+    perception INT UNSIGNED NOT NULL DEFAULT 0, charisma INT UNSIGNED NOT NULL DEFAULT 0,
+    skill_sequence JSON NULL, experience INT UNSIGNED NOT NULL, drops_json JSON NULL,
+    PRIMARY KEY (id), UNIQUE KEY uk_monster_code (code)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS monster_spawns (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, template_id BIGINT UNSIGNED NOT NULL, region_id BIGINT UNSIGNED NOT NULL,
+    pos_x INT NOT NULL, pos_y INT NOT NULL, pos_z INT NOT NULL, current_hp INT UNSIGNED NOT NULL, spawned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    defeated_at DATETIME NULL, PRIMARY KEY (id), KEY idx_spawn_location (region_id, pos_x, pos_y, pos_z, defeated_at),
+    CONSTRAINT fk_spawn_template FOREIGN KEY (template_id) REFERENCES monster_templates(id),
+    CONSTRAINT fk_spawn_region FOREIGN KEY (region_id) REFERENCES map_regions(id)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS combat_sessions (
+    id CHAR(36) NOT NULL, character_id BIGINT UNSIGNED NOT NULL, spawn_id BIGINT UNSIGNED NOT NULL,
+    player_hp INT UNSIGNED NOT NULL, player_mp INT UNSIGNED NOT NULL, cooldowns JSON NOT NULL,
+    turn_no INT UNSIGNED NOT NULL DEFAULT 1, state ENUM('active','victory','defeat','escaped') NOT NULL DEFAULT 'active',
+    PRIMARY KEY (id), UNIQUE KEY uk_active_character (character_id),
+    CONSTRAINT fk_combat_character FOREIGN KEY (character_id) REFERENCES characters(id), CONSTRAINT fk_combat_spawn FOREIGN KEY (spawn_id) REFERENCES monster_spawns(id)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS parties (
+    id CHAR(36) NOT NULL, leader_character_id BIGINT UNSIGNED NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id), UNIQUE KEY uk_party_leader (leader_character_id), CONSTRAINT fk_party_leader FOREIGN KEY (leader_character_id) REFERENCES characters(id)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS party_members (
+    party_id CHAR(36) NOT NULL, character_id BIGINT UNSIGNED NOT NULL, joined_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (party_id, character_id), UNIQUE KEY uk_member_party (character_id),
+    CONSTRAINT fk_party_member_party FOREIGN KEY (party_id) REFERENCES parties(id) ON DELETE CASCADE,
+    CONSTRAINT fk_party_member_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
 ];
 
 export const initializeSchema = async (pool: Pool) => {
@@ -54,4 +114,23 @@ export const initializeSchema = async (pool: Pool) => {
        ('dark_forest', '幽暗密林', '常年被薄雾笼罩的初始区域。', 300, 700, -500, -100, 0, 80, 1, 1)
      ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description)`
   );
+  await pool.query(`INSERT INTO item_definitions (code, name, description, item_type, weight, effect_json) VALUES
+    ('healing_herb', '微光草药', '恢复 30 点生命。', 'consumable', 0.20, JSON_OBJECT('heal', 30)),
+    ('wolf_fang', '幽狼之牙', '可出售的普通材料。', 'material', 0.15, NULL)
+    ON DUPLICATE KEY UPDATE name = VALUES(name)`);
+  await pool.query(`INSERT INTO skill_definitions (code, name, category, mana_cost, cooldown_turns, power, description) VALUES
+    ('arcane_bolt', '奥术飞矢', 'magic', 8, 1, 150, '发射一枚奥术能量。'),
+    ('heavy_strike', '沉重一击', 'physical', 5, 2, 180, '造成更高的物理伤害。')
+    ON DUPLICATE KEY UPDATE name = VALUES(name)`);
+  await pool.query(`INSERT INTO monster_templates (code, name, monster_class, level, hp_max, attack, defense, speed, perception, charisma, skill_sequence, experience, drops_json) VALUES
+    ('mist_wolf', '雾影狼', 'normal', 1, 75, 14, 4, 95, 8, 1, JSON_ARRAY(), 20, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',0.7,'quantity',1))),
+    ('forest_sprite', '林间精怪', 'normal', 1, 55, 11, 2, 110, 12, 10, JSON_ARRAY(), 18, JSON_ARRAY(JSON_OBJECT('code','healing_herb','chance',0.3,'quantity',1))),
+    ('ancient_wolf', '古狼首领', 'elite', 3, 180, 25, 8, 105, 14, 2, JSON_ARRAY('howl','bite','bite'), 80, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',1,'quantity',3)))
+    ON DUPLICATE KEY UPDATE name = VALUES(name)`);
+  await pool.query(`INSERT IGNORE INTO player_skills (character_id, skill_id, quick_slot)
+    SELECT c.id, s.id, CASE s.code WHEN 'arcane_bolt' THEN 1 WHEN 'heavy_strike' THEN 2 END FROM characters c JOIN skill_definitions s ON s.code IN ('arcane_bolt','heavy_strike')`);
+  await pool.query(`INSERT IGNORE INTO player_inventory (character_id, item_id, quantity)
+    SELECT c.id, i.id, 3 FROM characters c JOIN item_definitions i ON i.code='healing_herb'`);
+  await pool.query(`INSERT IGNORE INTO player_quick_items (character_id, quick_slot, item_id)
+    SELECT c.id, 1, i.id FROM characters c JOIN item_definitions i ON i.code='healing_herb'`);
 };
