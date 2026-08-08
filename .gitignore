@@ -25,5 +25,6 @@ yarn-error.log*
 # 工具
 .DS_Store
 *.local
+alemon.config.yaml
 
 /packages

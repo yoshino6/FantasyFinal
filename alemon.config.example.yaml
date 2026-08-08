@@ -1,7 +1,7 @@
 qq-bot:
-  app_id: '102057736'
-  secret: 'qWCtaI0jSCwhSE0naOC1qgXOG81uoidY'
-  sandbox: false
+  app_id: '你的 AppID'
+  secret: '你的 AppSecret'
+  sandbox: true
   markdownToText: true
   hideUnsupported: 1
 

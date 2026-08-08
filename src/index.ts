@@ -1,4 +1,4 @@
-import { Router, logger } from 'alemonjs';
+import { Router, logger, defineChildren } from 'alemonjs';
 import expose from './expose';
 import koaRouter from 'koa-router';
 
@@ -12,7 +12,7 @@ r.get('/ping', (ctx) => {
 });
 
 const router = Router.create({
-  events: ['message.create', 'private.message.create'] // 选择消息创建
+  events: ['message.create', 'private.message.create', 'interaction.create', 'private.interaction.create']
 });
 
 const appGroup = router.group({ // 精准规则匹配，复杂度 O1，稳定 且 几乎无损耗
@@ -25,6 +25,22 @@ const appGroup = router.group({ // 精准规则匹配，复杂度 O1，稳定 �
 
 appGroup.use("hello", () => import('./response/hello'))
 appGroup.use("help", () => import('./response/help'))
+appGroup.use('注册', () => import('./response/game-register'))
+appGroup.use('注册 继续', () => import('./response/game-continue'))
+appGroup.use({
+  path: '加点',
+  schema: {
+    usage: '/加点 <体质|精神|力量|智力|敏捷|感知> <点数>',
+    args: [
+      { name: 'attribute', rules: [{ required: true, type: 'enum', enum: ['体质', '精神', '力量', '智力', '敏捷', '感知'] }] },
+      { name: 'points', rules: [{ required: true, type: 'number', min: 1, max: 20 }] }
+    ]
+  }
+}, () => import('./response/add-points'))
+appGroup.use('重置加点', () => import('./response/reset-points'))
+appGroup.use('确认属性', () => import('./response/confirm-attributes'))
+appGroup.use('角色', () => import('./response/character'))
+appGroup.use('地图', () => import('./response/map'))
 
 export default defineChildren({
   // 注册内容
