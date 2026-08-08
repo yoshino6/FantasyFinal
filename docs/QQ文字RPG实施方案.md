@@ -88,7 +88,7 @@ src/
 
 ```sql
 CREATE DATABASE IF NOT EXISTS fantasy_final
-  CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS 'fantasy_app'@'%' IDENTIFIED BY '请替换为长随机密码';
 GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX
   ON fantasy_final.* TO 'fantasy_app'@'%';

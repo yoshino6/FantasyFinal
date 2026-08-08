@@ -13,7 +13,7 @@ export const getPool = async (): Promise<Pool> => {
       waitForConnections: true, connectionLimit: 1, charset: 'utf8mb4'
     });
     try {
-      await adminPool.query(`CREATE DATABASE IF NOT EXISTS \`${config.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`);
+      await adminPool.query(`CREATE DATABASE IF NOT EXISTS \`${config.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
     } finally {
       await adminPool.end();
     }
