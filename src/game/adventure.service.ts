@@ -100,6 +100,14 @@ const combatRow = async (qqUserId: string) => {
   return { character, combat: rows[0] };
 };
 
+export const battleStatus = async (qqUserId: string) => {
+  const { character, combat } = await combatRow(qqUserId);
+  return {
+    targetId: Number(combat.id), targetName: String(combat.name), targetHp: Number(combat.current_hp), targetHpMax: Number(combat.hp_max),
+    playerHp: Number(combat.player_hp), playerHpMax: Number(character.hp_max), playerMp: Number(combat.player_mp), playerMpMax: Number(character.mp_max), turn: Number(combat.turn_no)
+  };
+};
+
 const finishVictory = async (connection: PoolConnection, character: CharacterRow, combat: any) => {
   await connection.execute('UPDATE monster_spawns SET defeated_at=NOW(),current_hp=0 WHERE id=?', [combat.id]);
   await connection.execute('UPDATE combat_sessions SET state=\'victory\' WHERE combat_sessions.id=?', [combat.combat_id]);
