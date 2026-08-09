@@ -66,18 +66,18 @@ export const inventoryView = async (qqUserId: string, category: '装备' | '道�
   await pool.execute(`INSERT IGNORE INTO player_item_codex (character_id,item_id)
     SELECT ?,item_id FROM player_inventory WHERE character_id=? UNION SELECT ?,item_id FROM player_item_instances WHERE character_id=?`, [character.id, character.id, character.id, character.id]);
   const itemType = category === '装备' ? 'equipment' : category === '道具' ? 'consumable' : 'material';
-  const [stacked] = await pool.execute<(RowDataPacket & { id: number; name: string; item_category: string; quantity: number; description: string })[]>('SELECT i.id,i.name,i.item_category,pi.quantity,i.description FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.item_type=? AND i.stackable=1 ORDER BY i.name', [character.id, itemType]);
-  const [instances] = await pool.execute<(RowDataPacket & { id: number; definition_id: number; name: string; item_category: string; quality: number; durability: number; durability_max: number; description: string })[]>('SELECT ii.id,i.id AS definition_id,i.name,i.item_category,ii.quality,ii.durability,ii.durability_max,i.description FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.character_id=? AND i.item_type=? ORDER BY ii.acquired_at DESC', [character.id, itemType]);
-  const [recent] = await pool.execute<(RowDataPacket & { id: number; item_type: string; item_category: string; name: string })[]>(`SELECT id,item_type,item_category,name FROM (
-      SELECT i.id,i.item_type,i.item_category,i.name,ii.acquired_at FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.character_id=?
-      UNION ALL SELECT i.id,i.item_type,i.item_category,i.name,pi.acquired_at FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=?
+  const [stacked] = await pool.execute<(RowDataPacket & { codex_id: string; name: string; item_category: string; quantity: number; description: string })[]>('SELECT i.codex_id,i.name,i.item_category,pi.quantity,i.description FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.item_type=? AND i.stackable=1 ORDER BY i.name', [character.id, itemType]);
+  const [instances] = await pool.execute<(RowDataPacket & { id: number; definition_codex_id: string; name: string; item_category: string; quality: number; durability: number; durability_max: number; description: string })[]>('SELECT ii.id,i.codex_id AS definition_codex_id,i.name,i.item_category,ii.quality,ii.durability,ii.durability_max,i.description FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.character_id=? AND i.item_type=? ORDER BY ii.acquired_at DESC', [character.id, itemType]);
+  const [recent] = await pool.execute<(RowDataPacket & { codex_id: string; item_type: string; item_category: string; name: string })[]>(`SELECT codex_id,item_type,item_category,name FROM (
+      SELECT i.codex_id,i.item_type,i.item_category,i.name,ii.acquired_at FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.character_id=?
+      UNION ALL SELECT i.codex_id,i.item_type,i.item_category,i.name,pi.acquired_at FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=?
     ) recent_items ORDER BY acquired_at DESC LIMIT 5`, [character.id, character.id]);
   return { stacked, instances, recent };
 };
 
-export const itemCodex = async (qqUserId: string, itemId: number) => {
+export const itemCodex = async (qqUserId: string, codexId: string) => {
   const character = await characterFor(qqUserId);
-  const [rows] = await (await getPool()).execute<(RowDataPacket & { id: number; name: string; item_type: string; item_category: string; description: string; weight: number; stackable: number; effect_json: string | null })[]>(`SELECT i.id,i.name,i.item_type,i.item_category,i.description,i.weight,i.stackable,i.effect_json FROM player_item_codex c JOIN item_definitions i ON i.id=c.item_id WHERE c.character_id=? AND c.item_id=?`, [character.id, itemId]);
+  const [rows] = await (await getPool()).execute<(RowDataPacket & { codex_id: string; name: string; item_type: string; item_category: string; description: string; weight: number; stackable: number; effect_json: string | null })[]>(`SELECT i.codex_id,i.name,i.item_type,i.item_category,i.description,i.weight,i.stackable,i.effect_json FROM player_item_codex c JOIN item_definitions i ON i.id=c.item_id WHERE c.character_id=? AND i.codex_id=?`, [character.id, codexId]);
   if (!rows[0]) throw new Error('尚未解锁该物品图鉴。');
   return rows[0];
 };
