@@ -61,6 +61,18 @@ export const inventory = async (qqUserId: string) => {
   return { items: rows, weight, capacity: 30, speed, movementSpeed: movementSpeedFrom(speed, Number(character.level)), speedPenalty };
 };
 
+export const inventoryView = async (qqUserId: string, category: '装备' | '道具' | '材料' = '装备') => {
+  const character = await characterFor(qqUserId); const pool = await getPool();
+  const itemType = category === '装备' ? 'equipment' : category === '道具' ? 'consumable' : 'material';
+  const [stacked] = await pool.execute<(RowDataPacket & { id: number; name: string; item_category: string; quantity: number; description: string })[]>('SELECT i.id,i.name,i.item_category,pi.quantity,i.description FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.item_type=? AND i.stackable=1 ORDER BY i.name', [character.id, itemType]);
+  const [instances] = await pool.execute<(RowDataPacket & { id: number; name: string; item_category: string; quality: number; durability: number; durability_max: number; description: string })[]>('SELECT ii.id,i.name,i.item_category,ii.quality,ii.durability,ii.durability_max,i.description FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.character_id=? AND i.item_type=? ORDER BY ii.acquired_at DESC', [character.id, itemType]);
+  const [recent] = await pool.execute<(RowDataPacket & { item_type: string; item_category: string; name: string })[]>(`SELECT item_type,item_category,name FROM (
+      SELECT i.item_type,i.item_category,i.name,ii.acquired_at FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.character_id=?
+      UNION ALL SELECT i.item_type,i.item_category,i.name,pi.acquired_at FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=?
+    ) recent_items ORDER BY acquired_at DESC LIMIT 5`, [character.id, character.id]);
+  return { stacked, instances, recent };
+};
+
 export const equipment = async (qqUserId: string) => {
   const character = await characterFor(qqUserId);
   const [rows] = await (await getPool()).execute<(RowDataPacket & { slot: string; name: string; description: string })[]>('SELECT pe.slot,i.name,i.description FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id WHERE pe.character_id=? ORDER BY pe.slot', [character.id]);
@@ -200,7 +212,7 @@ const finishVictory = async (connection: PoolConnection, character: CharacterRow
   const rewards: string[] = [];
   for (const drop of drops) if (Math.random() <= Math.min(1, Number(drop.chance ?? 1) + modifiers.dropBonus)) {
     const [items] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>('SELECT id,name FROM item_definitions WHERE code=?', [drop.code]);
-    if (items[0]) { await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity)', [character.id, items[0].id, drop.quantity ?? 1]); rewards.push(`${items[0].name}×${drop.quantity ?? 1}`); }
+    if (items[0]) { await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),acquired_at=NOW()', [character.id, items[0].id, drop.quantity ?? 1]); rewards.push(`${items[0].name}×${drop.quantity ?? 1}`); }
   }
   return `胜利！获得经验 ${experience}${modifiers.experienceMultiplier > 1 ? '（成长祝福生效）' : ''}${rewards.length ? `，掉落 ${rewards.join('、')}` : ''}。`;
 };
