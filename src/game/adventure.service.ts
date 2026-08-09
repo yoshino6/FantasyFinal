@@ -3,7 +3,7 @@ import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 
 type CharacterRow = RowDataPacket & { id: number; name: string; level: number; experience: number; hp_max: number; mp_max: number; physical_attack: number; magic_attack: number; physical_defense: number; magic_defense: number; accuracy: number; evasion: number; crit_rate_bp: number; crit_damage_bp: number; crit_resist_bp: number; crit_damage_reduction_bp: number; speed: number; perception: number; spirit: number; intelligence: number; adventurer_registered: number; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string };
-type SpawnRow = RowDataPacket & { id: number; template_id?: number; name: string; monster_class: string; level: number; current_hp: number; hp_max: number; attack: number; defense: number; speed: number; perception: number; charisma: number; experience: number; drops_json: string | null; skill_sequence?: string | null };
+type SpawnRow = RowDataPacket & { id: number; template_id?: number; name: string; monster_class: string; level: number; current_hp: number; hp_max: number; attack: number; defense: number; speed: number; perception: number; charisma: number; experience: number; drops_json: string | null; skill_sequence?: unknown };
 type CombatModifiers = { weaponName?: string; physicalAttack: number; magicAttack: number; critRateBp: number; ignoreDefensePct: number; lifestealPct: number; magicDamagePct: number; manaCostReduction: number; experienceMultiplier: number; dropBonus: number; manaAffinity: boolean };
 const pickWeighted = <T extends { spawn_weight: number }>(items: T[]) => {
   const total = items.reduce((sum, item) => sum + Number(item.spawn_weight), 0);
@@ -15,6 +15,14 @@ const random = (min: number, max: number) => Math.floor(Math.random() * (max - m
 const jsonObject = (value: unknown): Record<string, unknown> => {
   if (!value) return {};
   return typeof value === 'string' ? JSON.parse(value) as Record<string, unknown> : value as Record<string, unknown>;
+};
+const stringList = (value: unknown): string[] => {
+  if (Array.isArray(value)) return value.map(String);
+  if (typeof value !== 'string' || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map(String) : typeof parsed === 'string' ? [parsed] : [];
+  } catch { return value.split(',').map(item => item.trim()).filter(Boolean); }
 };
 const movementSpeedFrom = (speed: number, level: number) => {
   const statSpeed = Math.floor(1 + Math.sqrt(Math.max(0, speed - 100) / 30));
@@ -300,7 +308,7 @@ export const combatAction = async (qqUserId: string, action: 'attack' | 'skill' 
     combat.current_hp -= damage;
   }
   if (combat.current_hp <= 0) { const victory = await finishVictory(connection, character, combat); return { log: `${log}\n${victory}`, ended: true }; }
-  const sequence = combat.skill_sequence ? JSON.parse(combat.skill_sequence) : [];
+  const sequence = stringList(combat.skill_sequence);
   const monsterSkill = sequence.length ? String(sequence[(Number(combat.turn_no) - 1) % sequence.length]) : '攻击';
   const multiplier = monsterSkill === 'howl' ? 0.7 : monsterSkill === 'bite' ? 1.25 : 1;
   const monster = monsterCombatStats(combat);
