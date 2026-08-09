@@ -11,8 +11,8 @@ export default async () => {
       ? '你的属性仍被世界法则隐藏。达到 Lv.5 后发送 /冒险者登记，在公会完成登记即可查看完整资料。'
       : `恩赐：${character.giftName ?? '无'}\n\n${characterText(character, character, character.growth, character.regionName, character.x, character.y, character.z)}`;
     if (!character) { await message.send({ format: messageFormat('尚未注册', content) }); return; }
-    const gender = character.gender === '男' ? '男♂' : character.gender === '女' ? '女♀' : '未设定♀♂';
-    const markdown = Format.createMarkdown().addTitle('角色信息').addText(`${character.name} `)
+    const gender = character.gender === '男' ? '♂' : character.gender === '女' ? '♀' : '?';
+    const markdown = Format.createMarkdown().addTitle('角色信息').addText(`\n\n${character.name} `)
       .addButton('[改名]', { data: '/改名 ', autoEnter: false }).addText(` ${gender}`)
       .addButton('[改性]', { data: '/改性 ', autoEnter: false }).addText(`\nLv.${character.level}｜经验 ${character.experience}\n\n${content}`);
     await message.send({ format: Format.create().addMarkdown(markdown) });
