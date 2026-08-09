@@ -8,13 +8,13 @@ const directionText = (point: NearbyPoint, x: number, y: number) => {
   return vertical && horizontal ? `${vertical}${horizontal}` : vertical || horizontal || '脚下';
 };
 
-const groundTitle = (registered: number, regionName: string, x: number, y: number, z: number) => Number(registered)
-  ? `你移动至${regionName} (${x}, ${y}, ${z})`
-  : '你移动至未知之地';
+export const currentLocationText = (character: { adventurer_registered: number; region_name: string; pos_x: number; pos_y: number; pos_z: number }) => Number(character.adventurer_registered)
+  ? `你位于${character.region_name} (${character.pos_x}, ${character.pos_y}, ${character.pos_z})`
+  : '你位于未知之地';
 
-export const outsidePanel = (registered: number, regionName: string, speed: number, range: number, x: number, y: number, z: number, description: string, points: NearbyPoint[]) => {
-  const markdown = Format.createMarkdown().addTitle(groundTitle(registered, regionName, x, y, z))
-    .addText(`${description}\n\n移动速度：${speed}\n感知范围：${range}\n\n范围内列表：\n`);
+export const outsidePanel = (location: string, speed: number, range: number, x: number, y: number, description: string, points: NearbyPoint[]) => {
+  const markdown = Format.createMarkdown().addTitle('操作面板')
+    .addText(`${location}\n\n${description}\n\n移动速度：${speed}\n感知范围：${range}\n\n范围内列表：\n`);
   if (!points.length) markdown.addText('感知范围内没有发现怪物、NPC 或特殊地点。');
   else {
     for (const point of points) {
@@ -50,10 +50,9 @@ export default async () => {
       if (!(error instanceof Error) || !error.message.includes('当前不在战斗中')) throw error;
       const [bag, nearby] = await Promise.all([inventory(event.current.UserId), nearbyPoints(event.current.UserId)]);
       const targets = nearby.points.length ? `\n\n范围内列表\n${nearby.points.map(point => `【${point.type}】${point.name} · ${directionText(point, Number(nearby.character.pos_x), Number(nearby.character.pos_y))} ${point.distance} 格${bag.movementSpeed > point.distance ? `：/前往 ${point.x} ${point.y}` : ''}`).join('\n')}` : '\n\n范围内列表：没有发现目标。';
-      const registered = Number(nearby.character.adventurer_registered);
-      const x = Number(nearby.character.pos_x); const y = Number(nearby.character.pos_y); const z = Number(nearby.character.pos_z);
-      const title = groundTitle(registered, nearby.character.region_name, x, y, z);
-      await sendWithTextFallback(message, outsidePanel(registered, nearby.character.region_name, bag.movementSpeed, nearby.range, x, y, z, nearby.description, nearby.points).addButtonGroup(panelButtons()), `【${title}】\n${nearby.description}\n\n移动速度：${bag.movementSpeed}（决定一次能移动几格）\n感知范围：${nearby.range}（决定能显示的怪物、NPC 等）${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
+      const x = Number(nearby.character.pos_x); const y = Number(nearby.character.pos_y);
+      const location = currentLocationText(nearby.character);
+      await sendWithTextFallback(message, outsidePanel(location, bag.movementSpeed, nearby.range, x, y, nearby.description, nearby.points).addButtonGroup(panelButtons()), `【操作面板】\n${location}\n\n${nearby.description}\n\n移动速度：${bag.movementSpeed}（决定一次能移动几格）\n感知范围：${nearby.range}（决定能显示的怪物、NPC 等）${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
     }
   } catch (error) {
     logger.error({ err: error, userId: event.current.UserId }, 'open panel failed');
