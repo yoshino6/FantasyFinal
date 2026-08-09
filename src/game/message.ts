@@ -34,7 +34,7 @@ export const giftText = (category: GiftCategory = 'artifact') => Object.entries(
   .filter(([, gift]) => gift.category === category)
   .map(([code, gift]) => `【${gift.name}】${gift.summary}\n/选择恩赐 ${code}`).join('\n\n');
 export const giftFormat = (category: GiftCategory = 'artifact') => {
-  const categoryName = category === 'artifact' ? '神器' : '神奇能力';
+  const categoryName = category === 'artifact' ? '神器' : '神技';
   const markdown = Format.createMarkdown()
     .addTitle('序章·带走一份恩赐（3/3）')
     .addBold(`女神说：“你可以带走一件神器，或一种神奇能力。慎重选择；选定后便会立刻传送。”\n\n当前分类：${categoryName}。点击蓝色名称，会将选择指令填入输入框。\n\n`);
