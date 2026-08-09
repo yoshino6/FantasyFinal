@@ -4,7 +4,8 @@ import { getPool, withTransaction } from '../database/pool';
 import { SESSION_TTL_MINUTES, calculateDerivedStats, gifts, isGiftCode } from './constants';
 import { attributes, type Allocation, type DerivedStats, type Growth } from './types';
 
-type SessionRow = RowDataPacket & { id: string; player_id: number; stage: 'story' | 'audience' | 'choice'; expires_at: Date };
+type RegistrationStage = 'story' | 'audience' | 'question' | 'destination' | 'danger' | 'choice';
+type SessionRow = RowDataPacket & { id: string; player_id: number; stage: RegistrationStage; expires_at: Date };
 type PlayerRow = RowDataPacket & { id: number; status: string };
 type RegionRow = RowDataPacket & { id: number; name: string; min_x: number; max_x: number; min_y: number; max_y: number; min_z: number; max_z: number };
 export type CharacterView = Allocation & DerivedStats & { name: string; regionName: string; x: number; y: number; z: number; level: number; experience: number; adventurerRegistered: boolean; giftName: string | null; growth: Growth };
@@ -61,9 +62,26 @@ export const continueRegistration = async (qqUserId: string) => withTransaction(
   const player = await getPlayer(connection, qqUserId);
   const session = await getSession(connection, player.id, true);
   if (!session || session.expires_at <= new Date()) throw new Error('注册会话已过期，请重新发送“注册”。');
-  const next = session.stage === 'story' ? 'audience' : session.stage === 'audience' ? 'choice' : 'choice';
+  const next = session.stage === 'story' ? 'audience' : session.stage === 'question' ? 'destination' : session.stage === 'danger' ? 'choice' : session.stage;
+  if (next === session.stage) throw new Error(session.stage === 'audience' ? '请先向女神询问这里是哪里。' : session.stage === 'destination' ? '请选择前往天堂或转生异世界。' : '恩赐已经在等待你的选择。');
   await connection.execute('UPDATE registration_sessions SET stage = ? WHERE id = ?', [next, session.id]);
   return next;
+});
+
+export const askWhereAmI = async (qqUserId: string) => withTransaction(async connection => {
+  const player = await getPlayer(connection, qqUserId);
+  const session = await getSession(connection, player.id, true);
+  if (!session || session.expires_at <= new Date() || session.stage !== 'audience') throw new Error('现在还不能提出这个问题。');
+  await connection.execute('UPDATE registration_sessions SET stage=\'question\' WHERE id=?', [session.id]);
+});
+
+export const chooseDestination = async (qqUserId: string, destination: '天堂' | '异世界') => withTransaction(async connection => {
+  const player = await getPlayer(connection, qqUserId);
+  const session = await getSession(connection, player.id, true);
+  if (!session || session.expires_at <= new Date() || session.stage !== 'destination') throw new Error('请先完成前面的转生剧情。');
+  if (destination === '天堂') return 'heaven' as const;
+  await connection.execute('UPDATE registration_sessions SET stage=\'danger\' WHERE id=?', [session.id]);
+  return 'danger' as const;
 });
 
 const requireChoiceSession = async (connection: PoolConnection, qqUserId: string) => {

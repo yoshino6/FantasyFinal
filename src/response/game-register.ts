@@ -1,6 +1,6 @@
 import { logger, useEvent, useMessage } from 'alemonjs';
 import { beginRegistration } from '../game/character.service';
-import { audienceFormat, audienceText, giftFormat, giftText, messageFormat, sendWithTextFallback, storyFormat, storyText } from '../game/message';
+import { audienceFormat, audienceText, dangerFormat, dangerText, destinationFormat, destinationText, giftFormat, giftText, messageFormat, questionFormat, questionText, sendWithTextFallback, storyFormat, storyText } from '../game/message';
 
 export default async () => {
   const [event] = useEvent();
@@ -13,8 +13,8 @@ export default async () => {
     }
     await sendWithTextFallback(
       message,
-      result.stage === 'story' ? storyFormat() : result.stage === 'audience' ? audienceFormat() : giftFormat(),
-      result.stage === 'story' ? storyText : result.stage === 'audience' ? audienceText : giftText()
+      result.stage === 'story' ? storyFormat() : result.stage === 'audience' ? audienceFormat() : result.stage === 'question' ? questionFormat() : result.stage === 'destination' ? destinationFormat() : result.stage === 'danger' ? dangerFormat() : giftFormat(),
+      result.stage === 'story' ? storyText : result.stage === 'audience' ? audienceText : result.stage === 'question' ? questionText : result.stage === 'destination' ? destinationText : result.stage === 'danger' ? dangerText : giftText()
     );
   } catch (error) {
     logger.error({ err: error, userId: event.current.UserId }, 'begin registration failed');
