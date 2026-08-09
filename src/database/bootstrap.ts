@@ -168,17 +168,6 @@ export const initializeSchema = async (pool: Pool) => {
   await pool.query(`UPDATE item_definitions SET item_category=CASE code WHEN 'holy_sword_shirulu' THEN '武器' WHEN 'demon_sword_aphia' THEN '武器' WHEN 'healing_herb' THEN '药剂' WHEN 'wolf_fang' THEN '兽材' ELSE item_category END, stackable=CASE WHEN item_type='equipment' THEN 0 ELSE 1 END`);
   await pool.query(`UPDATE item_definitions SET codex_id=CONCAT(CASE WHEN item_type='equipment' THEN CASE item_category WHEN '武器' THEN '11' WHEN '副手' THEN '12' WHEN '头部' THEN '13' WHEN '上装' THEN '14' WHEN '腰部' THEN '15' WHEN '下装' THEN '16' WHEN '脚部' THEN '17' WHEN '项链' THEN '18' WHEN '手镯' THEN '19' WHEN '戒指' THEN '10' ELSE '19' END WHEN item_type='consumable' THEN CASE item_category WHEN '药剂' THEN '21' WHEN '食物' THEN '22' ELSE '23' END WHEN item_type='material' THEN CASE item_category WHEN '食材' THEN '31' WHEN '草药' THEN '32' ELSE '39' END ELSE '99' END, LPAD(id,5,'0')) WHERE codex_id IS NULL`);
   try { await pool.query('ALTER TABLE item_definitions ADD UNIQUE KEY uk_item_codex_id (codex_id)'); } catch (error: any) { if (error?.code !== 'ER_DUP_KEYNAME') throw error; }
-  // 兼容旧角色：此前神器只写入了装备表，没有创建装备实例，导致背包装备页无法读取。
-  await pool.query(`
-    INSERT INTO player_item_instances (character_id, item_id, quality, durability, durability_max)
-    SELECT equipment.character_id, equipment.item_id, 100, 100, 100
-    FROM player_equipment equipment
-    INNER JOIN item_definitions item ON item.id = equipment.item_id AND item.item_type = 'equipment'
-    WHERE NOT EXISTS (
-      SELECT 1 FROM player_item_instances instance
-      WHERE instance.character_id = equipment.character_id AND instance.item_id = equipment.item_id
-    )
-  `);
   await pool.execute(
     `INSERT INTO map_regions (code, name, description, min_x, max_x, min_y, max_y, min_z, max_z, is_spawn_enabled, danger_level)
      VALUES
