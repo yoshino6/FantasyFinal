@@ -5,7 +5,12 @@ import { getPool, withTransaction } from '../database/pool';
 type CharacterRow = RowDataPacket & { id: number; name: string; level: number; experience: number; hp_max: number; mp_max: number; physical_attack: number; magic_attack: number; physical_defense: number; magic_defense: number; speed: number; perception: number; spirit: number; intelligence: number; adventurer_registered: number; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string };
 type SpawnRow = RowDataPacket & { id: number; name: string; monster_class: string; level: number; current_hp: number; hp_max: number; attack: number; defense: number; speed: number; perception: number; charisma: number; experience: number; drops_json: string | null; skill_sequence?: string | null };
 type CombatModifiers = { weaponName?: string; physicalAttack: number; magicAttack: number; critRateBp: number; ignoreDefensePct: number; lifestealPct: number; magicDamagePct: number; manaCostReduction: number; experienceMultiplier: number; dropBonus: number; manaAffinity: boolean };
-const pick = <T>(items: T[]) => items[Math.floor(Math.random() * items.length)];
+const pickWeighted = <T extends { spawn_weight: number }>(items: T[]) => {
+  const total = items.reduce((sum, item) => sum + Number(item.spawn_weight), 0);
+  let roll = Math.random() * total;
+  for (const item of items) { roll -= Number(item.spawn_weight); if (roll < 0) return item; }
+  return items[items.length - 1];
+};
 const random = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
 
 const characterFor = async (qqUserId: string): Promise<CharacterRow> => {
@@ -24,12 +29,19 @@ const modifiersFor = async (connection: PoolConnection, characterId: number): Pr
 export const spawnMonsters = async () => {
   const pool = await getPool();
   const [regions] = await pool.execute<(RowDataPacket & { id: number; min_x: number; max_x: number; min_y: number; max_y: number; min_z: number; max_z: number })[]>('SELECT id,min_x,max_x,min_y,max_y,min_z,max_z FROM map_regions WHERE is_spawn_enabled=1');
-  const [templates] = await pool.execute<(RowDataPacket & { id: number; hp_max: number; monster_class: string })[]>('SELECT id,hp_max,monster_class FROM monster_templates');
   for (const region of regions) {
+    const [templates] = await pool.execute<(RowDataPacket & { id: number; hp_max: number; monster_class: string; spawn_weight: number })[]>('SELECT t.id,t.hp_max,t.monster_class,p.spawn_weight FROM map_monster_pools p JOIN monster_templates t ON t.id=p.monster_template_id WHERE p.region_id=?', [region.id]);
+    if (!templates.length) continue;
+    const [blockedRows] = await pool.execute<(RowDataPacket & { pos_x: number; pos_y: number; pos_z: number })[]>(`SELECT pos_x,pos_y,pos_z FROM map_npcs WHERE region_id=? AND pos_x IS NOT NULL AND pos_y IS NOT NULL AND pos_z IS NOT NULL
+      UNION SELECT pos_x,pos_y,pos_z FROM map_special_objects WHERE region_id=?`, [region.id, region.id]);
+    const blocked = new Set(blockedRows.map(row => `${row.pos_x},${row.pos_y},${row.pos_z}`));
     const [countRows] = await pool.execute<(RowDataPacket & { total: number })[]>('SELECT COUNT(*) AS total FROM monster_spawns WHERE region_id=? AND defeated_at IS NULL', [region.id]);
     for (let i = Number(countRows[0].total); i < 48; i++) {
-      const template = Math.random() < 0.16 ? templates.find(item => item.monster_class === 'elite') ?? templates[0] : pick(templates.filter(item => item.monster_class === 'normal'));
-      await pool.execute('INSERT INTO monster_spawns (template_id,region_id,pos_x,pos_y,pos_z,current_hp) VALUES (?,?,?,?,?,?)', [template.id, region.id, random(region.min_x, region.max_x), random(region.min_y, region.max_y), random(region.min_z, region.max_z), template.hp_max]);
+      const template = pickWeighted(templates);
+      let x = random(region.min_x, region.max_x); let y = random(region.min_y, region.max_y); let z = random(region.min_z, region.max_z);
+      for (let attempt = 0; attempt < 32 && blocked.has(`${x},${y},${z}`); attempt++) { x = random(region.min_x, region.max_x); y = random(region.min_y, region.max_y); z = random(region.min_z, region.max_z); }
+      if (blocked.has(`${x},${y},${z}`)) continue;
+      await pool.execute('INSERT INTO monster_spawns (template_id,region_id,pos_x,pos_y,pos_z,current_hp) VALUES (?,?,?,?,?,?)', [template.id, region.id, x, y, z, template.hp_max]);
     }
   }
 };
@@ -69,13 +81,8 @@ export const move = async (qqUserId: string, direction: string) => withTransacti
   const [spawns] = await connection.execute<SpawnRow[]>(`SELECT s.id,t.name,t.monster_class,t.level,s.current_hp,t.hp_max,t.attack,t.defense,t.speed,t.perception,t.charisma,t.experience,t.drops_json FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? AND s.defeated_at IS NULL FOR UPDATE`, [region.id, x, y, character.pos_z]);
   const moved = { ...character, current_region_id: region.id, region_name: region.name, pos_x: x, pos_y: y };
   if (spawns.length) return { character: moved, kind: 'encounter' as const, spawns };
-  const events = [
-    '\n\n林间传来鸟鸣，薄雾在脚边散开。你暂时没有发现敌人。',
-    '\n\n你在路旁发现一座褪色的路标，上面指向更深的密林。',
-    '\n\n草丛轻响后归于平静。也许有什么正在远处观察你。',
-    '\n\n一缕温暖的风拂过，你恢复了继续前行的勇气。'
-  ];
-  return { character: moved, kind: 'event' as const, text: pick(events) };
+  const [texts] = await connection.execute<(RowDataPacket & { description: string })[]>('SELECT description FROM map_move_texts WHERE region_id=? ORDER BY RAND() LIMIT 1', [region.id]);
+  return { character: moved, kind: 'event' as const, text: texts[0]?.description ?? '四周一片寂静，暂时没有发现异常。' };
 });
 
 export const chooseTarget = async (qqUserId: string, spawnId: number) => withTransaction(async connection => {
