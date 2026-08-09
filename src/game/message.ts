@@ -1,5 +1,5 @@
 import { Format, ResultCode } from 'alemonjs';
-import { attributeNames, gifts } from './constants';
+import { attributeNames, gifts, type GiftCategory } from './constants';
 import { attributes, type Allocation, type DerivedStats, type Growth } from './types';
 
 const percent = (bp: number) => `${(bp / 100).toFixed(2)}%`;
@@ -21,24 +21,29 @@ export const messageFormat = (title: string, content: string) => Format.create()
 export const storyText = '你记得最后一刻：刺目的白光、失重感，以及一声带着歉意的轻笑。\n\n“抱歉，把你卷进来了。”\n女神坐在云端的柜台后，翻着一本写满涂改的名册。“不过这里是死后转生处，至少我能让你换个世界重新开始。”';
 
 export const storyFormat = () => Format.create()
-  .addMarkdown(Format.createMarkdown().addTitle('序章·转生窗口（1/3）').addText(storyText))
+  .addMarkdown(Format.createMarkdown().addTitle('序章·转生窗口（1/3）').addBold(storyText))
   .addButtonGroup(Format.createButtonGroup().addRow().addButton('继续', '/注册 继续', { type: 'command', autoEnter: true }));
 
 export const audienceText = '女神将冒险者卡片推到你面前，却没有让你填写任何数字。\n\n“新身体的六维与成长会由世界法则随机固定；总属性为 80～120，成长总和为 8.0～12.0。数值不能重置，也不会在初期公开。”\n\n“先去活下来吧。等你在冒险者公会正式登记后，才有资格查看完整角色资料。”';
 
 export const audienceFormat = () => Format.create()
-  .addMarkdown(Format.createMarkdown().addTitle('序章·女神的说明（2/3）').addText(audienceText))
+  .addMarkdown(Format.createMarkdown().addTitle('序章·女神的说明（2/3）').addBold(audienceText))
   .addButtonGroup(Format.createButtonGroup().addRow().addButton('接受命运', '/注册 继续', { type: 'command', autoEnter: true }));
 
-export const giftText = Object.entries(gifts).map(([code, gift]) => `【${gift.name}】${gift.description}\n/选择恩赐 ${code}`).join('\n\n');
-export const giftFormat = () => {
+export const giftText = (category: GiftCategory = 'artifact') => Object.entries(gifts)
+  .filter(([, gift]) => gift.category === category)
+  .map(([code, gift]) => `【${gift.name}】${gift.summary}\n/选择恩赐 ${code}`).join('\n\n');
+export const giftFormat = (category: GiftCategory = 'artifact') => {
+  const categoryName = category === 'artifact' ? '神器' : '神奇能力';
   const markdown = Format.createMarkdown()
     .addTitle('序章·带走一份恩赐（3/3）')
-    .addText('女神说：“你可以带走一件神器，或一种神奇能力。慎重选择；选定后便会立刻传送。”\n\n点击下方蓝色恩赐名称，会将对应指令填入输入框。\n\n');
-  for (const [code, gift] of Object.entries(gifts)) {
-    markdown.addButton(`【${gift.name}】`, { data: `/选择恩赐 ${code}`, autoEnter: false }).addText(` ${gift.description}\n\n`);
+    .addBold(`女神说：“你可以带走一件神器，或一种神奇能力。慎重选择；选定后便会立刻传送。”\n\n当前分类：${categoryName}。点击蓝色名称，会将选择指令填入输入框。\n\n`);
+  for (const [code, gift] of Object.entries(gifts).filter(([, gift]) => gift.category === category)) {
+    markdown.addButton(`【${gift.name}】`, { data: `/选择恩赐 ${code}`, autoEnter: false }).addBold(` ${gift.summary}\n\n`);
   }
-  return Format.create().addMarkdown(markdown);
+  return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow()
+    .addButton('神器', '/恩赐列表 神器', { type: 'command', autoEnter: true, style: category === 'artifact' ? 'blue' : undefined })
+    .addButton('神奇能力', '/恩赐列表 能力', { type: 'command', autoEnter: true, style: category === 'ability' ? 'blue' : undefined }));
 };
 
 export const characterText = (allocation: Allocation, stats: DerivedStats, growth: Growth, region: string, x: number, y: number, z: number) =>

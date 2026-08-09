@@ -14,7 +14,7 @@ export default async () => {
     await sendWithTextFallback(
       message,
       result.stage === 'story' ? storyFormat() : result.stage === 'audience' ? audienceFormat() : giftFormat(),
-      result.stage === 'story' ? storyText : result.stage === 'audience' ? audienceText : giftText
+      result.stage === 'story' ? storyText : result.stage === 'audience' ? audienceText : giftText()
     );
   } catch (error) {
     logger.error({ err: error, userId: event.current.UserId }, 'begin registration failed');
