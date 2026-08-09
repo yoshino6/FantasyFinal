@@ -14,7 +14,7 @@ const groundTitle = (registered: number, regionName: string, x: number, y: numbe
 
 const outsidePanel = (registered: number, regionName: string, speed: number, range: number, x: number, y: number, z: number, description: string, points: NearbyPoint[]) => {
   const markdown = Format.createMarkdown().addTitle(groundTitle(registered, regionName, x, y, z))
-    .addText(`${description}\n\n移动速度：${speed}（决定一次能移动几格）\n感知范围：${range}（决定能显示的怪物、NPC 等）\n\n范围内列表：\n`);
+    .addText(`${description}\n\n移动速度：${speed}\n感知范围：${range}\n\n范围内列表：\n`);
   if (!points.length) markdown.addText('感知范围内没有发现怪物、NPC 或特殊地点。');
   else {
     for (const point of points) {
