@@ -21,7 +21,7 @@ export const messageFormat = (title: string, content: string) => Format.create()
 export const storyText = '\n\n最后的记忆像被雨水浸透的旧照片。\n刺耳的声响、骤然逼近的黑暗，以及胸口最后一次无力的起伏。你想伸手抓住什么，指尖却先失去了温度。\n\n世界终于安静下来。';
 
 export const storyFormat = () => Format.create()
-  .addMarkdown(Format.createMarkdown().addTitle('序章·最后一幕（1/5）').addText(storyText))
+  .addMarkdown(Format.createMarkdown().addTitle('序章·最后一幕（1/6）').addText(storyText))
   .addButtonGroup(Format.createButtonGroup().addRow().addButton('继续', '/注册 继续', { type: 'command', autoEnter: true }));
 
 export const audienceText = '\n\n再次睁开眼时，你正站在一片没有尽头的幽暗空间。\n远处只有一张座椅，一名蓝发少女端坐其上，头顶流转着柔和的神辉。\n她似乎正在等你开口。';
