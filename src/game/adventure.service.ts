@@ -61,7 +61,7 @@ export const inventory = async (qqUserId: string) => {
   return { items: rows, weight, capacity: 30, speed, movementSpeed: movementSpeedFrom(speed, Number(character.level)), speedPenalty };
 };
 
-export const inventoryView = async (qqUserId: string, category: '装备' | '道具' | '材料' = '装备') => {
+export const inventoryView = async (qqUserId: string, category?: '装备' | '道具' | '材料') => {
   const character = await characterFor(qqUserId); const pool = await getPool();
   await pool.execute(`INSERT IGNORE INTO player_item_codex (character_id,item_id)
     SELECT ?,item_id FROM player_inventory WHERE character_id=? UNION SELECT ?,item_id FROM player_item_instances WHERE character_id=?`, [character.id, character.id, character.id, character.id]);
@@ -79,6 +79,17 @@ export const itemCodex = async (qqUserId: string, codexId: string) => {
   const character = await characterFor(qqUserId);
   const [rows] = await (await getPool()).execute<(RowDataPacket & { codex_id: string; name: string; item_type: string; item_category: string; description: string; weight: number; stackable: number; effect_json: string | null })[]>(`SELECT i.codex_id,i.name,i.item_type,i.item_category,i.description,i.weight,i.stackable,i.effect_json FROM player_item_codex c JOIN item_definitions i ON i.id=c.item_id WHERE c.character_id=? AND i.codex_id=?`, [character.id, codexId]);
   if (!rows[0]) throw new Error('尚未解锁该物品图鉴。');
+  return rows[0];
+};
+
+export const equipmentDetail = async (qqUserId: string, instanceId: number) => {
+  const character = await characterFor(qqUserId);
+  const [rows] = await (await getPool()).execute<(RowDataPacket & { name: string; item_category: string; quality: number; durability: number; durability_max: number; effect_json: string | null; description: string })[]>(`
+    SELECT i.name,i.item_category,ii.quality,ii.durability,ii.durability_max,COALESCE(ii.effect_json,i.effect_json) AS effect_json,i.description
+    FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
+    WHERE ii.id=? AND ii.character_id=? AND i.item_type='equipment'
+  `, [instanceId, character.id]);
+  if (!rows[0]) throw new Error('未找到该装备。');
   return rows[0];
 };
 
