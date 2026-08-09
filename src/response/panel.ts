@@ -36,9 +36,9 @@ export const panelButtons = () => Format.createButtonGroup()
     .addRow().addButton('菜单', '/菜单', { type: 'command', autoEnter: true, style: 'blue' });
 
 const battlePanel = (battle: Awaited<ReturnType<typeof battleStatus>>) => Format.create()
-  .addMarkdown(Format.createMarkdown().addTitle('战斗面板').addText(`第 ${battle.turn} 回合\n你：HP ${battle.playerHp}/${battle.playerHpMax}｜MP ${battle.playerMp}/${battle.playerMpMax}\n锁定目标：#${battle.targetId} ${battle.targetName}｜HP ${battle.targetHp}/${battle.targetHpMax}`))
+  .addMarkdown(Format.createMarkdown().addTitle('战斗面板').addText(`第 ${battle.turn} 回合\n${battle.members.map(member => `${member.id === battle.characterId ? '你' : '队友'}·${member.name} HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}`).join('\n')}\n${battle.targets.map(target => `敌方 #${target.id} ${target.name} HP ${target.hp}/${target.hpMax}`).join('\n')}`))
   .addButtonGroup(Format.createButtonGroup()
-    .addRow().addButton('战斗信息', '/战斗信息', { type: 'command', autoEnter: true }).addButton(`锁定目标 #${battle.targetId}`, '/战斗信息', { type: 'command', autoEnter: true, style: 'blue' })
+    .addRow().addButton('战斗信息', '/战斗信息', { type: 'command', autoEnter: true }).addButton('切换目标', '/战斗信息', { type: 'command', autoEnter: true, style: 'blue' })
     .addRow().addButton('普攻', '/攻击', { type: 'command', autoEnter: true, style: 'blue' }).addButton('技能①', '/技能 1', { type: 'command', autoEnter: true, style: 'blue' }).addButton('技能②', '/技能 2', { type: 'command', autoEnter: true, style: 'blue' })
     .addRow().addButton('道具①', '/道具 1', { type: 'command', autoEnter: true }).addButton('逃跑', '/逃跑', { type: 'command', autoEnter: true }));
 
@@ -48,7 +48,7 @@ export default async () => {
   try {
     try {
       const battle = await battleStatus(event.current.UserId);
-      await sendWithTextFallback(message, battlePanel(battle), `【战斗面板】\n你 HP ${battle.playerHp}/${battle.playerHpMax}｜MP ${battle.playerMp}/${battle.playerMpMax}\n目标 #${battle.targetId} ${battle.targetName} HP ${battle.targetHp}/${battle.targetHpMax}\n/攻击｜/技能 1｜/道具 1｜/逃跑`);
+      await sendWithTextFallback(message, battlePanel(battle), `【战斗面板】\n你 HP ${battle.playerHp}/${battle.playerHpMax}｜MP ${battle.playerMp}/${battle.playerMpMax}\n${battle.targets.map(target => `敌方 #${target.id} ${target.name} HP ${target.hp}/${target.hpMax}`).join('\n')}\n/攻击｜/技能 1｜/道具 1｜/逃跑`);
     } catch (error) {
       if (!(error instanceof Error) || !error.message.includes('当前不在战斗中')) throw error;
       const [bag, nearby] = await Promise.all([inventory(event.current.UserId), nearbyPoints(event.current.UserId)]);
