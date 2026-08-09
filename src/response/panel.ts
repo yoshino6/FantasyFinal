@@ -8,9 +8,12 @@ const directionText = (point: NearbyPoint, x: number, y: number) => {
   return vertical && horizontal ? `${vertical}${horizontal}` : vertical || horizontal || '脚下';
 };
 
-export const currentLocationText = (character: { adventurer_registered: number; region_name: string; pos_x: number; pos_y: number; pos_z: number }) => Number(character.adventurer_registered)
-  ? `你位于${character.region_name} (${character.pos_x}, ${character.pos_y}, ${character.pos_z})`
-  : '你位于未知之地';
+type LocationCharacter = { adventurer_registered: number; region_name: string; pos_x: number; pos_y: number; pos_z: number };
+const areaText = (character: LocationCharacter, verb: '位于' | '移动至') => Number(character.adventurer_registered)
+  ? `你${verb}${character.region_name} (${character.pos_x}, ${character.pos_y}, ${character.pos_z})`
+  : `你${verb}未知之地`;
+export const currentLocationText = (character: LocationCharacter) => areaText(character, '位于');
+export const movedLocationText = (character: LocationCharacter) => areaText(character, '移动至');
 
 export const outsidePanel = (location: string, speed: number, range: number, x: number, y: number, description: string, points: NearbyPoint[]) => {
   const markdown = Format.createMarkdown().addTitle('操作面板')
