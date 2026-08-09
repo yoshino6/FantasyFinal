@@ -4,10 +4,10 @@ import { messageFormat } from '../game/message';
 
 const fail = async (message: any, error: unknown, title = '操作失败') => message.send({ format: messageFormat(title, error instanceof Error ? error.message : '请稍后重试。') });
 const moveButtons = () => Format.createButtonGroup()
-  .addRow().addButton('上', '/移动 上', { type: 'command', autoEnter: true, style: 'blue' })
-  .addRow().addButton('左', '/移动 左', { type: 'command', autoEnter: true }).addButton('右', '/移动 右', { type: 'command', autoEnter: true })
-  .addRow().addButton('下', '/移动 下', { type: 'command', autoEnter: true, style: 'blue' })
-  .addRow().addButton('背包', '/背包', { type: 'command', autoEnter: true }).addButton('面板', '/面板', { type: 'command', autoEnter: true });
+  .addRow().addButton('装备', '/装备', { type: 'command', autoEnter: true }).addButton('上', '/移动 上', { type: 'command', autoEnter: true, style: 'blue' }).addButton('背包', '/背包', { type: 'command', autoEnter: true })
+  .addRow().addButton('左', '/移动 左', { type: 'command', autoEnter: true, style: 'blue' }).addButton('角色', '/角色', { type: 'command', autoEnter: true }).addButton('右', '/移动 右', { type: 'command', autoEnter: true, style: 'blue' })
+  .addRow().addButton('技能', '/技能列表', { type: 'command', autoEnter: true }).addButton('下', '/移动 下', { type: 'command', autoEnter: true, style: 'blue' }).addButton('队伍', '/队伍', { type: 'command', autoEnter: true })
+  .addRow().addButton('菜单', '/菜单', { type: 'command', autoEnter: true, style: 'blue' });
 const battleButtons = () => Format.createButtonGroup()
   .addRow().addButton('普攻', '/攻击', { type: 'command', autoEnter: true, style: 'blue' }).addButton('技能①', '/技能 1', { type: 'command', autoEnter: true, style: 'blue' }).addButton('技能②', '/技能 2', { type: 'command', autoEnter: true, style: 'blue' })
   .addRow().addButton('道具①', '/道具 1', { type: 'command', autoEnter: true }).addButton('逃跑', '/逃跑', { type: 'command', autoEnter: true });

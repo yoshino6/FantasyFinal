@@ -55,6 +55,24 @@ export const inventory = async (qqUserId: string) => {
   return { items: rows, weight, capacity: 30, speed: Math.max(1, Number(character.speed) - speedPenalty), speedPenalty };
 };
 
+export const equipment = async (qqUserId: string) => {
+  const character = await characterFor(qqUserId);
+  const [rows] = await (await getPool()).execute<(RowDataPacket & { slot: string; name: string; description: string })[]>('SELECT pe.slot,i.name,i.description FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id WHERE pe.character_id=? ORDER BY pe.slot', [character.id]);
+  return rows;
+};
+
+export const skillList = async (qqUserId: string) => {
+  const character = await characterFor(qqUserId);
+  const [rows] = await (await getPool()).execute<(RowDataPacket & { quick_slot: number | null; name: string; description: string; mana_cost: number })[]>('SELECT ps.quick_slot,s.name,s.description,s.mana_cost FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? ORDER BY ps.quick_slot', [character.id]);
+  return rows;
+};
+
+export const partyInfo = async (qqUserId: string) => {
+  const character = await characterFor(qqUserId);
+  const [rows] = await (await getPool()).execute<(RowDataPacket & { member_count: number; leader_name: string })[]>(`SELECT COUNT(pm2.character_id) AS member_count, leader.name AS leader_name FROM party_members pm JOIN parties p ON p.id=pm.party_id JOIN characters leader ON leader.id=p.leader_character_id JOIN party_members pm2 ON pm2.party_id=p.id WHERE pm.character_id=? GROUP BY p.id,leader.name`, [character.id]);
+  return rows[0] ?? null;
+};
+
 export const explore = async (qqUserId: string) => {
   const character = await characterFor(qqUserId);
   const pool = await getPool();
