@@ -12,8 +12,8 @@ export default async () => {
       : `恩赐：${character.giftName ?? '无'}\n\n${characterText(character, character, character.growth, character.regionName, character.x, character.y, character.z)}`;
     if (!character) { await message.send({ format: messageFormat('尚未注册', content) }); return; }
     const gender = character.gender === '男' ? '♂' : character.gender === '女' ? '♀' : '?';
-    const markdown = Format.createMarkdown().addTitle('角色信息').addText(`\n\n${character.name} `)
-      .addButton('[改名]', { data: '/改名 ', autoEnter: false }).addText(` ${gender}`)
+    const markdown = Format.createMarkdown().addTitle('角色信息').addText(`\n\n昵称：${character.name} `)
+      .addButton('[改名]', { data: '/改名 ', autoEnter: false }).addText(` \n性别：${gender}`)
       .addButton('[改性]', { data: '/改性 ', autoEnter: false }).addText(`\nLv.${character.level}｜经验 ${character.experience}\n\n${content}`);
     await message.send({ format: Format.create().addMarkdown(markdown) });
   } catch (error) {
