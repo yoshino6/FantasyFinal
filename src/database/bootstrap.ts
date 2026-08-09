@@ -127,9 +127,9 @@ export const initializeSchema = async (pool: Pool) => {
   await pool.execute(
     `INSERT INTO map_regions (code, name, description, min_x, max_x, min_y, max_y, min_z, max_z, is_spawn_enabled, danger_level)
      VALUES
-       ('world_tree', '世界树', '世界的中心，坐标原点。', -100, 100, -100, 100, -20, 120, 0, 0),
-       ('dark_forest', '幽暗密林', '常年被薄雾笼罩的初始区域。', 300, 700, -500, -100, 0, 80, 1, 1)
-     ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description)`
+       ('world_tree', '世界树', '世界的中心，占据约 20×20 格。', -10, 9, -10, 9, 0, 0, 0, 0),
+       ('dark_forest', '幽暗密林', '世界树正下方、常年被薄雾笼罩的约 100×100 格密林。', -50, 49, -110, -11, 0, 0, 1, 1)
+     ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description), min_x = VALUES(min_x), max_x = VALUES(max_x), min_y = VALUES(min_y), max_y = VALUES(max_y), min_z = VALUES(min_z), max_z = VALUES(max_z), is_spawn_enabled = VALUES(is_spawn_enabled), danger_level = VALUES(danger_level)`
   );
   await pool.query(`INSERT INTO item_definitions (code, name, description, item_type, weight, effect_json) VALUES
     ('healing_herb', '微光草药', '恢复 30 点生命。', 'consumable', 0.20, JSON_OBJECT('heal', 30)),
@@ -142,10 +142,12 @@ export const initializeSchema = async (pool: Pool) => {
     ('heavy_strike', '沉重一击', 'physical', 5, 2, 180, '造成更高的物理伤害。')
     ON DUPLICATE KEY UPDATE name = VALUES(name)`);
   await pool.query(`INSERT INTO monster_templates (code, name, monster_class, level, hp_max, attack, defense, speed, perception, charisma, skill_sequence, experience, drops_json) VALUES
-    ('mist_wolf', '雾影狼', 'normal', 1, 75, 14, 4, 95, 8, 1, JSON_ARRAY(), 20, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',0.7,'quantity',1))),
-    ('forest_sprite', '林间精怪', 'normal', 1, 55, 11, 2, 110, 12, 10, JSON_ARRAY(), 18, JSON_ARRAY(JSON_OBJECT('code','healing_herb','chance',0.3,'quantity',1))),
-    ('ancient_wolf', '古狼首领', 'elite', 3, 180, 25, 8, 105, 14, 2, JSON_ARRAY('howl','bite','bite'), 80, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',1,'quantity',3)))
-    ON DUPLICATE KEY UPDATE name = VALUES(name)`);
+    ('ball_rabbit', '球兔', 'normal', 1, 38, 8, 1, 125, 6, 14, JSON_ARRAY('hop'), 12, JSON_ARRAY(JSON_OBJECT('code','healing_herb','chance',0.15,'quantity',1))),
+    ('spike_boar', '刺猪', 'normal', 2, 88, 17, 5, 92, 9, 3, JSON_ARRAY('charge'), 28, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',0.45,'quantity',1))),
+    ('vine_python', '藤蚺', 'normal', 2, 76, 16, 3, 108, 13, 4, JSON_ARRAY('bite'), 30, JSON_ARRAY(JSON_OBJECT('code','healing_herb','chance',0.25,'quantity',1))),
+    ('black_bear', '乌熊', 'elite', 4, 215, 29, 10, 82, 11, 2, JSON_ARRAY('howl','bite'), 95, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',1,'quantity',2))),
+    ('mist_wolf', '雾影狼', 'normal', 1, 75, 14, 4, 95, 8, 1, JSON_ARRAY(), 20, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',0.7,'quantity',1)))
+    ON DUPLICATE KEY UPDATE name = VALUES(name), monster_class = VALUES(monster_class), level = VALUES(level), hp_max = VALUES(hp_max), attack = VALUES(attack), defense = VALUES(defense), speed = VALUES(speed), perception = VALUES(perception), charisma = VALUES(charisma), skill_sequence = VALUES(skill_sequence), experience = VALUES(experience), drops_json = VALUES(drops_json)`);
   await pool.query(`INSERT IGNORE INTO player_skills (character_id, skill_id, quick_slot)
     SELECT c.id, s.id, CASE s.code WHEN 'arcane_bolt' THEN 1 WHEN 'heavy_strike' THEN 2 END FROM characters c JOIN skill_definitions s ON s.code IN ('arcane_bolt','heavy_strike')`);
   await pool.query(`INSERT IGNORE INTO player_inventory (character_id, item_id, quantity)

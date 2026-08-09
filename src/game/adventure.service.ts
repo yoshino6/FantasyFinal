@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 
-type CharacterRow = RowDataPacket & { id: number; name: string; level: number; experience: number; hp_max: number; mp_max: number; physical_attack: number; magic_attack: number; physical_defense: number; magic_defense: number; speed: number; perception: number; spirit: number; intelligence: number; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string };
+type CharacterRow = RowDataPacket & { id: number; name: string; level: number; experience: number; hp_max: number; mp_max: number; physical_attack: number; magic_attack: number; physical_defense: number; magic_defense: number; speed: number; perception: number; spirit: number; intelligence: number; adventurer_registered: number; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string };
 type SpawnRow = RowDataPacket & { id: number; name: string; monster_class: string; level: number; current_hp: number; hp_max: number; attack: number; defense: number; speed: number; perception: number; charisma: number; experience: number; drops_json: string | null; skill_sequence?: string | null };
 type CombatModifiers = { weaponName?: string; physicalAttack: number; magicAttack: number; critRateBp: number; ignoreDefensePct: number; lifestealPct: number; magicDamagePct: number; manaCostReduction: number; experienceMultiplier: number; dropBonus: number; manaAffinity: boolean };
 const pick = <T>(items: T[]) => items[Math.floor(Math.random() * items.length)];
@@ -27,7 +27,7 @@ export const spawnMonsters = async () => {
   const [templates] = await pool.execute<(RowDataPacket & { id: number; hp_max: number; monster_class: string })[]>('SELECT id,hp_max,monster_class FROM monster_templates');
   for (const region of regions) {
     const [countRows] = await pool.execute<(RowDataPacket & { total: number })[]>('SELECT COUNT(*) AS total FROM monster_spawns WHERE region_id=? AND defeated_at IS NULL', [region.id]);
-    for (let i = Number(countRows[0].total); i < 6; i++) {
+    for (let i = Number(countRows[0].total); i < 48; i++) {
       const template = Math.random() < 0.16 ? templates.find(item => item.monster_class === 'elite') ?? templates[0] : pick(templates.filter(item => item.monster_class === 'normal'));
       await pool.execute('INSERT INTO monster_spawns (template_id,region_id,pos_x,pos_y,pos_z,current_hp) VALUES (?,?,?,?,?,?)', [template.id, region.id, random(region.min_x, region.max_x), random(region.min_y, region.max_y), random(region.min_z, region.max_z), template.hp_max]);
     }
@@ -62,23 +62,18 @@ export const move = async (qqUserId: string, direction: string) => withTransacti
   const delta: Record<string, [number, number]> = { 上: [0, 1], 下: [0, -1], 左: [-1, 0], 右: [1, 0] };
   if (!delta[direction]) throw new Error('方向只能是 上、下、左、右。');
   const x = Number(character.pos_x) + delta[direction][0]; const y = Number(character.pos_y) + delta[direction][1];
-  const [regionRows] = await connection.execute<(RowDataPacket & { min_x: number; max_x: number; min_y: number; max_y: number })[]>('SELECT min_x,max_x,min_y,max_y FROM map_regions WHERE id=?', [character.current_region_id]);
-  const region = regionRows[0]; if (x < region.min_x || x > region.max_x || y < region.min_y || y > region.max_y) throw new Error('前方超出当前地图区域边界。');
-  if (partyRows[0]) await connection.execute('UPDATE characters c JOIN party_members pm ON pm.character_id=c.id SET c.pos_x=?,c.pos_y=? WHERE pm.party_id=(SELECT party_id FROM party_members WHERE character_id=? LIMIT 1)', [x, y, character.id]);
-  else await connection.execute('UPDATE characters SET pos_x=?,pos_y=? WHERE id=?', [x, y, character.id]);
-  const [spawns] = await connection.execute<SpawnRow[]>(`SELECT s.id,t.name,t.monster_class,t.level,s.current_hp,t.hp_max,t.attack,t.defense,t.speed,t.perception,t.charisma,t.experience,t.drops_json FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? AND s.defeated_at IS NULL FOR UPDATE`, [character.current_region_id, x, y, character.pos_z]);
-  const moved = { ...character, pos_x: x, pos_y: y };
-  if (spawns[0]) {
-    const spawn = spawns[0];
-    const id = randomUUID();
-    await connection.execute('INSERT INTO combat_sessions (id,character_id,spawn_id,player_hp,player_mp,cooldowns) VALUES (?,?,?,?,?,JSON_OBJECT())', [id, character.id, spawn.id, character.hp_max, character.mp_max]);
-    return { character: moved, kind: 'battle' as const, spawn, playerHp: Number(character.hp_max), playerMp: Number(character.mp_max) };
-  }
+  const [regions] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>('SELECT id,name FROM map_regions WHERE ? BETWEEN min_x AND max_x AND ? BETWEEN min_y AND max_y AND ? BETWEEN min_z AND max_z ORDER BY danger_level DESC LIMIT 1', [x, y, character.pos_z]);
+  const region = regions[0]; if (!region) throw new Error('\n\n前面的区域，以后再来探索吧！');
+  if (partyRows[0]) await connection.execute('UPDATE characters c JOIN party_members pm ON pm.character_id=c.id SET c.current_region_id=?,c.pos_x=?,c.pos_y=? WHERE pm.party_id=(SELECT party_id FROM party_members WHERE character_id=? LIMIT 1)', [region.id, x, y, character.id]);
+  else await connection.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=? WHERE id=?', [region.id, x, y, character.id]);
+  const [spawns] = await connection.execute<SpawnRow[]>(`SELECT s.id,t.name,t.monster_class,t.level,s.current_hp,t.hp_max,t.attack,t.defense,t.speed,t.perception,t.charisma,t.experience,t.drops_json FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? AND s.defeated_at IS NULL FOR UPDATE`, [region.id, x, y, character.pos_z]);
+  const moved = { ...character, current_region_id: region.id, region_name: region.name, pos_x: x, pos_y: y };
+  if (spawns.length) return { character: moved, kind: 'encounter' as const, spawns };
   const events = [
-    '林间传来鸟鸣，薄雾在脚边散开。你暂时没有发现敌人。',
-    '你在路旁发现一座褪色的路标，上面指向更深的密林。',
-    '草丛轻响后归于平静。也许有什么正在远处观察你。',
-    '一缕温暖的风拂过，你恢复了继续前行的勇气。'
+    '\n\n林间传来鸟鸣，薄雾在脚边散开。你暂时没有发现敌人。',
+    '\n\n你在路旁发现一座褪色的路标，上面指向更深的密林。',
+    '\n\n草丛轻响后归于平静。也许有什么正在远处观察你。',
+    '\n\n一缕温暖的风拂过，你恢复了继续前行的勇气。'
   ];
   return { character: moved, kind: 'event' as const, text: pick(events) };
 });
@@ -120,7 +115,7 @@ export const encounterAction = async (qqUserId: string, spawnId: number, action:
 const combatRow = async (qqUserId: string) => {
   const character = await characterFor(qqUserId);
   const [rows] = await (await getPool()).execute<(RowDataPacket & SpawnRow & { combat_id: string; player_hp: number; player_mp: number; cooldowns: string; turn_no: number })[]>(`SELECT cs.id AS combat_id,cs.player_hp,cs.player_mp,cs.cooldowns,cs.turn_no,s.id,t.name,t.monster_class,t.level,s.current_hp,t.hp_max,t.attack,t.defense,t.speed,t.perception,t.charisma,t.experience,t.drops_json,t.skill_sequence FROM combat_sessions cs JOIN monster_spawns s ON s.id=cs.spawn_id JOIN monster_templates t ON t.id=s.template_id WHERE cs.character_id=? AND cs.state='active'`, [character.id]);
-  if (!rows[0]) throw new Error('当前不在战斗中。请先使用 /探索 发现敌人。');
+  if (!rows[0]) throw new Error('当前不在战斗中。请移动到敌对生物所在格子。');
   return { character, combat: rows[0] };
 };
 
