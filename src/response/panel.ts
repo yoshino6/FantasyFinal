@@ -8,15 +8,15 @@ const directionText = (point: NearbyPoint, x: number, y: number) => {
   return vertical && horizontal ? `${vertical}${horizontal}` : vertical || horizontal || '脚下';
 };
 
-const outsidePanel = (name: string, speed: number, weight: number, range: number, x: number, y: number, points: NearbyPoint[]) => {
-  const markdown = Format.createMarkdown().addTitle(name)
-    .addText(`当前速度 ${speed}｜负重 ${weight.toFixed(2)}kg｜感知范围 ${range} 格\n\n`);
+const outsidePanel = (speed: number, range: number, x: number, y: number, z: number, description: string, points: NearbyPoint[]) => {
+  const markdown = Format.createMarkdown().addTitle(`你移动至地面 (${x}, ${y}, ${z})`)
+    .addText(`${description}\n\n当前速度：${speed}（决定一次能移动几格）\n感知范围：${range}（决定能显示的怪物、NPC 等）\n\n范围内列表：\n`);
   if (!points.length) markdown.addText('感知范围内没有发现怪物、NPC 或特殊地点。');
   else {
-    markdown.addText('感知到的目标（点击名称填入前往指令）：\n');
     for (const point of points) {
-      markdown.addButton(`【${point.type}】${point.name}`, { data: `/前往 ${point.x} ${point.y}`, autoEnter: false })
-        .addText(` · ${directionText(point, x, y)} ${point.distance} 格\n`);
+      if (speed > point.distance) markdown.addButton(`【${point.type}】${point.name}`, { data: `/前往 ${point.x} ${point.y}`, autoEnter: false });
+      else markdown.addText(`【${point.type}】${point.name}`);
+      markdown.addText(` · ${directionText(point, x, y)} ${point.distance} 格\n`);
     }
   }
   return Format.create().addMarkdown(markdown)
@@ -44,8 +44,8 @@ export default async () => {
     } catch (error) {
       if (!(error instanceof Error) || !error.message.includes('当前不在战斗中')) throw error;
       const [bag, nearby] = await Promise.all([inventory(event.current.UserId), nearbyPoints(event.current.UserId)]);
-      const targets = nearby.points.length ? `\n\n感知目标\n${nearby.points.map(point => `【${point.type}】${point.name}：/前往 ${point.x} ${point.y}`).join('\n')}` : '\n\n感知范围内没有发现目标。';
-      await sendWithTextFallback(message, outsidePanel(nearby.character.name, bag.speed, bag.weight, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), nearby.points), `【${nearby.character.name}】\n当前速度 ${bag.speed}｜负重 ${bag.weight.toFixed(2)}kg｜感知范围 ${nearby.range} 格${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
+      const targets = nearby.points.length ? `\n\n范围内列表\n${nearby.points.map(point => `【${point.type}】${point.name} · ${directionText(point, Number(nearby.character.pos_x), Number(nearby.character.pos_y))} ${point.distance} 格${bag.speed > point.distance ? `：/前往 ${point.x} ${point.y}` : ''}`).join('\n')}` : '\n\n范围内列表：没有发现目标。';
+      await sendWithTextFallback(message, outsidePanel(bag.speed, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), Number(nearby.character.pos_z), nearby.description, nearby.points), `【你移动至地面 (${nearby.character.pos_x}, ${nearby.character.pos_y}, ${nearby.character.pos_z})】\n${nearby.description}\n\n当前速度：${bag.speed}（决定一次能移动几格）\n感知范围：${nearby.range}（决定能显示的怪物、NPC 等）${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
     }
   } catch (error) {
     logger.error({ err: error, userId: event.current.UserId }, 'open panel failed');
