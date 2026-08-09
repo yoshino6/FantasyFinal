@@ -14,7 +14,7 @@ const groundTitle = (registered: number, regionName: string, x: number, y: numbe
 
 const outsidePanel = (registered: number, regionName: string, speed: number, range: number, x: number, y: number, z: number, description: string, points: NearbyPoint[]) => {
   const markdown = Format.createMarkdown().addTitle(groundTitle(registered, regionName, x, y, z))
-    .addText(`${description}\n\n当前速度：${speed}（决定一次能移动几格）\n感知范围：${range}（决定能显示的怪物、NPC 等）\n\n范围内列表：\n`);
+    .addText(`${description}\n\n移动速度：${speed}（决定一次能移动几格）\n感知范围：${range}（决定能显示的怪物、NPC 等）\n\n范围内列表：\n`);
   if (!points.length) markdown.addText('感知范围内没有发现怪物、NPC 或特殊地点。');
   else {
     for (const point of points) {
@@ -48,11 +48,11 @@ export default async () => {
     } catch (error) {
       if (!(error instanceof Error) || !error.message.includes('当前不在战斗中')) throw error;
       const [bag, nearby] = await Promise.all([inventory(event.current.UserId), nearbyPoints(event.current.UserId)]);
-      const targets = nearby.points.length ? `\n\n范围内列表\n${nearby.points.map(point => `【${point.type}】${point.name} · ${directionText(point, Number(nearby.character.pos_x), Number(nearby.character.pos_y))} ${point.distance} 格${bag.speed > point.distance ? `：/前往 ${point.x} ${point.y}` : ''}`).join('\n')}` : '\n\n范围内列表：没有发现目标。';
+      const targets = nearby.points.length ? `\n\n范围内列表\n${nearby.points.map(point => `【${point.type}】${point.name} · ${directionText(point, Number(nearby.character.pos_x), Number(nearby.character.pos_y))} ${point.distance} 格${bag.movementSpeed > point.distance ? `：/前往 ${point.x} ${point.y}` : ''}`).join('\n')}` : '\n\n范围内列表：没有发现目标。';
       const registered = Number(nearby.character.adventurer_registered);
       const x = Number(nearby.character.pos_x); const y = Number(nearby.character.pos_y); const z = Number(nearby.character.pos_z);
       const title = groundTitle(registered, nearby.character.region_name, x, y, z);
-      await sendWithTextFallback(message, outsidePanel(registered, nearby.character.region_name, bag.speed, nearby.range, x, y, z, nearby.description, nearby.points), `【${title}】\n${nearby.description}\n\n当前速度：${bag.speed}（决定一次能移动几格）\n感知范围：${nearby.range}（决定能显示的怪物、NPC 等）${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
+      await sendWithTextFallback(message, outsidePanel(registered, nearby.character.region_name, bag.movementSpeed, nearby.range, x, y, z, nearby.description, nearby.points), `【${title}】\n${nearby.description}\n\n移动速度：${bag.movementSpeed}（决定一次能移动几格）\n感知范围：${nearby.range}（决定能显示的怪物、NPC 等）${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
     }
   } catch (error) {
     logger.error({ err: error, userId: event.current.UserId }, 'open panel failed');

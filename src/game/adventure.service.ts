@@ -12,6 +12,11 @@ const pickWeighted = <T extends { spawn_weight: number }>(items: T[]) => {
   return items[items.length - 1];
 };
 const random = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
+const movementSpeedFrom = (speed: number, level: number) => {
+  const statSpeed = Math.floor(1 + Math.sqrt(Math.max(0, speed - 100) / 30));
+  const levelCap = Math.min(10, 3 + Math.floor(Math.max(0, level - 1) / 10));
+  return Math.max(1, Math.min(10, levelCap, statSpeed));
+};
 
 const characterFor = async (qqUserId: string): Promise<CharacterRow> => {
   const [rows] = await (await getPool()).execute<CharacterRow[]>(`SELECT c.*, r.name AS region_name FROM characters c JOIN players p ON p.id=c.player_id JOIN map_regions r ON r.id=c.current_region_id WHERE p.qq_user_id=? LIMIT 1`, [qqUserId]);
@@ -52,7 +57,8 @@ export const inventory = async (qqUserId: string) => {
   const [rows] = await pool.execute<(RowDataPacket & { name: string; quantity: number; weight: number; quick_slot: number | null; equipped_slot: string | null })[]>(`SELECT i.name, pi.quantity, i.weight, qi.quick_slot, pe.slot AS equipped_slot FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id LEFT JOIN player_quick_items qi ON qi.character_id=pi.character_id AND qi.item_id=pi.item_id LEFT JOIN player_equipment pe ON pe.character_id=pi.character_id AND pe.item_id=pi.item_id WHERE pi.character_id=? ORDER BY i.name`, [character.id]);
   const weight = rows.reduce((sum, item) => sum + Number(item.quantity) * Number(item.weight), 0);
   const speedPenalty = Math.floor(weight / 5) * 2;
-  return { items: rows, weight, capacity: 30, speed: Math.max(1, Number(character.speed) - speedPenalty), speedPenalty };
+  const speed = Math.max(1, Number(character.speed) - speedPenalty);
+  return { items: rows, weight, capacity: 30, speed, movementSpeed: movementSpeedFrom(speed, Number(character.level)), speedPenalty };
 };
 
 export const equipment = async (qqUserId: string) => {
@@ -110,7 +116,7 @@ const moveToPosition = async (connection: PoolConnection, qqUserId: string, x: n
   if (partyRows[0] && Number(partyRows[0].leader_character_id) !== character.id) throw new Error('组队状态下仅队长可以移动。');
   const distance = Math.max(Math.abs(x - Number(character.pos_x)), Math.abs(y - Number(character.pos_y)));
   if (restrictToPerception && distance > perceptionRange(Number(character.perception))) throw new Error('该位置超出你的感知范围。');
-  if (speedLimit !== undefined && distance >= speedLimit) throw new Error(`当前速度为 ${speedLimit}，一次移动距离必须小于当前速度。`);
+  if (speedLimit !== undefined && distance >= speedLimit) throw new Error(`当前移动速度为 ${speedLimit}，一次移动距离必须小于移动速度。`);
   const [regions] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>('SELECT id,name FROM map_regions WHERE ? BETWEEN min_x AND max_x AND ? BETWEEN min_y AND max_y AND ? BETWEEN min_z AND max_z ORDER BY danger_level DESC LIMIT 1', [x, y, character.pos_z]);
   const region = regions[0]; if (!region) throw new Error('\n\n前面的区域，以后再来探索吧！');
   if (partyRows[0]) await connection.execute('UPDATE characters c JOIN party_members pm ON pm.character_id=c.id SET c.current_region_id=?,c.pos_x=?,c.pos_y=? WHERE pm.party_id=(SELECT party_id FROM party_members WHERE character_id=? LIMIT 1)', [region.id, x, y, character.id]);
@@ -132,7 +138,7 @@ export const move = async (qqUserId: string, direction: string) => withTransacti
 export const moveTo = async (qqUserId: string, x: number, y: number) => {
   if (!Number.isInteger(x) || !Number.isInteger(y)) throw new Error('目标坐标必须为整数。');
   const carry = await inventory(qqUserId);
-  return withTransaction(async connection => moveToPosition(connection, qqUserId, x, y, true, carry.speed));
+  return withTransaction(async connection => moveToPosition(connection, qqUserId, x, y, true, carry.movementSpeed));
 };
 
 export const chooseTarget = async (qqUserId: string, spawnId: number) => withTransaction(async connection => {
