@@ -23,6 +23,7 @@ const schemaStatements = [
   ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS characters (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, player_id BIGINT UNSIGNED NOT NULL, name VARCHAR(24) NOT NULL,
+    gender VARCHAR(8) NOT NULL DEFAULT '未设定', free_name_change_used TINYINT(1) NOT NULL DEFAULT 0, free_gender_change_used TINYINT(1) NOT NULL DEFAULT 0,
     level INT UNSIGNED NOT NULL DEFAULT 1, experience BIGINT UNSIGNED NOT NULL DEFAULT 0,
     constitution SMALLINT UNSIGNED NOT NULL, spirit SMALLINT UNSIGNED NOT NULL, strength SMALLINT UNSIGNED NOT NULL,
     intelligence SMALLINT UNSIGNED NOT NULL, agility SMALLINT UNSIGNED NOT NULL, perception SMALLINT UNSIGNED NOT NULL,
@@ -144,7 +145,7 @@ const schemaStatements = [
 export const initializeSchema = async (pool: Pool) => {
   for (const statement of schemaStatements) await pool.query(statement);
   await pool.query("ALTER TABLE registration_sessions MODIFY stage ENUM('story','audience','question','destination','danger','choice') NOT NULL DEFAULT 'story'");
-  for (const column of ['constitution_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'spirit_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'strength_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'intelligence_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'agility_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'perception_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'adventurer_registered TINYINT(1) NOT NULL DEFAULT 0']) {
+  for (const column of ['constitution_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'spirit_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'strength_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'intelligence_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'agility_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'perception_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'adventurer_registered TINYINT(1) NOT NULL DEFAULT 0', "gender VARCHAR(8) NOT NULL DEFAULT '未设定'", 'free_name_change_used TINYINT(1) NOT NULL DEFAULT 0', 'free_gender_change_used TINYINT(1) NOT NULL DEFAULT 0']) {
     try { await pool.query(`ALTER TABLE characters ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }
   await pool.execute(
@@ -158,7 +159,9 @@ export const initializeSchema = async (pool: Pool) => {
     ('healing_herb', '微光草药', '恢复 30 点生命。', 'consumable', 0.20, JSON_OBJECT('heal', 30)),
     ('wolf_fang', '幽狼之牙', '可出售的普通材料。', 'material', 0.15, NULL),
     ('holy_sword_shirulu', '圣剑·希尔露', '物攻 +20、暴击率 +10%；普攻无视 25% 防御，并回复伤害的 10% 生命。', 'equipment', 3.50, JSON_OBJECT('physicalAttack',20,'critRateBp',1000,'ignoreDefensePct',25,'lifestealPct',10)),
-    ('demon_sword_aphia', '魔剑·阿菲娅', '魔攻 +25；魔法技能伤害 +30%，魔力消耗 -2。', 'equipment', 3.20, JSON_OBJECT('magicAttack',25,'magicDamagePct',30,'manaCostReduction',2))
+    ('demon_sword_aphia', '魔剑·阿菲娅', '魔攻 +25；魔法技能伤害 +30%，魔力消耗 -2。', 'equipment', 3.20, JSON_OBJECT('magicAttack',25,'magicDamagePct',30,'manaCostReduction',2)),
+    ('rename_card', '改名卡', '用于再次修改角色昵称。首次改名免费，此后每次改名消耗一张。', 'consumable', 0.01, JSON_OBJECT('characterChange','name')),
+    ('gender_change_card', '改性卡', '用于再次修改角色性别。首次改性免费，此后每次改性消耗一张。', 'consumable', 0.01, JSON_OBJECT('characterChange','gender'))
     ON DUPLICATE KEY UPDATE name = VALUES(name)`);
   await pool.query(`INSERT INTO skill_definitions (code, name, category, mana_cost, cooldown_turns, power, description) VALUES
     ('arcane_bolt', '奥术飞矢', 'magic', 8, 1, 150, '发射一枚奥术能量。'),

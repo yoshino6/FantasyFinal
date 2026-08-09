@@ -8,7 +8,7 @@ type RegistrationStage = 'story' | 'audience' | 'question' | 'destination' | 'da
 type SessionRow = RowDataPacket & { id: string; player_id: number; stage: RegistrationStage; expires_at: Date };
 type PlayerRow = RowDataPacket & { id: number; status: string };
 type RegionRow = RowDataPacket & { id: number; name: string; min_x: number; max_x: number; min_y: number; max_y: number; min_z: number; max_z: number };
-export type CharacterView = Allocation & DerivedStats & { name: string; regionName: string; x: number; y: number; z: number; level: number; experience: number; adventurerRegistered: boolean; giftName: string | null; growth: Growth };
+export type CharacterView = Allocation & DerivedStats & { name: string; gender: string; regionName: string; x: number; y: number; z: number; level: number; experience: number; adventurerRegistered: boolean; giftName: string | null; growth: Growth };
 
 const randomInRange = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
 const distribute = (total: number, precision = 1) => {
@@ -124,12 +124,12 @@ export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: 
   await connection.execute('UPDATE players SET status = \'active\' WHERE id = ?', [player.id]);
   await connection.execute('DELETE FROM registration_sessions WHERE id = ?', [session.id]);
   await connection.execute('INSERT INTO player_events (player_id, event_type, payload) VALUES (?, \'character.created\', ?)', [player.id, JSON.stringify({ region: region.name, x, y, z, giftCode })]);
-  return { ...allocation, ...stats, growth, name, regionName: region.name, x, y, z, level: 1, experience: 0, adventurerRegistered: false, giftName: gifts[giftCode].name };
+  return { ...allocation, ...stats, growth, name, gender: '未设定', regionName: region.name, x, y, z, level: 1, experience: 0, adventurerRegistered: false, giftName: gifts[giftCode].name };
 });
 
 export const getCharacter = async (qqUserId: string): Promise<CharacterView | null> => {
   const [rows] = await (await getPool()).execute<(RowDataPacket & CharacterView)[]>(
-    `SELECT c.name, c.level, c.experience, c.adventurer_registered AS adventurerRegistered, c.constitution, c.spirit, c.strength, c.intelligence, c.agility, c.perception, c.constitution_growth AS constitutionGrowth, c.spirit_growth AS spiritGrowth, c.strength_growth AS strengthGrowth, c.intelligence_growth AS intelligenceGrowth, c.agility_growth AS agilityGrowth, c.perception_growth AS perceptionGrowth, c.hp_max AS hpMax, c.mp_max AS mpMax, c.physical_attack AS physicalAttack, c.magic_attack AS magicAttack, c.physical_defense AS physicalDefense, c.magic_defense AS magicDefense, c.accuracy, c.evasion, c.crit_rate_bp AS critRateBp, c.crit_damage_bp AS critDamageBp, c.crit_resist_bp AS critResistBp, c.crit_damage_reduction_bp AS critDamageReductionBp, c.tenacity, c.speed, r.name AS regionName, c.pos_x AS x, c.pos_y AS y, c.pos_z AS z, COALESCE(i.name, b.code) AS giftName FROM characters c JOIN players p ON p.id = c.player_id JOIN map_regions r ON r.id = c.current_region_id LEFT JOIN player_equipment pe ON pe.character_id=c.id AND pe.slot='weapon' LEFT JOIN item_definitions i ON i.id=pe.item_id LEFT JOIN player_blessings b ON b.character_id=c.id WHERE p.qq_user_id = ? LIMIT 1`,
+    `SELECT c.name, c.gender, c.level, c.experience, c.adventurer_registered AS adventurerRegistered, c.constitution, c.spirit, c.strength, c.intelligence, c.agility, c.perception, c.constitution_growth AS constitutionGrowth, c.spirit_growth AS spiritGrowth, c.strength_growth AS strengthGrowth, c.intelligence_growth AS intelligenceGrowth, c.agility_growth AS agilityGrowth, c.perception_growth AS perceptionGrowth, c.hp_max AS hpMax, c.mp_max AS mpMax, c.physical_attack AS physicalAttack, c.magic_attack AS magicAttack, c.physical_defense AS physicalDefense, c.magic_defense AS magicDefense, c.accuracy, c.evasion, c.crit_rate_bp AS critRateBp, c.crit_damage_bp AS critDamageBp, c.crit_resist_bp AS critResistBp, c.crit_damage_reduction_bp AS critDamageReductionBp, c.tenacity, c.speed, r.name AS regionName, c.pos_x AS x, c.pos_y AS y, c.pos_z AS z, COALESCE(i.name, b.code) AS giftName FROM characters c JOIN players p ON p.id = c.player_id JOIN map_regions r ON r.id = c.current_region_id LEFT JOIN player_equipment pe ON pe.character_id=c.id AND pe.slot='weapon' LEFT JOIN item_definitions i ON i.id=pe.item_id LEFT JOIN player_blessings b ON b.character_id=c.id WHERE p.qq_user_id = ? LIMIT 1`,
     [qqUserId]
   );
   const row = rows[0];
@@ -139,6 +139,43 @@ export const getCharacter = async (qqUserId: string): Promise<CharacterView | nu
     growth: Object.fromEntries(attributes.map(key => [key, Number(row[`${key}Growth` as keyof typeof row])])) as Growth
   };
 };
+
+const consumeIdentityChange = async (connection: PoolConnection, characterId: number, field: 'free_name_change_used' | 'free_gender_change_used', cardCode: 'rename_card' | 'gender_change_card') => {
+  const [characters] = await connection.execute<(RowDataPacket & { used: number })[]>(`SELECT ${field} AS used FROM characters WHERE id=? FOR UPDATE`, [characterId]);
+  if (!characters[0]) throw new Error('未找到角色。');
+  if (!Number(characters[0].used)) {
+    await connection.execute(`UPDATE characters SET ${field}=1 WHERE id=?`, [characterId]);
+    return false;
+  }
+  const [cards] = await connection.execute<(RowDataPacket & { item_id: number; quantity: number })[]>(`SELECT pi.item_id,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.code=? FOR UPDATE`, [characterId, cardCode]);
+  if (!cards[0] || Number(cards[0].quantity) < 1) throw new Error(cardCode === 'rename_card' ? '首次改名已用完，请使用改名卡。' : '首次改性已用完，请使用改性卡。');
+  await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=?', [characterId, cards[0].item_id]);
+  return true;
+};
+
+const characterIdForChange = async (connection: PoolConnection, qqUserId: string) => {
+  const player = await getPlayer(connection, qqUserId);
+  const [characters] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM characters WHERE player_id=? FOR UPDATE', [player.id]);
+  if (!characters[0]) throw new Error('请先完成角色注册。');
+  return characters[0].id;
+};
+
+export const changeCharacterName = async (qqUserId: string, input: string) => withTransaction(async connection => {
+  const name = input.trim();
+  if (Array.from(name).length < 2 || Array.from(name).length > 24 || /[\r\n]/.test(name)) throw new Error('昵称长度需为 2～24 个字符，且不能包含换行。');
+  const characterId = await characterIdForChange(connection, qqUserId);
+  const usedCard = await consumeIdentityChange(connection, characterId, 'free_name_change_used', 'rename_card');
+  await connection.execute('UPDATE characters SET name=? WHERE id=?', [name, characterId]);
+  return { name, usedCard };
+});
+
+export const changeCharacterGender = async (qqUserId: string, gender: string) => withTransaction(async connection => {
+  if (gender !== '男' && gender !== '女') throw new Error('性别只能选择“男”或“女”。');
+  const characterId = await characterIdForChange(connection, qqUserId);
+  const usedCard = await consumeIdentityChange(connection, characterId, 'free_gender_change_used', 'gender_change_card');
+  await connection.execute('UPDATE characters SET gender=? WHERE id=?', [gender, characterId]);
+  return { gender, usedCard };
+});
 
 export const registerAdventurer = async (qqUserId: string) => withTransaction(async connection => {
   const player = await getPlayer(connection, qqUserId);

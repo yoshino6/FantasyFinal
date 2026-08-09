@@ -37,6 +37,8 @@ appGroup.use({ path: '恩赐列表', schema: { usage: '/恩赐列表 <神器|能
 appGroup.use({ path: '选择恩赐', schema: { usage: '/选择恩赐 <代号>', args: [{ name: 'gift', rules: [{ required: true, type: 'enum', enum: ['holy_sword_shirulu', 'demon_sword_aphia', 'growth_blessing', 'mana_affinity', 'lucky_favor'] }] }] } }, () => import('./response/gift-select'))
 appGroup.use('冒险者登记', () => import('./response/adventurer-register'))
 appGroup.use('角色', () => import('./response/character'))
+appGroup.use({ path: '改名', schema: { usage: '/改名 <新昵称>', args: [{ name: 'name', rules: [{ required: true }] }] } }, () => import('./response/change-name'))
+appGroup.use({ path: '改性', schema: { usage: '/改性 <男|女>', args: [{ name: 'gender', rules: [{ required: true, type: 'enum', enum: ['男', '女'] }] }] } }, () => import('./response/change-gender'))
 appGroup.use('地图', () => import('./response/map'))
 appGroup.use('面板', () => import('./response/panel'))
 appGroup.use('战斗信息', () => import('./response/battle-info'))
