@@ -68,9 +68,9 @@ export const inventoryView = async (qqUserId: string, category: '装备' | '道�
   const itemType = category === '装备' ? 'equipment' : category === '道具' ? 'consumable' : 'material';
   const [stacked] = await pool.execute<(RowDataPacket & { id: number; name: string; item_category: string; quantity: number; description: string })[]>('SELECT i.id,i.name,i.item_category,pi.quantity,i.description FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.item_type=? AND i.stackable=1 ORDER BY i.name', [character.id, itemType]);
   const [instances] = await pool.execute<(RowDataPacket & { id: number; definition_id: number; name: string; item_category: string; quality: number; durability: number; durability_max: number; description: string })[]>('SELECT ii.id,i.id AS definition_id,i.name,i.item_category,ii.quality,ii.durability,ii.durability_max,i.description FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.character_id=? AND i.item_type=? ORDER BY ii.acquired_at DESC', [character.id, itemType]);
-  const [recent] = await pool.execute<(RowDataPacket & { item_type: string; item_category: string; name: string })[]>(`SELECT item_type,item_category,name FROM (
-      SELECT i.item_type,i.item_category,i.name,ii.acquired_at FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.character_id=?
-      UNION ALL SELECT i.item_type,i.item_category,i.name,pi.acquired_at FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=?
+  const [recent] = await pool.execute<(RowDataPacket & { id: number; item_type: string; item_category: string; name: string })[]>(`SELECT id,item_type,item_category,name FROM (
+      SELECT i.id,i.item_type,i.item_category,i.name,ii.acquired_at FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.character_id=?
+      UNION ALL SELECT i.id,i.item_type,i.item_category,i.name,pi.acquired_at FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=?
     ) recent_items ORDER BY acquired_at DESC LIMIT 5`, [character.id, character.id]);
   return { stacked, instances, recent };
 };
