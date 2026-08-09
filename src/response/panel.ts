@@ -12,7 +12,7 @@ const groundTitle = (registered: number, regionName: string, x: number, y: numbe
   ? `你移动至${regionName} (${x}, ${y}, ${z})`
   : '你移动至未知之地';
 
-const outsidePanel = (registered: number, regionName: string, speed: number, range: number, x: number, y: number, z: number, description: string, points: NearbyPoint[]) => {
+export const outsidePanel = (registered: number, regionName: string, speed: number, range: number, x: number, y: number, z: number, description: string, points: NearbyPoint[]) => {
   const markdown = Format.createMarkdown().addTitle(groundTitle(registered, regionName, x, y, z))
     .addText(`${description}\n\n移动速度：${speed}\n感知范围：${range}\n\n范围内列表：\n`);
   if (!points.length) markdown.addText('感知范围内没有发现怪物、NPC 或特殊地点。');
@@ -23,13 +23,14 @@ const outsidePanel = (registered: number, regionName: string, speed: number, ran
       markdown.addText(` · ${directionText(point, x, y)} ${point.distance} 格\n`);
     }
   }
-  return Format.create().addMarkdown(markdown)
-  .addButtonGroup(Format.createButtonGroup()
+  return Format.create().addMarkdown(markdown);
+};
+
+export const panelButtons = () => Format.createButtonGroup()
     .addRow().addButton('装备', '/装备', { type: 'command', autoEnter: true }).addButton('上', '/移动 上', { type: 'command', autoEnter: true, style: 'blue' }).addButton('背包', '/背包', { type: 'command', autoEnter: true })
     .addRow().addButton('左', '/移动 左', { type: 'command', autoEnter: true, style: 'blue' }).addButton('角色', '/角色', { type: 'command', autoEnter: true }).addButton('右', '/移动 右', { type: 'command', autoEnter: true, style: 'blue' })
     .addRow().addButton('技能', '/技能列表', { type: 'command', autoEnter: true }).addButton('下', '/移动 下', { type: 'command', autoEnter: true, style: 'blue' }).addButton('队伍', '/队伍', { type: 'command', autoEnter: true })
-    .addRow().addButton('菜单', '/菜单', { type: 'command', autoEnter: true, style: 'blue' }));
-};
+    .addRow().addButton('菜单', '/菜单', { type: 'command', autoEnter: true, style: 'blue' });
 
 const battlePanel = (battle: Awaited<ReturnType<typeof battleStatus>>) => Format.create()
   .addMarkdown(Format.createMarkdown().addTitle('战斗面板').addText(`第 ${battle.turn} 回合\n你：HP ${battle.playerHp}/${battle.playerHpMax}｜MP ${battle.playerMp}/${battle.playerMpMax}\n锁定目标：#${battle.targetId} ${battle.targetName}｜HP ${battle.targetHp}/${battle.targetHpMax}`))
@@ -52,7 +53,7 @@ export default async () => {
       const registered = Number(nearby.character.adventurer_registered);
       const x = Number(nearby.character.pos_x); const y = Number(nearby.character.pos_y); const z = Number(nearby.character.pos_z);
       const title = groundTitle(registered, nearby.character.region_name, x, y, z);
-      await sendWithTextFallback(message, outsidePanel(registered, nearby.character.region_name, bag.movementSpeed, nearby.range, x, y, z, nearby.description, nearby.points), `【${title}】\n${nearby.description}\n\n移动速度：${bag.movementSpeed}（决定一次能移动几格）\n感知范围：${nearby.range}（决定能显示的怪物、NPC 等）${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
+      await sendWithTextFallback(message, outsidePanel(registered, nearby.character.region_name, bag.movementSpeed, nearby.range, x, y, z, nearby.description, nearby.points).addButtonGroup(panelButtons()), `【${title}】\n${nearby.description}\n\n移动速度：${bag.movementSpeed}（决定一次能移动几格）\n感知范围：${nearby.range}（决定能显示的怪物、NPC 等）${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
     }
   } catch (error) {
     logger.error({ err: error, userId: event.current.UserId }, 'open panel failed');
