@@ -3,13 +3,13 @@ import { Format, useMessage } from 'alemonjs';
 export default async () => {
   const [message] = useMessage();
   const menu = Format.createMarkdown()
-    .addTitle('异界菜单')
-    .addSubtitle('注册与角色')
+    .addTitle('幻想次元·菜单')
+    .addSubtitle('角色')
     .addButton('注册', { data: '注册', autoEnter: false }).addText(' 开始或继续创建角色\n')
     .addButton('/角色', { data: '/角色', autoEnter: false }).addText(' 查看个人属性\n')
     .addButton('/地图', { data: '/地图', autoEnter: false }).addText(' 查看当前位置\n')
     .addButton('/面板', { data: '/面板', autoEnter: false }).addText(' 打开当前快捷操作\n')
-    .addSubtitle('探索与遭遇')
+    .addSubtitle('探索')
     .addButton('/探索', { data: '/探索', autoEnter: false }).addText(' 搜寻当前坐标的怪物\n')
     .addButton('/背包', { data: '/背包', autoEnter: false }).addText(' 查看负重、速度与道具\n')
     .addButton('/移动 上', { data: '/移动 上', autoEnter: false }).addText(' 向上移动（下/左/右同理）\n')

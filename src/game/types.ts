@@ -2,6 +2,7 @@ export const attributes = ['constitution', 'spirit', 'strength', 'intelligence',
 export type AttributeKey = (typeof attributes)[number];
 
 export type Allocation = Record<AttributeKey, number>;
+export type Growth = Record<AttributeKey, number>;
 export type DerivedStats = {
   hpMax: number; mpMax: number; physicalAttack: number; magicAttack: number;
   physicalDefense: number; magicDefense: number; accuracy: number; evasion: number;
@@ -10,5 +11,9 @@ export type DerivedStats = {
 };
 
 export const emptyAllocation = (): Allocation => ({
+  constitution: 0, spirit: 0, strength: 0, intelligence: 0, agility: 0, perception: 0
+});
+
+export const emptyGrowth = (): Growth => ({
   constitution: 0, spirit: 0, strength: 0, intelligence: 0, agility: 0, perception: 0
 });

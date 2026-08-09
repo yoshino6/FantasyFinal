@@ -1,7 +1,5 @@
 import type { Allocation, DerivedStats } from './types';
 
-export const INITIAL_ATTRIBUTE_POINTS = 20;
-export const ATTRIBUTE_CAP = 20;
 export const SESSION_TTL_MINUTES = 30;
 
 export const attributeNames: Record<keyof Allocation, string> = {
@@ -30,3 +28,14 @@ export const calculateDerivedStats = (value: Allocation): DerivedStats => ({
   tenacity: value.constitution * 3 + value.spirit * 2,
   speed: 100 + value.agility * 8
 });
+
+export const gifts = {
+  holy_sword_shirulu: { name: '圣剑·希尔露', description: '物攻 +20、暴击率 +10%，普攻无视目标 25% 防御并回复造成伤害的 10% 生命。' },
+  demon_sword_aphia: { name: '魔剑·阿菲娅', description: '魔攻 +25，魔法技能伤害 +30%，每次施放少消耗 2 点魔力。' },
+  growth_blessing: { name: '成长祝福', description: '所有战斗经验翻倍。' },
+  mana_affinity: { name: '魔力亲和', description: '技能魔力消耗降低 30%（至少 1 点）。' },
+  lucky_favor: { name: '幸运眷顾', description: '掉落判定成功率提高 20 个百分点，最高 100%。' }
+} as const;
+
+export type GiftCode = keyof typeof gifts;
+export const isGiftCode = (value: string): value is GiftCode => value in gifts;

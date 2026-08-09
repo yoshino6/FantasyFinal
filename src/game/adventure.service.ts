@@ -4,6 +4,7 @@ import { getPool, withTransaction } from '../database/pool';
 
 type CharacterRow = RowDataPacket & { id: number; name: string; level: number; experience: number; hp_max: number; mp_max: number; physical_attack: number; magic_attack: number; physical_defense: number; magic_defense: number; speed: number; perception: number; spirit: number; intelligence: number; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string };
 type SpawnRow = RowDataPacket & { id: number; name: string; monster_class: string; level: number; current_hp: number; hp_max: number; attack: number; defense: number; speed: number; perception: number; charisma: number; experience: number; drops_json: string | null; skill_sequence?: string | null };
+type CombatModifiers = { weaponName?: string; physicalAttack: number; magicAttack: number; critRateBp: number; ignoreDefensePct: number; lifestealPct: number; magicDamagePct: number; manaCostReduction: number; experienceMultiplier: number; dropBonus: number; manaAffinity: boolean };
 const pick = <T>(items: T[]) => items[Math.floor(Math.random() * items.length)];
 const random = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
 
@@ -11,6 +12,13 @@ const characterFor = async (qqUserId: string): Promise<CharacterRow> => {
   const [rows] = await (await getPool()).execute<CharacterRow[]>(`SELECT c.*, r.name AS region_name FROM characters c JOIN players p ON p.id=c.player_id JOIN map_regions r ON r.id=c.current_region_id WHERE p.qq_user_id=? LIMIT 1`, [qqUserId]);
   if (!rows[0]) throw new Error('请先发送“注册”创建角色。');
   return rows[0];
+};
+
+const modifiersFor = async (connection: PoolConnection, characterId: number): Promise<CombatModifiers> => {
+  const [rows] = await connection.execute<(RowDataPacket & { name: string | null; effect_json: string | null; blessing: string | null })[]>(`SELECT i.name,i.effect_json,b.code AS blessing FROM characters c LEFT JOIN player_equipment pe ON pe.character_id=c.id AND pe.slot='weapon' LEFT JOIN item_definitions i ON i.id=pe.item_id LEFT JOIN player_blessings b ON b.character_id=c.id WHERE c.id=?`, [characterId]);
+  const effect = rows[0]?.effect_json ? JSON.parse(rows[0].effect_json) : {};
+  const blessing = rows[0]?.blessing;
+  return { weaponName: rows[0]?.name ?? undefined, physicalAttack: Number(effect.physicalAttack ?? 0), magicAttack: Number(effect.magicAttack ?? 0), critRateBp: Number(effect.critRateBp ?? 0), ignoreDefensePct: Number(effect.ignoreDefensePct ?? 0), lifestealPct: Number(effect.lifestealPct ?? 0), magicDamagePct: Number(effect.magicDamagePct ?? 0), manaCostReduction: Number(effect.manaCostReduction ?? 0), experienceMultiplier: blessing === 'growth_blessing' ? 2 : 1, dropBonus: blessing === 'lucky_favor' ? 0.2 : 0, manaAffinity: blessing === 'mana_affinity' };
 };
 
 export const spawnMonsters = async () => {
@@ -29,7 +37,7 @@ export const spawnMonsters = async () => {
 export const inventory = async (qqUserId: string) => {
   const character = await characterFor(qqUserId);
   const pool = await getPool();
-  const [rows] = await pool.execute<(RowDataPacket & { name: string; quantity: number; weight: number; quick_slot: number | null })[]>(`SELECT i.name, pi.quantity, i.weight, qi.quick_slot FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id LEFT JOIN player_quick_items qi ON qi.character_id=pi.character_id AND qi.item_id=pi.item_id WHERE pi.character_id=? ORDER BY i.name`, [character.id]);
+  const [rows] = await pool.execute<(RowDataPacket & { name: string; quantity: number; weight: number; quick_slot: number | null; equipped_slot: string | null })[]>(`SELECT i.name, pi.quantity, i.weight, qi.quick_slot, pe.slot AS equipped_slot FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id LEFT JOIN player_quick_items qi ON qi.character_id=pi.character_id AND qi.item_id=pi.item_id LEFT JOIN player_equipment pe ON pe.character_id=pi.character_id AND pe.item_id=pi.item_id WHERE pi.character_id=? ORDER BY i.name`, [character.id]);
   const weight = rows.reduce((sum, item) => sum + Number(item.quantity) * Number(item.weight), 0);
   const speedPenalty = Math.floor(weight / 5) * 2;
   return { items: rows, weight, capacity: 30, speed: Math.max(1, Number(character.speed) - speedPenalty), speedPenalty };
@@ -47,6 +55,8 @@ export const explore = async (qqUserId: string) => {
 
 export const move = async (qqUserId: string, direction: string) => withTransaction(async connection => {
   const character = await characterFor(qqUserId);
+  const [activeCombat] = await connection.execute<RowDataPacket[]>('SELECT id FROM combat_sessions WHERE character_id=? AND state=\'active\' FOR UPDATE', [character.id]);
+  if (activeCombat.length) throw new Error('战斗尚未结束，无法移动。');
   const [partyRows] = await connection.execute<(RowDataPacket & { leader_character_id: number })[]>('SELECT p.leader_character_id FROM party_members pm JOIN parties p ON p.id=pm.party_id WHERE pm.character_id=?', [character.id]);
   if (partyRows[0] && Number(partyRows[0].leader_character_id) !== character.id) throw new Error('组队状态下仅队长可以移动。');
   const delta: Record<string, [number, number]> = { 上: [0, 1], 下: [0, -1], 左: [-1, 0], 右: [1, 0] };
@@ -56,7 +66,21 @@ export const move = async (qqUserId: string, direction: string) => withTransacti
   const region = regionRows[0]; if (x < region.min_x || x > region.max_x || y < region.min_y || y > region.max_y) throw new Error('前方超出当前地图区域边界。');
   if (partyRows[0]) await connection.execute('UPDATE characters c JOIN party_members pm ON pm.character_id=c.id SET c.pos_x=?,c.pos_y=? WHERE pm.party_id=(SELECT party_id FROM party_members WHERE character_id=? LIMIT 1)', [x, y, character.id]);
   else await connection.execute('UPDATE characters SET pos_x=?,pos_y=? WHERE id=?', [x, y, character.id]);
-  return { ...character, pos_x: x, pos_y: y };
+  const [spawns] = await connection.execute<SpawnRow[]>(`SELECT s.id,t.name,t.monster_class,t.level,s.current_hp,t.hp_max,t.attack,t.defense,t.speed,t.perception,t.charisma,t.experience,t.drops_json FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? AND s.defeated_at IS NULL FOR UPDATE`, [character.current_region_id, x, y, character.pos_z]);
+  const moved = { ...character, pos_x: x, pos_y: y };
+  if (spawns[0]) {
+    const spawn = spawns[0];
+    const id = randomUUID();
+    await connection.execute('INSERT INTO combat_sessions (id,character_id,spawn_id,player_hp,player_mp,cooldowns) VALUES (?,?,?,?,?,JSON_OBJECT())', [id, character.id, spawn.id, character.hp_max, character.mp_max]);
+    return { character: moved, kind: 'battle' as const, spawn, playerHp: Number(character.hp_max), playerMp: Number(character.mp_max) };
+  }
+  const events = [
+    '林间传来鸟鸣，薄雾在脚边散开。你暂时没有发现敌人。',
+    '你在路旁发现一座褪色的路标，上面指向更深的密林。',
+    '草丛轻响后归于平静。也许有什么正在远处观察你。',
+    '一缕温暖的风拂过，你恢复了继续前行的勇气。'
+  ];
+  return { character: moved, kind: 'event' as const, text: pick(events) };
 });
 
 export const chooseTarget = async (qqUserId: string, spawnId: number) => withTransaction(async connection => {
@@ -111,14 +135,16 @@ export const battleStatus = async (qqUserId: string) => {
 const finishVictory = async (connection: PoolConnection, character: CharacterRow, combat: any) => {
   await connection.execute('UPDATE monster_spawns SET defeated_at=NOW(),current_hp=0 WHERE id=?', [combat.id]);
   await connection.execute('UPDATE combat_sessions SET state=\'victory\' WHERE combat_sessions.id=?', [combat.combat_id]);
-  await connection.execute('UPDATE characters SET experience=experience+? WHERE id=?', [combat.experience, character.id]);
+  const modifiers = await modifiersFor(connection, character.id);
+  const experience = Number(combat.experience) * modifiers.experienceMultiplier;
+  await connection.execute('UPDATE characters SET level=GREATEST(level, FLOOR((experience+?)/100)+1), experience=experience+? WHERE id=?', [experience, experience, character.id]);
   const drops = combat.drops_json ? JSON.parse(combat.drops_json) : [];
   const rewards: string[] = [];
-  for (const drop of drops) if (Math.random() <= Number(drop.chance ?? 1)) {
+  for (const drop of drops) if (Math.random() <= Math.min(1, Number(drop.chance ?? 1) + modifiers.dropBonus)) {
     const [items] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>('SELECT id,name FROM item_definitions WHERE code=?', [drop.code]);
     if (items[0]) { await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity)', [character.id, items[0].id, drop.quantity ?? 1]); rewards.push(`${items[0].name}×${drop.quantity ?? 1}`); }
   }
-  return `胜利！获得经验 ${combat.experience}${rewards.length ? `，掉落 ${rewards.join('、')}` : ''}。`;
+  return `胜利！获得经验 ${experience}${modifiers.experienceMultiplier > 1 ? '（成长祝福生效）' : ''}${rewards.length ? `，掉落 ${rewards.join('、')}` : ''}。`;
 };
 
 export const combatAction = async (qqUserId: string, action: 'attack' | 'skill' | 'item' | 'escape', slot?: number) => withTransaction(async connection => {
@@ -128,6 +154,7 @@ export const combatAction = async (qqUserId: string, action: 'attack' | 'skill' 
   combat.player_hp = Number(locked[0].player_hp); combat.player_mp = Number(locked[0].player_mp); combat.current_hp = Number(locked[0].current_hp);
   let log = ''; let damage = 0;
   const carry = await inventory(qqUserId); const playerSpeed = carry.speed;
+  const modifiers = await modifiersFor(connection, character.id);
   if (action === 'escape') {
     if (playerSpeed + Number(character.perception) >= Number(combat.speed) + Number(combat.perception) + random(0, 30)) { await connection.execute('UPDATE combat_sessions SET state=\'escaped\' WHERE id=?', [combat.combat_id]); return { log: '你抓住空隙撤离了战斗。', ended: true }; }
     log = '撤离失败，敌人堵住了去路！';
@@ -141,9 +168,19 @@ export const combatAction = async (qqUserId: string, action: 'attack' | 'skill' 
     if (action === 'skill') {
       if (!slot) throw new Error('请选择技能快捷栏。');
       const [skills] = await connection.execute<(RowDataPacket & { name: string; category: string; mana_cost: number; power: number; cooldown_turns: number })[]>('SELECT s.name,s.category,s.mana_cost,s.power,s.cooldown_turns FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.quick_slot=?', [character.id, slot]);
-      const skill = skills[0]; if (!skill) throw new Error('该技能快捷栏为空。'); if (combat.player_mp < skill.mana_cost) throw new Error('魔力不足。');
-      combat.player_mp -= Number(skill.mana_cost); damage = Math.max(1, Math.floor(((skill.category === 'magic' ? Number(character.magic_attack) : Number(character.physical_attack)) * Number(skill.power) / 100) - Number(combat.defense))); log = `施放 ${skill.name}，造成 ${damage} 点伤害。`;
-    } else { damage = Math.max(1, Number(character.physical_attack) - Number(combat.defense)); log = `发动普攻，造成 ${damage} 点伤害。`; }
+      const skill = skills[0]; if (!skill) throw new Error('该技能快捷栏为空。');
+      const manaCost = Math.max(skill.mana_cost > 0 ? 1 : 0, Math.ceil(Number(skill.mana_cost) * (modifiers.manaAffinity ? 0.7 : 1)) - modifiers.manaCostReduction);
+      if (combat.player_mp < manaCost) throw new Error('魔力不足。');
+      combat.player_mp -= manaCost;
+      const attack = skill.category === 'magic' ? Number(character.magic_attack) + modifiers.magicAttack : Number(character.physical_attack) + modifiers.physicalAttack;
+      const multiplier = skill.category === 'magic' ? 1 + modifiers.magicDamagePct / 100 : 1;
+      damage = Math.max(1, Math.floor((attack * Number(skill.power) / 100 * multiplier) - Number(combat.defense))); log = `施放 ${skill.name}，造成 ${damage} 点伤害${modifiers.weaponName ? `（${modifiers.weaponName}生效）` : ''}。`;
+    } else {
+      const defense = Math.floor(Number(combat.defense) * (1 - modifiers.ignoreDefensePct / 100));
+      damage = Math.max(1, Number(character.physical_attack) + modifiers.physicalAttack - defense);
+      if (modifiers.lifestealPct) { const heal = Math.floor(damage * modifiers.lifestealPct / 100); combat.player_hp = Math.min(Number(character.hp_max), combat.player_hp + heal); log = `发动普攻，造成 ${damage} 点伤害，${modifiers.weaponName} 回复了 ${heal} 点生命。`; }
+      else log = `发动普攻，造成 ${damage} 点伤害。`;
+    }
     combat.current_hp -= damage;
   }
   if (combat.current_hp <= 0) { const victory = await finishVictory(connection, character, combat); return { log: `${log}\n${victory}`, ended: true }; }

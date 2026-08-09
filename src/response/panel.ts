@@ -3,12 +3,12 @@ import { battleStatus, inventory } from '../game/adventure.service';
 import { messageFormat, sendWithTextFallback } from '../game/message';
 
 const outsidePanel = (speed: number, weight: number) => Format.create()
-  .addMarkdown(Format.createMarkdown().addTitle('冒险面板').addText(`当前速度 ${speed}｜负重 ${weight.toFixed(2)}kg\n\n使用方向按钮移动；到达目标坐标后发送 /探索。`))
+  .addMarkdown(Format.createMarkdown().addTitle('冒险面板').addText(`当前速度 ${speed}｜负重 ${weight.toFixed(2)}kg\n\n使用方向按钮移动；进入格子会立刻触发遭遇或奇遇。`))
   .addButtonGroup(Format.createButtonGroup()
     .addRow().addButton('上', '/移动 上', { type: 'command', autoEnter: true, style: 'blue' })
     .addRow().addButton('左', '/移动 左', { type: 'command', autoEnter: true }).addButton('右', '/移动 右', { type: 'command', autoEnter: true })
     .addRow().addButton('下', '/移动 下', { type: 'command', autoEnter: true, style: 'blue' })
-    .addRow().addButton('探索', '/探索', { type: 'command', autoEnter: true, style: 'blue' }).addButton('背包', '/背包', { type: 'command', autoEnter: true }).addButton('角色', '/角色', { type: 'command', autoEnter: true }));
+    .addRow().addButton('背包', '/背包', { type: 'command', autoEnter: true }).addButton('角色', '/角色', { type: 'command', autoEnter: true }));
 
 const battlePanel = (battle: Awaited<ReturnType<typeof battleStatus>>) => Format.create()
   .addMarkdown(Format.createMarkdown().addTitle('战斗面板').addText(`第 ${battle.turn} 回合\n你：HP ${battle.playerHp}/${battle.playerHpMax}｜MP ${battle.playerMp}/${battle.playerMpMax}\n锁定目标：#${battle.targetId} ${battle.targetName}｜HP ${battle.targetHp}/${battle.targetHpMax}`))

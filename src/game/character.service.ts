@@ -1,17 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
-import { ATTRIBUTE_CAP, INITIAL_ATTRIBUTE_POINTS, SESSION_TTL_MINUTES, calculateDerivedStats } from './constants';
-import { attributes, emptyAllocation, type Allocation, type AttributeKey, type DerivedStats } from './types';
+import { SESSION_TTL_MINUTES, calculateDerivedStats, gifts, isGiftCode } from './constants';
+import { attributes, type Allocation, type DerivedStats, type Growth } from './types';
 
-type SessionRow = RowDataPacket & Allocation & { id: string; player_id: number; stage: 'story' | 'allocate'; expires_at: Date };
+type SessionRow = RowDataPacket & { id: string; player_id: number; stage: 'story' | 'audience' | 'choice'; expires_at: Date };
 type PlayerRow = RowDataPacket & { id: number; status: string };
 type RegionRow = RowDataPacket & { id: number; name: string; min_x: number; max_x: number; min_y: number; max_y: number; min_z: number; max_z: number };
-export type CharacterView = Allocation & DerivedStats & { name: string; regionName: string; x: number; y: number; z: number };
+export type CharacterView = Allocation & DerivedStats & { name: string; regionName: string; x: number; y: number; z: number; level: number; experience: number; adventurerRegistered: boolean; giftName: string | null; growth: Growth };
 
-const allocationFrom = (row: Allocation): Allocation => Object.fromEntries(attributes.map(key => [key, Number(row[key])])) as Allocation;
-const total = (allocation: Allocation) => attributes.reduce((sum, key) => sum + allocation[key], 0);
 const randomInRange = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
+const distribute = (total: number, precision = 1) => {
+  const units = Math.round(total / precision); const values = attributes.map(() => 1);
+  for (let remaining = units - attributes.length; remaining > 0; remaining--) values[randomInRange(0, values.length - 1)]++;
+  return Object.fromEntries(attributes.map((key, index) => [key, values[index] * precision])) as Allocation;
+};
 
 const getPlayer = async (connection: PoolConnection, qqUserId: string, nickname?: string): Promise<PlayerRow> => {
   await connection.execute(
@@ -24,7 +27,7 @@ const getPlayer = async (connection: PoolConnection, qqUserId: string, nickname?
 
 const getSession = async (connection: PoolConnection, playerId: number, lock = false) => {
   const [rows] = await connection.execute<SessionRow[]>(
-    `SELECT id, player_id, stage, constitution, spirit, strength, intelligence, agility, perception, expires_at FROM registration_sessions WHERE player_id = ?${lock ? ' FOR UPDATE' : ''}`,
+    `SELECT id, player_id, stage, expires_at FROM registration_sessions WHERE player_id = ?${lock ? ' FOR UPDATE' : ''}`,
     [playerId]
   );
   return rows[0];
@@ -41,56 +44,40 @@ export const hasCharacter = async (qqUserId: string) => {
 export const beginRegistration = async (qqUserId: string, nickname?: string) => withTransaction(async connection => {
   const player = await getPlayer(connection, qqUserId, nickname);
   const [characters] = await connection.execute<RowDataPacket[]>('SELECT id FROM characters WHERE player_id = ? LIMIT 1', [player.id]);
-  if (characters.length) return { alreadyRegistered: true as const, stage: null, allocation: null };
+  if (characters.length) return { alreadyRegistered: true as const, stage: null };
   let session = await getSession(connection, player.id, true);
   if (!session || session.expires_at <= new Date()) {
     const id = randomUUID();
     await connection.execute(
-      'INSERT INTO registration_sessions (id, player_id, stage, expires_at) VALUES (?, ?, \'story\', DATE_ADD(NOW(), INTERVAL ? MINUTE)) ON DUPLICATE KEY UPDATE id = VALUES(id), stage = VALUES(stage), constitution = 0, spirit = 0, strength = 0, intelligence = 0, agility = 0, perception = 0, expires_at = VALUES(expires_at)',
+      'INSERT INTO registration_sessions (id, player_id, stage, expires_at) VALUES (?, ?, \'story\', DATE_ADD(NOW(), INTERVAL ? MINUTE)) ON DUPLICATE KEY UPDATE id = VALUES(id), stage = VALUES(stage), expires_at = VALUES(expires_at)',
       [id, player.id, SESSION_TTL_MINUTES]
     );
     session = await getSession(connection, player.id, true);
   }
-  return { alreadyRegistered: false as const, stage: session.stage, allocation: allocationFrom(session) };
+  return { alreadyRegistered: false as const, stage: session.stage };
 });
 
 export const continueRegistration = async (qqUserId: string) => withTransaction(async connection => {
   const player = await getPlayer(connection, qqUserId);
   const session = await getSession(connection, player.id, true);
   if (!session || session.expires_at <= new Date()) throw new Error('注册会话已过期，请重新发送“注册”。');
-  await connection.execute('UPDATE registration_sessions SET stage = \'allocate\' WHERE id = ?', [session.id]);
-  return allocationFrom(session);
+  const next = session.stage === 'story' ? 'audience' : session.stage === 'audience' ? 'choice' : 'choice';
+  await connection.execute('UPDATE registration_sessions SET stage = ? WHERE id = ?', [next, session.id]);
+  return next;
 });
 
-const requireAllocationSession = async (connection: PoolConnection, qqUserId: string) => {
+const requireChoiceSession = async (connection: PoolConnection, qqUserId: string) => {
   const player = await getPlayer(connection, qqUserId);
   const session = await getSession(connection, player.id, true);
-  if (!session || session.stage !== 'allocate' || session.expires_at <= new Date()) throw new Error('属性分配会话不存在或已过期，请发送“注册”重新开始。');
+  if (!session || session.stage !== 'choice' || session.expires_at <= new Date()) throw new Error('请先完成转生剧情，再选择恩赐。');
   return { player, session };
 };
 
-export const addPoints = async (qqUserId: string, attribute: AttributeKey, points: number) => withTransaction(async connection => {
-  const { session } = await requireAllocationSession(connection, qqUserId);
-  if (!Number.isInteger(points) || points < 1 || points > INITIAL_ATTRIBUTE_POINTS) throw new Error('点数必须是 1 到 20 的整数。');
-  const allocation = allocationFrom(session);
-  if (allocation[attribute] + points > ATTRIBUTE_CAP) throw new Error(`单项属性不能超过 ${ATTRIBUTE_CAP} 点。`);
-  if (total(allocation) + points > INITIAL_ATTRIBUTE_POINTS) throw new Error('可分配点数不足。');
-  await connection.execute(`UPDATE registration_sessions SET ${attribute} = ${attribute} + ? WHERE id = ?`, [points, session.id]);
-  allocation[attribute] += points;
-  return allocation;
-});
-
-export const resetAllocation = async (qqUserId: string) => withTransaction(async connection => {
-  const { session } = await requireAllocationSession(connection, qqUserId);
-  const allocation = emptyAllocation();
-  await connection.execute('UPDATE registration_sessions SET constitution = 0, spirit = 0, strength = 0, intelligence = 0, agility = 0, perception = 0 WHERE id = ?', [session.id]);
-  return allocation;
-});
-
-export const confirmAllocation = async (qqUserId: string, nickname?: string): Promise<CharacterView> => withTransaction(async connection => {
-  const { player, session } = await requireAllocationSession(connection, qqUserId);
-  const allocation = allocationFrom(session);
-  if (total(allocation) !== INITIAL_ATTRIBUTE_POINTS) throw new Error(`请先分配完全部 ${INITIAL_ATTRIBUTE_POINTS} 点属性。`);
+export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: string): Promise<CharacterView> => withTransaction(async connection => {
+  if (!isGiftCode(giftCode)) throw new Error('未知恩赐，请使用列表中的英文代号。');
+  const { player, session } = await requireChoiceSession(connection, qqUserId);
+  const allocation = distribute(randomInRange(80, 120));
+  const growth = distribute(randomInRange(80, 120) / 10, 0.1) as Growth;
   const [regions] = await connection.execute<RegionRow[]>('SELECT id, name, min_x, max_x, min_y, max_y, min_z, max_z FROM map_regions WHERE is_spawn_enabled = 1 ORDER BY id LIMIT 1');
   const region = regions[0];
   if (!region) throw new Error('当前没有可用出生区域，请联系管理员。');
@@ -100,8 +87,8 @@ export const confirmAllocation = async (qqUserId: string, nickname?: string): Pr
   const stats = calculateDerivedStats(allocation);
   const name = `冒险者${(nickname || qqUserId).slice(-6)}`;
   await connection.execute(
-    'INSERT INTO characters (player_id, name, constitution, spirit, strength, intelligence, agility, perception, hp_max, mp_max, physical_attack, magic_attack, physical_defense, magic_defense, accuracy, evasion, crit_rate_bp, crit_damage_bp, crit_resist_bp, crit_damage_reduction_bp, tenacity, speed, current_region_id, pos_x, pos_y, pos_z) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [player.id, name, ...attributes.map(key => allocation[key]), stats.hpMax, stats.mpMax, stats.physicalAttack, stats.magicAttack, stats.physicalDefense, stats.magicDefense, stats.accuracy, stats.evasion, stats.critRateBp, stats.critDamageBp, stats.critResistBp, stats.critDamageReductionBp, stats.tenacity, stats.speed, region.id, x, y, z]
+    'INSERT INTO characters (player_id, name, constitution, spirit, strength, intelligence, agility, perception, constitution_growth, spirit_growth, strength_growth, intelligence_growth, agility_growth, perception_growth, hp_max, mp_max, physical_attack, magic_attack, physical_defense, magic_defense, accuracy, evasion, crit_rate_bp, crit_damage_bp, crit_resist_bp, crit_damage_reduction_bp, tenacity, speed, current_region_id, pos_x, pos_y, pos_z) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [player.id, name, ...attributes.map(key => allocation[key]), ...attributes.map(key => growth[key]), stats.hpMax, stats.mpMax, stats.physicalAttack, stats.magicAttack, stats.physicalDefense, stats.magicDefense, stats.accuracy, stats.evasion, stats.critRateBp, stats.critDamageBp, stats.critResistBp, stats.critDamageReductionBp, stats.tenacity, stats.speed, region.id, x, y, z]
   );
   const [newCharacters] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM characters WHERE player_id=?', [player.id]);
   const characterId = newCharacters[0].id;
@@ -111,16 +98,36 @@ export const confirmAllocation = async (qqUserId: string, nickname?: string): Pr
     SELECT ?, id, 3 FROM item_definitions WHERE code='healing_herb'`, [characterId]);
   await connection.execute(`INSERT INTO player_quick_items (character_id,quick_slot,item_id)
     SELECT ?, 1, id FROM item_definitions WHERE code='healing_herb'`, [characterId]);
+  if (giftCode === 'holy_sword_shirulu' || giftCode === 'demon_sword_aphia') {
+    const itemCode = giftCode;
+    await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) SELECT ?,id,1 FROM item_definitions WHERE code=?', [characterId, itemCode]);
+    await connection.execute('INSERT INTO player_equipment (character_id,slot,item_id) SELECT ?,\'weapon\',id FROM item_definitions WHERE code=?', [characterId, itemCode]);
+  } else await connection.execute('INSERT INTO player_blessings (character_id,code) VALUES (?,?)', [characterId, giftCode]);
   await connection.execute('UPDATE players SET status = \'active\' WHERE id = ?', [player.id]);
   await connection.execute('DELETE FROM registration_sessions WHERE id = ?', [session.id]);
-  await connection.execute('INSERT INTO player_events (player_id, event_type, payload) VALUES (?, \'character.created\', ?)', [player.id, JSON.stringify({ region: region.name, x, y, z })]);
-  return { ...allocation, ...stats, name, regionName: region.name, x, y, z };
+  await connection.execute('INSERT INTO player_events (player_id, event_type, payload) VALUES (?, \'character.created\', ?)', [player.id, JSON.stringify({ region: region.name, x, y, z, giftCode })]);
+  return { ...allocation, ...stats, growth, name, regionName: region.name, x, y, z, level: 1, experience: 0, adventurerRegistered: false, giftName: gifts[giftCode].name };
 });
 
 export const getCharacter = async (qqUserId: string): Promise<CharacterView | null> => {
   const [rows] = await (await getPool()).execute<(RowDataPacket & CharacterView)[]>(
-    'SELECT c.name, c.constitution, c.spirit, c.strength, c.intelligence, c.agility, c.perception, c.hp_max AS hpMax, c.mp_max AS mpMax, c.physical_attack AS physicalAttack, c.magic_attack AS magicAttack, c.physical_defense AS physicalDefense, c.magic_defense AS magicDefense, c.accuracy, c.evasion, c.crit_rate_bp AS critRateBp, c.crit_damage_bp AS critDamageBp, c.crit_resist_bp AS critResistBp, c.crit_damage_reduction_bp AS critDamageReductionBp, c.tenacity, c.speed, r.name AS regionName, c.pos_x AS x, c.pos_y AS y, c.pos_z AS z FROM characters c JOIN players p ON p.id = c.player_id JOIN map_regions r ON r.id = c.current_region_id WHERE p.qq_user_id = ? LIMIT 1',
+    `SELECT c.name, c.level, c.experience, c.adventurer_registered AS adventurerRegistered, c.constitution, c.spirit, c.strength, c.intelligence, c.agility, c.perception, c.constitution_growth AS constitutionGrowth, c.spirit_growth AS spiritGrowth, c.strength_growth AS strengthGrowth, c.intelligence_growth AS intelligenceGrowth, c.agility_growth AS agilityGrowth, c.perception_growth AS perceptionGrowth, c.hp_max AS hpMax, c.mp_max AS mpMax, c.physical_attack AS physicalAttack, c.magic_attack AS magicAttack, c.physical_defense AS physicalDefense, c.magic_defense AS magicDefense, c.accuracy, c.evasion, c.crit_rate_bp AS critRateBp, c.crit_damage_bp AS critDamageBp, c.crit_resist_bp AS critResistBp, c.crit_damage_reduction_bp AS critDamageReductionBp, c.tenacity, c.speed, r.name AS regionName, c.pos_x AS x, c.pos_y AS y, c.pos_z AS z, COALESCE(i.name, b.code) AS giftName FROM characters c JOIN players p ON p.id = c.player_id JOIN map_regions r ON r.id = c.current_region_id LEFT JOIN player_equipment pe ON pe.character_id=c.id AND pe.slot='weapon' LEFT JOIN item_definitions i ON i.id=pe.item_id LEFT JOIN player_blessings b ON b.character_id=c.id WHERE p.qq_user_id = ? LIMIT 1`,
     [qqUserId]
   );
-  return rows[0] ?? null;
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    ...row,
+    growth: Object.fromEntries(attributes.map(key => [key, Number(row[`${key}Growth` as keyof typeof row])])) as Growth
+  };
 };
+
+export const registerAdventurer = async (qqUserId: string) => withTransaction(async connection => {
+  const player = await getPlayer(connection, qqUserId);
+  const [rows] = await connection.execute<(RowDataPacket & { id: number; level: number; adventurer_registered: number })[]>('SELECT id,level,adventurer_registered FROM characters WHERE player_id=? FOR UPDATE', [player.id]);
+  if (!rows[0]) throw new Error('请先完成转生。');
+  if (rows[0].adventurer_registered) return false;
+  if (Number(rows[0].level) < 5) throw new Error('公会只接纳 Lv.5 及以上的见习者；继续冒险后再来。');
+  await connection.execute('UPDATE characters SET adventurer_registered=1 WHERE id=?', [rows[0].id]);
+  return true;
+});

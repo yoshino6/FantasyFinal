@@ -1,46 +1,11 @@
-import { logger, useEvent, useMessage, useRoute } from 'alemonjs';
-import { addPoints, confirmAllocation, resetAllocation } from '../game/character.service';
-import { attributeAliases } from '../game/constants';
-import { allocationFormat, allocationText, characterText, messageFormat, sendWithTextFallback } from '../game/message';
+import { useMessage } from 'alemonjs';
+import { messageFormat } from '../game/message';
 
-const errorText = (error: unknown) => error instanceof Error ? error.message : '操作失败，请稍后重试。';
-
-export const add = async () => {
-  const [event] = useEvent();
-  const [route] = useRoute();
+const disabled = async () => {
   const [message] = useMessage();
-  try {
-    const attribute = attributeAliases[String(route.param('attribute') ?? '')];
-    const points = Number(route.param('points'));
-    if (!attribute || !Number.isInteger(points)) throw new Error('属性或点数无效。');
-    const allocation = await addPoints(event.current.UserId, attribute, points);
-    await sendWithTextFallback(message, allocationFormat(allocation), allocationText(allocation));
-  } catch (error) {
-    logger.warn({ err: error, userId: event.current.UserId }, 'allocation add rejected');
-    await message.send({ format: messageFormat('加点失败', errorText(error)) });
-  }
+  await message.send({ format: messageFormat('命运已固定', '本世界的六维与成长由转生时随机固定，不能手动加点。请发送 /注册，完成剧情后用 /选择恩赐 代号 开始冒险。') });
 };
 
-export const reset = async () => {
-  const [event] = useEvent();
-  const [message] = useMessage();
-  try {
-    const allocation = await resetAllocation(event.current.UserId);
-    await sendWithTextFallback(message, allocationFormat(allocation), allocationText(allocation));
-  } catch (error) {
-    logger.warn({ err: error, userId: event.current.UserId }, 'allocation reset rejected');
-    await message.send({ format: messageFormat('重置失败', errorText(error)) });
-  }
-};
-
-export const confirm = async () => {
-  const [event] = useEvent();
-  const [message] = useMessage();
-  try {
-    const character = await confirmAllocation(event.current.UserId, event.current.UserName);
-    await message.send({ format: messageFormat(`穿越完成 · ${character.name}`, characterText(character, character, character.regionName, character.x, character.y, character.z)) });
-  } catch (error) {
-    logger.warn({ err: error, userId: event.current.UserId }, 'allocation confirm rejected');
-    await message.send({ format: messageFormat('确认失败', errorText(error)) });
-  }
-};
+export const add = disabled;
+export const reset = disabled;
+export const confirm = disabled;
