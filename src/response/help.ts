@@ -14,7 +14,6 @@ export default async () => {
     .addButton('/背包', { data: '/背包', autoEnter: false }).addText(' 查看负重、速度与道具\n')
     .addButton('/移动 上', { data: '/移动 上', autoEnter: false }).addText(' 向上移动（下/左/右同理）\n')
     .addButton('/目标 编号', { data: '/目标 ', autoEnter: false }).addText(' 锁定怪物进入战斗\n')
-    .addButton('/偷袭 编号', { data: '/偷袭 ', autoEnter: false }).addText(' 感知和速度判定\n')
     .addButton('/躲避 编号', { data: '/躲避 ', autoEnter: false }).addText(' 尝试避开敌人\n')
     .addButton('/交涉 编号', { data: '/交涉 ', autoEnter: false }).addText(' 尝试和平解决\n')
     .addSubtitle('战斗')

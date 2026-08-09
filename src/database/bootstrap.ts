@@ -112,6 +112,11 @@ const schemaStatements = [
     CONSTRAINT fk_map_monster_pool_region FOREIGN KEY (region_id) REFERENCES map_regions(id) ON DELETE CASCADE,
     CONSTRAINT fk_map_monster_pool_template FOREIGN KEY (monster_template_id) REFERENCES monster_templates(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS monster_encounter_texts (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, monster_template_id BIGINT UNSIGNED NOT NULL, description TEXT NOT NULL,
+    PRIMARY KEY (id), UNIQUE KEY uk_monster_encounter_text (monster_template_id, description(191)),
+    CONSTRAINT fk_monster_encounter_template FOREIGN KEY (monster_template_id) REFERENCES monster_templates(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS map_npcs (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, region_id BIGINT UNSIGNED NOT NULL, code VARCHAR(64) NOT NULL, name VARCHAR(64) NOT NULL,
     description TEXT NOT NULL, pos_x INT NULL, pos_y INT NULL, pos_z INT NULL,
@@ -140,7 +145,7 @@ const schemaStatements = [
     id CHAR(36) NOT NULL, character_id BIGINT UNSIGNED NOT NULL, spawn_id BIGINT UNSIGNED NOT NULL,
     player_hp INT UNSIGNED NOT NULL, player_mp INT UNSIGNED NOT NULL, cooldowns JSON NOT NULL,
     turn_no INT UNSIGNED NOT NULL DEFAULT 1, state ENUM('active','victory','defeat','escaped') NOT NULL DEFAULT 'active',
-    PRIMARY KEY (id), UNIQUE KEY uk_active_character (character_id),
+    PRIMARY KEY (id), KEY idx_combat_character_state (character_id, state),
     CONSTRAINT fk_combat_character FOREIGN KEY (character_id) REFERENCES characters(id), CONSTRAINT fk_combat_spawn FOREIGN KEY (spawn_id) REFERENCES monster_spawns(id)
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS parties (
@@ -157,6 +162,8 @@ const schemaStatements = [
 
 export const initializeSchema = async (pool: Pool) => {
   for (const statement of schemaStatements) await pool.query(statement);
+  try { await pool.query('ALTER TABLE combat_sessions DROP INDEX uk_active_character'); } catch (error: any) { if (error?.code !== 'ER_CANT_DROP_FIELD_OR_KEY') throw error; }
+  try { await pool.query('ALTER TABLE combat_sessions ADD KEY idx_combat_character_state (character_id, state)'); } catch (error: any) { if (error?.code !== 'ER_DUP_KEYNAME') throw error; }
   await pool.query("ALTER TABLE registration_sessions MODIFY stage ENUM('story','audience','question','destination','danger','choice') NOT NULL DEFAULT 'story'");
   for (const column of ['constitution_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'spirit_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'strength_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'intelligence_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'agility_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'perception_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'adventurer_registered TINYINT(1) NOT NULL DEFAULT 0', "gender VARCHAR(8) NOT NULL DEFAULT '未设定'", 'free_name_change_used TINYINT(1) NOT NULL DEFAULT 0', 'free_gender_change_used TINYINT(1) NOT NULL DEFAULT 0']) {
     try { await pool.query(`ALTER TABLE characters ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
@@ -195,6 +202,17 @@ export const initializeSchema = async (pool: Pool) => {
     ('black_bear', '乌熊', 'elite', 4, 1000, 120, 85, 82, 11, 2, JSON_ARRAY('howl','bite'), 95, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',1,'quantity',2))),
     ('mist_wolf', '雾影狼', 'normal', 1, 350, 55, 40, 95, 8, 1, JSON_ARRAY(), 20, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',0.7,'quantity',1)))
     ON DUPLICATE KEY UPDATE name = VALUES(name), monster_class = VALUES(monster_class), level = VALUES(level), hp_max = VALUES(hp_max), attack = VALUES(attack), defense = VALUES(defense), speed = VALUES(speed), perception = VALUES(perception), charisma = VALUES(charisma), skill_sequence = VALUES(skill_sequence), experience = VALUES(experience), drops_json = VALUES(drops_json)`);
+  await pool.query(`INSERT IGNORE INTO monster_encounter_texts (monster_template_id, description) VALUES
+    ((SELECT id FROM monster_templates WHERE code='ball_rabbit'), '落叶轻轻颤动，一只球兔从灌木后探出圆滚滚的脑袋，红色的眼睛正盯着你。'),
+    ((SELECT id FROM monster_templates WHERE code='ball_rabbit'), '草丛里传来急促的蹦跳声，球兔挡在了你的去路上。'),
+    ((SELECT id FROM monster_templates WHERE code='spike_boar'), '沉重的蹄声压过枯枝，一头刺猪低下头，用尖刺对准了你。'),
+    ((SELECT id FROM monster_templates WHERE code='spike_boar'), '泥土被拱开，暴躁的刺猪从阴影中冲出，发出威胁的哼叫。'),
+    ((SELECT id FROM monster_templates WHERE code='vine_python'), '藤蔓忽然收紧，藏在树冠间的藤蚺吐着信子俯视着你。'),
+    ((SELECT id FROM monster_templates WHERE code='vine_python'), '湿冷的鳞片擦过树干，藤蚺无声地封住了前方。'),
+    ((SELECT id FROM monster_templates WHERE code='black_bear'), '浓重的腥味扑面而来，乌熊从雾里直起身躯，发出低沉咆哮。'),
+    ((SELECT id FROM monster_templates WHERE code='black_bear'), '脚下的地面微微震动，乌熊拨开灌木，阴影笼罩了前路。'),
+    ((SELECT id FROM monster_templates WHERE code='mist_wolf'), '雾气里亮起一双幽绿的眼睛，雾影狼压低身体缓缓逼近。'),
+    ((SELECT id FROM monster_templates WHERE code='mist_wolf'), '远处传来短促狼嚎，雾影狼已悄然出现在你的侧前方。')`);
   await pool.query(`INSERT INTO map_monster_pools (region_id, monster_template_id, spawn_weight)
     SELECT r.id, t.id, CASE t.code WHEN 'ball_rabbit' THEN 40 WHEN 'spike_boar' THEN 25 WHEN 'vine_python' THEN 22 WHEN 'mist_wolf' THEN 12 WHEN 'black_bear' THEN 1 END
     FROM map_regions r JOIN monster_templates t ON t.code IN ('ball_rabbit','spike_boar','vine_python','mist_wolf','black_bear')

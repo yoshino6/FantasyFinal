@@ -3,7 +3,7 @@ import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 
 type CharacterRow = RowDataPacket & { id: number; name: string; level: number; experience: number; hp_max: number; mp_max: number; physical_attack: number; magic_attack: number; physical_defense: number; magic_defense: number; accuracy: number; evasion: number; crit_rate_bp: number; crit_damage_bp: number; crit_resist_bp: number; crit_damage_reduction_bp: number; speed: number; perception: number; spirit: number; intelligence: number; adventurer_registered: number; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string };
-type SpawnRow = RowDataPacket & { id: number; name: string; monster_class: string; level: number; current_hp: number; hp_max: number; attack: number; defense: number; speed: number; perception: number; charisma: number; experience: number; drops_json: string | null; skill_sequence?: string | null };
+type SpawnRow = RowDataPacket & { id: number; template_id?: number; name: string; monster_class: string; level: number; current_hp: number; hp_max: number; attack: number; defense: number; speed: number; perception: number; charisma: number; experience: number; drops_json: string | null; skill_sequence?: string | null };
 type CombatModifiers = { weaponName?: string; physicalAttack: number; magicAttack: number; critRateBp: number; ignoreDefensePct: number; lifestealPct: number; magicDamagePct: number; manaCostReduction: number; experienceMultiplier: number; dropBonus: number; manaAffinity: boolean };
 const pickWeighted = <T extends { spawn_weight: number }>(items: T[]) => {
   const total = items.reduce((sum, item) => sum + Number(item.spawn_weight), 0);
@@ -159,9 +159,12 @@ const moveToPosition = async (connection: PoolConnection, qqUserId: string, x: n
   const region = regions[0]; if (!region) throw new Error('\n\n前面的区域，以后再来探索吧！');
   if (partyRows[0]) await connection.execute('UPDATE characters c JOIN party_members pm ON pm.character_id=c.id SET c.current_region_id=?,c.pos_x=?,c.pos_y=? WHERE pm.party_id=(SELECT party_id FROM party_members WHERE character_id=? LIMIT 1)', [region.id, x, y, character.id]);
   else await connection.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=? WHERE id=?', [region.id, x, y, character.id]);
-  const [spawns] = await connection.execute<SpawnRow[]>(`SELECT s.id,t.name,t.monster_class,t.level,s.current_hp,t.hp_max,t.attack,t.defense,t.speed,t.perception,t.charisma,t.experience,t.drops_json FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? AND s.defeated_at IS NULL FOR UPDATE`, [region.id, x, y, character.pos_z]);
+  const [spawns] = await connection.execute<SpawnRow[]>(`SELECT s.id,s.template_id,t.name,t.monster_class,t.level,s.current_hp,t.hp_max,t.attack,t.defense,t.speed,t.perception,t.charisma,t.experience,t.drops_json FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? AND s.defeated_at IS NULL FOR UPDATE`, [region.id, x, y, character.pos_z]);
   const moved = { ...character, current_region_id: region.id, region_name: region.name, pos_x: x, pos_y: y };
-  if (spawns.length) return { character: moved, kind: 'encounter' as const, spawns };
+  if (spawns.length) {
+    const [texts] = await connection.execute<(RowDataPacket & { description: string })[]>('SELECT description FROM monster_encounter_texts WHERE monster_template_id=? ORDER BY RAND() LIMIT 1', [spawns[0].template_id]);
+    return { character: moved, kind: 'encounter' as const, spawns, text: texts[0]?.description ?? `${spawns[0].name} 拦住了你的去路。` };
+  }
   const [texts] = await connection.execute<(RowDataPacket & { description: string })[]>('SELECT description FROM map_move_texts WHERE region_id=? ORDER BY RAND() LIMIT 1', [region.id]);
   return { character: moved, kind: 'event' as const, text: texts[0]?.description ?? '四周一片寂静，暂时没有发现异常。' };
 };
@@ -190,11 +193,10 @@ export const chooseTarget = async (qqUserId: string, spawnId: number) => withTra
   return { character, spawn, playerHp: Number(character.hp_max), playerMp: Number(character.mp_max) };
 });
 
-export const encounterAction = async (qqUserId: string, spawnId: number, action: 'sneak' | 'avoid' | 'persuade') => {
+export const encounterAction = async (qqUserId: string, spawnId: number, action: 'avoid' | 'persuade') => {
   const found = await explore(qqUserId);
   const spawn = found.spawns.find(item => item.id === spawnId);
   if (!spawn) throw new Error('该目标不在当前位置。');
-  const carry = await inventory(qqUserId);
   const charm = Math.floor((Number(found.character.spirit) + Number(found.character.intelligence)) / 2);
   if (action === 'avoid') {
     if (Number(found.character.perception) + random(1, 20) >= Number(spawn.perception)) return '你借助感知绕开了敌人，没有进入战斗。';
@@ -204,13 +206,7 @@ export const encounterAction = async (qqUserId: string, spawnId: number, action:
     if (charm + random(1, 20) >= Number(spawn.charisma) + 12) return `你以诚意打动了 ${spawn.name}。它暂时退去，未发生战斗。`;
     const started = await chooseTarget(qqUserId, spawnId); return `交涉失败！${started.spawn.name} 露出敌意。\n进入战斗：/攻击｜/技能 1-4｜/道具 1-4｜/逃跑`;
   }
-  const started = await chooseTarget(qqUserId, spawnId);
-  if (Number(found.character.perception) + carry.speed >= Number(spawn.perception) + Number(spawn.speed)) {
-    const pool = await getPool(); const damage = Math.max(1, Number(found.character.physical_attack) - Number(spawn.defense));
-    await pool.execute('UPDATE monster_spawns SET current_hp=GREATEST(1,current_hp-?) WHERE id=?', [damage, spawnId]);
-    return `偷袭成功！你率先造成 ${damage} 点伤害。\n进入战斗：/攻击｜/技能 1-4｜/道具 1-4｜/逃跑`;
-  }
-  return `偷袭失败，${started.spawn.name} 已察觉你。\n进入战斗：/攻击｜/技能 1-4｜/道具 1-4｜/逃跑`;
+  throw new Error('未知的遇战操作。');
 };
 
 const combatRow = async (qqUserId: string) => {
