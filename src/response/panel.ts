@@ -1,14 +1,31 @@
 import { Format, logger, useEvent, useMessage } from 'alemonjs';
-import { battleStatus, inventory } from '../game/adventure.service';
+import { battleStatus, inventory, nearbyPoints, type NearbyPoint } from '../game/adventure.service';
 import { messageFormat, sendWithTextFallback } from '../game/message';
 
-const outsidePanel = (speed: number, weight: number) => Format.create()
-  .addMarkdown(Format.createMarkdown().addTitle('冒险面板').addText(`当前速度 ${speed}｜负重 ${weight.toFixed(2)}kg\n\n进入格子会立刻触发遭遇或奇遇。`))
+const directionText = (point: NearbyPoint, x: number, y: number) => {
+  const vertical = point.y > y ? '上方' : point.y < y ? '下方' : '';
+  const horizontal = point.x > x ? '右侧' : point.x < x ? '左侧' : '';
+  return vertical && horizontal ? `${vertical}${horizontal}` : vertical || horizontal || '脚下';
+};
+
+const outsidePanel = (name: string, speed: number, weight: number, range: number, x: number, y: number, points: NearbyPoint[]) => {
+  const markdown = Format.createMarkdown().addTitle(name)
+    .addText(`当前速度 ${speed}｜负重 ${weight.toFixed(2)}kg｜感知范围 ${range} 格\n\n`);
+  if (!points.length) markdown.addText('感知范围内没有发现怪物、NPC 或特殊地点。');
+  else {
+    markdown.addText('感知到的目标（点击名称填入前往指令）：\n');
+    for (const point of points) {
+      markdown.addButton(`【${point.type}】${point.name}`, { data: `/前往 ${point.x} ${point.y}`, autoEnter: false })
+        .addText(` · ${directionText(point, x, y)} ${point.distance} 格\n`);
+    }
+  }
+  return Format.create().addMarkdown(markdown)
   .addButtonGroup(Format.createButtonGroup()
     .addRow().addButton('装备', '/装备', { type: 'command', autoEnter: true }).addButton('上', '/移动 上', { type: 'command', autoEnter: true, style: 'blue' }).addButton('背包', '/背包', { type: 'command', autoEnter: true })
     .addRow().addButton('左', '/移动 左', { type: 'command', autoEnter: true, style: 'blue' }).addButton('角色', '/角色', { type: 'command', autoEnter: true }).addButton('右', '/移动 右', { type: 'command', autoEnter: true, style: 'blue' })
     .addRow().addButton('技能', '/技能列表', { type: 'command', autoEnter: true }).addButton('下', '/移动 下', { type: 'command', autoEnter: true, style: 'blue' }).addButton('队伍', '/队伍', { type: 'command', autoEnter: true })
     .addRow().addButton('菜单', '/菜单', { type: 'command', autoEnter: true, style: 'blue' }));
+};
 
 const battlePanel = (battle: Awaited<ReturnType<typeof battleStatus>>) => Format.create()
   .addMarkdown(Format.createMarkdown().addTitle('战斗面板').addText(`第 ${battle.turn} 回合\n你：HP ${battle.playerHp}/${battle.playerHpMax}｜MP ${battle.playerMp}/${battle.playerMpMax}\n锁定目标：#${battle.targetId} ${battle.targetName}｜HP ${battle.targetHp}/${battle.targetHpMax}`))
@@ -26,8 +43,9 @@ export default async () => {
       await sendWithTextFallback(message, battlePanel(battle), `【战斗面板】\n你 HP ${battle.playerHp}/${battle.playerHpMax}｜MP ${battle.playerMp}/${battle.playerMpMax}\n目标 #${battle.targetId} ${battle.targetName} HP ${battle.targetHp}/${battle.targetHpMax}\n/攻击｜/技能 1｜/道具 1｜/逃跑`);
     } catch (error) {
       if (!(error instanceof Error) || !error.message.includes('当前不在战斗中')) throw error;
-      const bag = await inventory(event.current.UserId);
-      await sendWithTextFallback(message, outsidePanel(bag.speed, bag.weight), `【冒险面板】\n当前速度 ${bag.speed}｜负重 ${bag.weight.toFixed(2)}kg\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
+      const [bag, nearby] = await Promise.all([inventory(event.current.UserId), nearbyPoints(event.current.UserId)]);
+      const targets = nearby.points.length ? `\n\n感知目标\n${nearby.points.map(point => `【${point.type}】${point.name}：/前往 ${point.x} ${point.y}`).join('\n')}` : '\n\n感知范围内没有发现目标。';
+      await sendWithTextFallback(message, outsidePanel(nearby.character.name, bag.speed, bag.weight, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), nearby.points), `【${nearby.character.name}】\n当前速度 ${bag.speed}｜负重 ${bag.weight.toFixed(2)}kg｜感知范围 ${nearby.range} 格${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
     }
   } catch (error) {
     logger.error({ err: error, userId: event.current.UserId }, 'open panel failed');
