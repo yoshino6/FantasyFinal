@@ -175,14 +175,15 @@ export const initializeSchema = async (pool: Pool) => {
        ('dark_forest', '幽暗密林', '世界树正下方、常年被薄雾笼罩的约 100×100 格密林。', -50, 49, -110, -11, 0, 0, 1, 1)
      ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description), min_x = VALUES(min_x), max_x = VALUES(max_x), min_y = VALUES(min_y), max_y = VALUES(max_y), min_z = VALUES(min_z), max_z = VALUES(max_z), is_spawn_enabled = VALUES(is_spawn_enabled), danger_level = VALUES(danger_level)`
   );
-  await pool.query(`INSERT INTO item_definitions (code, name, description, item_type, weight, effect_json) VALUES
-    ('healing_herb', '微光草药', '恢复 30 点生命。', 'consumable', 0.20, JSON_OBJECT('heal', 30)),
-    ('wolf_fang', '幽狼之牙', '可出售的普通材料。', 'material', 0.15, NULL),
-    ('holy_sword_shirulu', '圣剑·希尔露', '物攻 +20、暴击率 +10%；普攻无视 25% 防御，并回复伤害的 10% 生命。', 'equipment', 3.50, JSON_OBJECT('physicalAttack',20,'critRateBp',1000,'ignoreDefensePct',25,'lifestealPct',10)),
-    ('demon_sword_aphia', '魔剑·阿菲娅', '魔攻 +25；魔法技能伤害 +30%，魔力消耗 -2。', 'equipment', 3.20, JSON_OBJECT('magicAttack',25,'magicDamagePct',30,'manaCostReduction',2)),
-    ('rename_card', '改名卡', '用于再次修改角色昵称。首次改名免费，此后每次改名消耗一张。', 'consumable', 0.01, JSON_OBJECT('characterChange','name')),
-    ('gender_change_card', '改性卡', '用于再次修改角色性别。首次改性免费，此后每次改性消耗一张。', 'consumable', 0.01, JSON_OBJECT('characterChange','gender'))
-    ON DUPLICATE KEY UPDATE name = VALUES(name)`);
+  await pool.query(`INSERT INTO item_definitions (code, name, description, item_type, item_category, weight, stackable, effect_json) VALUES
+    ('healing_herb', '微光草药', '恢复 30 点生命。', 'consumable', '药剂', 0.20, 1, JSON_OBJECT('heal', 30)),
+    ('wolf_fang', '幽狼之牙', '可出售的普通材料。', 'material', '兽材', 0.15, 1, NULL),
+    ('holy_sword_shirulu', '圣剑·希尔露', '物攻 +20、暴击率 +10%；普攻无视 25% 防御，并回复伤害的 10% 生命。', 'equipment', '武器', 3.50, 0, JSON_OBJECT('physicalAttack',20,'critRateBp',1000,'ignoreDefensePct',25,'lifestealPct',10)),
+    ('demon_sword_aphia', '魔剑·阿菲娅', '魔攻 +25；魔法技能伤害 +30%，魔力消耗 -2。', 'equipment', '武器', 3.20, 0, JSON_OBJECT('magicAttack',25,'magicDamagePct',30,'manaCostReduction',2)),
+    ('rename_card', '改名卡', '用于再次修改角色昵称。首次改名免费，此后每次改名消耗一张。', 'consumable', '特殊', 0.01, 1, JSON_OBJECT('characterChange','name')),
+    ('gender_change_card', '改性卡', '用于再次修改角色性别。首次改性免费，此后每次改性消耗一张。', 'consumable', '特殊', 0.01, 1, JSON_OBJECT('characterChange','gender'))
+    ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description), item_category = VALUES(item_category), stackable = VALUES(stackable), effect_json = VALUES(effect_json)`);
+  await pool.query(`UPDATE item_definitions SET codex_id=CONCAT(CASE WHEN item_type='equipment' THEN CASE item_category WHEN '武器' THEN '11' WHEN '副手' THEN '12' WHEN '头部' THEN '13' WHEN '上装' THEN '14' WHEN '腰部' THEN '15' WHEN '下装' THEN '16' WHEN '脚部' THEN '17' WHEN '项链' THEN '18' WHEN '手镯' THEN '19' WHEN '戒指' THEN '10' ELSE '19' END WHEN item_type='consumable' THEN CASE item_category WHEN '药剂' THEN '21' WHEN '食物' THEN '22' ELSE '23' END WHEN item_type='material' THEN CASE item_category WHEN '食材' THEN '31' WHEN '草药' THEN '32' ELSE '39' END ELSE '99' END, LPAD(id,5,'0')) WHERE codex_id IS NULL`);
   await pool.query(`INSERT INTO skill_definitions (code, name, category, mana_cost, cooldown_turns, power, description) VALUES
     ('arcane_bolt', '奥术飞矢', 'magic', 8, 1, 150, '发射一枚奥术能量。'),
     ('heavy_strike', '沉重一击', 'physical', 5, 2, 180, '造成更高的物理伤害。')

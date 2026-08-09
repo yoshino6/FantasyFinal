@@ -2,9 +2,9 @@ import { logger, useEvent, useMessage, useRoute } from 'alemonjs';
 import { equipmentDetail } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
 
-const effectText = (effectJson: string | null) => {
+const effectText = (effectJson: unknown) => {
   if (!effectJson) return '无额外属性。';
-  const effect = JSON.parse(effectJson) as Record<string, number>;
+  const effect = (typeof effectJson === 'string' ? JSON.parse(effectJson) : effectJson) as Record<string, number>;
   const labels: Record<string, string> = { physicalAttack: '物理攻击', magicAttack: '魔法攻击', critRateBp: '暴击率', ignoreDefensePct: '无视防御', lifestealPct: '生命偷取', magicDamagePct: '魔法伤害', manaCostReduction: '魔力消耗降低' };
   const entries = Object.entries(effect).filter(([, value]) => Number(value));
   return entries.length ? entries.map(([key, value]) => `${labels[key] ?? key}：${key === 'critRateBp' ? `${Number(value) / 100}%` : Number(value) > 0 ? `+${value}` : value}`).join('\n') : '无额外属性。';

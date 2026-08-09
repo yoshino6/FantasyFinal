@@ -84,7 +84,7 @@ export const itemCodex = async (qqUserId: string, codexId: string) => {
 
 export const equipmentDetail = async (qqUserId: string, instanceId: number) => {
   const character = await characterFor(qqUserId);
-  const [rows] = await (await getPool()).execute<(RowDataPacket & { name: string; item_category: string; quality: number; durability: number; durability_max: number; effect_json: string | null; description: string })[]>(`
+  const [rows] = await (await getPool()).execute<(RowDataPacket & { name: string; item_category: string; quality: number; durability: number; durability_max: number; effect_json: unknown; description: string })[]>(`
     SELECT i.name,i.item_category,ii.quality,ii.durability,ii.durability_max,COALESCE(ii.effect_json,i.effect_json) AS effect_json,i.description
     FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
     WHERE ii.id=? AND ii.character_id=? AND i.item_type='equipment'
