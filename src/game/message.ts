@@ -31,8 +31,15 @@ export const audienceFormat = () => Format.create()
   .addButtonGroup(Format.createButtonGroup().addRow().addButton('接受命运', '/注册 继续', { type: 'command', autoEnter: true }));
 
 export const giftText = Object.entries(gifts).map(([code, gift]) => `【${gift.name}】${gift.description}\n/选择恩赐 ${code}`).join('\n\n');
-export const giftFormat = () => Format.create()
-  .addMarkdown(Format.createMarkdown().addTitle('序章·带走一份恩赐（3/3）').addText(`女神说：“你可以带走一件神器，或一种神奇能力。慎重选择；选定后便会立刻传送。”\n\n${giftText}`));
+export const giftFormat = () => {
+  const markdown = Format.createMarkdown()
+    .addTitle('序章·带走一份恩赐（3/3）')
+    .addText('女神说：“你可以带走一件神器，或一种神奇能力。慎重选择；选定后便会立刻传送。”\n\n点击下方蓝色恩赐名称，会将对应指令填入输入框。\n\n');
+  for (const [code, gift] of Object.entries(gifts)) {
+    markdown.addButton(`【${gift.name}】`, { data: `/选择恩赐 ${code}`, autoEnter: false }).addText(` ${gift.description}\n\n`);
+  }
+  return Format.create().addMarkdown(markdown);
+};
 
 export const characterText = (allocation: Allocation, stats: DerivedStats, growth: Growth, region: string, x: number, y: number, z: number) =>
   `基础属性\n${attributes.map(key => `${attributeNames[key]} ${allocation[key]}`).join('｜')}\n成长：${attributes.map(key => `${attributeNames[key]} +${growth[key].toFixed(1)}`).join('｜')}\n\n战斗属性\n生命 ${stats.hpMax}｜魔力 ${stats.mpMax}\n物攻 ${stats.physicalAttack}｜魔攻 ${stats.magicAttack}\n物防 ${stats.physicalDefense}｜魔防 ${stats.magicDefense}\n命中 ${percent(stats.accuracy)}｜闪避 ${percent(stats.evasion)}｜暴击 ${percent(stats.critRateBp)}\n爆伤 ${percent(stats.critDamageBp)}｜爆免 ${percent(stats.critDamageReductionBp)}｜爆抗 ${percent(stats.critResistBp)}\n韧性 ${stats.tenacity}｜速度 ${stats.speed}\n\n当前位置\n${region} (${x}, ${y}, ${z})`;
