@@ -15,8 +15,8 @@ const areaText = (character: LocationCharacter, verb: '位于' | '移动至') =>
 export const currentLocationText = (character: LocationCharacter) => areaText(character, '位于');
 export const movedLocationText = (character: LocationCharacter) => areaText(character, '移动至');
 
-export const outsidePanel = (location: string, speed: number, range: number, x: number, y: number, description: string, points: NearbyPoint[]) => {
-  const markdown = Format.createMarkdown().addTitle('操作面板')
+export const outsidePanel = (title: string, location: string, speed: number, range: number, x: number, y: number, description: string, points: NearbyPoint[]) => {
+  const markdown = Format.createMarkdown().addTitle(title)
     .addText(`\n\n${location}\n\n${description}\n\n移动速度：${speed}\n感知范围：${range}\n\n周边目标：\n`);
   if (!points.length) markdown.addText('空空如也');
   else {
@@ -55,7 +55,7 @@ export default async () => {
       const targets = nearby.points.length ? `\n\n周边目标\n${nearby.points.map(point => `【${point.type}】${point.name} · ${directionText(point, Number(nearby.character.pos_x), Number(nearby.character.pos_y))} ${point.distance} 格${bag.movementSpeed > point.distance ? `：/前往 ${point.x} ${point.y}` : ''}`).join('\n')}` : '\n\n没有发现任何目标。';
       const x = Number(nearby.character.pos_x); const y = Number(nearby.character.pos_y);
       const location = currentLocationText(nearby.character);
-      await sendWithTextFallback(message, outsidePanel(location, bag.movementSpeed, nearby.range, x, y, nearby.description, nearby.points).addButtonGroup(panelButtons()), `【操作面板】\n${location}\n\n${nearby.description}\n\n移动速度：${bag.movementSpeed}\n感知范围：${nearby.range}${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
+      await sendWithTextFallback(message, outsidePanel('操作面板', location, bag.movementSpeed, nearby.range, x, y, nearby.description, nearby.points).addButtonGroup(panelButtons()), `【操作面板】\n${location}\n\n${nearby.description}\n\n移动速度：${bag.movementSpeed}\n感知范围：${nearby.range}${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
     }
   } catch (error) {
     logger.error({ err: error, userId: event.current.UserId }, 'open panel failed');
