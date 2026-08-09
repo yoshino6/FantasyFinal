@@ -13,19 +13,20 @@ export const attributeAliases: Record<string, keyof Allocation> = {
 };
 
 export const calculateDerivedStats = (value: Allocation): DerivedStats => ({
-  hpMax: 100 + value.constitution * 25,
-  mpMax: 50 + value.spirit * 20,
-  physicalAttack: 10 + value.strength * 5,
-  magicAttack: 8 + value.intelligence * 5,
-  physicalDefense: 5 + value.constitution * 2 + value.strength,
-  magicDefense: 3 + value.spirit * 2 + value.intelligence,
-  accuracy: 8000 + value.perception * 100 + value.agility * 30,
-  evasion: value.agility * 80 + value.perception * 20,
-  critRateBp: value.perception * 50,
-  critDamageBp: 15000 + value.strength * 100,
-  critResistBp: value.intelligence * 40,
-  critDamageReductionBp: value.spirit * 40,
-  tenacity: value.constitution * 3 + value.spirit * 2,
+  // 主属性系数至少是任一副属性系数的两倍；数值属性会在战斗中按双方对抗结算。
+  hpMax: 120 + value.constitution * 20 + value.spirit * 4 + value.strength * 5 + value.intelligence * 2 + value.agility * 2 + value.perception * 2,
+  mpMax: 60 + value.spirit * 16 + value.intelligence * 8 + value.perception * 3 + value.constitution * 2 + value.strength + value.agility,
+  physicalAttack: 8 + value.strength * 2 + value.agility + value.constitution * 0.5 + value.perception * 0.4 + value.intelligence * 0.2 + value.spirit * 0.2,
+  magicAttack: 8 + value.intelligence * 2 + value.spirit + value.perception * 0.5 + value.agility * 0.4 + value.constitution * 0.2 + value.strength * 0.2,
+  physicalDefense: 8 + value.constitution * 2 + value.strength + value.agility * 0.5 + value.perception * 0.25 + value.spirit * 0.25 + value.intelligence * 0.25,
+  magicDefense: 8 + value.spirit * 2 + value.intelligence + value.perception * 0.5 + value.agility * 0.4 + value.constitution * 0.2 + value.strength * 0.2,
+  accuracy: 100 + value.agility * 20 + value.perception * 8 + value.intelligence * 4 + value.strength * 2 + value.constitution * 2 + value.spirit * 2,
+  evasion: 100 + value.agility * 20 + value.perception * 8 + value.intelligence * 4 + value.strength * 2 + value.constitution * 2 + value.spirit * 2,
+  critRateBp: 100 + value.perception * 20 + value.agility * 8 + value.intelligence * 4 + value.strength * 2 + value.constitution * 2 + value.spirit * 2,
+  critDamageBp: 100 + value.perception * 20 + value.strength * 8 + value.intelligence * 4 + value.agility * 2 + value.constitution * 2 + value.spirit * 2,
+  critResistBp: 100 + value.constitution * 20 + value.perception * 8 + value.spirit * 4 + value.strength * 2 + value.intelligence * 2 + value.agility * 2,
+  critDamageReductionBp: 100 + value.spirit * 20 + value.perception * 8 + value.constitution * 4 + value.intelligence * 2 + value.strength * 2 + value.agility * 2,
+  tenacity: value.constitution * 4 + value.spirit * 3 + value.perception,
   speed: 100 + value.agility * 8
 });
 

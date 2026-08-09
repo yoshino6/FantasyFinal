@@ -178,7 +178,7 @@ export const initializeSchema = async (pool: Pool) => {
   await pool.query(`INSERT INTO item_definitions (code, name, description, item_type, item_category, weight, stackable, effect_json) VALUES
     ('healing_herb', '微光草药', '恢复 30 点生命。', 'consumable', '药剂', 0.20, 1, JSON_OBJECT('heal', 30)),
     ('wolf_fang', '幽狼之牙', '可出售的普通材料。', 'material', '兽材', 0.15, 1, NULL),
-    ('holy_sword_shirulu', '圣剑·希尔露', '物攻 +20、暴击率 +10%；普攻无视 25% 防御，并回复伤害的 10% 生命。', 'equipment', '武器', 3.50, 0, JSON_OBJECT('physicalAttack',20,'critRateBp',1000,'ignoreDefensePct',25,'lifestealPct',10)),
+    ('holy_sword_shirulu', '圣剑·希尔露', '物攻 +20、暴击属性 +80；普攻无视 25% 防御，并回复伤害的 10% 生命。', 'equipment', '武器', 3.50, 0, JSON_OBJECT('physicalAttack',20,'critRateBp',80,'ignoreDefensePct',25,'lifestealPct',10)),
     ('demon_sword_aphia', '魔剑·阿菲娅', '魔攻 +25；魔法技能伤害 +30%，魔力消耗 -2。', 'equipment', '武器', 3.20, 0, JSON_OBJECT('magicAttack',25,'magicDamagePct',30,'manaCostReduction',2)),
     ('rename_card', '改名卡', '用于再次修改角色昵称。首次改名免费，此后每次改名消耗一张。', 'consumable', '特殊', 0.01, 1, JSON_OBJECT('characterChange','name')),
     ('gender_change_card', '改性卡', '用于再次修改角色性别。首次改性免费，此后每次改性消耗一张。', 'consumable', '特殊', 0.01, 1, JSON_OBJECT('characterChange','gender'))
@@ -189,11 +189,11 @@ export const initializeSchema = async (pool: Pool) => {
     ('heavy_strike', '沉重一击', 'physical', 5, 2, 180, '造成更高的物理伤害。')
     ON DUPLICATE KEY UPDATE name = VALUES(name)`);
   await pool.query(`INSERT INTO monster_templates (code, name, monster_class, level, hp_max, attack, defense, speed, perception, charisma, skill_sequence, experience, drops_json) VALUES
-    ('ball_rabbit', '球兔', 'normal', 1, 38, 8, 1, 125, 6, 14, JSON_ARRAY('hop'), 12, JSON_ARRAY(JSON_OBJECT('code','healing_herb','chance',0.15,'quantity',1))),
-    ('spike_boar', '刺猪', 'normal', 2, 88, 17, 5, 92, 9, 3, JSON_ARRAY('charge'), 28, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',0.45,'quantity',1))),
-    ('vine_python', '藤蚺', 'normal', 2, 76, 16, 3, 108, 13, 4, JSON_ARRAY('bite'), 30, JSON_ARRAY(JSON_OBJECT('code','healing_herb','chance',0.25,'quantity',1))),
-    ('black_bear', '乌熊', 'elite', 4, 215, 29, 10, 82, 11, 2, JSON_ARRAY('howl','bite'), 95, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',1,'quantity',2))),
-    ('mist_wolf', '雾影狼', 'normal', 1, 75, 14, 4, 95, 8, 1, JSON_ARRAY(), 20, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',0.7,'quantity',1)))
+    ('ball_rabbit', '球兔', 'normal', 1, 300, 50, 35, 125, 6, 14, JSON_ARRAY('hop'), 12, JSON_ARRAY(JSON_OBJECT('code','healing_herb','chance',0.15,'quantity',1))),
+    ('spike_boar', '刺猪', 'normal', 2, 480, 72, 55, 92, 9, 3, JSON_ARRAY('charge'), 28, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',0.45,'quantity',1))),
+    ('vine_python', '藤蚺', 'normal', 2, 440, 65, 45, 108, 13, 4, JSON_ARRAY('bite'), 30, JSON_ARRAY(JSON_OBJECT('code','healing_herb','chance',0.25,'quantity',1))),
+    ('black_bear', '乌熊', 'elite', 4, 1000, 120, 85, 82, 11, 2, JSON_ARRAY('howl','bite'), 95, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',1,'quantity',2))),
+    ('mist_wolf', '雾影狼', 'normal', 1, 350, 55, 40, 95, 8, 1, JSON_ARRAY(), 20, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',0.7,'quantity',1)))
     ON DUPLICATE KEY UPDATE name = VALUES(name), monster_class = VALUES(monster_class), level = VALUES(level), hp_max = VALUES(hp_max), attack = VALUES(attack), defense = VALUES(defense), speed = VALUES(speed), perception = VALUES(perception), charisma = VALUES(charisma), skill_sequence = VALUES(skill_sequence), experience = VALUES(experience), drops_json = VALUES(drops_json)`);
   await pool.query(`INSERT INTO map_monster_pools (region_id, monster_template_id, spawn_weight)
     SELECT r.id, t.id, CASE t.code WHEN 'ball_rabbit' THEN 40 WHEN 'spike_boar' THEN 25 WHEN 'vine_python' THEN 22 WHEN 'mist_wolf' THEN 12 WHEN 'black_bear' THEN 1 END

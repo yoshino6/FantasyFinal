@@ -2,8 +2,6 @@ import { Format, ResultCode } from 'alemonjs';
 import { attributeNames, gifts, type GiftCategory } from './constants';
 import { attributes, type Allocation, type DerivedStats, type Growth } from './types';
 
-const percent = (bp: number) => `${(bp / 100).toFixed(2)}%`;
-
 type MessageSender = {
   send: (params?: any) => Promise<Array<{ code: number }>>;
 };
@@ -69,4 +67,4 @@ export const giftFormat = (category: GiftCategory = 'artifact') => {
 };
 
 export const characterText = (allocation: Allocation, stats: DerivedStats, growth: Growth, region: string, x: number, y: number, z: number) =>
-  `基础属性\n${attributes.map(key => `${attributeNames[key]} ${allocation[key]}`).join('｜')}\n成长：${attributes.map(key => `${attributeNames[key]} +${growth[key].toFixed(1)}`).join('｜')}\n\n战斗属性\n生命 ${stats.hpMax}｜魔力 ${stats.mpMax}\n物攻 ${stats.physicalAttack}｜魔攻 ${stats.magicAttack}\n物防 ${stats.physicalDefense}｜魔防 ${stats.magicDefense}\n命中 ${percent(stats.accuracy)}｜闪避 ${percent(stats.evasion)}｜暴击 ${percent(stats.critRateBp)}\n爆伤 ${percent(stats.critDamageBp)}｜爆免 ${percent(stats.critDamageReductionBp)}｜爆抗 ${percent(stats.critResistBp)}\n韧性 ${stats.tenacity}｜速度 ${stats.speed}\n\n当前位置\n${region} (${x}, ${y}, ${z})`;
+  `基础属性\n${attributes.map(key => `${attributeNames[key]} ${allocation[key]}`).join('｜')}\n成长：${attributes.map(key => `${attributeNames[key]} +${growth[key].toFixed(1)}`).join('｜')}\n\n战斗属性\n生命 ${Math.round(stats.hpMax)}｜魔力 ${Math.round(stats.mpMax)}\n物攻 ${Math.round(stats.physicalAttack)}｜魔攻 ${Math.round(stats.magicAttack)}\n物防 ${Math.round(stats.physicalDefense)}｜魔防 ${Math.round(stats.magicDefense)}\n命中 ${Math.round(stats.accuracy)}｜闪避 ${Math.round(stats.evasion)}｜暴击 ${Math.round(stats.critRateBp)}\n爆伤 ${Math.round(stats.critDamageBp)}｜爆免 ${Math.round(stats.critDamageReductionBp)}｜爆抗 ${Math.round(stats.critResistBp)}\n韧性 ${Math.round(stats.tenacity)}｜速度 ${Math.round(stats.speed)}\n\n当前位置\n${region} (${x}, ${y}, ${z})`;

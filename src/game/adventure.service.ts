@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 
-type CharacterRow = RowDataPacket & { id: number; name: string; level: number; experience: number; hp_max: number; mp_max: number; physical_attack: number; magic_attack: number; physical_defense: number; magic_defense: number; speed: number; perception: number; spirit: number; intelligence: number; adventurer_registered: number; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string };
+type CharacterRow = RowDataPacket & { id: number; name: string; level: number; experience: number; hp_max: number; mp_max: number; physical_attack: number; magic_attack: number; physical_defense: number; magic_defense: number; accuracy: number; evasion: number; crit_rate_bp: number; crit_damage_bp: number; crit_resist_bp: number; crit_damage_reduction_bp: number; speed: number; perception: number; spirit: number; intelligence: number; adventurer_registered: number; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string };
 type SpawnRow = RowDataPacket & { id: number; name: string; monster_class: string; level: number; current_hp: number; hp_max: number; attack: number; defense: number; speed: number; perception: number; charisma: number; experience: number; drops_json: string | null; skill_sequence?: string | null };
 type CombatModifiers = { weaponName?: string; physicalAttack: number; magicAttack: number; critRateBp: number; ignoreDefensePct: number; lifestealPct: number; magicDamagePct: number; manaCostReduction: number; experienceMultiplier: number; dropBonus: number; manaAffinity: boolean };
 const pickWeighted = <T extends { spawn_weight: number }>(items: T[]) => {
@@ -12,6 +12,10 @@ const pickWeighted = <T extends { spawn_weight: number }>(items: T[]) => {
   return items[items.length - 1];
 };
 const random = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
+const jsonObject = (value: unknown): Record<string, unknown> => {
+  if (!value) return {};
+  return typeof value === 'string' ? JSON.parse(value) as Record<string, unknown> : value as Record<string, unknown>;
+};
 const movementSpeedFrom = (speed: number, level: number) => {
   const statSpeed = Math.floor(1 + Math.sqrt(Math.max(0, speed - 100) / 30));
   const levelCap = Math.min(10, 3 + Math.floor(Math.max(0, level - 1) / 10));
@@ -26,7 +30,7 @@ const characterFor = async (qqUserId: string): Promise<CharacterRow> => {
 
 const modifiersFor = async (connection: PoolConnection, characterId: number): Promise<CombatModifiers> => {
   const [rows] = await connection.execute<(RowDataPacket & { name: string | null; effect_json: string | null; blessing: string | null })[]>(`SELECT i.name,i.effect_json,b.code AS blessing FROM characters c LEFT JOIN player_equipment pe ON pe.character_id=c.id AND pe.slot='weapon' LEFT JOIN item_definitions i ON i.id=pe.item_id LEFT JOIN player_blessings b ON b.character_id=c.id WHERE c.id=?`, [characterId]);
-  const effect = rows[0]?.effect_json ? JSON.parse(rows[0].effect_json) : {};
+  const effect = jsonObject(rows[0]?.effect_json);
   const blessing = rows[0]?.blessing;
   return { weaponName: rows[0]?.name ?? undefined, physicalAttack: Number(effect.physicalAttack ?? 0), magicAttack: Number(effect.magicAttack ?? 0), critRateBp: Number(effect.critRateBp ?? 0), ignoreDefensePct: Number(effect.ignoreDefensePct ?? 0), lifestealPct: Number(effect.lifestealPct ?? 0), magicDamagePct: Number(effect.magicDamagePct ?? 0), manaCostReduction: Number(effect.manaCostReduction ?? 0), experienceMultiplier: blessing === 'growth_blessing' ? 2 : 1, dropBonus: blessing === 'lucky_favor' ? 0.2 : 0, manaAffinity: blessing === 'mana_affinity' };
 };
@@ -237,6 +241,27 @@ const finishVictory = async (connection: PoolConnection, character: CharacterRow
   return `胜利！获得经验 ${experience}${modifiers.experienceMultiplier > 1 ? '（成长祝福生效）' : ''}${rewards.length ? `，掉落 ${rewards.join('、')}` : ''}。`;
 };
 
+const opposedChance = (offense: number, defense: number) => {
+  const x = Math.max(1, Number(offense)); const y = Math.max(1, Number(defense));
+  return x / (x + y);
+};
+
+const resolveStrike = (attack: number, defense: number, accuracy: number, evasion: number, crit: number, critResist: number, critDamage: number, critReduction: number) => {
+  if (Math.random() >= opposedChance(accuracy, evasion)) return { hit: false, crit: false, damage: 0 };
+  let damage = Math.max(1, Math.floor(attack * attack / (attack + Math.max(1, defense))));
+  const critical = Math.random() < opposedChance(crit, critResist);
+  if (critical) damage = Math.max(1, Math.floor(damage * (1 + opposedChance(critDamage, critReduction))));
+  return { hit: true, crit: critical, damage };
+};
+
+const monsterCombatStats = (combat: SpawnRow) => {
+  const speed = Number(combat.speed); const perception = Number(combat.perception); const level = Number(combat.level);
+  const accuracy = 120 + speed * 2 + perception * 8;
+  const evasion = 120 + speed * 1.6 + perception * 8;
+  const crit = 180 + perception * 12 + level * 20;
+  return { accuracy, evasion, crit, critResist: crit, critDamage: 180 + Number(combat.attack) * 4, critReduction: 180 + Number(combat.defense) * 10 + level * 20 };
+};
+
 export const combatAction = async (qqUserId: string, action: 'attack' | 'skill' | 'item' | 'escape', slot?: number) => withTransaction(async connection => {
   const { character, combat } = await combatRow(qqUserId);
   const [locked] = await connection.execute<(RowDataPacket & { player_hp: number; player_mp: number; current_hp: number; cooldowns: string })[]>('SELECT cs.player_hp,cs.player_mp,s.current_hp,cs.cooldowns FROM combat_sessions cs JOIN monster_spawns s ON s.id=cs.spawn_id WHERE cs.id=? FOR UPDATE', [combat.combat_id]);
@@ -264,12 +289,15 @@ export const combatAction = async (qqUserId: string, action: 'attack' | 'skill' 
       combat.player_mp -= manaCost;
       const attack = skill.category === 'magic' ? Number(character.magic_attack) + modifiers.magicAttack : Number(character.physical_attack) + modifiers.physicalAttack;
       const multiplier = skill.category === 'magic' ? 1 + modifiers.magicDamagePct / 100 : 1;
-      damage = Math.max(1, Math.floor((attack * Number(skill.power) / 100 * multiplier) - Number(combat.defense))); log = `施放 ${skill.name}，造成 ${damage} 点伤害${modifiers.weaponName ? `（${modifiers.weaponName}生效）` : ''}。`;
+      const strike = resolveStrike(attack * Number(skill.power) / 100 * multiplier, Number(combat.defense), Number(character.accuracy), monsterCombatStats(combat).evasion, Number(character.crit_rate_bp) + modifiers.critRateBp, monsterCombatStats(combat).critResist, Number(character.crit_damage_bp), monsterCombatStats(combat).critReduction);
+      damage = strike.damage; log = !strike.hit ? `施放 ${skill.name}，但被敌人闪避。` : `施放 ${skill.name}，造成 ${damage} 点${strike.crit ? '暴击' : ''}伤害${modifiers.weaponName ? `（${modifiers.weaponName}生效）` : ''}。`;
     } else {
       const defense = Math.floor(Number(combat.defense) * (1 - modifiers.ignoreDefensePct / 100));
-      damage = Math.max(1, Number(character.physical_attack) + modifiers.physicalAttack - defense);
-      if (modifiers.lifestealPct) { const heal = Math.floor(damage * modifiers.lifestealPct / 100); combat.player_hp = Math.min(Number(character.hp_max), combat.player_hp + heal); log = `发动普攻，造成 ${damage} 点伤害，${modifiers.weaponName} 回复了 ${heal} 点生命。`; }
-      else log = `发动普攻，造成 ${damage} 点伤害。`;
+      const strike = resolveStrike(Number(character.physical_attack) + modifiers.physicalAttack, defense, Number(character.accuracy), monsterCombatStats(combat).evasion, Number(character.crit_rate_bp) + modifiers.critRateBp, monsterCombatStats(combat).critResist, Number(character.crit_damage_bp), monsterCombatStats(combat).critReduction);
+      damage = strike.damage;
+      if (!strike.hit) log = '发动普攻，但被敌人闪避。';
+      else if (modifiers.lifestealPct) { const heal = Math.floor(damage * modifiers.lifestealPct / 100); combat.player_hp = Math.min(Number(character.hp_max), combat.player_hp + heal); log = `发动普攻，造成 ${damage} 点${strike.crit ? '暴击' : ''}伤害，${modifiers.weaponName} 回复了 ${heal} 点生命。`; }
+      else log = `发动普攻，造成 ${damage} 点${strike.crit ? '暴击' : ''}伤害。`;
     }
     combat.current_hp -= damage;
   }
@@ -277,7 +305,9 @@ export const combatAction = async (qqUserId: string, action: 'attack' | 'skill' 
   const sequence = combat.skill_sequence ? JSON.parse(combat.skill_sequence) : [];
   const monsterSkill = sequence.length ? String(sequence[(Number(combat.turn_no) - 1) % sequence.length]) : '攻击';
   const multiplier = monsterSkill === 'howl' ? 0.7 : monsterSkill === 'bite' ? 1.25 : 1;
-  const monsterDamage = Math.max(1, Math.floor((Number(combat.attack) - Number(character.physical_defense)) * multiplier)); combat.player_hp -= monsterDamage; log += `\n${combat.name} 使用「${monsterSkill}」，造成 ${monsterDamage} 点伤害。`;
+  const monster = monsterCombatStats(combat);
+  const strike = resolveStrike(Number(combat.attack) * multiplier, Number(character.physical_defense), monster.accuracy, Number(character.evasion), monster.crit, Number(character.crit_resist_bp), monster.critDamage, Number(character.crit_damage_reduction_bp));
+  const monsterDamage = strike.damage; combat.player_hp -= monsterDamage; log += !strike.hit ? `\n${combat.name} 使用「${monsterSkill}」，但你闪避了攻击。` : `\n${combat.name} 使用「${monsterSkill}」，造成 ${monsterDamage} 点${strike.crit ? '暴击' : ''}伤害。`;
   if (combat.player_hp <= 0) { await connection.execute('UPDATE combat_sessions SET state=\'defeat\' WHERE id=?', [combat.combat_id]); await connection.execute('UPDATE characters SET experience=GREATEST(0,experience-10) WHERE id=?', [character.id]); return { log: `${log}\n你战败了，损失 10 点经验并被送回区域边缘。`, ended: true }; }
   await connection.execute('UPDATE monster_spawns SET current_hp=? WHERE id=?', [combat.current_hp, combat.id]);
   await connection.execute('UPDATE combat_sessions SET player_hp=?,player_mp=?,turn_no=turn_no+1 WHERE id=?', [combat.player_hp, combat.player_mp, combat.combat_id]);
