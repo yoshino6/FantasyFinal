@@ -49,10 +49,10 @@ export default async () => {
     } catch (error) {
       if (!(error instanceof Error) || !error.message.includes('当前不在战斗中')) throw error;
       const [bag, nearby] = await Promise.all([inventory(event.current.UserId), nearbyPoints(event.current.UserId)]);
-      const targets = nearby.points.length ? `\n\n范围内列表\n${nearby.points.map(point => `【${point.type}】${point.name} · ${directionText(point, Number(nearby.character.pos_x), Number(nearby.character.pos_y))} ${point.distance} 格${bag.movementSpeed > point.distance ? `：/前往 ${point.x} ${point.y}` : ''}`).join('\n')}` : '\n\n范围内列表：没有发现目标。';
+      const targets = nearby.points.length ? `\n\n周边目标\n${nearby.points.map(point => `【${point.type}】${point.name} · ${directionText(point, Number(nearby.character.pos_x), Number(nearby.character.pos_y))} ${point.distance} 格${bag.movementSpeed > point.distance ? `：/前往 ${point.x} ${point.y}` : ''}`).join('\n')}` : '\n\n没有发现任何目标。';
       const x = Number(nearby.character.pos_x); const y = Number(nearby.character.pos_y);
       const location = currentLocationText(nearby.character);
-      await sendWithTextFallback(message, outsidePanel(location, bag.movementSpeed, nearby.range, x, y, nearby.description, nearby.points).addButtonGroup(panelButtons()), `【操作面板】\n${location}\n\n${nearby.description}\n\n移动速度：${bag.movementSpeed}（决定一次能移动几格）\n感知范围：${nearby.range}（决定能显示的怪物、NPC 等）${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
+      await sendWithTextFallback(message, outsidePanel(location, bag.movementSpeed, nearby.range, x, y, nearby.description, nearby.points).addButtonGroup(panelButtons()), `【操作面板】\n${location}\n\n${nearby.description}\n\n移动速度：${bag.movementSpeed}\n感知范围：${nearby.range}${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
     }
   } catch (error) {
     logger.error({ err: error, userId: event.current.UserId }, 'open panel failed');
