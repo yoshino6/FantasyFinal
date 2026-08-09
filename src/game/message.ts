@@ -37,7 +37,7 @@ export const giftFormat = (category: GiftCategory = 'artifact') => {
   const categoryName = category === 'artifact' ? '神器' : '神技';
   const markdown = Format.createMarkdown()
     .addTitle('序章·带走一份恩赐（3/3）')
-    .addText(`女神说：“你可以带走一件神器，或一种神奇能力。慎重选择；选定后便会立刻传送。”\n\n当前分类：${categoryName}。点击蓝色名称，会将选择指令填入输入框。\n\n`);
+    .addText(`\n\n女神说：“你可以带走一件神器，或一种神奇能力。慎重选择；选定后便会立刻传送。”\n当前分类：${categoryName}。点击蓝色名称，会将选择指令填入输入框。\n\n`);
   for (const [code, gift] of Object.entries(gifts).filter(([, gift]) => gift.category === category)) {
     markdown.addButton(`【${gift.name}】`, { data: `/选择恩赐 ${code}`, autoEnter: false }).addText(` ${gift.summary}\n\n`);
   }
