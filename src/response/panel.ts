@@ -17,8 +17,8 @@ export const movedLocationText = (character: LocationCharacter) => areaText(char
 
 export const outsidePanel = (location: string, speed: number, range: number, x: number, y: number, description: string, points: NearbyPoint[]) => {
   const markdown = Format.createMarkdown().addTitle('操作面板')
-    .addText(`${location}\n\n${description}\n\n移动速度：${speed}\n感知范围：${range}\n\n范围内列表：\n`);
-  if (!points.length) markdown.addText('感知范围内没有发现怪物、NPC 或特殊地点。');
+    .addText(`\n\n${location}\n\n${description}\n\n移动速度：${speed}\n感知范围：${range}\n\n周边目标：\n`);
+  if (!points.length) markdown.addText('空空如也');
   else {
     for (const point of points) {
       if (speed > point.distance) markdown.addButton(`【${point.type}】${point.name}`, { data: `/前往 ${point.x} ${point.y}`, autoEnter: false });
