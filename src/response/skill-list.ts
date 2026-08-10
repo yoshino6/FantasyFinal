@@ -3,7 +3,7 @@ import { learnSkill, skillDetail, skillList, toggleSkillShortcut, upgradeSkill }
 import { messageFormat } from '../game/message';
 
 const skillListFormat = async (qqUserId: string, view: '已学习' | '未学习') => {
-  const data = await skillList(qqUserId); const markdown = Format.createMarkdown().addTitle('技能列表').addText(`\n剩余技能点：${data.skillPoints}\n`);
+  const data = await skillList(qqUserId); const markdown = Format.createMarkdown().addTitle('技能列表').addNewline().addNewline().addText(`剩余技能点：${data.skillPoints}\n`);
   if (view === '已学习') {
     if (!data.skills.length) markdown.addText('\n尚未学习技能。\n');
     for (const skill of data.skills) markdown.addText(`\n【${skill.name}】Lv.${skill.level} `).addButton('[详情]', { data: `/技能详情 ${skill.id}`, autoEnter: false }).addText(' ').addButton(skill.quick_slot ? '[取消快捷]' : '[快捷]', { data: `/技能快捷 ${skill.id}`, autoEnter: false }).addText('\n');
@@ -39,13 +39,13 @@ export const skillDetailHandler = async () => {
     const buttons = Format.createButtonGroup().addRow().addButton('返回技能列表', skill.learned ? '/技能列表 已学习' : '/技能列表 未学习', { type: 'command', autoEnter: true });
     if (!skill.learned) buttons.addButton('学习', `/学习技能 ${skill.id}`, { type: 'command', autoEnter: true, style: 'blue' });
     else if (skill.nextUpgradeCost !== null) buttons.addButton('升级', `/升级技能 ${skill.id}`, { type: 'command', autoEnter: true, style: 'blue' });
-    await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('技能详情').addText(text)).addButtonGroup(buttons) });
+    await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('技能详情').addNewline().addNewline().addText(text)).addButtonGroup(buttons) });
   } catch (error) { await message.send({ format: messageFormat('无法查看技能', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
 
 export const learnSkillHandler = async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
-  try { const result = await learnSkill(event.current.UserId, Number(route.param('id'))); await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('学习技能').addText(`已学习「${result.name}」，消耗 ${result.cost} 技能点。`)).addButtonGroup(Format.createButtonGroup().addRow().addButton('技能列表', '/技能列表', { type: 'command', autoEnter: true, style: 'blue' })) }); }
+  try { const result = await learnSkill(event.current.UserId, Number(route.param('id'))); await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('学习技能').addNewline().addNewline().addText(`已学习「${result.name}」，消耗 ${result.cost} 技能点。`)).addButtonGroup(Format.createButtonGroup().addRow().addButton('技能列表', '/技能列表', { type: 'command', autoEnter: true, style: 'blue' })) }); }
   catch (error) { await message.send({ format: messageFormat('学习失败', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
 

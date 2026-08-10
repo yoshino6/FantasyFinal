@@ -4,6 +4,7 @@ export default async () => {
   const [message] = useMessage();
   const menu = Format.createMarkdown()
     .addTitle('幻想次元·菜单')
+    .addNewline().addNewline()
     .addSubtitle('角色')
     .addButton('注册', { data: '注册', autoEnter: false }).addText(' 开始或继续创建角色\n')
     .addButton('/角色', { data: '/角色', autoEnter: false }).addText(' 查看个人属性\n')

@@ -12,7 +12,7 @@ export default async () => {
   const [event] = useEvent(); const [message] = useMessage();
   try {
     const items = await equipment(event.current.UserId);
-    const markdown = Format.createMarkdown().addTitle('我的装备');
+    const markdown = Format.createMarkdown().addTitle('我的装备').addNewline();
     const equippedBySlot = new Map(items.map(item => [item.slot, item]));
     for (const slot of slotOrder) {
       const item = equippedBySlot.get(slot);
@@ -32,7 +32,7 @@ export const unequipHandler = async () => {
   try {
     const slot = String(route.param('slot'));
     const item = await unequip(event.current.UserId, slot);
-    await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('卸下装备').addText(`已卸下【${slotNames[slot]}】${item.name}，已放回背包。`)).addButtonGroup(Format.createButtonGroup().addRow().addButton('我的装备', '/装备', { type: 'command', autoEnter: true, style: 'blue' })) });
+    await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('卸下装备').addNewline().addNewline().addText(`已卸下【${slotNames[slot]}】${item.name}，已放回背包。`)).addButtonGroup(Format.createButtonGroup().addRow().addButton('我的装备', '/装备', { type: 'command', autoEnter: true, style: 'blue' })) });
   } catch (error) { await message.send({ format: messageFormat('卸下失败', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
 
@@ -40,7 +40,7 @@ export const chooseEquipmentHandler = async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
   try {
     const slot = String(route.param('slot')); const items = await equipmentCandidates(event.current.UserId, slot);
-    const markdown = Format.createMarkdown().addTitle(`装备·${slotNames[slot] ?? slot}`);
+    const markdown = Format.createMarkdown().addTitle(`装备·${slotNames[slot] ?? slot}`).addNewline();
     if (!items.length) markdown.addText('\n背包中没有可装备的该部位装备。');
     for (const item of items) markdown.addText(`\n${item.name} #${item.id} `).addButton('[装备]', { data: `/穿戴装备 ${slot} ${item.id}`, autoEnter: false });
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('我的装备', '/装备', { type: 'command', autoEnter: true, style: 'blue' })) });
@@ -51,6 +51,6 @@ export const equipHandler = async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
   try {
     const slot = String(route.param('slot')); const item = await equip(event.current.UserId, slot, Number(route.param('id')));
-    await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('装备成功').addText(`已装备【${slotNames[slot]}】${item.name} #${item.id}。`)).addButtonGroup(Format.createButtonGroup().addRow().addButton('我的装备', '/装备', { type: 'command', autoEnter: true, style: 'blue' })) });
+    await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('装备成功').addNewline().addNewline().addText(`已装备【${slotNames[slot]}】${item.name} #${item.id}。`)).addButtonGroup(Format.createButtonGroup().addRow().addButton('我的装备', '/装备', { type: 'command', autoEnter: true, style: 'blue' })) });
   } catch (error) { await message.send({ format: messageFormat('装备失败', error instanceof Error ? error.message : '请稍后重试。') }); }
 };

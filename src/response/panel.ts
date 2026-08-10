@@ -36,7 +36,7 @@ export const panelButtons = () => Format.createButtonGroup()
     .addRow().addButton('菜单', '/菜单', { type: 'command', autoEnter: true, style: 'blue' });
 
 const battlePanel = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
-  const markdown = Format.createMarkdown().addTitle('战斗面板').addText(`第 ${battle.turn} 回合\n${battle.members.map(member => `${member.id === battle.characterId ? '你' : '队友'}·${member.name} HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}`).join('\n')}\n`);
+  const markdown = Format.createMarkdown().addTitle('战斗面板').addNewline().addNewline().addText(`第 ${battle.turn} 回合\n${battle.members.map(member => `${member.id === battle.characterId ? '你' : '队友'}·${member.name} HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}`).join('\n')}\n`);
   for (const [index, target] of battle.targets.entries()) markdown.addButton(`${battle.selectedTargetId === target.id ? '▶' : ''}敌方${index + 1} ${target.name}`, { data: `/切换目标 ${target.id}`, autoEnter: false }).addText(` HP ${target.hp}/${target.hpMax}${target.defeated ? '（击败）' : ''}\n`);
   const activeSkills = new Set(battle.skillSlots); const activeItems = new Set(battle.itemSlots); const actionStyle = battle.canAct ? 'blue' : undefined;
   return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup()

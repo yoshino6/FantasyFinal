@@ -14,7 +14,7 @@ export const sendWithTextFallback = async (message: MessageSender, format: Forma
 };
 
 export const messageFormat = (title: string, content: string) => Format.create()
-  .addMarkdown(Format.createMarkdown().addTitle(title).addText(content));
+  .addMarkdown(Format.createMarkdown().addTitle(title).addNewline().addNewline().addText(content.trimStart()));
 
 export const storyText = '\n\n最后的记忆像被雨水浸透的旧照片。\n刺耳的声响、骤然逼近的黑暗，以及胸口最后一次无力的起伏。你想伸手抓住什么，指尖却先失去了温度。\n\n世界终于安静下来。';
 
