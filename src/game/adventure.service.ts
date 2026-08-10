@@ -409,31 +409,31 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
     if (turn.kind === 'member') {
       const member = members.find(item => Number(item.id) === turn.id)!; if (member.is_defeated) continue;
       const choice = jsonObject(member.pending_action) as unknown as PendingAction;
-      if (choice.type === 'escape') { log.push(`\n➤[${member.name}]选择撤离\n  ➥等待队伍共同脱离。`); continue; }
+      if (choice.type === 'escape') { log.push(`\n➤[${member.name}]选择撤离\n　➥等待队伍共同脱离。`); continue; }
       if (choice.type === 'item') {
         const [items] = await connection.execute<(RowDataPacket & { item_id: number; quantity: number; name: string; effect_json: unknown })[]>('SELECT pi.item_id,pi.quantity,i.name,i.effect_json FROM player_quick_items qi JOIN player_inventory pi ON pi.character_id=qi.character_id AND pi.item_id=qi.item_id JOIN item_definitions i ON i.id=pi.item_id WHERE qi.character_id=? AND qi.quick_slot=? FOR UPDATE', [member.id, choice.slot]);
-        const item = items[0]; if (!item?.quantity) { log.push(`\n➤[${member.name}]使用道具\n  ➥快捷栏为空。`); continue; }
-        const oldHp = Number(member.current_hp); member.current_hp = Math.min(Number(member.hp_max), oldHp + Number(jsonObject(item.effect_json).heal ?? 0)); await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=?', [member.id, item.item_id]); log.push(`\n➤[${member.name}]使用[${item.name}]\n  ➥HP ${oldHp}→${member.current_hp}`); continue;
+        const item = items[0]; if (!item?.quantity) { log.push(`\n➤[${member.name}]使用道具\n　➥快捷栏为空。`); continue; }
+        const oldHp = Number(member.current_hp); member.current_hp = Math.min(Number(member.hp_max), oldHp + Number(jsonObject(item.effect_json).heal ?? 0)); await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=?', [member.id, item.item_id]); log.push(`\n➤[${member.name}]使用[${item.name}]\n　➥HP ${oldHp}→${member.current_hp}`); continue;
       }
       const target = targets.find(item => Number(item.id) === Number(member.selected_target_id) && !item.is_defeated) ?? targets.find(item => !item.is_defeated); if (!target) continue;
       const modifiers = await modifiersFor(connection, Number(member.id)); let attack = Number(member.physical_attack) + modifiers.physicalAttack; let power = 1; let kind = '物理'; let damageType = '斩击'; let label = '普通攻击';
       if (choice.type === 'skill') {
         const [skills] = await connection.execute<(RowDataPacket & { name: string; category: 'physical' | 'magic'; damage_type: string; mana_cost: number; power: number })[]>('SELECT s.name,s.category,s.damage_type,s.mana_cost,s.power FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.quick_slot=?', [member.id, choice.slot]);
-        const skill = skills[0]; if (!skill) { log.push(`\n➤[${member.name}]释放技能\n  ➥技能栏为空。`); continue; }
-        const manaCost = Math.max(skill.mana_cost ? 1 : 0, Math.ceil(Number(skill.mana_cost) * (modifiers.manaAffinity ? .7 : 1)) - modifiers.manaCostReduction); if (Number(member.current_mp) < manaCost) { log.push(`\n➤[${member.name}]释放技能「${skill.name}」\n  ➥MP不足。`); continue; }
+        const skill = skills[0]; if (!skill) { log.push(`\n➤[${member.name}]释放技能\n　➥技能栏为空。`); continue; }
+        const manaCost = Math.max(skill.mana_cost ? 1 : 0, Math.ceil(Number(skill.mana_cost) * (modifiers.manaAffinity ? .7 : 1)) - modifiers.manaCostReduction); if (Number(member.current_mp) < manaCost) { log.push(`\n➤[${member.name}]释放技能「${skill.name}」\n　➥MP不足。`); continue; }
         member.current_mp -= manaCost; label = `释放技能「${skill.name}」`; kind = skill.category === 'magic' ? '魔法' : '物理'; damageType = skill.damage_type; attack = (skill.category === 'magic' ? Number(member.magic_attack) + modifiers.magicAttack : Number(member.physical_attack) + modifiers.physicalAttack) * Number(skill.power) / 100; power = skill.category === 'magic' ? 1 + modifiers.magicDamagePct / 100 : 1;
       }
       const monster = monsterCombatStats(target); const defense = kind === '魔法' ? Number(target.defense) : Math.floor(Number(target.defense) * (1 - modifiers.ignoreDefensePct / 100)); const strike = resolveStrike(attack * power, defense, Number(member.accuracy), monster.evasion, Number(member.crit_rate_bp) + modifiers.critRateBp, monster.critResist, Number(member.crit_damage_bp), monster.critReduction);
-      log.push(`\n➤[${member.name}]${label}`); if (!strike.hit) { log.push(`  ➥[${target.name}]闪避了攻击`); continue; }
+      log.push(`\n➤[${member.name}]${label}`); if (!strike.hit) { log.push(`　➥[${target.name}]闪避了攻击`); continue; }
       const elemental = weaknessMultiplier(target, damageType); const damage = Math.max(1, Math.floor(strike.damage * elemental)); const oldHp = Number(target.current_hp); target.current_hp = Math.max(0, oldHp - damage); if (!target.current_hp) target.is_defeated = 1;
       await connection.execute('UPDATE combat_threat SET threat=threat+? WHERE session_id=? AND spawn_id=? AND character_id=?', [damage, session.combat_id, target.id, member.id]); if (modifiers.lifestealPct && choice.type === 'attack') member.current_hp = Math.min(Number(member.hp_max), Number(member.current_hp) + Math.floor(damage * modifiers.lifestealPct / 100));
-      log.push(`  ➥对[${target.name}]造成 ${damage} 点${kind}伤害${strike.crit ? '（暴击）' : ''}${elemental > 1 ? '（弱点）' : elemental < 1 ? '（抗性）' : ''}(${oldHp}→${target.current_hp})`);
+      log.push(`　➥对[${target.name}]造成 ${damage} 点${kind}伤害${strike.crit ? '（暴击）' : ''}${elemental > 1 ? '（弱点）' : elemental < 1 ? '（抗性）' : ''}(${oldHp}→${target.current_hp})`);
     } else {
       const monsterTarget = targets.find(item => Number(item.id) === turn.id)!; if (monsterTarget.is_defeated) continue;
       const [threatRows] = await connection.execute<(RowDataPacket & { character_id: number; threat: number })[]>('SELECT character_id,threat FROM combat_threat WHERE session_id=? AND spawn_id=? FOR UPDATE', [session.combat_id, monsterTarget.id]); const victim = threatTarget(members, new Map(threatRows.map(row => [Number(row.character_id), Number(row.threat)]))); if (!victim) continue;
       const sequence = stringList(monsterTarget.skill_sequence); const skill = sequence.length ? sequence[(Number(session.turn_no) - 1) % sequence.length] : '攻击'; const multiplier = skill === 'howl' ? .7 : skill === 'bite' ? 1.25 : 1; const monster = monsterCombatStats(monsterTarget); const strike = resolveStrike(Number(monsterTarget.attack) * multiplier, Number(victim.physical_defense), monster.accuracy, Number(victim.evasion), monster.crit, Number(victim.crit_resist_bp), monster.critDamage, Number(victim.crit_damage_reduction_bp));
-      log.push(`\n➤[${monsterTarget.name}]释放技能「${skill}」`); if (!strike.hit) { log.push(`  ➥[${victim.name}]闪避了攻击`); continue; }
-      const oldHp = Number(victim.current_hp); victim.current_hp = Math.max(0, oldHp - strike.damage); if (!victim.current_hp) victim.is_defeated = 1; log.push(`  ➥对[${victim.name}]造成 ${strike.damage} 点物理伤害${strike.crit ? '（暴击）' : ''}(${oldHp}→${victim.current_hp})`);
+      log.push(`\n➤[${monsterTarget.name}]释放技能「${skill}」`); if (!strike.hit) { log.push(`　➥[${victim.name}]闪避了攻击`); continue; }
+      const oldHp = Number(victim.current_hp); victim.current_hp = Math.max(0, oldHp - strike.damage); if (!victim.current_hp) victim.is_defeated = 1; log.push(`　➥对[${victim.name}]造成 ${strike.damage} 点物理伤害${strike.crit ? '（暴击）' : ''}(${oldHp}→${victim.current_hp})`);
     }
   }
   for (const target of targets) { await connection.execute('UPDATE monster_spawns SET current_hp=?,defeated_at=IF(?,NOW(),defeated_at) WHERE id=?', [target.current_hp, target.is_defeated ? 1 : 0, target.id]); await connection.execute('UPDATE combat_targets SET is_defeated=? WHERE session_id=? AND spawn_id=?', [target.is_defeated ? 1 : 0, session.combat_id, target.id]); }
