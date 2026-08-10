@@ -99,6 +99,20 @@ const schemaStatements = [
     CONSTRAINT fk_player_skill_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
     CONSTRAINT fk_player_skill_definition FOREIGN KEY (skill_id) REFERENCES skill_definitions(id)
   ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS effect_definitions (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, code VARCHAR(64) NOT NULL, name VARCHAR(64) NOT NULL,
+    effect_type ENUM('damage_over_time','stat_modifier','cleanse','control','shield','heal_over_time') NOT NULL,
+    default_value DECIMAL(8,3) NOT NULL DEFAULT 0, default_duration TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    max_level TINYINT UNSIGNED NOT NULL DEFAULT 1, max_stacks TINYINT UNSIGNED NOT NULL DEFAULT 1, stackable TINYINT(1) NOT NULL DEFAULT 0,
+    description TEXT NOT NULL, PRIMARY KEY (id), UNIQUE KEY uk_effect_code (code)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS skill_effects (
+    skill_id BIGINT UNSIGNED NOT NULL, effect_id BIGINT UNSIGNED NOT NULL, effect_level TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    value_override DECIMAL(8,3) NULL, duration_override TINYINT UNSIGNED NULL, target_scope ENUM('enemy','ally','self') NOT NULL DEFAULT 'enemy',
+    trigger_timing ENUM('on_hit','on_cast','turn_start') NOT NULL DEFAULT 'on_hit', PRIMARY KEY (skill_id,effect_id),
+    CONSTRAINT fk_skill_effect_skill FOREIGN KEY (skill_id) REFERENCES skill_definitions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_skill_effect_definition FOREIGN KEY (effect_id) REFERENCES effect_definitions(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS monster_templates (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, code VARCHAR(64) NOT NULL, name VARCHAR(64) NOT NULL,
     monster_class ENUM('normal','elite','boss') NOT NULL DEFAULT 'normal', level INT UNSIGNED NOT NULL DEFAULT 1,
@@ -106,6 +120,12 @@ const schemaStatements = [
     perception INT UNSIGNED NOT NULL DEFAULT 0, charisma INT UNSIGNED NOT NULL DEFAULT 0, weakness_json JSON NULL, resistance_json JSON NULL,
     skill_sequence JSON NULL, experience INT UNSIGNED NOT NULL, drops_json JSON NULL,
     PRIMARY KEY (id), UNIQUE KEY uk_monster_code (code)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS monster_skill_learn_rules (
+    monster_template_id BIGINT UNSIGNED NOT NULL, skill_id BIGINT UNSIGNED NOT NULL, chance DECIMAL(6,5) NOT NULL,
+    PRIMARY KEY (monster_template_id,skill_id),
+    CONSTRAINT fk_skill_learn_monster FOREIGN KEY (monster_template_id) REFERENCES monster_templates(id) ON DELETE CASCADE,
+    CONSTRAINT fk_skill_learn_skill FOREIGN KEY (skill_id) REFERENCES skill_definitions(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS map_monster_pools (
     region_id BIGINT UNSIGNED NOT NULL, monster_template_id BIGINT UNSIGNED NOT NULL, spawn_weight INT UNSIGNED NOT NULL DEFAULT 1,
@@ -170,6 +190,14 @@ const schemaStatements = [
     CONSTRAINT fk_combat_threat_spawn FOREIGN KEY (spawn_id) REFERENCES monster_spawns(id),
     CONSTRAINT fk_combat_threat_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS combat_status_effects (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, session_id CHAR(36) NOT NULL, target_kind ENUM('member','target') NOT NULL, target_id BIGINT UNSIGNED NOT NULL,
+    effect_id BIGINT UNSIGNED NOT NULL, effect_level TINYINT UNSIGNED NOT NULL, value DECIMAL(8,3) NOT NULL, stacks TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    remaining_turns TINYINT UNSIGNED NOT NULL, PRIMARY KEY (id), UNIQUE KEY uk_combat_effect_target (session_id,target_kind,target_id,effect_id),
+    KEY idx_combat_effect_turn (session_id,remaining_turns),
+    CONSTRAINT fk_combat_effect_session FOREIGN KEY (session_id) REFERENCES combat_sessions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_combat_effect_definition FOREIGN KEY (effect_id) REFERENCES effect_definitions(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS parties (
     id CHAR(36) NOT NULL, leader_character_id BIGINT UNSIGNED NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id), UNIQUE KEY uk_party_leader (leader_character_id), CONSTRAINT fk_party_leader FOREIGN KEY (leader_character_id) REFERENCES characters(id)
@@ -221,11 +249,40 @@ export const initializeSchema = async (pool: Pool) => {
     ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description), item_category = VALUES(item_category), stackable = VALUES(stackable), effect_json = VALUES(effect_json)`);
   await pool.query(`UPDATE item_definitions SET codex_id=CONCAT(CASE WHEN item_type='equipment' THEN CASE item_category WHEN '武器' THEN '11' WHEN '副手' THEN '12' WHEN '头部' THEN '13' WHEN '上装' THEN '14' WHEN '腰部' THEN '15' WHEN '下装' THEN '16' WHEN '脚部' THEN '17' WHEN '项链' THEN '18' WHEN '手镯' THEN '19' WHEN '戒指' THEN '10' ELSE '19' END WHEN item_type='consumable' THEN CASE item_category WHEN '药剂' THEN '21' WHEN '食物' THEN '22' ELSE '23' END WHEN item_type='material' THEN CASE item_category WHEN '食材' THEN '31' WHEN '草药' THEN '32' ELSE '39' END ELSE '99' END, LPAD(id,5,'0')) WHERE codex_id IS NULL`);
   await pool.query(`INSERT INTO skill_definitions (code, name, category, mana_cost, cooldown_turns, power, description) VALUES
+    ('heavy_strike', '重击', 'physical', 5, 2, 180, '凝聚力量的沉重打击。'),
     ('arcane_bolt', '奥术飞矢', 'magic', 8, 1, 150, '发射一枚奥术能量。'),
-    ('heavy_strike', '沉重一击', 'physical', 5, 2, 180, '造成更高的物理伤害。')
-    ON DUPLICATE KEY UPDATE name = VALUES(name)`);
-  await pool.query(`UPDATE skill_definitions SET damage_type=CASE code WHEN 'arcane_bolt' THEN '奥术' WHEN 'heavy_strike' THEN '打击' ELSE damage_type END`);
+    ('armor_break', '碎甲斩', 'physical', 8, 2, 130, '斩击并施加脆弱。'),
+    ('fireball', '火球术', 'magic', 12, 2, 165, '爆裂火焰，可能灼烧敌人。'),
+    ('toxic_edge', '淬毒刃', 'physical', 10, 2, 120, '在武器上附毒，使中毒可以叠层。'),
+    ('purifying_light', '净化之光', 'magic', 14, 3, 90, '净化己方全部异常状态。'),
+    ('frost_bind', '冰缚术', 'magic', 13, 3, 115, '冰霜束缚敌人，降低速度。'),
+    ('bloodletting', '割裂', 'physical', 9, 2, 145, '造成伤口，持续流血。'),
+    ('hop', '跃击', 'physical', 0, 0, 100, '球兔的快速撞击。'),
+    ('charge', '冲撞', 'physical', 0, 1, 135, '刺猪的蓄力冲撞。'),
+    ('bite', '撕咬', 'physical', 0, 0, 125, '野兽的凶猛撕咬。'),
+    ('howl', '震慑咆哮', 'magic', 0, 1, 70, '以咆哮扰乱敌人。')
+    ON DUPLICATE KEY UPDATE name=VALUES(name),mana_cost=VALUES(mana_cost),cooldown_turns=VALUES(cooldown_turns),power=VALUES(power),description=VALUES(description)`);
+  await pool.query(`UPDATE skill_definitions SET damage_type=CASE code WHEN 'arcane_bolt' THEN '奥术' WHEN 'heavy_strike' THEN '打击' WHEN 'armor_break' THEN '斩击' WHEN 'fireball' THEN '火' WHEN 'toxic_edge' THEN '刺击' WHEN 'purifying_light' THEN '光' WHEN 'frost_bind' THEN '冰' WHEN 'bloodletting' THEN '斩击' WHEN 'hop' THEN '打击' WHEN 'charge' THEN '刺击' WHEN 'bite' THEN '刺击' WHEN 'howl' THEN '暗' ELSE damage_type END`);
   await pool.query(`UPDATE skill_definitions SET codex_id=CONCAT(CASE category WHEN 'physical' THEN '41' WHEN 'magic' THEN '42' ELSE '49' END, LPAD(id,5,'0')) WHERE codex_id IS NULL`);
+  await pool.query(`INSERT INTO effect_definitions (code,name,effect_type,default_value,default_duration,max_level,max_stacks,stackable,description) VALUES
+    ('vulnerability','脆弱','stat_modifier',25,3,5,1,0,'降低目标物理防御，效果值为百分比。'),
+    ('burn','灼烧','damage_over_time',5,3,5,1,0,'每回合损失最大生命值一定比例。'),
+    ('poison','中毒','damage_over_time',3,3,5,5,1,'每回合损失最大生命值一定比例，可叠加。'),
+    ('bleeding','流血','damage_over_time',4,3,5,3,1,'每回合损失最大生命值一定比例，可叠加。'),
+    ('slow','迟缓','stat_modifier',20,2,5,1,0,'降低速度，效果值为百分比。'),
+    ('stun','眩晕','control',1,1,3,1,0,'无法进行一次行动。'),
+    ('purify','净化','cleanse',1,0,1,1,0,'移除目标全部异常状态。'),
+    ('barrier','护盾','shield',12,3,5,1,0,'获得相当于最大生命值一定比例的护盾。'),
+    ('regeneration','再生','heal_over_time',4,3,5,1,0,'每回合恢复最大生命值一定比例。')
+    ON DUPLICATE KEY UPDATE name=VALUES(name),default_value=VALUES(default_value),default_duration=VALUES(default_duration),max_level=VALUES(max_level),max_stacks=VALUES(max_stacks),stackable=VALUES(stackable),description=VALUES(description)`);
+  await pool.query(`INSERT INTO skill_effects (skill_id,effect_id,effect_level,target_scope,trigger_timing) VALUES
+    ((SELECT id FROM skill_definitions WHERE code='armor_break'),(SELECT id FROM effect_definitions WHERE code='vulnerability'),1,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='fireball'),(SELECT id FROM effect_definitions WHERE code='burn'),1,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='toxic_edge'),(SELECT id FROM effect_definitions WHERE code='poison'),1,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='purifying_light'),(SELECT id FROM effect_definitions WHERE code='purify'),1,'self','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='frost_bind'),(SELECT id FROM effect_definitions WHERE code='slow'),1,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='bloodletting'),(SELECT id FROM effect_definitions WHERE code='bleeding'),1,'enemy','on_hit')
+    ON DUPLICATE KEY UPDATE effect_level=VALUES(effect_level),target_scope=VALUES(target_scope),trigger_timing=VALUES(trigger_timing)`);
   await pool.query(`INSERT INTO monster_templates (code, name, monster_class, level, hp_max, attack, defense, speed, perception, charisma, skill_sequence, experience, drops_json) VALUES
     ('ball_rabbit', '球兔', 'normal', 1, 300, 50, 35, 125, 6, 14, JSON_ARRAY('hop'), 12, JSON_ARRAY(JSON_OBJECT('code','healing_herb','chance',0.15,'quantity',1))),
     ('spike_boar', '刺猪', 'normal', 2, 480, 72, 55, 92, 9, 3, JSON_ARRAY('charge'), 28, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',0.45,'quantity',1))),
@@ -234,6 +291,15 @@ export const initializeSchema = async (pool: Pool) => {
     ('mist_wolf', '雾影狼', 'normal', 1, 350, 55, 40, 95, 8, 1, JSON_ARRAY(), 20, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',0.7,'quantity',1)))
     ON DUPLICATE KEY UPDATE name = VALUES(name), monster_class = VALUES(monster_class), level = VALUES(level), hp_max = VALUES(hp_max), attack = VALUES(attack), defense = VALUES(defense), speed = VALUES(speed), perception = VALUES(perception), charisma = VALUES(charisma), skill_sequence = VALUES(skill_sequence), experience = VALUES(experience), drops_json = VALUES(drops_json)`);
   await pool.query(`UPDATE monster_templates SET weakness_json=CASE code WHEN 'ball_rabbit' THEN JSON_ARRAY('刺击') WHEN 'spike_boar' THEN JSON_ARRAY('水') WHEN 'vine_python' THEN JSON_ARRAY('火','斩击') WHEN 'black_bear' THEN JSON_ARRAY('冰') WHEN 'mist_wolf' THEN JSON_ARRAY('光') ELSE weakness_json END, resistance_json=CASE code WHEN 'ball_rabbit' THEN JSON_ARRAY('打击') WHEN 'spike_boar' THEN JSON_ARRAY('刺击') WHEN 'vine_python' THEN JSON_ARRAY('木') WHEN 'black_bear' THEN JSON_ARRAY('打击') WHEN 'mist_wolf' THEN JSON_ARRAY('暗') ELSE resistance_json END`);
+  await pool.query(`INSERT INTO monster_skill_learn_rules (monster_template_id,skill_id,chance) VALUES
+    ((SELECT id FROM monster_templates WHERE code='ball_rabbit'),(SELECT id FROM skill_definitions WHERE code='armor_break'),0.03000),
+    ((SELECT id FROM monster_templates WHERE code='spike_boar'),(SELECT id FROM skill_definitions WHERE code='bloodletting'),0.05000),
+    ((SELECT id FROM monster_templates WHERE code='vine_python'),(SELECT id FROM skill_definitions WHERE code='toxic_edge'),0.08000),
+    ((SELECT id FROM monster_templates WHERE code='vine_python'),(SELECT id FROM skill_definitions WHERE code='frost_bind'),0.03000),
+    ((SELECT id FROM monster_templates WHERE code='mist_wolf'),(SELECT id FROM skill_definitions WHERE code='arcane_bolt'),0.06000),
+    ((SELECT id FROM monster_templates WHERE code='black_bear'),(SELECT id FROM skill_definitions WHERE code='fireball'),0.05000),
+    ((SELECT id FROM monster_templates WHERE code='black_bear'),(SELECT id FROM skill_definitions WHERE code='purifying_light'),0.02000)
+    ON DUPLICATE KEY UPDATE chance=VALUES(chance)`);
   await pool.query(`INSERT IGNORE INTO monster_encounter_texts (monster_template_id, description) VALUES
     ((SELECT id FROM monster_templates WHERE code='ball_rabbit'), '落叶轻轻颤动，一只球兔从灌木后探出圆滚滚的脑袋，红色的眼睛正盯着你。'),
     ((SELECT id FROM monster_templates WHERE code='ball_rabbit'), '草丛里传来急促的蹦跳声，球兔挡在了你的去路上。'),
@@ -265,7 +331,7 @@ export const initializeSchema = async (pool: Pool) => {
     ((SELECT id FROM map_regions WHERE code='dark_forest'), '远处传来不明生物的低鸣，密林很快又归于沉寂。'),
     ((SELECT id FROM map_regions WHERE code='dark_forest'), '藤蔓垂落在前方，树影在雾里扭曲成陌生的形状。')`);
   await pool.query(`INSERT IGNORE INTO player_skills (character_id, skill_id, quick_slot)
-    SELECT c.id, s.id, CASE s.code WHEN 'arcane_bolt' THEN 1 WHEN 'heavy_strike' THEN 2 END FROM characters c JOIN skill_definitions s ON s.code IN ('arcane_bolt','heavy_strike')`);
+    SELECT c.id,s.id,1 FROM characters c JOIN skill_definitions s ON s.code='heavy_strike'`);
   await pool.query(`INSERT IGNORE INTO player_inventory (character_id, item_id, quantity)
     SELECT c.id, i.id, 3 FROM characters c JOIN item_definitions i ON i.code='healing_herb'`);
   await pool.query(`INSERT IGNORE INTO player_quick_items (character_id, quick_slot, item_id)
