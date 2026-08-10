@@ -33,9 +33,9 @@ export const calculateDerivedStats = (value: Allocation): DerivedStats => ({
 export const gifts = {
   holy_sword_shirulu: { name: '圣剑·希尔露', category: 'artifact', summary: '由星辉铸成的圣洁长剑。' },
   demon_sword_aphia: { name: '魔剑·阿菲娅', category: 'artifact', summary: '寄宿深渊意志的漆黑魔剑。' },
-  growth_blessing: { name: '成长祝福', category: 'ability', summary: '让经验积累更快的祝福。' },
-  mana_affinity: { name: '魔力亲和', category: 'ability', summary: '让你更熟悉魔力流动的天赋。' },
-  lucky_favor: { name: '幸运眷顾', category: 'ability', summary: '受命运青睐的微小奇迹。' }
+  growth_blessing: { name: '成长祝福', category: 'ability', summary: '【被动】所有获得的经验值翻倍。' },
+  mana_affinity: { name: '魔力亲和', category: 'ability', summary: '【被动】技能魔力消耗降低 30%。' },
+  lucky_favor: { name: '幸运眷顾', category: 'ability', summary: '【被动】战利品掉落概率提高 20%。' }
 } as const;
 
 export type GiftCode = keyof typeof gifts;

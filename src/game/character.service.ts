@@ -114,13 +114,19 @@ export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: 
     SELECT ?, id, 3 FROM item_definitions WHERE code='healing_herb'`, [characterId]);
   await connection.execute(`INSERT INTO player_quick_items (character_id,quick_slot,item_id)
     SELECT ?, 1, id FROM item_definitions WHERE code='healing_herb'`, [characterId]);
+  await connection.execute(`INSERT INTO player_skill_discoveries (character_id,skill_id)
+    SELECT ?,id FROM skill_definitions WHERE code='appraisal'`, [characterId]);
   if (giftCode === 'holy_sword_shirulu' || giftCode === 'demon_sword_aphia') {
     const itemCode = giftCode;
     await connection.execute('INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max) SELECT ?,id,100,100,100 FROM item_definitions WHERE code=?', [characterId, itemCode]);
     await connection.execute(`INSERT INTO player_equipment (character_id,slot,item_id,instance_id)
       SELECT ?, 'weapon', ii.item_id, ii.id FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
       WHERE ii.character_id=? AND i.code=? ORDER BY ii.id DESC LIMIT 1`, [characterId, characterId, itemCode]);
-  } else await connection.execute('INSERT INTO player_blessings (character_id,code) VALUES (?,?)', [characterId, giftCode]);
+  } else {
+    await connection.execute('INSERT INTO player_blessings (character_id,code) VALUES (?,?)', [characterId, giftCode]);
+    await connection.execute(`INSERT INTO player_skills (character_id,skill_id)
+      SELECT ?,id FROM skill_definitions WHERE code=? AND category='passive'`, [characterId, giftCode]);
+  }
   await connection.execute('UPDATE players SET status = \'active\' WHERE id = ?', [player.id]);
   await connection.execute('DELETE FROM registration_sessions WHERE id = ?', [session.id]);
   await connection.execute('INSERT INTO player_events (player_id, event_type, payload) VALUES (?, \'character.created\', ?)', [player.id, JSON.stringify({ region: region.name, x, y, z, giftCode })]);

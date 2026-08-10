@@ -2,13 +2,18 @@ import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
 import { learnSkill, skillDetail, skillList, toggleSkillShortcut, upgradeSkill } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
 
-const categoryNames: Record<string, string> = { physical: '物理', magic: '魔法', utility: '辅助' };
+const categoryNames: Record<string, string> = { physical: '物理', magic: '魔法', utility: '辅助', passive: '被动' };
 
 const skillListFormat = async (qqUserId: string, view: '已学习' | '未学习') => {
   const data = await skillList(qqUserId); const markdown = Format.createMarkdown().addTitle('技能列表').addNewline().addNewline().addText(`剩余技能点：${data.skillPoints}\n`);
   if (view === '已学习') {
     if (!data.skills.length) markdown.addText('\n尚未学习技能。\n');
-    for (const skill of data.skills) markdown.addText(`\n【${skill.name}】Lv.${skill.level} `).addButton('[详情]', { data: `/技能详情 ${skill.id}`, autoEnter: false }).addText(' ').addButton(skill.quick_slot ? '[取消快捷]' : '[快捷]', { data: `/技能快捷 ${skill.id}`, autoEnter: false }).addText('\n');
+    for (const skill of data.skills) {
+      markdown.addText(`\n【${skill.name}】Lv.${skill.level} `).addButton('[详情]', { data: `/技能详情 ${skill.id}`, autoEnter: false });
+      if (skill.category === 'passive') markdown.addText(' [被动]');
+      else markdown.addText(' ').addButton(skill.quick_slot ? '[取消快捷]' : '[快捷]', { data: `/技能快捷 ${skill.id}`, autoEnter: false });
+      markdown.addText('\n');
+    }
     markdown.addText('\n快捷技能：\n');
     const shortcuts = data.skills.filter(skill => skill.quick_slot).sort((a, b) => Number(a.quick_slot) - Number(b.quick_slot));
     if (!shortcuts.length) markdown.addText('暂无\n');
@@ -37,7 +42,10 @@ export const skillDetailHandler = async () => {
       : skill.nextUpgradeCost === null
         ? '已达最高等级。'
         : `升级消耗：${skill.nextUpgradeCost} 技能点`;
-    const text = `【${skill.name}】${levelText}\n${skill.description}\n\n类别：${categoryNames[skill.category] ?? '辅助'}｜属性：${skill.damage_type}\n威力：${skill.actualPower}\n魔力消耗：${skill.mana_cost}\n冷却：${skill.actualCooldown} 回合\n特殊效果：${skill.effects ?? '无'}\n\n${costText}`;
+    const combatText = skill.category === 'passive'
+      ? `类别：${categoryNames.passive}\n被动效果：${skill.description}`
+      : `类别：${categoryNames[skill.category] ?? '辅助'}｜属性：${skill.damage_type}\n威力：${skill.actualPower}\n魔力消耗：${skill.mana_cost}\n冷却：${skill.actualCooldown} 回合\n特殊效果：${skill.effects ?? '无'}`;
+    const text = `【${skill.name}】${levelText}\n${skill.description}\n\n${combatText}\n\n${costText}`;
     const buttons = Format.createButtonGroup().addRow().addButton('返回技能列表', skill.learned ? '/技能列表 已学习' : '/技能列表 未学习', { type: 'command', autoEnter: true });
     if (!skill.learned) buttons.addButton('学习', `/学习技能 ${skill.id}`, { type: 'command', autoEnter: true, style: 'blue' });
     else if (skill.nextUpgradeCost !== null) buttons.addButton('升级', `/升级技能 ${skill.id}`, { type: 'command', autoEnter: true, style: 'blue' });
