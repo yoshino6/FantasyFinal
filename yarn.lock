@@ -2,10 +2,10 @@
 # yarn lockfile v1
 
 
-"@alemonjs/qq-bot@^2.1.23":
-  version "2.1.31"
-  resolved "https://registry.npmmirror.com/@alemonjs/qq-bot/-/qq-bot-2.1.31.tgz#c10aeee04e3c7c3f866eaff828157458bb6bd428"
-  integrity sha512-QHoBnxdSaRWGpMo0IY2jlwZ58ob7nG8huna3iue2L96tZKbKRXsu66S07po+1/T3HhtmAGmw+i11qTB7wc3JiA==
+"@alemonjs/qq-bot@^2.1.32":
+  version "2.1.32"
+  resolved "https://registry.npmmirror.com/@alemonjs/qq-bot/-/qq-bot-2.1.32.tgz#b60e98e3ae4d631c4b7539dda906c4df15eff178"
+  integrity sha512-xGmHzJcOqWHmcqb9fSNGYxhESL8nXIOVaH6mIZzzd9vnOR8Gq0G1Kw/e4FrV6ZjXFRW7tdG+zWZf98GsF0d1Eg==
   dependencies:
     "@noble/curves" "^1.7.0"
     axios "^1.4.0"
@@ -527,10 +527,10 @@ aggregate-error@^4.0.1:
     clean-stack "^4.0.0"
     indent-string "^5.0.0"
 
-alemonjs@^2.1.94:
-  version "2.1.94"
-  resolved "https://registry.npmmirror.com/alemonjs/-/alemonjs-2.1.94.tgz#f2f566c4431d3d3fa857c8497f74786ab26ee083"
-  integrity sha512-UJ8uUL2kxWiRwE8OWArT/Lbsf+v69NzenyteggxMlymUa8U6eRQACu0dPyI5sfQna/dm7/Vo+HFTNIeZ/Xf3jg==
+alemonjs@^2.1.95:
+  version "2.1.95"
+  resolved "https://registry.npmmirror.com/alemonjs/-/alemonjs-2.1.95.tgz#708a6ab64fc0a09ddfb6d50c31f65d281bc42a15"
+  integrity sha512-nyh45BjERJc+exrYBIX2nE+p+vqLUu+7qmjN2WwkEQWN8ZWcdOOVKIBelaT03+m5HSW3tw2maHKfLRdt7iVxZQ==
   dependencies:
     "@koa/cors" "^5.0.0"
     axios "^1.14.0"
