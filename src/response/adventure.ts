@@ -5,14 +5,11 @@ import { movedLocationText, outsidePanel, panelButtons } from './panel';
 
 const fail = async (message: any, error: unknown, title = '操作失败') => message.send({ format: messageFormat(title, error instanceof Error ? error.message : '请稍后重试。') });
 const moveButtons = panelButtons;
-const battleButtons = (battle?: Awaited<ReturnType<typeof battleStatus>>) => {
-  const group = Format.createButtonGroup();
-  if (battle?.targets.length) {
-    const row = group.addRow();
-    for (const target of battle.targets.filter(target => !target.defeated)) row.addButton(`${battle.selectedTargetId === target.id ? '▶' : ''}${target.name}`, `/切换目标 ${target.id}`, { type: 'command', autoEnter: true, style: 'blue' });
-  }
-  return group.addRow().addButton('普攻', '/攻击', { type: 'command', autoEnter: true, style: 'blue' }).addButton('技能①', '/技能 1', { type: 'command', autoEnter: true, style: 'blue' }).addButton('技能②', '/技能 2', { type: 'command', autoEnter: true, style: 'blue' })
-    .addRow().addButton('道具①', '/道具 1', { type: 'command', autoEnter: true }).addButton('逃跑', '/逃跑', { type: 'command', autoEnter: true });
+const battleButtons = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
+  const activeSkills = new Set(battle.skillSlots); const activeItems = new Set(battle.itemSlots); const actionStyle = battle.canAct ? 'blue' : undefined;
+  return Format.createButtonGroup()
+    .addRow().addButton('普攻', '/攻击', { type: 'command', autoEnter: true, style: actionStyle }).addButton('技能①', '/技能 1', { type: 'command', autoEnter: true, style: battle.canAct && activeSkills.has(1) ? 'blue' : undefined }).addButton('技能②', '/技能 2', { type: 'command', autoEnter: true, style: battle.canAct && activeSkills.has(2) ? 'blue' : undefined }).addButton('技能③', '/技能 3', { type: 'command', autoEnter: true, style: battle.canAct && activeSkills.has(3) ? 'blue' : undefined }).addButton('技能④', '/技能 4', { type: 'command', autoEnter: true, style: battle.canAct && activeSkills.has(4) ? 'blue' : undefined })
+    .addRow().addButton('道具①', '/道具 1', { type: 'command', autoEnter: true, style: battle.canAct && activeItems.has(1) ? 'blue' : undefined }).addButton('道具②', '/道具 2', { type: 'command', autoEnter: true, style: battle.canAct && activeItems.has(2) ? 'blue' : undefined }).addButton('道具③', '/道具 3', { type: 'command', autoEnter: true, style: battle.canAct && activeItems.has(3) ? 'blue' : undefined }).addButton('道具④', '/道具 4', { type: 'command', autoEnter: true, style: battle.canAct && activeItems.has(4) ? 'blue' : undefined }).addButton('逃跑', '/逃跑', { type: 'command', autoEnter: true, style: actionStyle });
 };
 const encounterButtons = (spawnId: number) => Format.createButtonGroup().addRow().addButton('战斗', `/目标 ${spawnId}`, { type: 'command', autoEnter: true, style: 'blue' }).addButton('说服', `/交涉 ${spawnId}`, { type: 'command', autoEnter: true }).addButton('避战', `/躲避 ${spawnId}`, { type: 'command', autoEnter: true });
 const battleStateText = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
@@ -21,12 +18,13 @@ const battleStateText = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
     const label = member.id === battle.characterId ? '你' : teammates.length === 1 ? '队友' : `队友${teammates.indexOf(member) + 1}`;
     return `${label} HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}${member.defeated ? '（倒下）' : member.pending ? '（已行动）' : ''}`;
   });
-  const targets = battle.targets.map((target, index) => `敌方${index + 1} HP ${target.hp}/${target.hpMax}${target.defeated ? '（击败）' : ''}`);
-  return `${members.join('\n')}\n${targets.join('\n')}`;
+  return members.join('\n');
 };
 const battleFormat = (_title: string, text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => {
   const lines = text.split('\n'); if (/^战斗<\d+>回合$/.test(lines[0])) lines.shift();
-  return Format.create().addMarkdown(Format.createMarkdown().addTitle(`战斗<${battle.turn}>回合`).addText(`${lines.join('\n')}\n${battleStateText(battle)}`)).addButtonGroup(battleButtons(battle));
+  const markdown = Format.createMarkdown().addTitle(`战斗<${battle.turn}>回合`).addText(`${lines.join('\n')}\n${battleStateText(battle)}\n`);
+  for (const [index, target] of battle.targets.entries()) markdown.addButton(`${battle.selectedTargetId === target.id ? '▶' : ''}敌方${index + 1} ${target.name}`, { data: `/切换目标 ${target.id}`, autoEnter: false }).addText(` HP ${target.hp}/${target.hpMax}${target.defeated ? '（击败）' : ''}\n`);
+  return Format.create().addMarkdown(markdown).addButtonGroup(battleButtons(battle));
 };
 
 export const exploreHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await explore(event.current.UserId); const targets = result.spawns.length ? `\n\n可选目标\n${result.spawns.map(s => `#${s.id} ${s.name} Lv.${s.level}｜HP ${s.current_hp}/${s.hp_max}`).join('\n')}\n\n发送 /目标 编号 进入战斗。` : ''; await message.send({ format: messageFormat('探索', result.text + targets) }); } catch (error) { logger.warn({ err: error }, 'explore failed'); await fail(message, error); } };

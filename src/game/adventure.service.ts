@@ -16,6 +16,7 @@ const pickWeighted = <T extends { spawn_weight: number }>(items: T[]) => {
   return items[items.length - 1];
 };
 const random = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
+const quickSlotLabel = (slot: number) => `技能${'①②③④'.charAt(slot - 1) || slot}`;
 const jsonObject = (value: unknown): Record<string, unknown> => {
   if (!value) return {};
   if (typeof value !== 'string') return value as Record<string, unknown>;
@@ -47,7 +48,7 @@ const characterFor = async (qqUserId: string): Promise<CharacterRow> => {
 };
 
 const modifiersFor = async (connection: PoolConnection, characterId: number): Promise<CombatModifiers> => {
-  const [rows] = await connection.execute<(RowDataPacket & { name: string | null; effect_json: string | null; blessing: string | null })[]>(`SELECT i.name,i.effect_json,b.code AS blessing FROM characters c LEFT JOIN player_equipment pe ON pe.character_id=c.id AND pe.slot='weapon' LEFT JOIN item_definitions i ON i.id=pe.item_id LEFT JOIN player_blessings b ON b.character_id=c.id WHERE c.id=?`, [characterId]);
+  const [rows] = await connection.execute<(RowDataPacket & { name: string | null; effect_json: string | null; blessing: string | null })[]>(`SELECT i.name,COALESCE(ii.effect_json,i.effect_json) AS effect_json,b.code AS blessing FROM characters c LEFT JOIN player_equipment pe ON pe.character_id=c.id AND pe.slot='weapon' LEFT JOIN item_definitions i ON i.id=pe.item_id LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=c.id LEFT JOIN player_blessings b ON b.character_id=c.id WHERE c.id=?`, [characterId]);
   const effect = jsonObject(rows[0]?.effect_json);
   const blessing = rows[0]?.blessing;
   return { weaponName: rows[0]?.name ?? undefined, physicalAttack: Number(effect.physicalAttack ?? 0), magicAttack: Number(effect.magicAttack ?? 0), critRateBp: Number(effect.critRateBp ?? 0), ignoreDefensePct: Number(effect.ignoreDefensePct ?? 0), lifestealPct: Number(effect.lifestealPct ?? 0), magicDamagePct: Number(effect.magicDamagePct ?? 0), manaCostReduction: Number(effect.manaCostReduction ?? 0), experienceMultiplier: blessing === 'growth_blessing' ? 2 : 1, dropBonus: blessing === 'lucky_favor' ? 0.2 : 0, manaAffinity: blessing === 'mana_affinity' };
@@ -119,13 +120,65 @@ export const equipmentDetail = async (qqUserId: string, instanceId: number) => {
 
 export const equipment = async (qqUserId: string) => {
   const character = await characterFor(qqUserId);
-  const [rows] = await (await getPool()).execute<(RowDataPacket & { slot: string; name: string; instance_id: number | null })[]>(`SELECT pe.slot,i.name,MIN(ii.id) AS instance_id
+  const [rows] = await (await getPool()).execute<(RowDataPacket & { slot: string; name: string; instance_id: number | null })[]>(`SELECT pe.slot,i.name,pe.instance_id
     FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
-    LEFT JOIN player_item_instances ii ON ii.character_id=pe.character_id AND ii.item_id=pe.item_id
-    WHERE pe.character_id=? GROUP BY pe.slot,i.name
+    WHERE pe.character_id=?
     ORDER BY FIELD(pe.slot,'weapon','offhand','shoulder','upper','waist','lower','feet','necklace','bracelet','ring')`, [character.id]);
   return rows;
 };
+
+const equipmentSlots = ['weapon', 'offhand', 'shoulder', 'upper', 'waist', 'lower', 'feet', 'necklace', 'bracelet', 'ring'] as const;
+const equipmentSlotCategories: Record<typeof equipmentSlots[number], string[]> = {
+  weapon: ['武器'], offhand: ['副手'], shoulder: ['头肩', '头部'], upper: ['上装'], waist: ['腰部'],
+  lower: ['下装'], feet: ['脚部'], necklace: ['项链'], bracelet: ['手镯'], ring: ['戒指']
+};
+
+const requireEquipmentSlot = (slot: string) => {
+  if (!equipmentSlots.includes(slot as typeof equipmentSlots[number])) throw new Error('无效的装备部位。');
+  return slot as typeof equipmentSlots[number];
+};
+
+export const equipmentCandidates = async (qqUserId: string, slot: string) => {
+  const validSlot = requireEquipmentSlot(slot); const character = await characterFor(qqUserId); const categories = equipmentSlotCategories[validSlot];
+  const placeholders = categories.map(() => '?').join(',');
+  const [rows] = await (await getPool()).execute<(RowDataPacket & { id: number; name: string })[]>(`
+    SELECT ii.id,i.name FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
+    LEFT JOIN player_equipment pe ON pe.character_id=ii.character_id AND pe.instance_id=ii.id
+    WHERE ii.character_id=? AND i.item_type='equipment' AND i.item_category IN (${placeholders}) AND pe.instance_id IS NULL
+    ORDER BY ii.acquired_at DESC,ii.id DESC
+  `, [character.id, ...categories]);
+  return rows;
+};
+
+export const unequip = async (qqUserId: string, slot: string) => withTransaction(async connection => {
+  requireEquipmentSlot(slot);
+  const character = await characterFor(qqUserId);
+  const [rows] = await connection.execute<(RowDataPacket & { name: string })[]>(`
+    SELECT i.name FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
+    WHERE pe.character_id=? AND pe.slot=? FOR UPDATE
+  `, [character.id, slot]);
+  if (!rows[0]) throw new Error('该部位没有装备。');
+  await connection.execute('DELETE FROM player_equipment WHERE character_id=? AND slot=?', [character.id, slot]);
+  return rows[0];
+});
+
+export const equip = async (qqUserId: string, slot: string, instanceId: number) => withTransaction(async connection => {
+  const validSlot = requireEquipmentSlot(slot); const character = await characterFor(qqUserId); const categories = equipmentSlotCategories[validSlot];
+  const placeholders = categories.map(() => '?').join(',');
+  const [items] = await connection.execute<(RowDataPacket & { id: number; item_id: number; name: string })[]>(`
+    SELECT ii.id,ii.item_id,i.name FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
+    WHERE ii.id=? AND ii.character_id=? AND i.item_type='equipment' AND i.item_category IN (${placeholders}) FOR UPDATE
+  `, [instanceId, character.id, ...categories]);
+  const item = items[0];
+  if (!item) throw new Error('背包中没有这件可装备的物品。');
+  const [occupied] = await connection.execute<(RowDataPacket & { slot: string })[]>('SELECT slot FROM player_equipment WHERE character_id=? AND instance_id=? FOR UPDATE', [character.id, instanceId]);
+  if (occupied[0] && occupied[0].slot !== validSlot) throw new Error('这件装备正在其他部位穿戴。');
+  const [sameDefinitions] = await connection.execute<(RowDataPacket & { slot: string })[]>('SELECT slot FROM player_equipment WHERE character_id=? AND item_id=? AND slot<>? FOR UPDATE', [character.id, item.item_id, validSlot]);
+  if (sameDefinitions[0]) throw new Error('同类装备已穿戴在其他部位。');
+  await connection.execute('DELETE FROM player_equipment WHERE character_id=? AND slot=?', [character.id, validSlot]);
+  await connection.execute('INSERT INTO player_equipment (character_id,slot,item_id,instance_id) VALUES (?,?,?,?)', [character.id, validSlot, item.item_id, item.id]);
+  return item;
+});
 
 export const skillList = async (qqUserId: string) => {
   const character = await characterFor(qqUserId); const pool = await getPool();
@@ -308,9 +361,12 @@ export const battleStatus = async (qqUserId: string) => {
   const session = sessions[0]; if (!session) throw new Error('当前不在战斗中。请移动到敌对生物所在格子。');
   const [members] = await pool.execute<CombatMemberRow[]>(`SELECT c.*,r.name AS region_name,cm.current_hp,cm.current_mp,cm.selected_target_id,cm.pending_action,cm.is_defeated FROM combat_members cm JOIN characters c ON c.id=cm.character_id JOIN map_regions r ON r.id=c.current_region_id WHERE cm.session_id=? ORDER BY c.id`, [session.combat_id]);
   const [targets] = await pool.execute<CombatTargetRow[]>(`SELECT s.id,t.name,t.level,s.current_hp,t.hp_max,ct.is_defeated FROM combat_targets ct JOIN monster_spawns s ON s.id=ct.spawn_id JOIN monster_templates t ON t.id=s.template_id WHERE ct.session_id=? ORDER BY s.id`, [session.combat_id]);
+  const [skills] = await pool.execute<(RowDataPacket & { quick_slot: number })[]>('SELECT quick_slot FROM player_skills WHERE character_id=? AND quick_slot IS NOT NULL', [character.id]);
+  const [items] = await pool.execute<(RowDataPacket & { quick_slot: number })[]>('SELECT qi.quick_slot FROM player_quick_items qi JOIN player_inventory pi ON pi.character_id=qi.character_id AND pi.item_id=qi.item_id WHERE qi.character_id=? AND pi.quantity>0', [character.id]);
   const own = members.find(member => Number(member.id) === Number(character.id)); if (!own) throw new Error('战斗成员状态异常。');
   return {
     sessionId: session.combat_id, characterId: Number(character.id), turn: Number(session.turn_no), playerHp: Number(own.current_hp), playerHpMax: Number(character.hp_max), playerMp: Number(own.current_mp), playerMpMax: Number(character.mp_max), selectedTargetId: own.selected_target_id ? Number(own.selected_target_id) : null,
+    canAct: !Boolean(own.is_defeated) && !Boolean(own.pending_action), skillSlots: skills.map(skill => Number(skill.quick_slot)), itemSlots: items.map(item => Number(item.quick_slot)),
     members: members.map(member => ({ id: Number(member.id), name: member.name, hp: Number(member.current_hp), hpMax: Number(member.hp_max), mp: Number(member.current_mp), mpMax: Number(member.mp_max), defeated: Boolean(member.is_defeated), pending: Boolean(member.pending_action) })),
     targets: targets.map(target => ({ id: Number(target.id), name: target.name, level: Number(target.level), hp: Number(target.current_hp), hpMax: Number(target.hp_max), defeated: Boolean(target.is_defeated) }))
   };
@@ -516,6 +572,14 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
   if (!actor || actor.is_defeated) throw new Error('你已失去行动能力。');
   if (actor.pending_action) throw new Error('本回合行动已确认，请等待队友。');
   if ((action === 'skill' || action === 'item') && !slot) throw new Error('请选择快捷栏位。');
+  if (action === 'skill') {
+    const [skills] = await connection.execute<RowDataPacket[]>('SELECT skill_id FROM player_skills WHERE character_id=? AND quick_slot=? FOR UPDATE', [character.id, slot]);
+    if (!skills[0]) throw new Error(`${quickSlotLabel(Number(slot))}未配置。请先在技能列表设置快捷技能。`);
+  }
+  if (action === 'item') {
+    const [items] = await connection.execute<RowDataPacket[]>('SELECT qi.item_id FROM player_quick_items qi JOIN player_inventory pi ON pi.character_id=qi.character_id AND pi.item_id=qi.item_id WHERE qi.character_id=? AND qi.quick_slot=? AND pi.quantity>0 FOR UPDATE', [character.id, slot]);
+    if (!items[0]) throw new Error(`道具${'①②③④'.charAt(Number(slot) - 1) || slot}未配置或已耗尽。`);
+  }
   const pending: PendingAction = { type: action, ...(slot ? { slot } : {}) };
   await connection.execute('UPDATE combat_members SET pending_action=? WHERE session_id=? AND character_id=?', [JSON.stringify(pending), session.combat_id, character.id]); actor.pending_action = JSON.stringify(pending);
   const aliveMembers = members.filter(member => !member.is_defeated);

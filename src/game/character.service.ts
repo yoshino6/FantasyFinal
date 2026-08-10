@@ -117,7 +117,9 @@ export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: 
   if (giftCode === 'holy_sword_shirulu' || giftCode === 'demon_sword_aphia') {
     const itemCode = giftCode;
     await connection.execute('INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max) SELECT ?,id,100,100,100 FROM item_definitions WHERE code=?', [characterId, itemCode]);
-    await connection.execute('INSERT INTO player_equipment (character_id,slot,item_id) SELECT ?,\'weapon\',id FROM item_definitions WHERE code=?', [characterId, itemCode]);
+    await connection.execute(`INSERT INTO player_equipment (character_id,slot,item_id,instance_id)
+      SELECT ?, 'weapon', ii.item_id, ii.id FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
+      WHERE ii.character_id=? AND i.code=? ORDER BY ii.id DESC LIMIT 1`, [characterId, characterId, itemCode]);
   } else await connection.execute('INSERT INTO player_blessings (character_id,code) VALUES (?,?)', [characterId, giftCode]);
   await connection.execute('UPDATE players SET status = \'active\' WHERE id = ?', [player.id]);
   await connection.execute('DELETE FROM registration_sessions WHERE id = ?', [session.id]);
