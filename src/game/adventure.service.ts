@@ -574,7 +574,7 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
   if ((action === 'skill' || action === 'item') && !slot) throw new Error('请选择快捷栏位。');
   if (action === 'skill') {
     const [skills] = await connection.execute<RowDataPacket[]>('SELECT skill_id FROM player_skills WHERE character_id=? AND quick_slot=? FOR UPDATE', [character.id, slot]);
-    if (!skills[0]) throw new Error(`${quickSlotLabel(Number(slot))}未配置。请先在技能列表设置快捷技能。`);
+    if (!skills[0]) throw new Error(`${quickSlotLabel(Number(slot))}未配置`);
   }
   if (action === 'item') {
     const [items] = await connection.execute<RowDataPacket[]>('SELECT qi.item_id FROM player_quick_items qi JOIN player_inventory pi ON pi.character_id=qi.character_id AND pi.item_id=qi.item_id WHERE qi.character_id=? AND qi.quick_slot=? AND pi.quantity>0 FOR UPDATE', [character.id, slot]);
