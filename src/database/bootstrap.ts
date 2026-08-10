@@ -131,7 +131,7 @@ const schemaStatements = [
     PRIMARY KEY (id), UNIQUE KEY uk_monster_code (code)
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS monster_skill_learn_rules (
-    monster_template_id BIGINT UNSIGNED NOT NULL, skill_id BIGINT UNSIGNED NOT NULL, chance DECIMAL(6,5) NOT NULL,
+    monster_template_id BIGINT UNSIGNED NOT NULL, source_skill_code VARCHAR(64) NOT NULL, skill_id BIGINT UNSIGNED NOT NULL, chance DECIMAL(6,5) NOT NULL,
     PRIMARY KEY (monster_template_id,skill_id),
     CONSTRAINT fk_skill_learn_monster FOREIGN KEY (monster_template_id) REFERENCES monster_templates(id) ON DELETE CASCADE,
     CONSTRAINT fk_skill_learn_skill FOREIGN KEY (skill_id) REFERENCES skill_definitions(id) ON DELETE CASCADE
@@ -237,6 +237,7 @@ export const initializeSchema = async (pool: Pool) => {
   for (const column of ["damage_type VARCHAR(16) NOT NULL DEFAULT '无'", 'codex_id CHAR(7) NULL']) {
     try { await pool.query(`ALTER TABLE skill_definitions ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }
+  try { await pool.query('ALTER TABLE monster_skill_learn_rules ADD COLUMN source_skill_code VARCHAR(64) NULL AFTER monster_template_id'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   for (const column of ['skill_points INT UNSIGNED NOT NULL DEFAULT 1']) {
     try { await pool.query(`ALTER TABLE characters ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }
@@ -280,10 +281,13 @@ export const initializeSchema = async (pool: Pool) => {
     ('hop', '跃击', 'physical', 0, 0, 100, '球兔的快速撞击。'),
     ('charge', '冲撞', 'physical', 0, 1, 135, '刺猪的蓄力冲撞。'),
     ('bite', '撕咬', 'physical', 0, 0, 125, '野兽的凶猛撕咬。'),
-    ('howl', '震慑咆哮', 'magic', 0, 1, 70, '以咆哮扰乱敌人。')
+    ('howl', '震慑咆哮', 'magic', 0, 1, 70, '以咆哮扰乱敌人。'),
+    ('jump_strike', '跃步重击', 'physical', 4, 1, 135, '将球兔的跃击改良为适合人类施展的重击。'),
+    ('bite_slash', '咬合斩', 'physical', 5, 1, 145, '将猛兽撕咬的发力方式融入剑技，斩开目标。'),
+    ('war_cry', '震荡战吼', 'magic', 8, 2, 95, '以经过控制的战吼震荡敌人的精神。')
     ON DUPLICATE KEY UPDATE name=VALUES(name),mana_cost=VALUES(mana_cost),cooldown_turns=VALUES(cooldown_turns),power=VALUES(power),description=VALUES(description)`);
-  await pool.query(`UPDATE skill_definitions SET damage_type=CASE code WHEN 'arcane_bolt' THEN '奥术' WHEN 'heavy_strike' THEN '打击' WHEN 'armor_break' THEN '斩击' WHEN 'fireball' THEN '火' WHEN 'toxic_edge' THEN '刺击' WHEN 'purifying_light' THEN '光' WHEN 'frost_bind' THEN '冰' WHEN 'bloodletting' THEN '斩击' WHEN 'hop' THEN '打击' WHEN 'charge' THEN '刺击' WHEN 'bite' THEN '刺击' WHEN 'howl' THEN '暗' ELSE damage_type END`);
-  await pool.query(`UPDATE skill_definitions SET learn_cost=CASE code WHEN 'heavy_strike' THEN 1 WHEN 'armor_break' THEN 1 WHEN 'arcane_bolt' THEN 1 WHEN 'bloodletting' THEN 1 WHEN 'toxic_edge' THEN 2 WHEN 'fireball' THEN 2 WHEN 'frost_bind' THEN 2 WHEN 'purifying_light' THEN 3 ELSE 99 END, upgrade_cost=CASE code WHEN 'heavy_strike' THEN 1 WHEN 'armor_break' THEN 1 WHEN 'arcane_bolt' THEN 1 WHEN 'bloodletting' THEN 1 WHEN 'toxic_edge' THEN 2 WHEN 'fireball' THEN 2 WHEN 'frost_bind' THEN 2 WHEN 'purifying_light' THEN 3 ELSE 99 END, max_level=CASE WHEN code IN ('hop','charge','bite','howl') THEN 1 ELSE 5 END, power_per_level=CASE WHEN code IN ('hop','charge','bite','howl') THEN 0 ELSE 15 END, cooldown_reduction_per_level=CASE WHEN code IN ('heavy_strike','armor_break','fireball','toxic_edge','purifying_light','frost_bind','bloodletting') THEN 1 ELSE 0 END`);
+  await pool.query(`UPDATE skill_definitions SET damage_type=CASE code WHEN 'arcane_bolt' THEN '奥术' WHEN 'heavy_strike' THEN '打击' WHEN 'armor_break' THEN '斩击' WHEN 'fireball' THEN '火' WHEN 'toxic_edge' THEN '刺击' WHEN 'purifying_light' THEN '光' WHEN 'frost_bind' THEN '冰' WHEN 'bloodletting' THEN '斩击' WHEN 'hop' THEN '打击' WHEN 'jump_strike' THEN '打击' WHEN 'charge' THEN '刺击' WHEN 'bite' THEN '斩击' WHEN 'bite_slash' THEN '斩击' WHEN 'howl' THEN '暗' WHEN 'war_cry' THEN '暗' ELSE damage_type END`);
+  await pool.query(`UPDATE skill_definitions SET learn_cost=CASE code WHEN 'heavy_strike' THEN 1 WHEN 'armor_break' THEN 1 WHEN 'arcane_bolt' THEN 1 WHEN 'bloodletting' THEN 1 WHEN 'jump_strike' THEN 1 WHEN 'bite_slash' THEN 1 WHEN 'charge' THEN 1 WHEN 'war_cry' THEN 2 WHEN 'toxic_edge' THEN 2 WHEN 'fireball' THEN 2 WHEN 'frost_bind' THEN 2 WHEN 'purifying_light' THEN 3 ELSE 99 END, upgrade_cost=CASE code WHEN 'heavy_strike' THEN 1 WHEN 'armor_break' THEN 1 WHEN 'arcane_bolt' THEN 1 WHEN 'bloodletting' THEN 1 WHEN 'jump_strike' THEN 1 WHEN 'bite_slash' THEN 1 WHEN 'charge' THEN 1 WHEN 'war_cry' THEN 2 WHEN 'toxic_edge' THEN 2 WHEN 'fireball' THEN 2 WHEN 'frost_bind' THEN 2 WHEN 'purifying_light' THEN 3 ELSE 99 END, max_level=CASE WHEN code IN ('hop','bite','howl') THEN 1 ELSE 5 END, power_per_level=CASE WHEN code IN ('hop','bite','howl') THEN 0 ELSE 15 END, cooldown_reduction_per_level=CASE WHEN code IN ('heavy_strike','armor_break','fireball','toxic_edge','purifying_light','frost_bind','bloodletting','jump_strike','bite_slash','charge','war_cry') THEN 1 ELSE 0 END`);
   await pool.query(`UPDATE skill_definitions SET codex_id=CONCAT(CASE category WHEN 'physical' THEN '41' WHEN 'magic' THEN '42' ELSE '49' END, LPAD(id,5,'0')) WHERE codex_id IS NULL`);
   await pool.query(`INSERT INTO effect_definitions (code,name,effect_type,default_value,default_duration,max_level,max_stacks,stackable,description) VALUES
     ('vulnerability','脆弱','stat_modifier',25,3,5,1,0,'降低目标物理防御，效果值为百分比。'),
@@ -312,15 +316,13 @@ export const initializeSchema = async (pool: Pool) => {
     ('mist_wolf', '雾影狼', 'normal', 1, 350, 55, 40, 95, 8, 1, JSON_ARRAY(), 20, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',0.7,'quantity',1)))
     ON DUPLICATE KEY UPDATE name = VALUES(name), monster_class = VALUES(monster_class), level = VALUES(level), hp_max = VALUES(hp_max), attack = VALUES(attack), defense = VALUES(defense), speed = VALUES(speed), perception = VALUES(perception), charisma = VALUES(charisma), skill_sequence = VALUES(skill_sequence), experience = VALUES(experience), drops_json = VALUES(drops_json)`);
   await pool.query(`UPDATE monster_templates SET weakness_json=CASE code WHEN 'ball_rabbit' THEN JSON_ARRAY('刺击') WHEN 'spike_boar' THEN JSON_ARRAY('水') WHEN 'vine_python' THEN JSON_ARRAY('火','斩击') WHEN 'black_bear' THEN JSON_ARRAY('冰') WHEN 'mist_wolf' THEN JSON_ARRAY('光') ELSE weakness_json END, resistance_json=CASE code WHEN 'ball_rabbit' THEN JSON_ARRAY('打击') WHEN 'spike_boar' THEN JSON_ARRAY('刺击') WHEN 'vine_python' THEN JSON_ARRAY('木') WHEN 'black_bear' THEN JSON_ARRAY('打击') WHEN 'mist_wolf' THEN JSON_ARRAY('暗') ELSE resistance_json END`);
-  await pool.query(`INSERT INTO monster_skill_learn_rules (monster_template_id,skill_id,chance) VALUES
-    ((SELECT id FROM monster_templates WHERE code='ball_rabbit'),(SELECT id FROM skill_definitions WHERE code='armor_break'),0.03000),
-    ((SELECT id FROM monster_templates WHERE code='spike_boar'),(SELECT id FROM skill_definitions WHERE code='bloodletting'),0.05000),
-    ((SELECT id FROM monster_templates WHERE code='vine_python'),(SELECT id FROM skill_definitions WHERE code='toxic_edge'),0.08000),
-    ((SELECT id FROM monster_templates WHERE code='vine_python'),(SELECT id FROM skill_definitions WHERE code='frost_bind'),0.03000),
-    ((SELECT id FROM monster_templates WHERE code='mist_wolf'),(SELECT id FROM skill_definitions WHERE code='arcane_bolt'),0.06000),
-    ((SELECT id FROM monster_templates WHERE code='black_bear'),(SELECT id FROM skill_definitions WHERE code='fireball'),0.05000),
-    ((SELECT id FROM monster_templates WHERE code='black_bear'),(SELECT id FROM skill_definitions WHERE code='purifying_light'),0.02000)
-    ON DUPLICATE KEY UPDATE chance=VALUES(chance)`);
+  await pool.query(`DELETE r FROM monster_skill_learn_rules r JOIN monster_templates t ON t.id=r.monster_template_id WHERE t.code IN ('ball_rabbit','spike_boar','vine_python','black_bear','mist_wolf')`);
+  await pool.query(`INSERT INTO monster_skill_learn_rules (monster_template_id,source_skill_code,skill_id,chance) VALUES
+    ((SELECT id FROM monster_templates WHERE code='ball_rabbit'),'hop',(SELECT id FROM skill_definitions WHERE code='jump_strike'),0.03000),
+    ((SELECT id FROM monster_templates WHERE code='spike_boar'),'charge',(SELECT id FROM skill_definitions WHERE code='charge'),0.05000),
+    ((SELECT id FROM monster_templates WHERE code='vine_python'),'bite',(SELECT id FROM skill_definitions WHERE code='bite_slash'),0.08000),
+    ((SELECT id FROM monster_templates WHERE code='black_bear'),'bite',(SELECT id FROM skill_definitions WHERE code='bite_slash'),0.10000),
+    ((SELECT id FROM monster_templates WHERE code='black_bear'),'howl',(SELECT id FROM skill_definitions WHERE code='war_cry'),0.04000)`);
   await pool.query(`INSERT IGNORE INTO monster_encounter_texts (monster_template_id, description) VALUES
     ((SELECT id FROM monster_templates WHERE code='ball_rabbit'), '落叶轻轻颤动，一只球兔从灌木后探出圆滚滚的脑袋，红色的眼睛正盯着你。'),
     ((SELECT id FROM monster_templates WHERE code='ball_rabbit'), '草丛里传来急促的蹦跳声，球兔挡在了你的去路上。'),

@@ -9,6 +9,7 @@ type CombatTargetRow = SpawnRow & { is_defeated: number };
 type PendingAction = { type: 'attack' | 'skill' | 'item' | 'escape'; slot?: number };
 type CombatEffectRow = RowDataPacket & { id: number; target_kind: 'member' | 'target'; target_id: number; code: string; name: string; effect_type: string; value: number; stacks: number; remaining_turns: number };
 type CombatModifiers = { weaponName?: string; physicalAttack: number; magicAttack: number; critRateBp: number; ignoreDefensePct: number; lifestealPct: number; magicDamagePct: number; manaCostReduction: number; experienceMultiplier: number; dropBonus: number; manaAffinity: boolean };
+export type VictorySettlement = { kind: 'victory'; members: { name: string; experience: number; levelText?: string; drops: { name: string; quantity: number; itemType: string; codexId: string | null; instanceId?: number }[]; learned: { id: number; name: string }[] }[] };
 const pickWeighted = <T extends { spawn_weight: number }>(items: T[]) => {
   const total = items.reduce((sum, item) => sum + Number(item.spawn_weight), 0);
   let roll = Math.random() * total;
@@ -540,29 +541,39 @@ const processTurnEffects = async (connection: PoolConnection, sessionId: string,
 
 const finishPartyVictory = async (connection: PoolConnection, sessionId: string, members: CombatMemberRow[], targets: CombatTargetRow[]) => {
   await connection.execute('UPDATE combat_sessions SET state=\'victory\' WHERE id=?', [sessionId]);
-  const totalExperience = targets.reduce((sum, target) => sum + Number(target.experience), 0); const rewards: string[] = [];
+  const totalExperience = targets.reduce((sum, target) => sum + Number(target.experience), 0); const rewards: VictorySettlement['members'] = [];
   for (const member of members) {
     const modifiers = await modifiersFor(connection, Number(member.id)); const experience = totalExperience * modifiers.experienceMultiplier;
     const oldLevel = Number(member.level); const newLevel = Math.max(oldLevel, Math.floor((Number(member.experience) + experience) / 100) + 1); const gainedPoints = newLevel - oldLevel;
     await connection.execute('UPDATE characters SET level=?,experience=experience+?,skill_points=skill_points+? WHERE id=?', [newLevel, experience, gainedPoints, member.id]);
-    const drops: string[] = [];
+    const drops: VictorySettlement['members'][number]['drops'] = [];
     for (const target of targets) for (const rawDrop of jsonArray(target.drops_json)) {
       const drop = jsonObject(rawDrop); if (!drop.code || Math.random() > Math.min(1, Number(drop.chance ?? 1) + modifiers.dropBonus)) continue;
-      const [items] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>('SELECT id,name FROM item_definitions WHERE code=?', [String(drop.code)]); if (!items[0]) continue;
-      const quantity = Math.max(1, Number(drop.quantity ?? 1)); await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),acquired_at=NOW()', [member.id, items[0].id, quantity]); drops.push(`${items[0].name}×${quantity}`);
-    }
-    const learned: string[] = [];
-    for (const target of targets) {
-      const [rules] = await connection.execute<(RowDataPacket & { skill_id: number; name: string; chance: number })[]>(`SELECT r.skill_id,s.name,r.chance FROM monster_skill_learn_rules r JOIN skill_definitions s ON s.id=r.skill_id WHERE r.monster_template_id=?`, [Number(target.template_id)]);
-      for (const rule of rules) {
-        if (Math.random() > Number(rule.chance)) continue;
-        const [result] = await connection.execute<any>('INSERT IGNORE INTO player_skill_discoveries (character_id,skill_id) VALUES (?,?)', [member.id, rule.skill_id]);
-        if (Number(result.affectedRows)) learned.push(rule.name);
+      const [items] = await connection.execute<(RowDataPacket & { id: number; name: string; item_type: string; codex_id: string | null })[]>('SELECT id,name,item_type,codex_id FROM item_definitions WHERE code=?', [String(drop.code)]); const item = items[0]; if (!item) continue;
+      const quantity = Math.max(1, Number(drop.quantity ?? 1));
+      await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [member.id, item.id]);
+      if (item.item_type === 'equipment') {
+        for (let index = 0; index < quantity; index += 1) {
+          const [result] = await connection.execute<any>('INSERT INTO player_item_instances (character_id,item_id) VALUES (?,?)', [member.id, item.id]);
+          drops.push({ name: item.name, quantity: 1, itemType: item.item_type, codexId: item.codex_id, instanceId: Number(result.insertId) });
+        }
+      } else {
+        await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),acquired_at=NOW()', [member.id, item.id, quantity]);
+        drops.push({ name: item.name, quantity, itemType: item.item_type, codexId: item.codex_id });
       }
     }
-    rewards.push(`[${member.name}] 获得 ${experience} 经验${gainedPoints ? `，升级至 Lv.${newLevel} 并获得 ${gainedPoints} 技能点` : ''}${drops.length ? `，${drops.join('、')}` : ''}${learned.length ? `\n领悟技能：${learned.map(name => `「${name}」`).join('、')}` : ''}`);
+    const learned: VictorySettlement['members'][number]['learned'] = [];
+    for (const target of targets) {
+      const [rules] = await connection.execute<(RowDataPacket & { skill_id: number; name: string; chance: number; source_skill_code: string })[]>(`SELECT r.skill_id,s.name,r.chance,r.source_skill_code FROM monster_skill_learn_rules r JOIN skill_definitions s ON s.id=r.skill_id JOIN skill_definitions source ON source.code=r.source_skill_code AND source.category=s.category AND source.damage_type=s.damage_type WHERE r.monster_template_id=?`, [Number(target.template_id)]);
+      for (const rule of rules) {
+        if (!stringList(target.skill_sequence).includes(rule.source_skill_code) || Math.random() > Number(rule.chance)) continue;
+        const [result] = await connection.execute<any>('INSERT IGNORE INTO player_skill_discoveries (character_id,skill_id) VALUES (?,?)', [member.id, rule.skill_id]);
+        if (Number(result.affectedRows)) learned.push({ id: Number(rule.skill_id), name: rule.name });
+      }
+    }
+    rewards.push({ name: member.name, experience, levelText: gainedPoints ? `升级至 Lv.${newLevel}，获得 ${gainedPoints} 技能点` : undefined, drops, learned });
   }
-  return `胜利结算\n${rewards.join('\n')}`;
+  return { kind: 'victory', members: rewards } as VictorySettlement;
 };
 
 export const combatAction = async (qqUserId: string, action: PendingAction['type'], slot?: number) => withTransaction(async connection => {
