@@ -6,14 +6,14 @@ const skillListFormat = async (qqUserId: string, view: '已学习' | '未学习'
   const data = await skillList(qqUserId); const markdown = Format.createMarkdown().addTitle('技能列表').addText(`\n剩余技能点：${data.skillPoints}\n`);
   if (view === '已学习') {
     if (!data.skills.length) markdown.addText('\n尚未学习技能。\n');
-    for (const skill of data.skills) markdown.addText(`\n【${skill.name}】Lv.${skill.level} `).addButton('[详情]', { data: `/技能详情 ${skill.id}`, autoEnter: false }).addText(' ').addButton(skill.quick_slot ? '[取消快捷]' : '[快捷]', { data: `/技能快捷 ${skill.id}`, autoEnter: false }).addText('\n');
+    for (const skill of data.skills) markdown.addContent('\n!12 ').addText(`【${skill.name}】Lv.${skill.level} `).addButton('[详情]', { data: `/技能详情 ${skill.id}`, autoEnter: false }).addText(' ').addButton(skill.quick_slot ? '[取消快捷]' : '[快捷]', { data: `/技能快捷 ${skill.id}`, autoEnter: false }).addContent('!\n');
     markdown.addText('\n快捷技能：\n');
     const shortcuts = data.skills.filter(skill => skill.quick_slot).sort((a, b) => Number(a.quick_slot) - Number(b.quick_slot));
     if (!shortcuts.length) markdown.addText('暂无\n');
     else for (const skill of shortcuts) markdown.addText(`技能${'①②③④'.charAt(Number(skill.quick_slot) - 1)} ${skill.name}\n`);
   } else {
-    if (!data.discoveries.length) markdown.addText('\n尚未领悟未学习的技能。\n');
-    for (const skill of data.discoveries) markdown.addText(`\n【${skill.name}】SP:${skill.learn_cost} `).addButton('[详情]', { data: `/技能详情 ${skill.id}`, autoEnter: false }).addText(' ').addButton('[学习]', { data: `/学习技能 ${skill.id}`, autoEnter: false }).addText('\n');
+    if (!data.discoveries.length) markdown.addText('\n尚无可学习的技能。\n');
+    for (const skill of data.discoveries) markdown.addContent('\n!12 ').addText(`【${skill.name}】SP:${skill.learn_cost} `).addButton('[详情]', { data: `/技能详情 ${skill.id}`, autoEnter: false }).addText(' ').addButton('[学习]', { data: `/学习技能 ${skill.id}`, autoEnter: false }).addContent('!\n');
   }
   const tabs = Format.createButtonGroup().addRow().addButton('已学习', '/技能列表 已学习', { type: 'command', autoEnter: true, style: view === '已学习' ? 'blue' : undefined }).addButton('未学习', '/技能列表 未学习', { type: 'command', autoEnter: true, style: view === '未学习' ? 'blue' : undefined });
   return Format.create().addMarkdown(markdown).addButtonGroup(tabs);
