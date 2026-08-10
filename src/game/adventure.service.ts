@@ -1,15 +1,45 @@
 import { randomUUID } from 'node:crypto';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
+import { calculateDerivedStats } from './constants';
+import { attributes, type Allocation } from './types';
 
 type CharacterRow = RowDataPacket & { id: number; name: string; level: number; experience: number; skill_points: number; hp_max: number; mp_max: number; physical_attack: number; magic_attack: number; physical_defense: number; magic_defense: number; accuracy: number; evasion: number; crit_rate_bp: number; crit_damage_bp: number; crit_resist_bp: number; crit_damage_reduction_bp: number; speed: number; perception: number; spirit: number; intelligence: number; adventurer_registered: number; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string };
-type SpawnRow = RowDataPacket & { id: number; template_id?: number; name: string; monster_class: string; level: number; current_hp: number; hp_max: number; attack: number; defense: number; speed: number; perception: number; charisma: number; experience: number; drops_json: unknown; skill_sequence?: unknown; weakness_json?: unknown; resistance_json?: unknown };
+type MonsterAttributes = Allocation & Record<`${keyof Allocation}_growth`, number>;
+type MonsterTrait = { code: string; name: string; hpPct?: number; mpPct?: number; physicalAttackPct?: number; magicAttackPct?: number; physicalDefensePct?: number; magicDefensePct?: number; accuracyPct?: number; evasionPct?: number; speedPct?: number };
+type SpawnRow = RowDataPacket & MonsterAttributes & { id: number; template_id?: number; name: string; monster_class: string; level: number; current_hp: number; hp_max: number; attack: number; defense: number; speed: number; experience: number; drops_json: unknown; skill_sequence?: unknown; traits_json?: unknown; weakness_json?: unknown; resistance_json?: unknown };
 type CombatMemberRow = CharacterRow & { current_hp: number; current_mp: number; selected_target_id: number | null; pending_action: unknown; is_defeated: number };
-type CombatTargetRow = SpawnRow & { is_defeated: number };
+type CombatTargetRow = SpawnRow & { current_mp: number; cooldowns: unknown; is_defeated: number };
 type PendingAction = { type: 'attack' | 'skill' | 'item' | 'escape'; slot?: number };
 type CombatEffectRow = RowDataPacket & { id: number; target_kind: 'member' | 'target'; target_id: number; code: string; name: string; effect_type: string; value: number; stacks: number; remaining_turns: number };
 type CombatModifiers = { weaponName?: string; physicalAttack: number; magicAttack: number; critRateBp: number; ignoreDefensePct: number; lifestealPct: number; magicDamagePct: number; manaCostReduction: number; experienceMultiplier: number; dropBonus: number; manaAffinity: boolean };
 export type VictorySettlement = { kind: 'victory'; members: { name: string; experience: number; levelText?: string; drops: { name: string; quantity: number; itemType: string; codexId: string | null; instanceId?: number }[]; learned: { id: number; name: string }[] }[] };
+const monsterAttributeColumns = `${attributes.map(attribute => `t.${attribute},t.${attribute}_growth`).join(',')}`;
+const lowMonsterTraits: MonsterTrait[] = [
+  { code: 'fierce', name: '凶猛的', physicalAttackPct: 10 }, { code: 'sturdy', name: '坚韧的', hpPct: 10 },
+  { code: 'keen', name: '敏锐的', accuracyPct: 10 }, { code: 'nimble', name: '灵巧的', evasionPct: 10, speedPct: 5 },
+  { code: 'arcane', name: '魔蕴的', magicAttackPct: 10 }, { code: 'hardhide', name: '硬皮的', physicalDefensePct: 10 }
+];
+const traitList = (value: unknown) => jsonArray(value).map(item => jsonObject(item) as unknown as MonsterTrait).filter(trait => trait.code && trait.name);
+const percentBonus = (traits: MonsterTrait[], key: keyof MonsterTrait) => traits.reduce((total, trait) => total + Number(trait[key] ?? 0), 0);
+const monsterAttributes = (monster: MonsterAttributes & { level: number }): Allocation => Object.fromEntries(attributes.map(attribute => [attribute, Number(monster[attribute]) + Math.max(0, Number(monster.level) - 1) * Number(monster[`${attribute}_growth`])])) as Allocation;
+const monsterCombatStats = (monster: MonsterAttributes & { level: number }) => {
+  const values = monsterAttributes(monster);
+  const stats = calculateDerivedStats(values);
+  const traits = traitList((monster as SpawnRow).traits_json);
+  const boosted = (value: number, key: keyof MonsterTrait) => Math.floor(value * (1 + percentBonus(traits, key) / 100));
+  return {
+    hpMax: boosted(stats.hpMax, 'hpPct'), mpMax: boosted(stats.mpMax, 'mpPct'), physicalAttack: boosted(stats.physicalAttack, 'physicalAttackPct'), magicAttack: boosted(stats.magicAttack, 'magicAttackPct'),
+    physicalDefense: boosted(stats.physicalDefense, 'physicalDefensePct'), magicDefense: boosted(stats.magicDefense, 'magicDefensePct'), accuracy: boosted(stats.accuracy, 'accuracyPct'), evasion: boosted(stats.evasion, 'evasionPct'),
+    crit: Math.floor(stats.critRateBp), critResist: Math.floor(stats.critResistBp), critDamage: Math.floor(stats.critDamageBp), critReduction: Math.floor(stats.critDamageReductionBp), speed: boosted(stats.speed, 'speedPct'), perception: Math.floor(values.perception)
+  };
+};
+const materializeMonster = <T extends SpawnRow>(monster: T): T => {
+  const stats = monsterCombatStats(monster);
+  const traits = traitList(monster.traits_json);
+  return Object.assign(monster, { name: `${traits.map(trait => trait.name).join('')}${monster.name}`, hp_max: stats.hpMax, attack: stats.physicalAttack, defense: stats.physicalDefense, speed: stats.speed });
+};
+const materializeMonsters = <T extends SpawnRow>(monsters: T[]) => monsters.map(materializeMonster).sort((left, right) => monsterCombatStats(right).perception - monsterCombatStats(left).perception || Number(left.id) - Number(right.id));
 const pickWeighted = <T extends { spawn_weight: number }>(items: T[]) => {
   const total = items.reduce((sum, item) => sum + Number(item.spawn_weight), 0);
   let roll = Math.random() * total;
@@ -17,6 +47,11 @@ const pickWeighted = <T extends { spawn_weight: number }>(items: T[]) => {
   return items[items.length - 1];
 };
 const random = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
+const randomItems = <T>(items: T[], count: number) => [...items].sort(() => Math.random() - .5).slice(0, count);
+const randomMonsterTraits = () => {
+  const count = Math.random() < .55 ? 0 : Math.random() < .88 ? 1 : 2;
+  return randomItems(lowMonsterTraits, count);
+};
 const quickSlotLabel = (slot: number) => `技能${'①②③④'.charAt(slot - 1) || slot}`;
 const jsonObject = (value: unknown): Record<string, unknown> => {
   if (!value) return {};
@@ -59,7 +94,7 @@ export const spawnMonsters = async () => {
   const pool = await getPool();
   const [regions] = await pool.execute<(RowDataPacket & { id: number; min_x: number; max_x: number; min_y: number; max_y: number; min_z: number; max_z: number })[]>('SELECT id,min_x,max_x,min_y,max_y,min_z,max_z FROM map_regions WHERE is_spawn_enabled=1');
   for (const region of regions) {
-    const [templates] = await pool.execute<(RowDataPacket & { id: number; hp_max: number; monster_class: string; spawn_weight: number })[]>('SELECT t.id,t.hp_max,t.monster_class,p.spawn_weight FROM map_monster_pools p JOIN monster_templates t ON t.id=p.monster_template_id WHERE p.region_id=?', [region.id]);
+    const [templates] = await pool.execute<(RowDataPacket & MonsterAttributes & { id: number; level: number; monster_class: string; spawn_weight: number; skill_sequence: unknown })[]>(`SELECT t.id,t.level,t.monster_class,t.skill_sequence,p.spawn_weight,${monsterAttributeColumns} FROM map_monster_pools p JOIN monster_templates t ON t.id=p.monster_template_id WHERE p.region_id=?`, [region.id]);
     if (!templates.length) continue;
     const [blockedRows] = await pool.execute<(RowDataPacket & { pos_x: number; pos_y: number; pos_z: number })[]>(`SELECT pos_x,pos_y,pos_z FROM map_npcs WHERE region_id=? AND pos_x IS NOT NULL AND pos_y IS NOT NULL AND pos_z IS NOT NULL
       UNION SELECT pos_x,pos_y,pos_z FROM map_special_objects WHERE region_id=?`, [region.id, region.id]);
@@ -72,7 +107,9 @@ export const spawnMonsters = async () => {
       let x = random(region.min_x, region.max_x); let y = random(region.min_y, region.max_y); let z = random(region.min_z, region.max_z);
       for (let attempt = 0; attempt < 32 && blocked.has(`${x},${y},${z}`); attempt++) { x = random(region.min_x, region.max_x); y = random(region.min_y, region.max_y); z = random(region.min_z, region.max_z); }
       if (blocked.has(`${x},${y},${z}`)) continue;
-      await pool.execute('INSERT INTO monster_spawns (template_id,region_id,pos_x,pos_y,pos_z,current_hp) VALUES (?,?,?,?,?,?)', [template.id, region.id, x, y, z, template.hp_max]);
+      const skillPool = stringList(template.skill_sequence); const skills = randomItems(skillPool, random(0, Math.min(4, skillPool.length))); const traits = randomMonsterTraits();
+      const stats = monsterCombatStats({ ...template, traits_json: traits });
+      await pool.execute('INSERT INTO monster_spawns (template_id,region_id,pos_x,pos_y,pos_z,current_hp,skill_sequence,traits_json) VALUES (?,?,?,?,?,?,?,?)', [template.id, region.id, x, y, z, stats.hpMax, JSON.stringify(skills), JSON.stringify(traits)]);
     }
   }
 };
@@ -239,10 +276,11 @@ export const partyInfo = async (qqUserId: string) => {
 export const explore = async (qqUserId: string) => {
   const character = await characterFor(qqUserId);
   const pool = await getPool();
-  const [spawns] = await pool.execute<SpawnRow[]>(`SELECT s.id,t.name,t.monster_class,t.level,s.current_hp,t.hp_max,t.attack,t.defense,t.speed,t.perception,t.charisma,t.experience,t.drops_json FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? AND s.defeated_at IS NULL ORDER BY t.perception DESC,s.id`, [character.current_region_id, character.pos_x, character.pos_y, character.pos_z]);
+  const [spawnRows] = await pool.execute<SpawnRow[]>(`SELECT s.id,s.template_id,t.name,t.monster_class,t.level,s.current_hp,s.traits_json,COALESCE(s.skill_sequence,t.skill_sequence) AS skill_sequence,${monsterAttributeColumns},t.experience,t.drops_json FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? AND s.defeated_at IS NULL`, [character.current_region_id, character.pos_x, character.pos_y, character.pos_z]);
+  const spawns = materializeMonsters(spawnRows);
   if (!spawns.length) return { character, spawns, text: '四周只有风吹树叶的声音。这里暂时没有敌对生物。' };
-  const charm = Math.floor((Number(character.spirit) + Number(character.intelligence)) / 2);
-  const text = `你发现 ${spawns.map(s => `#${s.id} ${s.name} Lv.${s.level}`).join('、')}。\n\n感知 ${character.perception}｜负重后速度 ${character.speed}｜魅力 ${charm}\n感知与速度高于敌人时可偷袭；感知较高可尝试躲避；魅力较高可交涉。`;
+  const negotiation = Math.floor(Number(character.spirit) + Number(character.intelligence) + Number(character.perception) / 2);
+  const text = `你发现 ${spawns.map(s => `#${s.id} ${s.name} Lv.${s.level}`).join('、')}。\n\n感知 ${character.perception}｜负重后速度 ${character.speed}｜交涉值 ${negotiation}\n感知与速度高于敌人时可偷袭；感知较高可尝试躲避；交涉成功率按双方交涉值对抗结算。`;
   return { character, spawns, text };
 };
 
@@ -279,7 +317,8 @@ const moveToPosition = async (connection: PoolConnection, qqUserId: string, x: n
   const region = regions[0]; if (!region) throw new Error('\n\n前面的区域，以后再来探索吧！');
   if (partyRows[0]) await connection.execute('UPDATE characters c JOIN party_members pm ON pm.character_id=c.id SET c.current_region_id=?,c.pos_x=?,c.pos_y=? WHERE pm.party_id=(SELECT party_id FROM party_members WHERE character_id=? LIMIT 1)', [region.id, x, y, character.id]);
   else await connection.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=? WHERE id=?', [region.id, x, y, character.id]);
-  const [spawns] = await connection.execute<SpawnRow[]>(`SELECT s.id,s.template_id,t.name,t.monster_class,t.level,s.current_hp,t.hp_max,t.attack,t.defense,t.speed,t.perception,t.charisma,t.experience,t.drops_json FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? AND s.defeated_at IS NULL ORDER BY t.perception DESC,s.id FOR UPDATE`, [region.id, x, y, character.pos_z]);
+  const [spawnRows] = await connection.execute<SpawnRow[]>(`SELECT s.id,s.template_id,t.name,t.monster_class,t.level,s.current_hp,s.traits_json,COALESCE(s.skill_sequence,t.skill_sequence) AS skill_sequence,${monsterAttributeColumns},t.experience,t.drops_json FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? AND s.defeated_at IS NULL FOR UPDATE`, [region.id, x, y, character.pos_z]);
+  const spawns = materializeMonsters(spawnRows);
   const moved = { ...character, current_region_id: region.id, region_name: region.name, pos_x: x, pos_y: y };
   if (spawns.length) {
     const [texts] = await connection.execute<(RowDataPacket & { description: string })[]>('SELECT description FROM monster_encounter_texts WHERE monster_template_id=? ORDER BY RAND() LIMIT 1', [spawns[0].template_id]);
@@ -321,21 +360,22 @@ const combatMembers = async (connection: PoolConnection, sessionId: string) => {
 };
 
 const combatTargets = async (connection: PoolConnection, sessionId: string) => {
-  const [rows] = await connection.execute<CombatTargetRow[]>(`SELECT s.id,s.template_id,t.name,t.monster_class,t.level,s.current_hp,t.hp_max,t.attack,t.defense,t.speed,t.perception,t.charisma,t.experience,t.drops_json,t.skill_sequence,t.weakness_json,t.resistance_json,ct.is_defeated
+  const [rows] = await connection.execute<CombatTargetRow[]>(`SELECT s.id,s.template_id,t.name,t.monster_class,t.level,s.current_hp,s.traits_json,COALESCE(s.skill_sequence,t.skill_sequence) AS skill_sequence,${monsterAttributeColumns},t.experience,t.drops_json,t.weakness_json,t.resistance_json,ct.current_mp,ct.cooldowns,ct.is_defeated
     FROM combat_targets ct JOIN monster_spawns s ON s.id=ct.spawn_id JOIN monster_templates t ON t.id=s.template_id WHERE ct.session_id=? ORDER BY s.id FOR UPDATE`, [sessionId]);
-  return rows;
+  return materializeMonsters(rows);
 };
 
 export const chooseTarget = async (qqUserId: string, spawnId: number) => withTransaction(async connection => {
   const character = await characterFor(qqUserId); const members = await partyCombatants(connection, character);
   const [existing] = await connection.execute<RowDataPacket[]>(`SELECT cs.id FROM combat_sessions cs JOIN combat_members cm ON cm.session_id=cs.id WHERE cm.character_id IN (${members.map(() => '?').join(',')}) AND cs.state='active' LIMIT 1 FOR UPDATE`, members.map(member => member.id));
   if (existing[0]) throw new Error('队伍正在战斗中，请先结束当前战斗。');
-  const [spawns] = await connection.execute<SpawnRow[]>(`SELECT s.id,s.template_id,t.name,t.monster_class,t.level,s.current_hp,t.hp_max,t.attack,t.defense,t.speed,t.perception,t.charisma,t.experience,t.drops_json,t.skill_sequence,t.weakness_json,t.resistance_json FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? AND s.defeated_at IS NULL ORDER BY t.perception DESC,s.id FOR UPDATE`, [character.current_region_id, character.pos_x, character.pos_y, character.pos_z]);
+  const [spawnRows] = await connection.execute<SpawnRow[]>(`SELECT s.id,s.template_id,t.name,t.monster_class,t.level,s.current_hp,s.traits_json,COALESCE(s.skill_sequence,t.skill_sequence) AS skill_sequence,${monsterAttributeColumns},t.experience,t.drops_json,t.weakness_json,t.resistance_json FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? AND s.defeated_at IS NULL FOR UPDATE`, [character.current_region_id, character.pos_x, character.pos_y, character.pos_z]);
+  const spawns = materializeMonsters(spawnRows);
   const selected = spawns.find(spawn => Number(spawn.id) === spawnId); if (!selected) throw new Error('目标已离开当前位置或已被击败。');
   const id = randomUUID();
   await connection.execute('INSERT INTO combat_sessions (id,character_id,spawn_id,player_hp,player_mp,cooldowns) VALUES (?,?,?,?,?,JSON_OBJECT())', [id, character.id, spawns[0].id, character.hp_max, character.mp_max]);
   for (const member of members) await connection.execute('INSERT INTO combat_members (session_id,character_id,current_hp,current_mp,selected_target_id) VALUES (?,?,?,?,?)', [id, member.id, member.hp_max, member.mp_max, selected.id]);
-  for (const spawn of spawns) { await connection.execute('INSERT INTO combat_targets (session_id,spawn_id) VALUES (?,?)', [id, spawn.id]); for (const member of members) await connection.execute('INSERT INTO combat_threat (session_id,spawn_id,character_id,threat) VALUES (?,?,?,1)', [id, spawn.id, member.id]); }
+  for (const spawn of spawns) { await connection.execute('INSERT INTO combat_targets (session_id,spawn_id,current_mp,cooldowns) VALUES (?,?,?,JSON_OBJECT())', [id, spawn.id, monsterCombatStats(spawn).mpMax]); for (const member of members) await connection.execute('INSERT INTO combat_threat (session_id,spawn_id,character_id,threat) VALUES (?,?,?,1)', [id, spawn.id, member.id]); }
   return { character, spawn: selected, spawns, members };
 });
 
@@ -344,15 +384,16 @@ export const encounterAction = async (qqUserId: string, spawnId: number, action:
   const spawn = found.spawns.find(item => item.id === spawnId);
   if (!spawn) throw new Error('该目标不在当前位置。');
   const primary = found.spawns[0];
-  const charm = Math.floor((Number(found.character.spirit) + Number(found.character.intelligence)) / 2);
+  const playerNegotiation = Math.max(1, Math.floor(Number(found.character.spirit) + Number(found.character.intelligence) + Number(found.character.perception) / 2));
   if (action === 'avoid') {
-    if (Number(found.character.perception) + random(1, 20) >= Number(primary.perception)) return '你借助感知绕开了敌人，没有进入战斗。';
+    if (Number(found.character.perception) + random(1, 20) >= monsterCombatStats(primary).perception) return '你借助感知绕开了敌人，没有进入战斗。';
     const started = await chooseTarget(qqUserId, spawnId); return `躲避失败！\n目标：${started.spawn.name}\n进入战斗：/攻击｜/技能 1-4｜/道具 1-4｜/逃跑`;
   }
   if (action === 'persuade') {
-    const chance = Math.max(.02, Math.min(.15, .05 + (charm - Number(primary.charisma)) * .01));
+    const monsterNegotiation = Math.max(1, Math.floor(Object.values(monsterAttributes(primary)).reduce((total, value) => total + Number(value), 0)));
+    const chance = opposedChance(playerNegotiation, monsterNegotiation);
     if (Math.random() < chance) return withTransaction(async connection => {
-      const [targets] = await connection.execute<SpawnRow[]>(`SELECT s.id,t.name,t.experience,t.drops_json FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.id=? AND s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? AND s.defeated_at IS NULL FOR UPDATE`, [spawnId, found.character.current_region_id, found.character.pos_x, found.character.pos_y, found.character.pos_z]);
+      const [targets] = await connection.execute<SpawnRow[]>(`SELECT s.id,s.template_id,t.name,t.level,${monsterAttributeColumns},t.experience,t.drops_json FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.id=? AND s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? AND s.defeated_at IS NULL FOR UPDATE`, [spawnId, found.character.current_region_id, found.character.pos_x, found.character.pos_y, found.character.pos_z]);
       const target = targets[0]; if (!target) throw new Error('该目标已离开当前位置。');
       const experience = Math.max(1, Math.floor(Number(target.experience) * .2)); const oldLevel = Number(found.character.level); const newLevel = Math.max(oldLevel, Math.floor((Number(found.character.experience) + experience) / 100) + 1); const gainedPoints = newLevel - oldLevel;
       await connection.execute('UPDATE monster_spawns SET current_hp=0,defeated_at=NOW() WHERE id=?', [target.id]);
@@ -378,7 +419,8 @@ export const battleStatus = async (qqUserId: string) => {
   const [sessions] = await pool.execute<(RowDataPacket & { combat_id: string; turn_no: number })[]>(`SELECT cs.id AS combat_id,cs.turn_no FROM combat_members cm JOIN combat_sessions cs ON cs.id=cm.session_id WHERE cm.character_id=? AND cs.state='active' LIMIT 1`, [character.id]);
   const session = sessions[0]; if (!session) throw new Error('当前不在战斗中。请移动到敌对生物所在格子。');
   const [members] = await pool.execute<CombatMemberRow[]>(`SELECT c.*,r.name AS region_name,cm.current_hp,cm.current_mp,cm.selected_target_id,cm.pending_action,cm.is_defeated FROM combat_members cm JOIN characters c ON c.id=cm.character_id JOIN map_regions r ON r.id=c.current_region_id WHERE cm.session_id=? ORDER BY c.id`, [session.combat_id]);
-  const [targets] = await pool.execute<CombatTargetRow[]>(`SELECT s.id,t.name,t.level,s.current_hp,t.hp_max,ct.is_defeated FROM combat_targets ct JOIN monster_spawns s ON s.id=ct.spawn_id JOIN monster_templates t ON t.id=s.template_id WHERE ct.session_id=? ORDER BY s.id`, [session.combat_id]);
+  const [targetRows] = await pool.execute<CombatTargetRow[]>(`SELECT s.id,s.template_id,t.name,t.level,s.current_hp,s.traits_json,COALESCE(s.skill_sequence,t.skill_sequence) AS skill_sequence,${monsterAttributeColumns},ct.current_mp,ct.cooldowns,ct.is_defeated FROM combat_targets ct JOIN monster_spawns s ON s.id=ct.spawn_id JOIN monster_templates t ON t.id=s.template_id WHERE ct.session_id=? ORDER BY s.id`, [session.combat_id]);
+  const targets = materializeMonsters(targetRows);
   const [skills] = await pool.execute<(RowDataPacket & { quick_slot: number })[]>('SELECT quick_slot FROM player_skills WHERE character_id=? AND quick_slot IS NOT NULL', [character.id]);
   const [items] = await pool.execute<(RowDataPacket & { quick_slot: number })[]>('SELECT qi.quick_slot FROM player_quick_items qi JOIN player_inventory pi ON pi.character_id=qi.character_id AND pi.item_id=qi.item_id WHERE qi.character_id=? AND pi.quantity>0', [character.id]);
   const own = members.find(member => Number(member.id) === Number(character.id)); if (!own) throw new Error('战斗成员状态异常。');
@@ -416,14 +458,6 @@ const resolveStrike = (attack: number, defense: number, accuracy: number, evasio
   const critical = Math.random() < opposedChance(crit, critResist);
   if (critical) damage = Math.max(1, Math.floor(damage * (1 + opposedChance(critDamage, critReduction))));
   return { hit: true, crit: critical, damage };
-};
-
-const monsterCombatStats = (combat: SpawnRow) => {
-  const speed = Number(combat.speed); const perception = Number(combat.perception); const level = Number(combat.level);
-  const accuracy = 120 + speed * 2 + perception * 8;
-  const evasion = 120 + speed * 1.6 + perception * 8;
-  const crit = 180 + perception * 12 + level * 20;
-  return { accuracy, evasion, crit, critResist: crit, critDamage: 180 + Number(combat.attack) * 4, critReduction: 180 + Number(combat.defense) * 10 + level * 20 };
 };
 
 // 旧会话逻辑仅保留给历史会话；新战斗统一使用下方的队伍回合实现。
@@ -517,23 +551,23 @@ const effectMessage = (effect: { code: string; name: string; effect_type: string
   return `　　$${effect.name}$${detail}${duration ? `(${duration})` : ''}${stacks > 1 ? `×${stacks}` : ''}`;
 };
 
-const applySkillEffects = async (connection: PoolConnection, sessionId: string, skillId: number, caster: CombatMemberRow, target: CombatTargetRow, timing: 'on_hit' | 'on_cast', log: string[]) => {
+const applySkillEffects = async (connection: PoolConnection, sessionId: string, skillId: number, caster: { id: number }, casterKind: 'member' | 'target', target: { id: number }, targetKind: 'member' | 'target', timing: 'on_hit' | 'on_cast', log: string[]) => {
   const [effects] = await connection.execute<(RowDataPacket & { id: number; code: string; name: string; effect_type: string; value: number; duration: number; max_stacks: number; stackable: number; effect_level: number; target_scope: 'enemy' | 'ally' | 'self' })[]>(`SELECT e.id,e.code,e.name,e.effect_type,COALESCE(se.value_override,e.default_value) AS value,COALESCE(se.duration_override,e.default_duration) AS duration,e.max_stacks,e.stackable,se.effect_level,se.target_scope
     FROM skill_effects se JOIN effect_definitions e ON e.id=se.effect_id WHERE se.skill_id=? AND se.trigger_timing=?`, [skillId, timing]);
   for (const effect of effects) {
     const value = Number(effect.value) * (1 + Math.max(0, Number(effect.effect_level) - 1) * .25);
-    const targetKind = effect.target_scope === 'enemy' ? 'target' : 'member'; const targetId = effect.target_scope === 'enemy' ? Number(target.id) : Number(caster.id);
+    const effectTargetKind = effect.target_scope === 'enemy' ? targetKind : casterKind; const targetId = effect.target_scope === 'enemy' ? Number(target.id) : Number(caster.id);
     if (effect.effect_type === 'cleanse') {
-      await connection.execute(`DELETE ce FROM combat_status_effects ce JOIN effect_definitions e ON e.id=ce.effect_id WHERE ce.session_id=? AND ce.target_kind=? AND ce.target_id=? AND e.effect_type IN ('damage_over_time','stat_modifier','control')`, [sessionId, targetKind, targetId]);
+      await connection.execute(`DELETE ce FROM combat_status_effects ce JOIN effect_definitions e ON e.id=ce.effect_id WHERE ce.session_id=? AND ce.target_kind=? AND ce.target_id=? AND e.effect_type IN ('damage_over_time','stat_modifier','control')`, [sessionId, effectTargetKind, targetId]);
       log.push(effectMessage(effect, value, Number(effect.duration))); continue;
     }
-    const [existing] = await connection.execute<(RowDataPacket & { id: number; stacks: number })[]>('SELECT id,stacks FROM combat_status_effects WHERE session_id=? AND target_kind=? AND target_id=? AND effect_id=? FOR UPDATE', [sessionId, targetKind, targetId, effect.id]);
+    const [existing] = await connection.execute<(RowDataPacket & { id: number; stacks: number })[]>('SELECT id,stacks FROM combat_status_effects WHERE session_id=? AND target_kind=? AND target_id=? AND effect_id=? FOR UPDATE', [sessionId, effectTargetKind, targetId, effect.id]);
     if (existing[0]) {
       const stacks = effect.stackable ? Math.min(Number(effect.max_stacks), Number(existing[0].stacks) + 1) : 1;
       await connection.execute('UPDATE combat_status_effects SET effect_level=?,value=?,stacks=?,remaining_turns=GREATEST(remaining_turns,?) WHERE id=?', [effect.effect_level, value, stacks, effect.duration, existing[0].id]);
       log.push(effectMessage(effect, value, Number(effect.duration), stacks));
     } else {
-      await connection.execute('INSERT INTO combat_status_effects (session_id,target_kind,target_id,effect_id,effect_level,value,remaining_turns) VALUES (?,?,?,?,?,?,?)', [sessionId, targetKind, targetId, effect.id, effect.effect_level, value, effect.duration]);
+      await connection.execute('INSERT INTO combat_status_effects (session_id,target_kind,target_id,effect_id,effect_level,value,remaining_turns) VALUES (?,?,?,?,?,?,?)', [sessionId, effectTargetKind, targetId, effect.id, effect.effect_level, value, effect.duration]);
       log.push(effectMessage(effect, value, Number(effect.duration)));
     }
   }
@@ -615,7 +649,7 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
 
   const targets = await combatTargets(connection, session.combat_id); const log: string[] = [`战斗<${session.turn_no}>回合`]; const effects = await processTurnEffects(connection, session.combat_id, members, targets, log);
   const effectValue = (kind: 'member' | 'target', targetId: number, code: string) => effects.filter(effect => effect.target_kind === kind && Number(effect.target_id) === targetId && effect.code === code).reduce((sum, effect) => sum + Number(effect.value) * Number(effect.stacks), 0);
-  const turns = [...aliveMembers.filter(member => !member.is_defeated).map(member => ({ kind: 'member' as const, id: Number(member.id), speed: Number(member.speed) * (1 - effectValue('member', Number(member.id), 'slow') / 100) })), ...targets.filter(target => !target.is_defeated).map(target => ({ kind: 'target' as const, id: Number(target.id), speed: Number(target.speed) * (1 - effectValue('target', Number(target.id), 'slow') / 100) }))].sort((a, b) => b.speed - a.speed || a.id - b.id);
+  const turns = [...aliveMembers.filter(member => !member.is_defeated).map(member => ({ kind: 'member' as const, id: Number(member.id), speed: Number(member.speed) * (1 - effectValue('member', Number(member.id), 'slow') / 100) })), ...targets.filter(target => !target.is_defeated).map(target => ({ kind: 'target' as const, id: Number(target.id), speed: monsterCombatStats(target).speed * (1 - effectValue('target', Number(target.id), 'slow') / 100) }))].sort((a, b) => b.speed - a.speed || a.id - b.id);
   for (const turn of turns) {
     if (turn.kind === 'member') {
       const member = members.find(item => Number(item.id) === turn.id)!; if (member.is_defeated) continue;
@@ -634,26 +668,38 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
         const manaCost = Math.max(skill.mana_cost ? 1 : 0, Math.ceil(Number(skill.mana_cost) * (modifiers.manaAffinity ? .7 : 1)) - modifiers.manaCostReduction); if (Number(member.current_mp) < manaCost) { log.push(`➤【${member.name}】释放技能「${skill.name}」\n　➥MP不足。`); continue; }
         member.current_mp -= manaCost; skillId = Number(skill.id); label = `释放技能「${skill.name}」`; kind = skill.category === 'magic' ? '魔法' : '物理'; damageType = skill.damage_type; attack = (skill.category === 'magic' ? Number(member.magic_attack) + modifiers.magicAttack : Number(member.physical_attack) + modifiers.physicalAttack) * (Number(skill.power) + (Number(skill.level) - 1) * Number(skill.power_per_level)) / 100; power = skill.category === 'magic' ? 1 + modifiers.magicDamagePct / 100 : 1;
       }
-      const monster = monsterCombatStats(target); const vulnerability = effectValue('target', Number(target.id), 'vulnerability'); const defense = kind === '魔法' ? Number(target.defense) : Math.floor(Number(target.defense) * (1 - Math.min(90, modifiers.ignoreDefensePct + vulnerability) / 100)); const strike = resolveStrike(attack * power, defense, Number(member.accuracy), monster.evasion, Number(member.crit_rate_bp) + modifiers.critRateBp, monster.critResist, Number(member.crit_damage_bp), monster.critReduction);
-      log.push(`➤【${member.name}】${label}`); if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, target, 'on_cast', log); if (!strike.hit) { log.push(`　➥[${target.name}]闪避了攻击`); continue; }
+      const monster = monsterCombatStats(target); const vulnerability = effectValue('target', Number(target.id), 'vulnerability'); const baseDefense = kind === '魔法' ? monster.magicDefense : monster.physicalDefense; const defense = Math.floor(baseDefense * (1 - (kind === '魔法' ? 0 : Math.min(90, modifiers.ignoreDefensePct + vulnerability)) / 100)); const strike = resolveStrike(attack * power, defense, Number(member.accuracy), monster.evasion, Number(member.crit_rate_bp) + modifiers.critRateBp, monster.critResist, Number(member.crit_damage_bp), monster.critReduction);
+      log.push(`➤【${member.name}】${label}`); if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, 'member', target, 'target', 'on_cast', log); if (!strike.hit) { log.push(`　➥[${target.name}]闪避了攻击`); continue; }
       const elemental = weaknessMultiplier(target, damageType); const damage = Math.max(1, Math.floor(strike.damage * elemental)); const oldHp = Number(target.current_hp); target.current_hp = Math.max(0, oldHp - damage); if (!target.current_hp) target.is_defeated = 1;
       await connection.execute('UPDATE combat_threat SET threat=threat+? WHERE session_id=? AND spawn_id=? AND character_id=?', [damage, session.combat_id, target.id, member.id]); if (modifiers.lifestealPct && choice.type === 'attack') member.current_hp = Math.min(Number(member.hp_max), Number(member.current_hp) + Math.floor(damage * modifiers.lifestealPct / 100));
       log.push(`　➥${elemental > 1 ? '[克制]' : elemental < 1 ? '[抗性]' : ''}${strike.crit ? '[暴击!]' : ''}对【${target.name}】造成 ${damage} 点${kind}伤害(${oldHp}→${target.current_hp})`);
-      if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, target, 'on_hit', log);
+      if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, 'member', target, 'target', 'on_hit', log);
     } else {
       const monsterTarget = targets.find(item => Number(item.id) === turn.id)!; if (monsterTarget.is_defeated) continue;
       const [threatRows] = await connection.execute<(RowDataPacket & { character_id: number; threat: number })[]>('SELECT character_id,threat FROM combat_threat WHERE session_id=? AND spawn_id=? FOR UPDATE', [session.combat_id, monsterTarget.id]); const victim = threatTarget(members, new Map(threatRows.map(row => [Number(row.character_id), Number(row.threat)]))); if (!victim) continue;
-      const sequence = stringList(monsterTarget.skill_sequence); const skillCode = sequence.length ? sequence[(Number(session.turn_no) - 1) % sequence.length] : '攻击';
-      const [skillRows] = await connection.execute<(RowDataPacket & { name: string; category: 'physical' | 'magic'; power: number })[]>('SELECT name,category,power FROM skill_definitions WHERE code=?', [skillCode]);
-      const skill = skillRows[0]; const multiplier = Number(skill?.power ?? 100) / 100; const monster = monsterCombatStats(monsterTarget); const bite = skillCode === 'bite';
-      const strike = resolveStrike(Number(monsterTarget.attack) * multiplier, Number(victim.physical_defense), monster.accuracy, Number(victim.evasion), monster.crit + (bite ? 2500 : 0), Number(victim.crit_resist_bp), monster.critDamage, Number(victim.crit_damage_reduction_bp), bite);
-      log.push(`➤【${monsterTarget.name}】释放技能「${skill?.name ?? skillCode}」`);
+      const sequence = stringList(monsterTarget.skill_sequence); const cooldowns = jsonObject(monsterTarget.cooldowns);
+      let skill: (RowDataPacket & { id: number; code: string; name: string; category: 'physical' | 'magic'; power: number; mana_cost: number; cooldown_turns: number }) | undefined;
+      if (sequence.length) {
+        const placeholders = sequence.map(() => '?').join(',');
+        const [skillRows] = await connection.execute<(RowDataPacket & { id: number; code: string; name: string; category: 'physical' | 'magic'; power: number; mana_cost: number; cooldown_turns: number })[]>(`SELECT id,code,name,category,power,mana_cost,cooldown_turns FROM skill_definitions WHERE code IN (${placeholders})`, sequence);
+        const readySkills = skillRows.filter(candidate => Number(monsterTarget.current_mp) >= Number(candidate.mana_cost) && Number(cooldowns[candidate.code] ?? 0) <= 0);
+        skill = readySkills.length ? readySkills[random(0, readySkills.length - 1)] : undefined;
+      }
+      if (skill) { monsterTarget.current_mp -= Number(skill.mana_cost); cooldowns[skill.code] = Number(skill.cooldown_turns) + 1; monsterTarget.cooldowns = cooldowns; }
+      const multiplier = Number(skill?.power ?? 100) / 100; const monster = monsterCombatStats(monsterTarget); const bite = skill?.code === 'bite';
+      const monsterAttack = skill?.category === 'magic' ? monster.magicAttack : monster.physicalAttack; const victimDefense = skill?.category === 'magic' ? Number(victim.magic_defense) : Number(victim.physical_defense);
+      const strike = resolveStrike(monsterAttack * multiplier, victimDefense, monster.accuracy, Number(victim.evasion), monster.crit + (bite ? 2500 : 0), Number(victim.crit_resist_bp), monster.critDamage, Number(victim.crit_damage_reduction_bp), bite);
+      log.push(`➤【${monsterTarget.name}】${skill ? `释放技能「${skill.name}」` : '普通攻击'}`);
       if (bite) { log.push('　#必中#该攻击必定命中'); log.push('　#獠牙#该攻击暴击+25%'); }
       if (!strike.hit) { log.push(`　➥[${victim.name}]闪避了攻击`); continue; }
-      const oldHp = Number(victim.current_hp); victim.current_hp = Math.max(0, oldHp - strike.damage); if (!victim.current_hp) victim.is_defeated = 1; log.push(`　➥${strike.crit ? '[暴击!]' : ''}对【${victim.name}】造成 ${strike.damage} 点${skill?.category === 'magic' ? '魔法' : '物理'}伤害(${oldHp}→${victim.current_hp})`);
+      const oldHp = Number(victim.current_hp); victim.current_hp = Math.max(0, oldHp - strike.damage); if (!victim.current_hp) victim.is_defeated = 1; log.push(`　➥${strike.crit ? '[暴击!]' : ''}对【${victim.name}】造成 ${strike.damage} 点${skill?.category === 'magic' ? '魔法' : '物理'}伤害(${oldHp}→${victim.current_hp})`); if (skill) await applySkillEffects(connection, session.combat_id, Number(skill.id), monsterTarget, 'target', victim, 'member', 'on_hit', log);
     }
   }
-  for (const target of targets) { await connection.execute('UPDATE monster_spawns SET current_hp=?,defeated_at=IF(?,NOW(),defeated_at) WHERE id=?', [target.current_hp, target.is_defeated ? 1 : 0, target.id]); await connection.execute('UPDATE combat_targets SET is_defeated=? WHERE session_id=? AND spawn_id=?', [target.is_defeated ? 1 : 0, session.combat_id, target.id]); }
+  for (const target of targets) {
+    const cooldowns = jsonObject(target.cooldowns); for (const [code, turns] of Object.entries(cooldowns)) cooldowns[code] = Math.max(0, Number(turns) - 1);
+    await connection.execute('UPDATE monster_spawns SET current_hp=?,defeated_at=IF(?,NOW(),defeated_at) WHERE id=?', [target.current_hp, target.is_defeated ? 1 : 0, target.id]);
+    await connection.execute('UPDATE combat_targets SET current_mp=?,cooldowns=?,is_defeated=? WHERE session_id=? AND spawn_id=?', [target.current_mp, JSON.stringify(cooldowns), target.is_defeated ? 1 : 0, session.combat_id, target.id]);
+  }
   for (const member of members) await connection.execute('UPDATE combat_members SET current_hp=?,current_mp=?,is_defeated=?,pending_action=NULL WHERE session_id=? AND character_id=?', [member.current_hp, member.current_mp, member.is_defeated ? 1 : 0, session.combat_id, member.id]);
   if (aliveMembers.every(member => (jsonObject(member.pending_action) as unknown as PendingAction).type === 'escape')) { await connection.execute('UPDATE combat_sessions SET state=\'escaped\' WHERE id=?', [session.combat_id]); return { ended: true, waiting: false, log: `${log.join('\n')}\n\n队伍一同撤离了战斗。` }; }
   if (targets.every(target => target.is_defeated)) return { ended: true, waiting: false, log: log.join('\n'), settlement: await finishPartyVictory(connection, session.combat_id, members, targets) };
