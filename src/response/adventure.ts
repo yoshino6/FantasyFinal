@@ -21,18 +21,18 @@ const battleStateText = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
   return members.join('\n');
 };
 const appendBattleState = (markdown: ReturnType<typeof Format.createMarkdown>, battle: Awaited<ReturnType<typeof battleStatus>>) => {
-  markdown.addText(`\n${battleStateText(battle)}\n`);
+  markdown.addText(`${battleStateText(battle)}\n`);
   for (const [index, target] of battle.targets.entries()) markdown.addButton(`${battle.selectedTargetId === target.id ? '▶' : ''}敌方${index + 1} ${target.name}`, { data: `/切换目标 ${target.id}`, autoEnter: false }).addText(` HP ${target.hp}/${target.hpMax}${target.defeated ? '（击败）' : ''}\n`);
   return markdown;
 };
 const battleFormat = (_title: string, text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => {
   const lines = text.split('\n'); if (/^战斗<\d+>回合$/.test(lines[0])) lines.shift();
   const markdown = Format.createMarkdown().addTitle(`战斗<${battle.turn}>回合`);
-  if (lines.join('\n')) markdown.addBlockquote(lines.join('\n'));
+  if (lines.join('\n')) markdown.addBlockquote(lines.join('\n')).addNewline().addNewline();
   return Format.create().addMarkdown(appendBattleState(markdown, battle)).addButtonGroup(battleButtons(battle));
 };
 const battleErrorFormat = (text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => {
-  const markdown = Format.createMarkdown().addTitle('操作失败').addText(text);
+  const markdown = Format.createMarkdown().addTitle('操作失败').addText(`${text}\n\n`);
   return Format.create().addMarkdown(appendBattleState(markdown, battle)).addButtonGroup(battleButtons(battle));
 };
 
