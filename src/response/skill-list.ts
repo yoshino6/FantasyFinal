@@ -3,7 +3,7 @@ import { learnSkill, skillDetail, skillList, toggleSkillShortcut, upgradeSkill }
 import { messageFormat } from '../game/message';
 
 const skillListFormat = async (qqUserId: string, view: '已学习' | '未学习') => {
-  const data = await skillList(qqUserId); const markdown = Format.createMarkdown().addTitle('技能列表').addText(`剩余技能点：${data.skillPoints}\n`);
+  const data = await skillList(qqUserId); const markdown = Format.createMarkdown().addTitle('技能列表').addText(`\n剩余技能点：${data.skillPoints}\n`);
   if (view === '已学习') {
     if (!data.skills.length) markdown.addText('\n尚未学习技能。\n');
     for (const skill of data.skills) markdown.addText(`\n【${skill.name}】Lv.${skill.level} `).addButton('[详情]', { data: `/技能详情 ${skill.id}`, autoEnter: false }).addText(' ').addButton(skill.quick_slot ? '[取消快捷]' : '[快捷]', { data: `/技能快捷 ${skill.id}`, autoEnter: false }).addText('\n');
