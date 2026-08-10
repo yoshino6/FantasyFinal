@@ -16,10 +16,25 @@ export const sendWithTextFallback = async (message: MessageSender, format: Forma
 export const messageFormat = (title: string, content: string) => Format.create()
   .addMarkdown(Format.createMarkdown().addTitle(title).addNewline().addNewline().addText(content.trimStart()));
 
-export const storyText = '\n\n最后的记忆像被雨水浸透的旧照片。\n刺耳的声响、骤然逼近的黑暗，以及胸口最后一次无力的起伏。你想伸手抓住什么，指尖却先失去了温度。\n\n世界终于安静下来。';
+const storyScenes = [
+  '最后的记忆像被雨水浸透的旧照片。\n刺耳的声响、骤然逼近的黑暗，以及胸口最后一次无力的起伏。你想伸手抓住什么，指尖却先失去了温度。\n\n世界终于安静下来。',
+  '雨夜的路灯在水洼里碎成一片片昏黄。\n你本想快些回到温暖的房间，却只来得及听见一声急促的鸣笛。疼痛短得像错觉，随后连雨声也渐渐远去。',
+  '拥挤的人群、站台的提示音，以及掌心里还没来得及喝完的热饮。\n世界忽然倾斜，周围的声音被拉得很长。你想起今天原本只是再普通不过的一天。',
+  '深夜的屏幕仍亮着，未完成的消息停在输入框里。\n疲惫像潮水一样涌来，你伏在桌前想稍微休息一会儿，却没有再等到天亮。',
+  '夏日的蝉鸣响得格外聒噪。\n你站在树荫下，抬头看见天空明亮得近乎刺眼；下一刻，意识像断开的风筝线，轻轻飘向了遥远的地方。',
+  '你记得救护车的灯光在视野里旋转，记得有人焦急地呼唤。\n可那些声音隔着越来越深的水面。最后留下的，只有一句没能说出口的“没关系”。',
+  '雪落在肩头，很快融成冰冷的水珠。\n你以为自己只是有些困，便靠着墙缓缓坐下。街道依旧有人来往，而你的呼吸先一步停在了冬夜里。',
+  '厨房里飘着熟悉的香味，窗外是寻常的黄昏。\n你甚至还在盘算晚些时候要做什么，心口却突然传来陌生的钝痛，将所有计划都按下了暂停。',
+  '海风带着咸味扑面而来，远处的浪一遍遍拍打岸边。\n你在潮水的牵引中失去力气，最后看到的，是被夕阳染成金色的海面。',
+  '警报声响起时，你还以为那只是一次普通的演习。\n人群匆忙奔跑，尘埃遮住了视线。等一切重新安静，你已听不见自己的心跳。',
+  '你把伞递给了陌生人，自己转身走进细密的雨里。\n那一瞬间的善意仍留在心中，可命运没有给你回头的机会；黑暗温柔又残酷地合上了眼帘。',
+  '没有惊天动地的告别，也没有人提前预告。\n只是一个平凡的瞬间，你忽然感觉身体变得很轻，仿佛所有牵挂都被留在了原来的世界。'
+];
 
-export const storyFormat = () => Format.create()
-  .addMarkdown(Format.createMarkdown().addTitle('序章·最后一幕（1/6）').addText(storyText))
+export const randomStoryText = () => `\n\n${storyScenes[Math.floor(Math.random() * storyScenes.length)]}`;
+
+export const storyFormat = (text = randomStoryText()) => Format.create()
+  .addMarkdown(Format.createMarkdown().addTitle('序章·最后一幕（1/6）').addText(text))
   .addButtonGroup(Format.createButtonGroup().addRow().addButton('继续', '/注册 继续', { type: 'command', autoEnter: true }));
 
 export const audienceText = '\n\n再次睁开眼时，你正站在一片没有尽头的幽暗空间。\n远处只有一张座椅，一名蓝发少女端坐其上，头顶流转着柔和的神辉。\n她似乎正在等你开口。';

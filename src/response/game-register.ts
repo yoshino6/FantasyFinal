@@ -1,6 +1,6 @@
 import { logger, useEvent, useMessage } from 'alemonjs';
 import { beginRegistration } from '../game/character.service';
-import { audienceFormat, audienceText, dangerFormat, dangerText, destinationFormat, destinationText, giftFormat, giftText, messageFormat, questionFormat, questionText, sendWithTextFallback, storyFormat, storyText } from '../game/message';
+import { audienceFormat, audienceText, dangerFormat, dangerText, destinationFormat, destinationText, giftFormat, giftText, messageFormat, questionFormat, questionText, randomStoryText, sendWithTextFallback, storyFormat } from '../game/message';
 
 export default async () => {
   const [event] = useEvent();
@@ -11,10 +11,11 @@ export default async () => {
       await message.send({ format: messageFormat('旅者已归来', '你已抵达异世界。发送 /角色 查看当前属性。') });
       return;
     }
+    const text = result.stage === 'story' ? randomStoryText() : result.stage === 'audience' ? audienceText : result.stage === 'question' ? questionText : result.stage === 'destination' ? destinationText : result.stage === 'danger' ? dangerText : giftText();
     await sendWithTextFallback(
       message,
-      result.stage === 'story' ? storyFormat() : result.stage === 'audience' ? audienceFormat() : result.stage === 'question' ? questionFormat() : result.stage === 'destination' ? destinationFormat() : result.stage === 'danger' ? dangerFormat() : giftFormat(),
-      result.stage === 'story' ? storyText : result.stage === 'audience' ? audienceText : result.stage === 'question' ? questionText : result.stage === 'destination' ? destinationText : result.stage === 'danger' ? dangerText : giftText()
+      result.stage === 'story' ? storyFormat(text) : result.stage === 'audience' ? audienceFormat() : result.stage === 'question' ? questionFormat() : result.stage === 'destination' ? destinationFormat() : result.stage === 'danger' ? dangerFormat() : giftFormat(),
+      text
     );
   } catch (error) {
     logger.error({ err: error, userId: event.current.UserId }, 'begin registration failed');
