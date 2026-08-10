@@ -16,11 +16,15 @@ const battleButtons = (battle?: Awaited<ReturnType<typeof battleStatus>>) => {
 };
 const encounterButtons = (spawnId: number) => Format.createButtonGroup().addRow().addButton('战斗', `/目标 ${spawnId}`, { type: 'command', autoEnter: true, style: 'blue' }).addButton('说服', `/交涉 ${spawnId}`, { type: 'command', autoEnter: true }).addButton('避战', `/躲避 ${spawnId}`, { type: 'command', autoEnter: true });
 const battleStateText = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
-  const members = battle.members.map(member => `${member.id === battle.characterId ? '你' : '队友'}${member.name ? `·${member.name}` : ''} HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}${member.defeated ? '（倒下）' : member.pending ? '（已行动）' : ''}`);
-  const targets = battle.targets.map(target => `${target.name} HP ${target.hp}/${target.hpMax}${target.defeated ? '（击败）' : ''}`);
-  return `${members.join('\n')}\n${targets.join('\n')}\n点击敌方名称切换目标`;
+  const teammates = battle.members.filter(member => member.id !== battle.characterId);
+  const members = battle.members.map(member => {
+    const label = member.id === battle.characterId ? '你' : teammates.length === 1 ? '队友' : `队友${teammates.indexOf(member) + 1}`;
+    return `${label} HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}${member.defeated ? '（倒下）' : member.pending ? '（已行动）' : ''}`;
+  });
+  const targets = battle.targets.map((target, index) => `敌方${index + 1} HP ${target.hp}/${target.hpMax}${target.defeated ? '（击败）' : ''}`);
+  return `${members.join('\n')}\n${targets.join('\n')}`;
 };
-const battleFormat = (title: string, text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => Format.create().addMarkdown(Format.createMarkdown().addTitle(title).addText(`${text}\n\n${battleStateText(battle)}`)).addButtonGroup(battleButtons(battle));
+const battleFormat = (title: string, text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => Format.create().addMarkdown(Format.createMarkdown().addTitle(title).addText(`${text}\n${battleStateText(battle)}`)).addButtonGroup(battleButtons(battle));
 
 export const exploreHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await explore(event.current.UserId); const targets = result.spawns.length ? `\n\n可选目标\n${result.spawns.map(s => `#${s.id} ${s.name} Lv.${s.level}｜HP ${s.current_hp}/${s.hp_max}`).join('\n')}\n\n发送 /目标 编号 进入战斗。` : ''; await message.send({ format: messageFormat('探索', result.text + targets) }); } catch (error) { logger.warn({ err: error }, 'explore failed'); await fail(message, error); } };
 export const inventoryHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const bag = await inventory(event.current.UserId); await message.send({ format: messageFormat('冒险背包', `负重 ${bag.weight.toFixed(2)}/${bag.capacity}｜速度惩罚 -${bag.speedPenalty}\n当前速度 ${bag.speed}\n\n${bag.items.length ? bag.items.map(i => `${i.equipped_slot ? `[已装备·${i.equipped_slot}] ` : i.quick_slot ? `[道具${i.quick_slot}] ` : ''}${i.name} ×${i.quantity}（${i.weight}kg）`).join('\n') : '背包为空。'}`) }); } catch (error) { await fail(message, error); } };
