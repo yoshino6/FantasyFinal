@@ -103,7 +103,7 @@ export const inventoryView = async (qqUserId: string, category?: '装备' | '道
 
 export const itemCodex = async (qqUserId: string, codexId: string) => {
   const character = await characterFor(qqUserId);
-  const [rows] = await (await getPool()).execute<(RowDataPacket & { codex_id: string; name: string; item_type: string; item_category: string; description: string; weight: number; stackable: number; effect_json: string | null })[]>(`SELECT i.codex_id,i.name,i.item_type,i.item_category,i.description,i.weight,i.stackable,i.effect_json FROM player_item_codex c JOIN item_definitions i ON i.id=c.item_id WHERE c.character_id=? AND i.codex_id=?`, [character.id, codexId]);
+  const [rows] = await (await getPool()).execute<(RowDataPacket & { codex_id: string; name: string; item_category: string; description: string; obtain_source: string; weight: number })[]>(`SELECT i.codex_id,i.name,i.item_category,i.description,i.obtain_source,i.weight FROM player_item_codex c JOIN item_definitions i ON i.id=c.item_id WHERE c.character_id=? AND i.codex_id=?`, [character.id, codexId]);
   if (!rows[0]) throw new Error('尚未解锁该物品图鉴。');
   return rows[0];
 };

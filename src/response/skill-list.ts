@@ -2,6 +2,8 @@ import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
 import { learnSkill, skillDetail, skillList, toggleSkillShortcut, upgradeSkill } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
 
+const categoryNames: Record<string, string> = { physical: '物理', magic: '魔法', utility: '辅助' };
+
 const skillListFormat = async (qqUserId: string, view: '已学习' | '未学习') => {
   const data = await skillList(qqUserId); const markdown = Format.createMarkdown().addTitle('技能列表').addNewline().addNewline().addText(`剩余技能点：${data.skillPoints}\n`);
   if (view === '已学习') {
@@ -35,7 +37,7 @@ export const skillDetailHandler = async () => {
       : skill.nextUpgradeCost === null
         ? '已达最高等级。'
         : `升级消耗：${skill.nextUpgradeCost} 技能点`;
-    const text = `【${skill.name}】${levelText}\n${skill.description}\n\n类别：${skill.category}｜属性：${skill.damage_type}\n威力：${skill.actualPower}\n魔力消耗：${skill.mana_cost}\n冷却：${skill.actualCooldown} 回合\n特殊效果：${skill.effects ?? '无'}\n\n${costText}`;
+    const text = `【${skill.name}】${levelText}\n${skill.description}\n\n类别：${categoryNames[skill.category] ?? '辅助'}｜属性：${skill.damage_type}\n威力：${skill.actualPower}\n魔力消耗：${skill.mana_cost}\n冷却：${skill.actualCooldown} 回合\n特殊效果：${skill.effects ?? '无'}\n\n${costText}`;
     const buttons = Format.createButtonGroup().addRow().addButton('返回技能列表', skill.learned ? '/技能列表 已学习' : '/技能列表 未学习', { type: 'command', autoEnter: true });
     if (!skill.learned) buttons.addButton('学习', `/学习技能 ${skill.id}`, { type: 'command', autoEnter: true, style: 'blue' });
     else if (skill.nextUpgradeCost !== null) buttons.addButton('升级', `/升级技能 ${skill.id}`, { type: 'command', autoEnter: true, style: 'blue' });
