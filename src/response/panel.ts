@@ -11,7 +11,7 @@ const directionText = (point: NearbyPoint, x: number, y: number) => {
 type LocationCharacter = { adventurer_registered: number; region_name: string; pos_x: number; pos_y: number; pos_z: number };
 const areaText = (character: LocationCharacter, verb: '位于' | '移动至') => Number(character.adventurer_registered)
   ? `你${verb}${character.region_name} (${character.pos_x}, ${character.pos_y}, ${character.pos_z})`
-  : `你${verb}未知之地`;
+  : `你${verb}未知之地 (?, ?)`;
 export const currentLocationText = (character: LocationCharacter) => areaText(character, '位于');
 export const movedLocationText = (character: LocationCharacter) => areaText(character, '移动至');
 
