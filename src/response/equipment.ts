@@ -15,7 +15,7 @@ export default async () => {
     if (!items.length) markdown.addText('\n当前没有装备。');
     for (const item of items) {
       markdown.addText(`\n【${slotNames[item.slot] ?? item.slot}】`);
-      if (item.instance_id) markdown.addButton(item.name, { data: `/装备详情 ${item.instance_id}`, autoEnter: true });
+      if (item.instance_id) markdown.addButton(item.name, { data: `/装备详情 ${item.instance_id}`, autoEnter: false });
       else markdown.addText(item.name);
     }
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('操作面板', '/面板', { type: 'command', autoEnter: true, style: 'blue' })) });
