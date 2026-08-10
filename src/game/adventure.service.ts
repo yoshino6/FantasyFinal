@@ -350,7 +350,24 @@ export const encounterAction = async (qqUserId: string, spawnId: number, action:
     const started = await chooseTarget(qqUserId, spawnId); return `躲避失败！\n目标：${started.spawn.name}\n进入战斗：/攻击｜/技能 1-4｜/道具 1-4｜/逃跑`;
   }
   if (action === 'persuade') {
-    if (charm + random(1, 20) >= Number(primary.charisma) + 12) return `你以诚意打动了 ${primary.name}。它暂时退去，未发生战斗。`;
+    const chance = Math.max(.02, Math.min(.15, .05 + (charm - Number(primary.charisma)) * .01));
+    if (Math.random() < chance) return withTransaction(async connection => {
+      const [targets] = await connection.execute<SpawnRow[]>(`SELECT s.id,t.name,t.experience,t.drops_json FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.id=? AND s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? AND s.defeated_at IS NULL FOR UPDATE`, [spawnId, found.character.current_region_id, found.character.pos_x, found.character.pos_y, found.character.pos_z]);
+      const target = targets[0]; if (!target) throw new Error('该目标已离开当前位置。');
+      const experience = Math.max(1, Math.floor(Number(target.experience) * .2)); const oldLevel = Number(found.character.level); const newLevel = Math.max(oldLevel, Math.floor((Number(found.character.experience) + experience) / 100) + 1); const gainedPoints = newLevel - oldLevel;
+      await connection.execute('UPDATE monster_spawns SET current_hp=0,defeated_at=NOW() WHERE id=?', [target.id]);
+      await connection.execute('UPDATE characters SET level=?,experience=experience+?,skill_points=skill_points+? WHERE id=?', [newLevel, experience, gainedPoints, found.character.id]);
+      const rewards: string[] = [];
+      for (const rawDrop of jsonArray(target.drops_json)) {
+        const drop = jsonObject(rawDrop); if (!drop.code || Math.random() >= Math.min(1, Number(drop.chance ?? 1) * .2)) continue;
+        const [items] = await connection.execute<(RowDataPacket & { id: number; name: string; item_type: string })[]>('SELECT id,name,item_type FROM item_definitions WHERE code=?', [String(drop.code)]); const item = items[0]; if (!item) continue;
+        const quantity = Math.max(1, Number(drop.quantity ?? 1)); await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [found.character.id, item.id]);
+        if (item.item_type === 'equipment') for (let index = 0; index < quantity; index += 1) await connection.execute('INSERT INTO player_item_instances (character_id,item_id) VALUES (?,?)', [found.character.id, item.id]);
+        else await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),acquired_at=NOW()', [found.character.id, item.id, quantity]);
+        rewards.push(`${item.name}×${quantity}`);
+      }
+      return `交涉成功！${target.name} 接受了你的提议，转身消失在雾中。\n获得经验 ${experience}${gainedPoints ? `，升级至 Lv.${newLevel} 并获得 ${gainedPoints} 技能点` : ''}${rewards.length ? `\n获得 ${rewards.join('、')}` : ''}`;
+    });
     const started = await chooseTarget(qqUserId, spawnId); return `交涉失败！${started.spawn.name} 露出敌意。\n进入战斗：/攻击｜/技能 1-4｜/道具 1-4｜/逃跑`;
   }
   throw new Error('未知的遇战操作。');
