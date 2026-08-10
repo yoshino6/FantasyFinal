@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 
-type CharacterRow = RowDataPacket & { id: number; name: string; level: number; experience: number; hp_max: number; mp_max: number; physical_attack: number; magic_attack: number; physical_defense: number; magic_defense: number; accuracy: number; evasion: number; crit_rate_bp: number; crit_damage_bp: number; crit_resist_bp: number; crit_damage_reduction_bp: number; speed: number; perception: number; spirit: number; intelligence: number; adventurer_registered: number; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string };
+type CharacterRow = RowDataPacket & { id: number; name: string; level: number; experience: number; skill_points: number; hp_max: number; mp_max: number; physical_attack: number; magic_attack: number; physical_defense: number; magic_defense: number; accuracy: number; evasion: number; crit_rate_bp: number; crit_damage_bp: number; crit_resist_bp: number; crit_damage_reduction_bp: number; speed: number; perception: number; spirit: number; intelligence: number; adventurer_registered: number; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string };
 type SpawnRow = RowDataPacket & { id: number; template_id?: number; name: string; monster_class: string; level: number; current_hp: number; hp_max: number; attack: number; defense: number; speed: number; perception: number; charisma: number; experience: number; drops_json: unknown; skill_sequence?: unknown; weakness_json?: unknown; resistance_json?: unknown };
 type CombatMemberRow = CharacterRow & { current_hp: number; current_mp: number; selected_target_id: number | null; pending_action: unknown; is_defeated: number };
 type CombatTargetRow = SpawnRow & { is_defeated: number };
@@ -124,12 +124,53 @@ export const equipment = async (qqUserId: string) => {
 };
 
 export const skillList = async (qqUserId: string) => {
-  const character = await characterFor(qqUserId);
-  const [rows] = await (await getPool()).execute<(RowDataPacket & { quick_slot: number | null; name: string; description: string; mana_cost: number; effects: string | null })[]>(`SELECT ps.quick_slot,s.name,s.description,s.mana_cost,GROUP_CONCAT(CONCAT(e.name,' Lv.',se.effect_level) ORDER BY e.id SEPARATOR '、') AS effects
-    FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id LEFT JOIN skill_effects se ON se.skill_id=s.id LEFT JOIN effect_definitions e ON e.id=se.effect_id
-    WHERE ps.character_id=? GROUP BY ps.character_id,ps.skill_id,ps.quick_slot,s.name,s.description,s.mana_cost ORDER BY ps.quick_slot`, [character.id]);
-  return rows;
+  const character = await characterFor(qqUserId); const pool = await getPool();
+  const [skills] = await pool.execute<(RowDataPacket & { id: number; name: string; level: number; quick_slot: number | null; learned_at: Date })[]>('SELECT s.id,s.name,ps.level,ps.quick_slot,ps.learned_at FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? ORDER BY ps.learned_at,s.id', [character.id]);
+  const [discoveries] = await pool.execute<(RowDataPacket & { id: number; name: string; learn_cost: number })[]>(`SELECT s.id,s.name,s.learn_cost FROM player_skill_discoveries d JOIN skill_definitions s ON s.id=d.skill_id
+    LEFT JOIN player_skills ps ON ps.character_id=d.character_id AND ps.skill_id=d.skill_id WHERE d.character_id=? AND ps.skill_id IS NULL ORDER BY d.discovered_at,s.id`, [character.id]);
+  return { skillPoints: Number(character.skill_points), skills, discoveries };
 };
+
+export const skillDetail = async (qqUserId: string, skillId: number) => {
+  const character = await characterFor(qqUserId); const pool = await getPool();
+  const [rows] = await pool.execute<(RowDataPacket & { id: number; name: string; category: string; damage_type: string; mana_cost: number; cooldown_turns: number; power: number; learn_cost: number; upgrade_cost: number; max_level: number; power_per_level: number; cooldown_reduction_per_level: number; level: number; learned: number; description: string; effects: string | null })[]>(`SELECT s.*,COALESCE(ps.level,0) AS level,(ps.skill_id IS NOT NULL) AS learned,GROUP_CONCAT(CONCAT(e.name,' Lv.',se.effect_level) ORDER BY e.id SEPARATOR '、') AS effects
+    FROM skill_definitions s LEFT JOIN player_skills ps ON ps.skill_id=s.id AND ps.character_id=? LEFT JOIN player_skill_discoveries d ON d.skill_id=s.id AND d.character_id=?
+    LEFT JOIN skill_effects se ON se.skill_id=s.id LEFT JOIN effect_definitions e ON e.id=se.effect_id WHERE s.id=? AND (ps.skill_id IS NOT NULL OR d.skill_id IS NOT NULL) GROUP BY s.id,ps.level,ps.skill_id`, [character.id, character.id, skillId]);
+  if (!rows[0]) throw new Error('尚未领悟该技能。');
+  const skill = rows[0]; const level = Math.max(1, Number(skill.level)); const learned = Boolean(skill.learned);
+  return { ...skill, level, learned, actualPower: Number(skill.power) + (level - 1) * Number(skill.power_per_level), actualCooldown: Math.max(0, Number(skill.cooldown_turns) - (level - 1) * Number(skill.cooldown_reduction_per_level)), nextUpgradeCost: !learned || level >= Number(skill.max_level) ? null : Number(skill.upgrade_cost) + level - 1 };
+};
+
+export const learnSkill = async (qqUserId: string, skillId: number) => withTransaction(async connection => {
+  const character = await characterFor(qqUserId);
+  const [skills] = await connection.execute<(RowDataPacket & { name: string; learn_cost: number })[]>(`SELECT s.name,s.learn_cost FROM player_skill_discoveries d JOIN skill_definitions s ON s.id=d.skill_id
+    LEFT JOIN player_skills ps ON ps.character_id=d.character_id AND ps.skill_id=d.skill_id WHERE d.character_id=? AND d.skill_id=? AND ps.skill_id IS NULL FOR UPDATE`, [character.id, skillId]);
+  const skill = skills[0]; if (!skill) throw new Error('该技能尚未领悟，或已经学习。');
+  if (Number(character.skill_points) < Number(skill.learn_cost)) throw new Error(`技能点不足，学习「${skill.name}」需要 ${skill.learn_cost} 点。`);
+  await connection.execute('UPDATE characters SET skill_points=skill_points-? WHERE id=?', [skill.learn_cost, character.id]);
+  await connection.execute('INSERT INTO player_skills (character_id,skill_id) VALUES (?,?)', [character.id, skillId]);
+  return { name: skill.name, cost: Number(skill.learn_cost) };
+});
+
+export const toggleSkillShortcut = async (qqUserId: string, skillId: number) => withTransaction(async connection => {
+  const character = await characterFor(qqUserId);
+  const [skills] = await connection.execute<(RowDataPacket & { quick_slot: number | null; name: string })[]>('SELECT ps.quick_slot,s.name FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.skill_id=? FOR UPDATE', [character.id, skillId]);
+  const skill = skills[0]; if (!skill) throw new Error('尚未学习该技能。');
+  if (skill.quick_slot) { await connection.execute('UPDATE player_skills SET quick_slot=NULL WHERE character_id=? AND skill_id=?', [character.id, skillId]); return { name: skill.name, slot: null }; }
+  const [used] = await connection.execute<(RowDataPacket & { quick_slot: number })[]>('SELECT quick_slot FROM player_skills WHERE character_id=? AND quick_slot IS NOT NULL ORDER BY quick_slot FOR UPDATE', [character.id]);
+  const slot = [1, 2, 3, 4].find(candidate => !used.some(item => Number(item.quick_slot) === candidate));
+  if (!slot) throw new Error('技能快捷栏已满，请先取消一个快捷技能。');
+  await connection.execute('UPDATE player_skills SET quick_slot=? WHERE character_id=? AND skill_id=?', [slot, character.id, skillId]); return { name: skill.name, slot };
+});
+
+export const upgradeSkill = async (qqUserId: string, skillId: number) => withTransaction(async connection => {
+  const character = await characterFor(qqUserId);
+  const [skills] = await connection.execute<(RowDataPacket & { name: string; level: number; max_level: number; upgrade_cost: number })[]>('SELECT s.name,ps.level,s.max_level,s.upgrade_cost FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.skill_id=? FOR UPDATE', [character.id, skillId]);
+  const skill = skills[0]; if (!skill) throw new Error('尚未学习该技能。'); if (Number(skill.level) >= Number(skill.max_level)) throw new Error('该技能已达到最高等级。');
+  const cost = Number(skill.upgrade_cost) + Number(skill.level) - 1; if (Number(character.skill_points) < cost) throw new Error(`技能点不足，升级需要 ${cost} 点。`);
+  await connection.execute('UPDATE characters SET skill_points=skill_points-? WHERE id=?', [cost, character.id]); await connection.execute('UPDATE player_skills SET level=level+1 WHERE character_id=? AND skill_id=?', [character.id, skillId]);
+  return { name: skill.name, level: Number(skill.level) + 1, cost };
+});
 
 export const partyInfo = async (qqUserId: string) => {
   const character = await characterFor(qqUserId);
@@ -427,7 +468,8 @@ const finishPartyVictory = async (connection: PoolConnection, sessionId: string,
   const totalExperience = targets.reduce((sum, target) => sum + Number(target.experience), 0); const rewards: string[] = [];
   for (const member of members) {
     const modifiers = await modifiersFor(connection, Number(member.id)); const experience = totalExperience * modifiers.experienceMultiplier;
-    await connection.execute('UPDATE characters SET level=GREATEST(level,FLOOR((experience+?)/100)+1),experience=experience+? WHERE id=?', [experience, experience, member.id]);
+    const oldLevel = Number(member.level); const newLevel = Math.max(oldLevel, Math.floor((Number(member.experience) + experience) / 100) + 1); const gainedPoints = newLevel - oldLevel;
+    await connection.execute('UPDATE characters SET level=?,experience=experience+?,skill_points=skill_points+? WHERE id=?', [newLevel, experience, gainedPoints, member.id]);
     const drops: string[] = [];
     for (const target of targets) for (const rawDrop of jsonArray(target.drops_json)) {
       const drop = jsonObject(rawDrop); if (!drop.code || Math.random() > Math.min(1, Number(drop.chance ?? 1) + modifiers.dropBonus)) continue;
@@ -439,11 +481,11 @@ const finishPartyVictory = async (connection: PoolConnection, sessionId: string,
       const [rules] = await connection.execute<(RowDataPacket & { skill_id: number; name: string; chance: number })[]>(`SELECT r.skill_id,s.name,r.chance FROM monster_skill_learn_rules r JOIN skill_definitions s ON s.id=r.skill_id WHERE r.monster_template_id=?`, [Number(target.template_id)]);
       for (const rule of rules) {
         if (Math.random() > Number(rule.chance)) continue;
-        const [result] = await connection.execute<any>('INSERT IGNORE INTO player_skills (character_id,skill_id) VALUES (?,?)', [member.id, rule.skill_id]);
+        const [result] = await connection.execute<any>('INSERT IGNORE INTO player_skill_discoveries (character_id,skill_id) VALUES (?,?)', [member.id, rule.skill_id]);
         if (Number(result.affectedRows)) learned.push(rule.name);
       }
     }
-    rewards.push(`[${member.name}] 获得 ${experience} 经验${drops.length ? `，${drops.join('、')}` : ''}${learned.length ? `\n领悟技能：${learned.map(name => `「${name}」`).join('、')}` : ''}`);
+    rewards.push(`[${member.name}] 获得 ${experience} 经验${gainedPoints ? `，升级至 Lv.${newLevel} 并获得 ${gainedPoints} 技能点` : ''}${drops.length ? `，${drops.join('、')}` : ''}${learned.length ? `\n领悟技能：${learned.map(name => `「${name}」`).join('、')}` : ''}`);
   }
   return `胜利结算\n${rewards.join('\n')}`;
 };
@@ -476,10 +518,10 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
       const target = targets.find(item => Number(item.id) === Number(member.selected_target_id) && !item.is_defeated) ?? targets.find(item => !item.is_defeated); if (!target) continue;
       const modifiers = await modifiersFor(connection, Number(member.id)); let attack = Number(member.physical_attack) + modifiers.physicalAttack; let power = 1; let kind = '物理'; let damageType = '斩击'; let label = '普通攻击'; let skillId: number | undefined;
       if (choice.type === 'skill') {
-        const [skills] = await connection.execute<(RowDataPacket & { id: number; name: string; category: 'physical' | 'magic'; damage_type: string; mana_cost: number; power: number })[]>('SELECT s.id,s.name,s.category,s.damage_type,s.mana_cost,s.power FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.quick_slot=?', [member.id, choice.slot]);
+        const [skills] = await connection.execute<(RowDataPacket & { id: number; name: string; category: 'physical' | 'magic'; damage_type: string; mana_cost: number; power: number; level: number; power_per_level: number })[]>('SELECT s.id,s.name,s.category,s.damage_type,s.mana_cost,s.power,ps.level,s.power_per_level FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.quick_slot=?', [member.id, choice.slot]);
         const skill = skills[0]; if (!skill) { log.push(`\n➤[${member.name}]释放技能\n　➥技能栏为空。`); continue; }
         const manaCost = Math.max(skill.mana_cost ? 1 : 0, Math.ceil(Number(skill.mana_cost) * (modifiers.manaAffinity ? .7 : 1)) - modifiers.manaCostReduction); if (Number(member.current_mp) < manaCost) { log.push(`\n➤[${member.name}]释放技能「${skill.name}」\n　➥MP不足。`); continue; }
-        member.current_mp -= manaCost; skillId = Number(skill.id); label = `释放技能「${skill.name}」`; kind = skill.category === 'magic' ? '魔法' : '物理'; damageType = skill.damage_type; attack = (skill.category === 'magic' ? Number(member.magic_attack) + modifiers.magicAttack : Number(member.physical_attack) + modifiers.physicalAttack) * Number(skill.power) / 100; power = skill.category === 'magic' ? 1 + modifiers.magicDamagePct / 100 : 1;
+        member.current_mp -= manaCost; skillId = Number(skill.id); label = `释放技能「${skill.name}」`; kind = skill.category === 'magic' ? '魔法' : '物理'; damageType = skill.damage_type; attack = (skill.category === 'magic' ? Number(member.magic_attack) + modifiers.magicAttack : Number(member.physical_attack) + modifiers.physicalAttack) * (Number(skill.power) + (Number(skill.level) - 1) * Number(skill.power_per_level)) / 100; power = skill.category === 'magic' ? 1 + modifiers.magicDamagePct / 100 : 1;
       }
       const monster = monsterCombatStats(target); const vulnerability = effectValue('target', Number(target.id), 'vulnerability'); const defense = kind === '魔法' ? Number(target.defense) : Math.floor(Number(target.defense) * (1 - Math.min(90, modifiers.ignoreDefensePct + vulnerability) / 100)); const strike = resolveStrike(attack * power, defense, Number(member.accuracy), monster.evasion, Number(member.crit_rate_bp) + modifiers.critRateBp, monster.critResist, Number(member.crit_damage_bp), monster.critReduction);
       log.push(`\n➤[${member.name}]${label}`); if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, target, 'on_cast', log); if (!strike.hit) { log.push(`　➥[${target.name}]闪避了攻击`); continue; }

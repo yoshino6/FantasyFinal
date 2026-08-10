@@ -110,8 +110,6 @@ export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: 
   );
   const [newCharacters] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM characters WHERE player_id=?', [player.id]);
   const characterId = newCharacters[0].id;
-  await connection.execute(`INSERT INTO player_skills (character_id,skill_id,quick_slot)
-    SELECT ?,id,1 FROM skill_definitions WHERE code='heavy_strike'`, [characterId]);
   await connection.execute(`INSERT INTO player_inventory (character_id,item_id,quantity)
     SELECT ?, id, 3 FROM item_definitions WHERE code='healing_herb'`, [characterId]);
   await connection.execute(`INSERT INTO player_quick_items (character_id,quick_slot,item_id)
