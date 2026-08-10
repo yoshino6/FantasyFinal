@@ -65,7 +65,7 @@ const showMoveResult = async (message: any, qqUserId: string, result: any) => {
   const first = result.spawns[0];
   const targets = result.spawns.map((spawn: { name: string; level: number }) => `${spawn.name} Lv.${spawn.level}`).join('\n');
   const markdown = Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText(movedLocationText(result.character))
-    .addNewline().addBlockquote(result.text).addNewline().addNewline().addTitle('！！！遇战！！！').addNewline().addNewline().addText(targets);
+    .addNewline().addBlockquote(result.text).addNewline().addNewline().addTitle('★★★遇战★★★').addNewline().addNewline().addText(targets);
   await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(encounterButtons(first.id)) });
 };
 export const moveHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await showMoveResult(message, event.current.UserId, await move(event.current.UserId, String(route.param('direction')))); } catch (error) { await fail(message, error, '无法移动'); } };
