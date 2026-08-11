@@ -764,8 +764,8 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
       await connection.execute('UPDATE combat_threat SET threat=threat+? WHERE session_id=? AND spawn_id=? AND character_id=?', [damage, session.combat_id, target.id, member.id]); if (modifiers.lifestealPct && choice.type === 'attack') member.current_hp = Math.min(Number(member.hp_max), Number(member.current_hp) + Math.floor(damage * modifiers.lifestealPct / 100));
       const observer = appraisalForTarget(appraisal, Number(target.level));
       log.push(observer
-        ? `　➥${observer.informationLevel >= 4 ? elemental > 1 ? '[克制]' : elemental < 1 ? '[抗性]' : '' : ''}${strike.crit ? '[暴击!]' : ''}对【${targetName(target)}】造成 ${damage} 点${kind}伤害(${oldHp}→${target.current_hp})`
-        : `　➥对【？？？】造成 ？？？ 点${kind}伤害(？？？→？？？)`);
+        ? `　➥${observer.informationLevel >= 4 ? elemental > 1 ? '[克制]' : elemental < 1 ? '[抗性]' : '' : ''}${strike.crit ? '[暴击!]' : ''}对【${targetName(target)}】造成 ${damage}点${kind}伤害(${oldHp}→${target.current_hp})`
+        : `　➥对【？？？】造成 ？？？点${kind}伤害(？？？→？？？)`);
       if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, 'member', target, 'target', 'on_hit', log);
     } else {
       const monsterTarget = targets.find(item => Number(item.id) === turn.id)!; if (monsterTarget.is_defeated) continue;
