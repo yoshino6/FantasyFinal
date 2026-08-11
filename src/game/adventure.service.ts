@@ -82,6 +82,7 @@ const roundTowardInitialTiming = (initial: number, raw: number) => {
   if (initial <= 0) return raw > 2 ? Math.max(1, Math.floor(raw) - 1) : 0;
   return raw < initial ? Math.ceil(raw) : Math.floor(raw);
 };
+const activeSkillUpgradeCost = (level: number) => Math.floor(Math.max(1, level) / 10) + 1;
 
 const characterFor = async (qqUserId: string): Promise<CharacterRow> => {
   const pool = await getPool(); const [rows] = await pool.execute<CharacterRow[]>(`SELECT c.*, r.name AS region_name FROM characters c JOIN players p ON p.id=c.player_id JOIN map_regions r ON r.id=c.current_region_id WHERE p.qq_user_id=? LIMIT 1`, [qqUserId]);
@@ -306,7 +307,7 @@ export const skillDetail = async (qqUserId: string, skillId: number) => {
   const actualCooldown = Math.max(0, roundTowardInitialTiming(Number(skill.cooldown_turns), Math.max(1, baseCooldown) * Math.pow(1.08, overcharge) * Math.pow(.92, instant)));
   const baseChant = Number(skill.chant_turns);
   const actualChant = Math.max(0, roundTowardInitialTiming(baseChant, Math.max(1, baseChant) * Math.pow(1.08, overcharge) * Math.pow(.92, instant)));
-  return { ...skill, level, learned, characterLevel: Number(character.level), skillPoints: Number(character.skill_points), appraisal: progress, specializations, actualPower, actualManaCost, actualCooldown, actualChant, nextUpgradeCost: skill.code === 'appraisal' ? null : !learned || level >= Number(skill.max_level) ? null : Number(skill.upgrade_cost) + level - 1 };
+  return { ...skill, level, learned, characterLevel: Number(character.level), skillPoints: Number(character.skill_points), appraisal: progress, specializations, actualPower, actualManaCost, actualCooldown, actualChant, specializationUpgradeCost: !learned || skill.category === 'passive' || level >= Number(skill.max_level) ? null : activeSkillUpgradeCost(level), nextUpgradeCost: skill.code === 'appraisal' ? null : !learned || level >= Number(skill.max_level) ? null : activeSkillUpgradeCost(level) };
 };
 
 export const learnSkill = async (qqUserId: string, skillId: number) => withTransaction(async connection => {
@@ -339,7 +340,7 @@ export const upgradeSkill = async (qqUserId: string, skillId: number) => withTra
   const [skills] = await connection.execute<(RowDataPacket & { name: string; code: string; level: number; max_level: number; upgrade_cost: number })[]>('SELECT s.name,s.code,ps.level,s.max_level,s.upgrade_cost FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.skill_id=? FOR UPDATE', [character.id, skillId]);
   const skill = skills[0]; if (!skill) throw new Error('尚未学习该技能。'); if (Number(skill.level) >= Number(skill.max_level)) throw new Error('该技能已达到最高等级。');
   if (skill.code === 'appraisal') throw new Error('鉴识需要选择“慧眼”或“识珠”专精升级。');
-  const cost = Number(skill.upgrade_cost) + Number(skill.level) - 1; if (Number(character.skill_points) < cost) throw new Error(`技能点不足，升级需要 ${cost} 点。`);
+  const cost = activeSkillUpgradeCost(Number(skill.level)); if (Number(character.skill_points) < cost) throw new Error(`技能点不足，升级需要 ${cost} 点。`);
   await connection.execute('UPDATE characters SET skill_points=skill_points-? WHERE id=?', [cost, character.id]); await connection.execute('UPDATE player_skills SET level=level+1 WHERE character_id=? AND skill_id=?', [character.id, skillId]);
   return { name: skill.name, level: Number(skill.level) + 1, cost };
 });
@@ -352,11 +353,11 @@ export const upgradeSkillSpecialization = async (qqUserId: string, skillId: numb
   await connection.execute('INSERT IGNORE INTO player_skill_specializations (character_id,skill_id,specialization) VALUES (?,?,?)', [character.id, skillId, specialization]);
   const [rows] = await connection.execute<(RowDataPacket & { level: number })[]>('SELECT level FROM player_skill_specializations WHERE character_id=? AND skill_id=? AND specialization=? FOR UPDATE', [character.id, skillId, specialization]);
   const level = Number(rows[0].level); if (level >= 100) throw new Error('该专精已达到最高等级。');
-  if (Number(character.skill_points) < 1) throw new Error('技能点不足，升级需要 1 点。');
-  await connection.execute('UPDATE characters SET skill_points=skill_points-1 WHERE id=?', [character.id]);
+  const cost = activeSkillUpgradeCost(Number(skill.level)); if (Number(character.skill_points) < cost) throw new Error(`技能点不足，升级需要 ${cost} 点。`);
+  await connection.execute('UPDATE characters SET skill_points=skill_points-? WHERE id=?', [cost, character.id]);
   await connection.execute('UPDATE player_skill_specializations SET level=level+1 WHERE character_id=? AND skill_id=? AND specialization=?', [character.id, skillId, specialization]);
   await connection.execute('UPDATE player_skills SET level=level+1 WHERE character_id=? AND skill_id=?', [character.id, skillId]);
-  return { name: skill.name, skillLevel: Number(skill.level) + 1, specialization, level: level + 1 };
+  return { name: skill.name, skillLevel: Number(skill.level) + 1, specialization, level: level + 1, cost };
 });
 
 export const upgradeAppraisal = async (qqUserId: string, direction: 'range' | 'information') => withTransaction(async connection => {
