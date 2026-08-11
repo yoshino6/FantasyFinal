@@ -594,7 +594,7 @@ export const encounterAction = async (qqUserId: string, spawnId: number, action:
       for (const member of members) await connection.execute('INSERT INTO encounter_escape_tokens (character_id,region_id,pos_x,pos_y,pos_z) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE region_id=VALUES(region_id),pos_x=VALUES(pos_x),pos_y=VALUES(pos_y),pos_z=VALUES(pos_z)', [member.id, character.current_region_id, character.pos_x, character.pos_y, character.pos_z]);
       if (canAvoid) return '你抢在敌人反应之前脱离了遭遇，可以继续移动。';
       const victim = members.find(member => Number(member.id) === Number(character.id)) ?? character; const strike = resolveStrike(monster.physicalAttack, Number(victim.physical_defense), monster.accuracy, Number(victim.evasion), monster.crit, Number(victim.crit_resist_bp), monster.critDamage, Number(victim.crit_damage_reduction_bp));
-      return !strike.hit ? `躲避不及，${primary.name} 发起追击，但【${victim.name}】闪避了攻击。\n你们仍成功脱离遭遇，可以继续移动。` : `躲避不及，${primary.name} 发起追击，对【${victim.name}】造成 ${strike.damage} 点物理伤害。\n你们仍成功脱离遭遇，可以继续移动。`;
+      return !strike.hit ? `躲避不及，${primary.name} 发起追击，但【${victim.name}】闪避了。\n你们仍成功脱离遭遇，可以继续移动。` : `躲避不及，${primary.name} 发起追击，对【${victim.name}】造成 ${strike.damage} 点物理伤害。\n你们仍成功脱离遭遇，可以继续移动。`;
     });
   }
   if (action === 'persuade') {
@@ -832,8 +832,8 @@ const processTurnEffects = async (connection: PoolConnection, sessionId: string,
       const maxHp = Number(effect.target_kind === 'member' ? (target as CombatMemberRow).hp_max : (target as CombatTargetRow).hp_max); const amount = Math.max(1, Math.floor(maxHp * Number(effect.value) * Number(effect.stacks) / 100)); const oldHp = Number((target as any).current_hp);
       (target as any).current_hp = effect.effect_type === 'damage_over_time' ? Math.max(0, oldHp - amount) : Math.min(maxHp, oldHp + amount);
       if (!(target as any).current_hp) (target as any).is_defeated = 1;
-      const marker = effect.effect_type === 'damage_over_time' ? '$' : '#';
-      log.push(`${marker}${effect.name}${marker}【${(target as any).name}】${effect.effect_type === 'damage_over_time' ? '损失' : '恢复'} ${amount} HP(${oldHp}→${(target as any).current_hp})`);
+      const marker = effect.effect_type === 'damage_over_time' ? '$' : '&';
+      log.push(`§${marker}${effect.name}${marker}${effect.effect_type === 'damage_over_time' ? '损失' : '恢复'} ${amount} HP(${oldHp}→${(target as any).current_hp})`);
     }
     if (Number(effect.remaining_turns) <= 1) await connection.execute('DELETE FROM combat_status_effects WHERE id=?', [effect.id]);
     else await connection.execute('UPDATE combat_status_effects SET remaining_turns=remaining_turns-1 WHERE id=?', [effect.id]);
@@ -979,7 +979,7 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
         continue;
       }
       const monster = monsterCombatStats(target); const vulnerability = effectValue('target', Number(target.id), 'vulnerability'); const baseDefense = kind === '魔法' ? monster.magicDefense : monster.physicalDefense; const defense = Math.floor(baseDefense * (1 - (kind === '魔法' ? 0 : Math.min(90, modifiers.ignoreDefensePct + vulnerability)) / 100)); const strike = resolveStrike(attack * power * (Number(session.turn_no) === 1 ? 1 + Number(session.opening_damage_bonus) : 1), defense, Number(member.accuracy), monster.evasion, Number(member.crit_rate_bp) + modifiers.critRateBp, monster.critResist, Number(member.crit_damage_bp), monster.critReduction);
-      log.push(`➤【${member.name}】${label}`); if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, 'member', target, 'target', 'on_cast', log); if (!strike.hit) { log.push(`　➥[${targetName(target)}]闪避了攻击`); continue; }
+      log.push(`➤【${member.name}】${label}`); if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, 'member', target, 'target', 'on_cast', log); if (!strike.hit) { log.push(`　➥【${targetName(target)}】闪避了攻击`); continue; }
       const elemental = weaknessMultiplier(target, damageType); const damage = Math.max(1, Math.floor(strike.damage * elemental)); const oldHp = Number(target.current_hp); target.current_hp = Math.max(0, oldHp - damage); if (!target.current_hp) target.is_defeated = 1;
       await connection.execute('UPDATE combat_threat SET threat=threat+? WHERE session_id=? AND spawn_id=? AND character_id=?', [damage, session.combat_id, target.id, member.id]); if (skillCode === 'warrior_taunt') { await connection.execute('UPDATE combat_threat SET threat=threat+600 WHERE session_id=? AND spawn_id=? AND character_id=?', [session.combat_id, target.id, member.id]); log.push('　#挑衅#目标的注意力被莱昂牢牢吸引'); } if (modifiers.lifestealPct && choice.type === 'attack') member.current_hp = Math.min(Number(member.hp_max), Number(member.current_hp) + Math.floor(damage * modifiers.lifestealPct / 100));
       const observer = appraisalForTarget(appraisal, Number(target.level));
@@ -1007,7 +1007,7 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
       const identifiedMonster = Boolean(appraisalForTarget(appraisal, Number(monsterTarget.level)));
       log.push(`➤【${targetName(monsterTarget)}】${skill ? `释放技能「${identifiedMonster ? skill.name : '???'}」` : '普通攻击'}`);
       if (bite) { log.push('　#必中#该攻击必定命中'); log.push('　#獠牙#该攻击暴击+25%'); }
-      if (!strike.hit) { log.push(`　➥[${victim.name}]闪避了攻击`); continue; }
+      if (!strike.hit) { log.push(`　➥【${victim.name}】闪避了攻击`); continue; }
       const barrier = effectValue('member', Number(victim.id), 'barrier'); const damage = Math.max(1, Math.floor(strike.damage * (1 - Math.min(80, barrier) / 100)));
       const oldHp = Number(victim.current_hp); victim.current_hp = Math.max(0, oldHp - damage); if (!victim.current_hp) victim.is_defeated = 1; log.push(`　➥${strike.crit ? '[暴击!]' : ''}对【${victim.name}】造成 ${damage} 点${skill?.category === 'magic' ? '魔法' : '物理'}伤害(${oldHp}→${victim.current_hp})`); if (skill) await applySkillEffects(connection, session.combat_id, Number(skill.id), monsterTarget, 'target', victim, 'member', 'on_hit', log);
     }
