@@ -37,7 +37,7 @@ export const panelButtons = (resting = false) => Format.createButtonGroup()
     .addRow().addButton(resting ? '行动' : '休息', resting ? '/行动' : '/休息', { type: 'command', autoEnter: true, style: 'blue' }).addButton('菜单', '/菜单', { type: 'command', autoEnter: true, style: 'blue' });
 
 const battlePanel = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
-  const markdown = Format.createMarkdown().addTitle('战斗面板').addNewline().addNewline().addText(`第 ${battle.turn} 回合\n${battle.members.map(member => `${member.id === battle.characterId ? '你' : '队友'}·${member.name} HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}`).join('\n')}\n`);
+  const markdown = Format.createMarkdown().addTitle('战斗面板').addNewline().addNewline().addText(`第 ${battle.turn} 回合\n${battle.members.map(member => `【${member.name}】HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}`).join('\n')}\n`);
   for (const [index, target] of battle.targets.entries()) markdown.addButton(`${battle.selectedTargetId === target.id ? '▶' : ''}敌方${index + 1} ${target.name}`, { data: `/切换目标 ${target.id}`, autoEnter: false }).addText(` HP ${target.hp}/${target.hpMax}${target.defeated ? '（击败）' : ''}\n`);
   const activeSkills = new Set(battle.readySkillSlots); const activeItems = new Set(battle.itemSlots); const actionStyle = battle.canAct ? 'blue' : undefined;
   const buttons = Format.createButtonGroup()
@@ -53,7 +53,7 @@ export default async () => {
   try {
     try {
       const battle = await battleStatus(event.current.UserId);
-      await sendWithTextFallback(message, battlePanel(battle), `【战斗面板】\n你 HP ${battle.playerHp}/${battle.playerHpMax}｜MP ${battle.playerMp}/${battle.playerMpMax}\n${battle.targets.map(target => `敌方 #${target.id} ${target.name} HP ${target.hp}/${target.hpMax}`).join('\n')}\n/攻击｜/技能 1｜/道具 1｜/逃跑`);
+      await sendWithTextFallback(message, battlePanel(battle), `【战斗面板】\n${battle.members.map(member => `【${member.name}】HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}`).join('\n')}\n${battle.targets.map(target => `敌方 #${target.id} ${target.name} HP ${target.hp}/${target.hpMax}`).join('\n')}\n/攻击｜/技能 1｜/道具 1｜/逃跑`);
     } catch (error) {
       if (!(error instanceof Error) || !error.message.includes('当前不在战斗中')) throw error;
       const [bag, nearby] = await Promise.all([inventory(event.current.UserId), nearbyPoints(event.current.UserId)]);

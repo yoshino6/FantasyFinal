@@ -15,10 +15,8 @@ const battleButtons = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
 };
 const encounterButtons = (spawnId: number, canAmbush = false) => Format.createButtonGroup().addRow().addButton(canAmbush ? '偷袭' : '战斗', canAmbush ? `/偷袭 ${spawnId}` : `/目标 ${spawnId}`, { type: 'command', autoEnter: true, style: 'blue' }).addButton('交涉', `/交涉 ${spawnId}`, { type: 'command', autoEnter: true }).addButton('躲避', `/躲避 ${spawnId}`, { type: 'command', autoEnter: true });
 const battleStateText = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
-  const teammates = battle.members.filter(member => member.id !== battle.characterId);
   const members = battle.members.map(member => {
-    const label = member.id === battle.characterId ? '你' : teammates.length === 1 ? '队友' : `队友${teammates.indexOf(member) + 1}`;
-    return `${label} HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}${member.defeated ? '（倒下）' : member.pending ? '（已行动）' : ''}`;
+    return `【${member.name}】HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}${member.defeated ? '（倒下）' : member.pending ? '（已行动）' : ''}`;
   });
   return members.join('\n');
 };
