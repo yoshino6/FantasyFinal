@@ -26,7 +26,10 @@ const traitList = (value: unknown) => jsonArray(value).map(item => jsonObject(it
 const percentBonus = (traits: MonsterTrait[], key: keyof MonsterTrait) => traits.reduce((total, trait) => total + Number(trait[key] ?? 0), 0);
 const monsterAttributes = (monster: MonsterAttributes & { level: number }): Allocation => {
   const multiplier = traitList((monster as SpawnRow).traits_json).reduce((value, trait) => value * Number(trait.attributeMultiplier ?? 1), 1);
-  return Object.fromEntries(attributes.map(attribute => [attribute, Math.floor((Number(monster[attribute]) + Math.max(0, Number(monster.level) - 1) * Number(monster[`${attribute}_growth`])) * multiplier])) as Allocation;
+  return Object.fromEntries(attributes.map(attribute => {
+    const baseValue = Number(monster[attribute]) + Math.max(0, Number(monster.level) - 1) * Number(monster[`${attribute}_growth`]);
+    return [attribute, Math.floor(baseValue * multiplier)];
+  })) as Allocation;
 };
 const monsterCombatStats = (monster: MonsterAttributes & { level: number }) => {
   const values = monsterAttributes(monster);
