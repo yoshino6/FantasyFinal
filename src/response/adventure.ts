@@ -27,10 +27,19 @@ const appendBattleState = (markdown: ReturnType<typeof Format.createMarkdown>, b
   for (const [index, target] of battle.targets.entries()) markdown.addButton(`${battle.selectedTargetId === target.id ? '▶' : ''}敌方${index + 1} ${target.name}`, { data: `/切换目标 ${target.id}`, autoEnter: false }).addText(` HP ${target.hp}/${target.hpMax}${target.defeated ? '（击败）' : ''}\n`);
   return markdown;
 };
+const appendCombatLog = (markdown: ReturnType<typeof Format.createMarkdown>, text: string) => {
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.trimStart();
+    if (!line) { markdown.addNewline(); continue; }
+    if (line.startsWith('➥')) markdown.addBlockquote(line.replaceAll('$', '\\$')).addNewline();
+    else markdown.addText(`${line}\n`);
+  }
+  return markdown;
+};
 const battleFormat = (_title: string, text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => {
   const lines = text.split('\n'); if (/^战斗<\d+>回合$/.test(lines[0])) lines.shift();
   const markdown = Format.createMarkdown().addTitle(`战斗<${battle.turn}>回合`);
-  if (lines.join('\n')) markdown.addBlockquote(lines.join('\n')).addNewline().addNewline();
+  if (lines.join('\n')) appendCombatLog(markdown, lines.join('\n')).addNewline();
   return Format.create().addMarkdown(appendBattleState(markdown, battle)).addButtonGroup(battleButtons(battle));
 };
 const ambushStartFormat = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
@@ -51,7 +60,7 @@ const battleErrorFormat = (text: string, battle: Awaited<ReturnType<typeof battl
 const finalBattleFormat = (log: string) => {
   const lines = log.split('\n'); const turn = /^战斗<(\d+)>回合$/.exec(lines[0]); const title = turn ? `战斗<${Number(turn[1]) + 1}>回合` : '战斗'; if (turn) lines.shift();
   const markdown = Format.createMarkdown().addTitle(title);
-  if (lines.join('\n')) markdown.addBlockquote(lines.join('\n'));
+  if (lines.join('\n')) appendCombatLog(markdown, lines.join('\n'));
   return Format.create().addMarkdown(markdown);
 };
 const victoryButtons = () => Format.createButtonGroup().addRow().addButton('操作面板', '/面板', { type: 'command', autoEnter: true, style: 'blue' });
@@ -83,7 +92,7 @@ const chapterFormat = (stage: number, text: string) => {
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 
-export const exploreHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await explore(event.current.UserId); const targets = result.spawns.length ? `\n\n可选目标\n${result.spawns.map(s => result.canViewMonsterInfo ? `#${s.id} ${s.name} Lv.${s.level}｜HP ${s.current_hp}/${s.hp_max}` : `#${s.id} ？？？`).join('\n')}\n\n发送 /目标 编号 进入战斗。` : ''; await message.send({ format: messageFormat('探索', result.text + targets) }); } catch (error) { logger.warn({ err: error }, 'explore failed'); await fail(message, error); } };
+export const exploreHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await explore(event.current.UserId); const targets = result.spawns.length ? `\n\n可选目标\n${result.spawns.map(s => result.canViewMonsterInfo ? `#${s.id} ${s.name} Lv.${s.level}｜HP ${s.current_hp}/${s.hp_max}` : `#${s.id} ???`).join('\n')}\n\n发送 /目标 编号 进入战斗。` : ''; await message.send({ format: messageFormat('探索', result.text + targets) }); } catch (error) { logger.warn({ err: error }, 'explore failed'); await fail(message, error); } };
 export const inventoryHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const bag = await inventory(event.current.UserId); await message.send({ format: messageFormat('冒险背包', `负重 ${bag.weight.toFixed(2)}/${bag.capacity}｜速度惩罚 -${bag.speedPenalty}\n当前速度 ${bag.speed}\n\n${bag.items.length ? bag.items.map(i => `${i.equipped_slot ? `[已装备·${i.equipped_slot}] ` : i.quick_slot ? `[道具${i.quick_slot}] ` : ''}${i.name} ×${i.quantity}（${i.weight}kg）`).join('\n') : '背包为空。'}`) }); } catch (error) { await fail(message, error); } };
 const movementPanel = async (qqUserId: string, description: string) => { const [bag, nearby] = await Promise.all([inventory(qqUserId), nearbyPoints(qqUserId)]); const resting = nearby.character.activity_status !== 'active'; return outsidePanel('行动', movedLocationText(nearby.character), bag.movementSpeed, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), description, nearby.points, resting); };
 const showMoveResult = async (message: any, qqUserId: string, result: any) => {
