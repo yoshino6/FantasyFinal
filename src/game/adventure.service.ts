@@ -495,7 +495,7 @@ export const inspectCombat = async (qqUserId: string) => {
   let effects: CombatEffectRow[] = []; let threats: (RowDataPacket & { spawn_id: number; name: string; threat: number })[] = [];
   if (profile.informationLevel >= 3) [effects] = await pool.execute<CombatEffectRow[]>('SELECT ce.id,ce.target_kind,ce.target_id,e.code,e.name,e.effect_type,ce.value,ce.stacks,ce.remaining_turns FROM combat_status_effects ce JOIN effect_definitions e ON e.id=ce.effect_id WHERE ce.session_id=?', [session.combat_id]);
   if (profile.informationLevel >= 3) [threats] = await pool.execute<(RowDataPacket & { spawn_id: number; name: string; threat: number })[]>('SELECT ct.spawn_id,c.name,ct.threat FROM combat_threat ct JOIN characters c ON c.id=ct.character_id WHERE ct.session_id=?', [session.combat_id]);
-  const lines = ['我方状态', ...members.map(member => `【${member.name}】HP ${member.current_hp}/${member.hp_max}｜MP ${member.current_mp}/${member.mp_max}${member.is_defeated ? '（倒下）' : ''}`), '', `鉴识：等级差 Lv.${profile.rangeLevel}（可鉴识至自身等级 +${profile.rangeLevel * 3}）｜信息深化 Lv.${profile.informationLevel}`, '', '敌方状态'];
+  const lines = ['我方状态', ...members.map(member => `【${member.name}】HP ${member.current_hp}/${member.hp_max}｜MP ${member.current_mp}/${member.mp_max}${member.is_defeated ? '（倒下）' : ''}`), '', `鉴识：慧眼 Lv.${profile.rangeLevel}（可鉴识至自身等级 +${profile.rangeLevel * 3}）｜识珠 Lv.${profile.informationLevel}`, '', '敌方状态'];
   for (const raw of targets) {
     const observer = appraisalForTarget(profile, Number(raw.level)); const target = materializeMonster(raw, Number(observer?.informationLevel ?? 0) >= 2); if (!observer) { lines.push('【？？？】数据无法解析。'); continue; }
     lines.push(`【${target.name}】HP ${target.current_hp}/${target.hp_max}｜MP ${target.current_mp}/${monsterCombatStats(target).mpMax}`);
@@ -510,7 +510,7 @@ export const monsterDetail = async (qqUserId: string, spawnId: number) => {
   const character = await characterFor(qqUserId); const pool = await getPool();
   const appraisal = await appraisalProfileFor(pool, [character.id]);
   if (!appraisal.learned) throw new Error('尚未学会被动技能「鉴识」，无法查看怪物词条与属性。');
-  if (appraisal.informationLevel < 4) throw new Error('鉴识信息深化达到 Lv.4 后，才能查看完整怪物图鉴。');
+  if (appraisal.informationLevel < 4) throw new Error('鉴识识珠达到 Lv.4 后，才能查看完整怪物图鉴。');
   const [rows] = await pool.execute<SpawnRow[]>(`SELECT s.id,s.template_id,t.name,t.monster_class,t.level,s.current_hp,s.traits_json,COALESCE(s.skill_sequence,t.skill_sequence) AS skill_sequence,${monsterAttributeColumns},t.experience,t.drops_json
     FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id
     WHERE s.id=? AND s.defeated_at IS NULL AND (s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? OR EXISTS (
