@@ -102,6 +102,10 @@ const schemaStatements = [
     CONSTRAINT fk_player_skill_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
     CONSTRAINT fk_player_skill_definition FOREIGN KEY (skill_id) REFERENCES skill_definitions(id)
   ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_appraisal_progress (
+    character_id BIGINT UNSIGNED NOT NULL, range_level TINYINT UNSIGNED NOT NULL DEFAULT 1, information_level TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    PRIMARY KEY (character_id), CONSTRAINT fk_appraisal_progress_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_skill_discoveries (
     character_id BIGINT UNSIGNED NOT NULL, skill_id BIGINT UNSIGNED NOT NULL, discovered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (character_id,skill_id), KEY idx_skill_discovery_order (character_id,discovered_at),
@@ -336,12 +340,15 @@ export const initializeSchema = async (pool: Pool) => {
     WHEN 'lucky_favor' THEN JSON_OBJECT('dropBonusPct',20)
     ELSE passive_effect_json END
     WHERE code IN ('appraisal','growth_blessing','mana_affinity','lucky_favor')`);
+  await pool.query(`UPDATE skill_definitions SET upgrade_cost=1,max_level=13,description='鉴识未知的敌对生物。低于自身等级的目标必定可鉴识；等级差每升一级可额外鉴识高于自身 3 级的目标；信息深化可逐步解锁更多情报。' WHERE code='appraisal'`);
   await pool.query(`UPDATE skill_definitions SET codex_id=CONCAT(CASE category WHEN 'physical' THEN '41' WHEN 'magic' THEN '42' ELSE '49' END, LPAD(id,5,'0')) WHERE codex_id IS NULL`);
   await pool.query(`INSERT IGNORE INTO player_skills (character_id,skill_id)
     SELECT b.character_id,s.id FROM player_blessings b JOIN skill_definitions s ON s.code=b.code AND s.category='passive'`);
   await pool.query(`INSERT IGNORE INTO player_skill_discoveries (character_id,skill_id)
     SELECT c.id,s.id FROM characters c JOIN skill_definitions s ON s.code='appraisal'
     LEFT JOIN player_skills ps ON ps.character_id=c.id AND ps.skill_id=s.id WHERE ps.skill_id IS NULL`);
+  await pool.query(`INSERT IGNORE INTO player_appraisal_progress (character_id)
+    SELECT ps.character_id FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE s.code='appraisal'`);
   await pool.query(`INSERT INTO effect_definitions (code,name,effect_type,default_value,default_duration,max_level,max_stacks,stackable,description) VALUES
     ('vulnerability','脆弱','stat_modifier',25,3,5,1,0,'降低目标物理防御，效果值为百分比。'),
     ('burn','灼烧','damage_over_time',5,3,5,1,0,'每回合损失最大生命值一定比例。'),

@@ -1,5 +1,5 @@
 import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
-import { learnSkill, skillDetail, skillList, toggleSkillShortcut, upgradeSkill } from '../game/adventure.service';
+import { learnSkill, skillDetail, skillList, toggleSkillShortcut, upgradeAppraisal, upgradeSkill } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
 
 const categoryNames: Record<string, string> = { physical: '物理', magic: '魔法', utility: '辅助', passive: '被动' };
@@ -42,13 +42,19 @@ export const skillDetailHandler = async () => {
       : skill.nextUpgradeCost === null
         ? '已达最高等级。'
         : `升级消耗：${skill.nextUpgradeCost} 技能点`;
+    const appraisalText = skill.code === 'appraisal' && skill.appraisal
+      ? `\n鉴识进度：\n等级差 Lv.${skill.appraisal.rangeLevel}（可鉴识至自身等级 +${skill.appraisal.rangeLevel * 3}）\n信息深化 Lv.${skill.appraisal.informationLevel}/4\n深化 Lv.1：名称、生命、魔力、技能名\nLv.2：词条、攻防、命中、闪避\nLv.3：战斗状态\nLv.4：种族、弱点、抗性与六维`
+      : '';
     const combatText = skill.category === 'passive'
       ? `类别：${categoryNames.passive}\n被动效果：${skill.description}`
       : `类别：${categoryNames[skill.category] ?? '辅助'}｜属性：${skill.damage_type}\n威力：${skill.actualPower}\n魔力消耗：${skill.mana_cost}\n冷却：${skill.actualCooldown} 回合\n特殊效果：${skill.effects ?? '无'}`;
-    const text = `【${skill.name}】${levelText}\n${skill.description}\n\n${combatText}\n\n${costText}`;
+    const text = `【${skill.name}】${levelText}\n${skill.description}\n\n${combatText}${appraisalText}\n\n${costText}`;
     const buttons = Format.createButtonGroup().addRow().addButton('返回技能列表', skill.learned ? '/技能列表 已学习' : '/技能列表 未学习', { type: 'command', autoEnter: true });
     if (!skill.learned) buttons.addButton('学习', `/学习技能 ${skill.id}`, { type: 'command', autoEnter: true, style: 'blue' });
-    else if (skill.nextUpgradeCost !== null) buttons.addButton('升级', `/升级技能 ${skill.id}`, { type: 'command', autoEnter: true, style: 'blue' });
+    else if (skill.code === 'appraisal' && skill.appraisal) {
+      if (skill.appraisal.rangeLevel < 10) buttons.addButton('升级等级差', '/升级鉴识 等级差', { type: 'command', autoEnter: true, style: 'blue' });
+      if (skill.appraisal.informationLevel < 4) buttons.addButton('信息深化', '/升级鉴识 信息深化', { type: 'command', autoEnter: true, style: 'blue' });
+    } else if (skill.nextUpgradeCost !== null) buttons.addButton('升级', `/升级技能 ${skill.id}`, { type: 'command', autoEnter: true, style: 'blue' });
     await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('技能详情').addNewline().addNewline().addText(text)).addButtonGroup(buttons) });
   } catch (error) { await message.send({ format: messageFormat('无法查看技能', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
@@ -69,4 +75,13 @@ export const upgradeSkillHandler = async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
   try { const result = await upgradeSkill(event.current.UserId, Number(route.param('id'))); await message.send({ format: messageFormat('技能升级', `「${result.name}」已提升至 Lv.${result.level}，消耗 ${result.cost} 技能点。`) }); }
   catch (error) { await message.send({ format: messageFormat('升级失败', error instanceof Error ? error.message : '请稍后重试。') }); }
+};
+
+export const upgradeAppraisalHandler = async () => {
+  const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
+  const direction = String(route.param('direction')) === '等级差' ? 'range' : 'information';
+  try {
+    const result = await upgradeAppraisal(event.current.UserId, direction);
+    await message.send({ format: messageFormat('鉴识升级', `「鉴识」已提升至 Lv.${result.level}，${result.direction === 'range' ? `等级差提升至 Lv.${result.rangeLevel}（可鉴识至自身等级 +${result.rangeLevel * 3}）` : `信息深化提升至 Lv.${result.informationLevel}` }，消耗 ${result.cost} 技能点。`) });
+  } catch (error) { await message.send({ format: messageFormat('鉴识升级失败', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
