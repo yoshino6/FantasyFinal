@@ -262,7 +262,7 @@ export const skillDetail = async (qqUserId: string, skillId: number) => {
   let progressRows: (RowDataPacket & { range_level: number; information_level: number })[] = [];
   if (skill.code === 'appraisal' && learned) [progressRows] = await pool.execute<(RowDataPacket & { range_level: number; information_level: number })[]>('SELECT range_level,information_level FROM player_appraisal_progress WHERE character_id=?', [character.id]);
   const progress = progressRows[0] ? { rangeLevel: Number(progressRows[0].range_level), informationLevel: Number(progressRows[0].information_level) } : undefined;
-  return { ...skill, level, learned, appraisal: progress, actualPower: Number(skill.power) + (level - 1) * Number(skill.power_per_level), actualCooldown: Math.max(0, Number(skill.cooldown_turns) - (level - 1) * Number(skill.cooldown_reduction_per_level)), nextUpgradeCost: skill.code === 'appraisal' ? null : !learned || level >= Number(skill.max_level) ? null : Number(skill.upgrade_cost) + level - 1 };
+  return { ...skill, level, learned, characterLevel: Number(character.level), skillPoints: Number(character.skill_points), appraisal: progress, actualPower: Number(skill.power) + (level - 1) * Number(skill.power_per_level), actualCooldown: Math.max(0, Number(skill.cooldown_turns) - (level - 1) * Number(skill.cooldown_reduction_per_level)), nextUpgradeCost: skill.code === 'appraisal' ? null : !learned || level >= Number(skill.max_level) ? null : Number(skill.upgrade_cost) + level - 1 };
 };
 
 export const learnSkill = async (qqUserId: string, skillId: number) => withTransaction(async connection => {
@@ -293,7 +293,7 @@ export const upgradeSkill = async (qqUserId: string, skillId: number) => withTra
   const character = await characterFor(qqUserId);
   const [skills] = await connection.execute<(RowDataPacket & { name: string; code: string; level: number; max_level: number; upgrade_cost: number })[]>('SELECT s.name,s.code,ps.level,s.max_level,s.upgrade_cost FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.skill_id=? FOR UPDATE', [character.id, skillId]);
   const skill = skills[0]; if (!skill) throw new Error('尚未学习该技能。'); if (Number(skill.level) >= Number(skill.max_level)) throw new Error('该技能已达到最高等级。');
-  if (skill.code === 'appraisal') throw new Error('鉴识需要选择“等级差”或“信息深化”方向升级。');
+  if (skill.code === 'appraisal') throw new Error('鉴识需要选择“慧眼”或“识珠”专精升级。');
   const cost = Number(skill.upgrade_cost) + Number(skill.level) - 1; if (Number(character.skill_points) < cost) throw new Error(`技能点不足，升级需要 ${cost} 点。`);
   await connection.execute('UPDATE characters SET skill_points=skill_points-? WHERE id=?', [cost, character.id]); await connection.execute('UPDATE player_skills SET level=level+1 WHERE character_id=? AND skill_id=?', [character.id, skillId]);
   return { name: skill.name, level: Number(skill.level) + 1, cost };
@@ -306,8 +306,8 @@ export const upgradeAppraisal = async (qqUserId: string, direction: 'range' | 'i
   await connection.execute('INSERT IGNORE INTO player_appraisal_progress (character_id) VALUES (?)', [character.id]);
   const [progressRows] = await connection.execute<(RowDataPacket & { range_level: number; information_level: number })[]>('SELECT range_level,information_level FROM player_appraisal_progress WHERE character_id=? FOR UPDATE', [character.id]);
   const progress = progressRows[0]; const current = direction === 'range' ? Number(progress.range_level) : Number(progress.information_level);
-  const cap = direction === 'range' ? 10 : 4; if (current >= cap) throw new Error(direction === 'range' ? '鉴识等级差已达到上限。' : '鉴识信息深化已达到上限。');
-  const cost = Number(skill.level); if (Number(character.skill_points) < cost) throw new Error(`技能点不足，升级需要 ${cost} 点。`);
+  const cap = direction === 'range' ? 10 : 4; if (current >= cap) throw new Error(direction === 'range' ? '鉴识慧眼已达到上限。' : '鉴识识珠已达到上限。');
+  const cost = direction === 'range' ? current : current + 1; if (Number(character.skill_points) < cost) throw new Error(`技能点不足，升级需要 ${cost} 点。`);
   await connection.execute('UPDATE characters SET skill_points=skill_points-? WHERE id=?', [cost, character.id]);
   await connection.execute(`UPDATE player_appraisal_progress SET ${direction === 'range' ? 'range_level' : 'information_level'}=${direction === 'range' ? 'range_level' : 'information_level'}+1 WHERE character_id=?`, [character.id]);
   await connection.execute('UPDATE player_skills SET level=level+1 WHERE character_id=? AND skill_id=?', [character.id, skill.id]);
@@ -492,14 +492,15 @@ export const inspectCombat = async (qqUserId: string) => {
   const profile = await appraisalProfileFor(pool, members.map(member => Number(member.id))); if (!profile.learned) throw new Error('队伍中无人学会被动技能「鉴识」。');
   const [targets] = await pool.execute<CombatTargetRow[]>(`SELECT s.id,s.template_id,t.name,t.monster_class,t.level,s.current_hp,s.traits_json,COALESCE(s.skill_sequence,t.skill_sequence) AS skill_sequence,${monsterAttributeColumns},t.experience,t.drops_json,t.weakness_json,t.resistance_json,ct.current_mp,ct.cooldowns,ct.is_defeated
     FROM combat_targets ct JOIN monster_spawns s ON s.id=ct.spawn_id JOIN monster_templates t ON t.id=s.template_id WHERE ct.session_id=? ORDER BY s.id`, [session.combat_id]);
-  let effects: CombatEffectRow[] = [];
+  let effects: CombatEffectRow[] = []; let threats: (RowDataPacket & { spawn_id: number; name: string; threat: number })[] = [];
   if (profile.informationLevel >= 3) [effects] = await pool.execute<CombatEffectRow[]>('SELECT ce.id,ce.target_kind,ce.target_id,e.code,e.name,e.effect_type,ce.value,ce.stacks,ce.remaining_turns FROM combat_status_effects ce JOIN effect_definitions e ON e.id=ce.effect_id WHERE ce.session_id=?', [session.combat_id]);
+  if (profile.informationLevel >= 3) [threats] = await pool.execute<(RowDataPacket & { spawn_id: number; name: string; threat: number })[]>('SELECT ct.spawn_id,c.name,ct.threat FROM combat_threat ct JOIN characters c ON c.id=ct.character_id WHERE ct.session_id=?', [session.combat_id]);
   const lines = ['我方状态', ...members.map(member => `【${member.name}】HP ${member.current_hp}/${member.hp_max}｜MP ${member.current_mp}/${member.mp_max}${member.is_defeated ? '（倒下）' : ''}`), '', `鉴识：等级差 Lv.${profile.rangeLevel}（可鉴识至自身等级 +${profile.rangeLevel * 3}）｜信息深化 Lv.${profile.informationLevel}`, '', '敌方状态'];
   for (const raw of targets) {
     const observer = appraisalForTarget(profile, Number(raw.level)); const target = materializeMonster(raw, Number(observer?.informationLevel ?? 0) >= 2); if (!observer) { lines.push('【？？？】数据无法解析。'); continue; }
     lines.push(`【${target.name}】HP ${target.current_hp}/${target.hp_max}｜MP ${target.current_mp}/${monsterCombatStats(target).mpMax}`);
     if (observer.informationLevel >= 2) { const stats = monsterCombatStats(target); lines.push(`词条：${traitList(target.traits_json).map(trait => trait.name).join('、') || '无'}｜物攻 ${stats.physicalAttack}｜魔攻 ${stats.magicAttack}｜物防 ${stats.physicalDefense}｜魔防 ${stats.magicDefense}｜命中 ${stats.accuracy}｜闪避 ${stats.evasion}`); }
-    if (observer.informationLevel >= 3) { const statuses = effects.filter(effect => effect.target_kind === 'target' && Number(effect.target_id) === Number(target.id)); lines.push(`状态：${statuses.length ? statuses.map(effect => `${effect.name}${effect.stacks > 1 ? `×${effect.stacks}` : ''}(${effect.remaining_turns})`).join('、') : '无'}`); }
+    if (observer.informationLevel >= 3) { const statuses = effects.filter(effect => effect.target_kind === 'target' && Number(effect.target_id) === Number(target.id)); const threat = threats.filter(item => Number(item.spawn_id) === Number(target.id)).sort((left, right) => Number(right.threat) - Number(left.threat))[0]; lines.push(`状态：${statuses.length ? statuses.map(effect => `${effect.name}${effect.stacks > 1 ? `×${effect.stacks}` : ''}(${effect.remaining_turns})`).join('、') : '无'}｜目标仇恨：${threat ? threat.name : '无'}`); }
     if (observer.informationLevel >= 4) { const className: Record<string, string> = { normal: '普通', elite: '精英', boss: '首领' }; const attrs = monsterAttributes(target); lines.push(`种族：${className[target.monster_class] ?? target.monster_class}｜弱点：${stringList(target.weakness_json).join('、') || '无'}｜抗性：${stringList(target.resistance_json).join('、') || '无'}\n六维：体${attrs.constitution} 精${attrs.spirit} 力${attrs.strength} 智${attrs.intelligence} 敏${attrs.agility} 感${attrs.perception}`); }
   }
   return { text: lines.join('\n') };

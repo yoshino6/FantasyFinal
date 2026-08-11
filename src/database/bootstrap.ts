@@ -340,7 +340,7 @@ export const initializeSchema = async (pool: Pool) => {
     WHEN 'lucky_favor' THEN JSON_OBJECT('dropBonusPct',20)
     ELSE passive_effect_json END
     WHERE code IN ('appraisal','growth_blessing','mana_affinity','lucky_favor')`);
-  await pool.query(`UPDATE skill_definitions SET upgrade_cost=1,max_level=13,description='鉴识未知的敌对生物。低于自身等级的目标必定可鉴识；等级差每升一级可额外鉴识高于自身 3 级的目标；信息深化可逐步解锁更多情报。' WHERE code='appraisal'`);
+  await pool.query(`UPDATE skill_definitions SET upgrade_cost=1,max_level=13,description='鉴识未知的敌对生物。慧眼每升一级可额外鉴识高于自身 3 级的目标；识珠可逐步解锁更多情报。' WHERE code='appraisal'`);
   await pool.query(`UPDATE skill_definitions SET codex_id=CONCAT(CASE category WHEN 'physical' THEN '41' WHEN 'magic' THEN '42' ELSE '49' END, LPAD(id,5,'0')) WHERE codex_id IS NULL`);
   await pool.query(`INSERT IGNORE INTO player_skills (character_id,skill_id)
     SELECT b.character_id,s.id FROM player_blessings b JOIN skill_definitions s ON s.code=b.code AND s.category='passive'`);

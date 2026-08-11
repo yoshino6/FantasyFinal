@@ -36,6 +36,20 @@ export const skillDetailHandler = async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
   try {
     const skill = await skillDetail(event.current.UserId, Number(route.param('id')));
+    if (skill.code === 'appraisal' && skill.learned && skill.appraisal) {
+      const eyeCost = skill.appraisal.rangeLevel; const pearlCost = skill.appraisal.informationLevel + 1;
+      const markdown = Format.createMarkdown().addTitle('技能详情').addNewline().addNewline()
+        .addText(`【鉴识】Lv.${skill.level}\n`).addBlockquote('类别：被动').addNewline().addBlockquote('效果：鉴识未知的敌对生物，查看其各种信息。').addNewline().addNewline()
+        .addText('专精：\n①慧眼 Lv.' + skill.appraisal.rangeLevel + '/10 ');
+      if (skill.appraisal.rangeLevel < 10) markdown.addButton(`[升级(SP${eyeCost})]`, { data: '/升级鉴识 慧眼', autoEnter: false });
+      markdown.addNewline().addBlockquote('每一级允许查看比自身等级高3级以内的信息。').addNewline().addBlockquote(`当前可查看 Lv.${skill.characterLevel + skill.appraisal.rangeLevel * 3} 及以下敌对生物的信息。`).addNewline()
+        .addText(`②识珠 Lv.${skill.appraisal.informationLevel}/4 `);
+      if (skill.appraisal.informationLevel < 4) markdown.addButton(`[升级(SP${pearlCost})]`, { data: '/升级鉴识 识珠', autoEnter: false });
+      markdown.addNewline().addBlockquote('根据当前等级，可查看不同深度的信息：').addNewline().addBlockquote('1级：名称、生命、魔力、技能').addNewline().addBlockquote('2级：词条、详细属性').addNewline().addBlockquote('3级：当前增益、目标仇恨').addNewline().addBlockquote('4级：弱点、抗性等全部信息').addNewline().addNewline().addText(`当前技能点：${skill.skillPoints}`);
+      const buttons = Format.createButtonGroup().addRow().addButton('技能列表', '/技能列表 已学习', { type: 'command', autoEnter: true, style: 'blue' });
+      await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) });
+      return;
+    }
     const levelText = skill.learned ? `Lv.${skill.level}/${skill.max_level}` : `未学习｜SP:${skill.learn_cost}`;
     const costText = !skill.learned
       ? `学习消耗：${skill.learn_cost} 技能点`
@@ -52,8 +66,8 @@ export const skillDetailHandler = async () => {
     const buttons = Format.createButtonGroup().addRow().addButton('返回技能列表', skill.learned ? '/技能列表 已学习' : '/技能列表 未学习', { type: 'command', autoEnter: true });
     if (!skill.learned) buttons.addButton('学习', `/学习技能 ${skill.id}`, { type: 'command', autoEnter: true, style: 'blue' });
     else if (skill.code === 'appraisal' && skill.appraisal) {
-      if (skill.appraisal.rangeLevel < 10) buttons.addButton('升级等级差', '/升级鉴识 等级差', { type: 'command', autoEnter: true, style: 'blue' });
-      if (skill.appraisal.informationLevel < 4) buttons.addButton('信息深化', '/升级鉴识 信息深化', { type: 'command', autoEnter: true, style: 'blue' });
+      if (skill.appraisal.rangeLevel < 10) buttons.addButton('升级慧眼', '/升级鉴识 慧眼', { type: 'command', autoEnter: true, style: 'blue' });
+      if (skill.appraisal.informationLevel < 4) buttons.addButton('升级识珠', '/升级鉴识 识珠', { type: 'command', autoEnter: true, style: 'blue' });
     } else if (skill.nextUpgradeCost !== null) buttons.addButton('升级', `/升级技能 ${skill.id}`, { type: 'command', autoEnter: true, style: 'blue' });
     await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('技能详情').addNewline().addNewline().addText(text)).addButtonGroup(buttons) });
   } catch (error) { await message.send({ format: messageFormat('无法查看技能', error instanceof Error ? error.message : '请稍后重试。') }); }
@@ -79,9 +93,9 @@ export const upgradeSkillHandler = async () => {
 
 export const upgradeAppraisalHandler = async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
-  const direction = String(route.param('direction')) === '等级差' ? 'range' : 'information';
+  const direction = String(route.param('direction')) === '慧眼' ? 'range' : 'information';
   try {
     const result = await upgradeAppraisal(event.current.UserId, direction);
-    await message.send({ format: messageFormat('鉴识升级', `「鉴识」已提升至 Lv.${result.level}，${result.direction === 'range' ? `等级差提升至 Lv.${result.rangeLevel}（可鉴识至自身等级 +${result.rangeLevel * 3}）` : `信息深化提升至 Lv.${result.informationLevel}` }，消耗 ${result.cost} 技能点。`) });
+    await message.send({ format: messageFormat('鉴识升级', `「鉴识」已提升至 Lv.${result.level}，${result.direction === 'range' ? `慧眼提升至 Lv.${result.rangeLevel}（可鉴识至自身等级 +${result.rangeLevel * 3}）` : `识珠提升至 Lv.${result.informationLevel}` }，消耗 ${result.cost} 技能点。`) });
   } catch (error) { await message.send({ format: messageFormat('鉴识升级失败', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
