@@ -6,7 +6,7 @@ import { attributes, type Allocation } from './types';
 
 type CharacterRow = RowDataPacket & { id: number; player_id: number; name: string; level: number; experience: number; skill_points: number; hp_max: number; mp_max: number; current_hp: number; current_mp: number; activity_status: 'active' | 'resting' | 'unconscious'; rest_started_at: Date | null; physical_attack: number; magic_attack: number; physical_defense: number; magic_defense: number; accuracy: number; evasion: number; crit_rate_bp: number; crit_damage_bp: number; crit_resist_bp: number; crit_damage_reduction_bp: number; speed: number; perception: number; spirit: number; intelligence: number; adventurer_registered: number; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string };
 type MonsterAttributes = Allocation & Record<`${keyof Allocation}_growth`, number>;
-type MonsterTrait = { code: string; name: string; hpPct?: number; mpPct?: number; physicalAttackPct?: number; magicAttackPct?: number; physicalDefensePct?: number; magicDefensePct?: number; accuracyPct?: number; evasionPct?: number; speedPct?: number };
+type MonsterTrait = { code: string; name: string; attributeMultiplier?: number; statMultiplier?: number; hpPct?: number; mpPct?: number; physicalAttackPct?: number; magicAttackPct?: number; physicalDefensePct?: number; magicDefensePct?: number; accuracyPct?: number; evasionPct?: number; speedPct?: number };
 type SpawnRow = RowDataPacket & MonsterAttributes & { id: number; template_id?: number; name: string; monster_class: string; level: number; current_hp: number; hp_max: number; attack: number; defense: number; speed: number; experience: number; drops_json: unknown; skill_sequence?: unknown; traits_json?: unknown; weakness_json?: unknown; resistance_json?: unknown };
 type CombatMemberRow = CharacterRow & { current_hp: number; current_mp: number; selected_target_id: number | null; pending_action: unknown; cooldowns: unknown; is_defeated: number };
 type CombatTargetRow = SpawnRow & { current_mp: number; cooldowns: unknown; is_defeated: number };
@@ -24,16 +24,21 @@ const lowMonsterTraits: MonsterTrait[] = [
 ];
 const traitList = (value: unknown) => jsonArray(value).map(item => jsonObject(item) as unknown as MonsterTrait).filter(trait => trait.code && trait.name);
 const percentBonus = (traits: MonsterTrait[], key: keyof MonsterTrait) => traits.reduce((total, trait) => total + Number(trait[key] ?? 0), 0);
-const monsterAttributes = (monster: MonsterAttributes & { level: number }): Allocation => Object.fromEntries(attributes.map(attribute => [attribute, Number(monster[attribute]) + Math.max(0, Number(monster.level) - 1) * Number(monster[`${attribute}_growth`])])) as Allocation;
+const monsterAttributes = (monster: MonsterAttributes & { level: number }): Allocation => {
+  const multiplier = traitList((monster as SpawnRow).traits_json).reduce((value, trait) => value * Number(trait.attributeMultiplier ?? 1), 1);
+  return Object.fromEntries(attributes.map(attribute => [attribute, Math.floor((Number(monster[attribute]) + Math.max(0, Number(monster.level) - 1) * Number(monster[`${attribute}_growth`])) * multiplier])) as Allocation;
+};
 const monsterCombatStats = (monster: MonsterAttributes & { level: number }) => {
   const values = monsterAttributes(monster);
   const stats = calculateDerivedStats(values);
   const traits = traitList((monster as SpawnRow).traits_json);
-  const boosted = (value: number, key: keyof MonsterTrait) => Math.floor(value * (1 + percentBonus(traits, key) / 100));
+  const statMultiplier = traits.reduce((value, trait) => value * Number(trait.statMultiplier ?? 1), 1);
+  const boosted = (value: number, key: keyof MonsterTrait) => Math.floor(value * statMultiplier * (1 + percentBonus(traits, key) / 100));
+  const scaled = (value: number) => Math.floor(value * statMultiplier);
   return {
     hpMax: boosted(stats.hpMax, 'hpPct'), mpMax: boosted(stats.mpMax, 'mpPct'), physicalAttack: boosted(stats.physicalAttack, 'physicalAttackPct'), magicAttack: boosted(stats.magicAttack, 'magicAttackPct'),
     physicalDefense: boosted(stats.physicalDefense, 'physicalDefensePct'), magicDefense: boosted(stats.magicDefense, 'magicDefensePct'), accuracy: boosted(stats.accuracy, 'accuracyPct'), evasion: boosted(stats.evasion, 'evasionPct'),
-    crit: Math.floor(stats.critRateBp), critResist: Math.floor(stats.critResistBp), critDamage: Math.floor(stats.critDamageBp), critReduction: Math.floor(stats.critDamageReductionBp), speed: boosted(stats.speed, 'speedPct'), perception: Math.floor(values.perception)
+    crit: scaled(stats.critRateBp), critResist: scaled(stats.critResistBp), critDamage: scaled(stats.critDamageBp), critReduction: scaled(stats.critDamageReductionBp), speed: boosted(stats.speed, 'speedPct'), perception: scaled(values.perception)
   };
 };
 const materializeMonster = <T extends SpawnRow>(monster: T, revealTraits = false): T => {
@@ -509,13 +514,13 @@ export const forestGuideChoice = async (qqUserId: string, choice: 'join' | 'depa
   }
   const [templateRows] = await connection.execute<SpawnRow[]>('SELECT t.id AS template_id,t.name,t.level,t.constitution,t.spirit,t.strength,t.intelligence,t.agility,t.perception,t.constitution_growth,t.spirit_growth,t.strength_growth,t.intelligence_growth,t.agility_growth,t.perception_growth,t.skill_sequence FROM monster_templates t WHERE t.code=\'forest_slime\' FOR UPDATE');
   const template = templateRows[0]; if (!template) throw new Error('森林史莱姆的数据尚未准备好。');
-  const hp = monsterCombatStats(template).hpMax;
+  const weakenedTraits = [{ code: 'weakened', name: '虚弱的', statMultiplier: .5 }]; const hp = monsterCombatStats({ ...template, traits_json: weakenedTraits }).hpMax;
   const [existing] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM monster_spawns WHERE template_id=? AND region_id=? AND pos_x=? AND pos_y=? AND pos_z=? AND defeated_at IS NULL LIMIT 1 FOR UPDATE', [template.template_id, character.current_region_id, character.pos_x, character.pos_y, character.pos_z]);
   let spawnId = Number(existing[0]?.id);
   if (!spawnId) {
-    const [result] = await connection.execute<any>('INSERT INTO monster_spawns (template_id,region_id,pos_x,pos_y,pos_z,current_hp,skill_sequence) VALUES (?,?,?,?,?,?,?)', [template.template_id, character.current_region_id, character.pos_x, character.pos_y, character.pos_z, hp, JSON.stringify(stringList(template.skill_sequence))]);
+    const [result] = await connection.execute<any>('INSERT INTO monster_spawns (template_id,region_id,pos_x,pos_y,pos_z,current_hp,skill_sequence,traits_json) VALUES (?,?,?,?,?,?,?,?)', [template.template_id, character.current_region_id, character.pos_x, character.pos_y, character.pos_z, hp, JSON.stringify(stringList(template.skill_sequence)), JSON.stringify(weakenedTraits)]);
     spawnId = Number(result.insertId);
-  }
+  } else await connection.execute('UPDATE monster_spawns SET current_hp=?,traits_json=? WHERE id=?', [hp, JSON.stringify(weakenedTraits), spawnId]);
   await connection.execute('UPDATE player_story_progress SET status=? WHERE character_id=? AND story_code=\'forest_guide\'', [choice === 'join' ? 'joined' : 'declined', character.id]);
   return {
     spawnId,
