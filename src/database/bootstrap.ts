@@ -404,15 +404,15 @@ export const initializeSchema = async (pool: Pool) => {
   await pool.query(`UPDATE monster_templates SET weakness_json=CASE code WHEN 'ball_rabbit' THEN JSON_ARRAY('刺击') WHEN 'spike_boar' THEN JSON_ARRAY('水') WHEN 'vine_snake' THEN JSON_ARRAY('火') WHEN 'black_bear' THEN JSON_ARRAY('冰') WHEN 'mist_wolf' THEN JSON_ARRAY('光') WHEN 'roll_rabbit' THEN JSON_ARRAY('刺击') WHEN 'tusk_boar' THEN JSON_ARRAY('水') WHEN 'vine_python' THEN JSON_ARRAY('火','斩击') WHEN 'pitch_bear' THEN JSON_ARRAY('冰') WHEN 'shadow_wolf' THEN JSON_ARRAY('光') WHEN 'goblin' THEN JSON_ARRAY('雷') ELSE weakness_json END, resistance_json=CASE code WHEN 'ball_rabbit' THEN JSON_ARRAY('打击') WHEN 'spike_boar' THEN JSON_ARRAY('刺击') WHEN 'vine_snake' THEN JSON_ARRAY('木') WHEN 'black_bear' THEN JSON_ARRAY('打击') WHEN 'mist_wolf' THEN JSON_ARRAY('暗') WHEN 'roll_rabbit' THEN JSON_ARRAY('打击') WHEN 'tusk_boar' THEN JSON_ARRAY('刺击') WHEN 'vine_python' THEN JSON_ARRAY('木') WHEN 'pitch_bear' THEN JSON_ARRAY('打击') WHEN 'shadow_wolf' THEN JSON_ARRAY('暗') WHEN 'goblin' THEN JSON_ARRAY('火') ELSE resistance_json END`);
   await pool.query(`DELETE r FROM monster_skill_learn_rules r JOIN monster_templates t ON t.id=r.monster_template_id WHERE t.code IN ('ball_rabbit','spike_boar','vine_snake','black_bear','mist_wolf','roll_rabbit','tusk_boar','vine_python','pitch_bear','shadow_wolf','goblin')`);
   await pool.query(`INSERT INTO monster_skill_learn_rules (monster_template_id,source_skill_code,skill_id,chance) VALUES
-    ((SELECT id FROM monster_templates WHERE code='ball_rabbit'),'hop',(SELECT id FROM skill_definitions WHERE code='jump_strike'),0.03000),
-    ((SELECT id FROM monster_templates WHERE code='spike_boar'),'charge',(SELECT id FROM skill_definitions WHERE code='charge'),0.05000),
-    ((SELECT id FROM monster_templates WHERE code='vine_snake'),'bite',(SELECT id FROM skill_definitions WHERE code='bite_slash'),0.04000),
-    ((SELECT id FROM monster_templates WHERE code='vine_python'),'bite',(SELECT id FROM skill_definitions WHERE code='bite_slash'),0.08000),
-    ((SELECT id FROM monster_templates WHERE code='mist_wolf'),'mist_pounce',(SELECT id FROM skill_definitions WHERE code='mist_step_slash'),0.05000),
-    ((SELECT id FROM monster_templates WHERE code='roll_rabbit'),'hop',(SELECT id FROM skill_definitions WHERE code='jump_strike'),0.06000),
-    ((SELECT id FROM monster_templates WHERE code='tusk_boar'),'charge',(SELECT id FROM skill_definitions WHERE code='charge'),0.07000),
-    ((SELECT id FROM monster_templates WHERE code='shadow_wolf'),'mist_pounce',(SELECT id FROM skill_definitions WHERE code='mist_step_slash'),0.08000),
-    ((SELECT id FROM monster_templates WHERE code='pitch_bear'),'howl',(SELECT id FROM skill_definitions WHERE code='war_cry'),0.06000)`);
+    ((SELECT id FROM monster_templates WHERE code='ball_rabbit'),'hop',(SELECT id FROM skill_definitions WHERE code='jump_strike'),0.50000),
+    ((SELECT id FROM monster_templates WHERE code='spike_boar'),'charge',(SELECT id FROM skill_definitions WHERE code='charge'),0.50000),
+    ((SELECT id FROM monster_templates WHERE code='vine_snake'),'bite',(SELECT id FROM skill_definitions WHERE code='bite_slash'),0.50000),
+    ((SELECT id FROM monster_templates WHERE code='vine_python'),'bite',(SELECT id FROM skill_definitions WHERE code='bite_slash'),0.50000),
+    ((SELECT id FROM monster_templates WHERE code='mist_wolf'),'mist_pounce',(SELECT id FROM skill_definitions WHERE code='mist_step_slash'),0.50000),
+    ((SELECT id FROM monster_templates WHERE code='roll_rabbit'),'hop',(SELECT id FROM skill_definitions WHERE code='jump_strike'),0.50000),
+    ((SELECT id FROM monster_templates WHERE code='tusk_boar'),'charge',(SELECT id FROM skill_definitions WHERE code='charge'),0.50000),
+    ((SELECT id FROM monster_templates WHERE code='shadow_wolf'),'mist_pounce',(SELECT id FROM skill_definitions WHERE code='mist_step_slash'),0.50000),
+    ((SELECT id FROM monster_templates WHERE code='pitch_bear'),'howl',(SELECT id FROM skill_definitions WHERE code='war_cry'),0.50000)`);
   await pool.query(`INSERT IGNORE INTO monster_encounter_texts (monster_template_id, description) VALUES
     ((SELECT id FROM monster_templates WHERE code='ball_rabbit'), '落叶轻轻颤动，一只球兔从灌木后探出圆滚滚的脑袋，红色的眼睛正盯着你。'),
     ((SELECT id FROM monster_templates WHERE code='ball_rabbit'), '草丛里传来急促的蹦跳声，球兔挡在了你的去路上。'),
