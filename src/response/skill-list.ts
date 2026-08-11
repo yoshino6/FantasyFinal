@@ -42,7 +42,7 @@ export const skillDetailHandler = async () => {
         .addText(`【鉴识】Lv.${skill.level}\n`).addBlockquote('类别：被动').addNewline().addBlockquote('效果：鉴识未知的敌对生物，查看其各种信息。').addNewline().addNewline()
         .addText('专精：\n①慧眼 Lv.' + skill.appraisal.rangeLevel + '/10 ');
       if (skill.appraisal.rangeLevel < 10) markdown.addButton(`[升级(SP${eyeCost})]`, { data: '/升级鉴识 慧眼', autoEnter: false });
-      markdown.addNewline().addBlockquote('每一级允许查看比自身等级高3级以内的信息。').addNewline().addBlockquote(`当前可查看 Lv.${skill.characterLevel + skill.appraisal.rangeLevel * 3} 及以下敌对生物的信息。`).addNewline()
+      markdown.addNewline().addBlockquote('每一级允许查看比自身等级高3级以内的信息。').addNewline().addBlockquote(`当前可查看 Lv.${skill.characterLevel + skill.appraisal.rangeLevel * 3} 及以下敌对生物的信息。`).addNewline().addNewline()
         .addText(`②识珠 Lv.${skill.appraisal.informationLevel}/4 `);
       if (skill.appraisal.informationLevel < 4) markdown.addButton(`[升级(SP${pearlCost})]`, { data: '/升级鉴识 识珠', autoEnter: false });
       markdown.addNewline().addBlockquote('根据当前等级，可查看不同深度的信息：').addNewline().addBlockquote('1级：名称、生命、魔力、技能').addNewline().addBlockquote('2级：词条、详细属性').addNewline().addBlockquote('3级：当前增益、目标仇恨').addNewline().addBlockquote('4级：弱点、抗性等全部信息').addNewline().addNewline().addText(`当前技能点：${skill.skillPoints}`);
