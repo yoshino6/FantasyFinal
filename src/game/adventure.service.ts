@@ -497,7 +497,7 @@ export const forestGuideChoice = async (qqUserId: string, choice: 'join' | 'depa
   if (progressRows[0]?.status !== 'met' || Number(progressRows[0]?.stage) !== 5) throw new Error('这段林间相遇尚未推进到最终抉择。');
   const [existingParty] = await connection.execute<RowDataPacket[]>('SELECT party_id FROM party_members WHERE character_id=? FOR UPDATE', [character.id]);
   if (existingParty[0]) throw new Error('请先离开当前队伍，再接受这支冒险小队的邀请。');
-  const [companions] = await connection.execute<(RowDataPacket & { id: number })[]>(`SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id IN ('npc_forest_warrior','npc_forest_mage','npc_forest_priest') ORDER BY c.id FOR UPDATE`);
+  const [companions] = await connection.execute<(RowDataPacket & { id: number })[]>(`SELECT c.id FROM characters c WHERE c.npc_code IN ('npc_forest_warrior','npc_forest_mage','npc_forest_priest') ORDER BY c.id FOR UPDATE`);
   if (companions.length !== 3) throw new Error('冒险小队尚未抵达密林，请重启机器人初始化数据。');
   const partyId = randomUUID();
   await connection.execute('INSERT INTO parties (id,leader_character_id) VALUES (?,?)', [partyId, character.id]);
@@ -919,14 +919,14 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
   }
   const pending: PendingAction = { type: action, ...(slot ? { slot } : {}) };
   await connection.execute('UPDATE combat_members SET pending_action=? WHERE session_id=? AND character_id=?', [JSON.stringify(pending), session.combat_id, character.id]); actor.pending_action = JSON.stringify(pending);
-  const [npcRows] = await connection.execute<(RowDataPacket & { character_id: number; qq_user_id: string })[]>(`SELECT cm.character_id,p.qq_user_id FROM combat_members cm JOIN characters c ON c.id=cm.character_id JOIN players p ON p.id=c.player_id WHERE cm.session_id=? AND cm.is_defeated=0 AND cm.pending_action IS NULL AND p.qq_user_id IN ('npc_forest_warrior','npc_forest_mage','npc_forest_priest') FOR UPDATE`, [session.combat_id]);
+  const [npcRows] = await connection.execute<(RowDataPacket & { character_id: number; npc_code: string })[]>(`SELECT cm.character_id,c.npc_code FROM combat_members cm JOIN characters c ON c.id=cm.character_id WHERE cm.session_id=? AND cm.is_defeated=0 AND cm.pending_action IS NULL AND c.npc_code IN ('npc_forest_warrior','npc_forest_mage','npc_forest_priest') FOR UPDATE`, [session.combat_id]);
   for (const npc of npcRows) {
     const turn = Number(session.turn_no);
-    const slot = npc.qq_user_id === 'npc_forest_warrior' ? (turn % 3 === 1 ? 1 : turn % 3 === 2 ? 2 : 3)
-      : npc.qq_user_id === 'npc_forest_mage' ? (turn % 2 === 1 ? 1 : 2)
+    const slot = npc.npc_code === 'npc_forest_warrior' ? (turn % 3 === 1 ? 1 : turn % 3 === 2 ? 2 : 3)
+      : npc.npc_code === 'npc_forest_mage' ? (turn % 2 === 1 ? 1 : 2)
         : (turn % 3 === 1 ? 2 : turn % 3 === 2 ? 1 : 3);
-    const code = npc.qq_user_id === 'npc_forest_warrior' ? ['warrior_taunt', 'shield_counter', 'guard_break'][slot - 1]
-      : npc.qq_user_id === 'npc_forest_mage' ? ['arcane_shackle', 'ember_burst'][slot - 1]
+    const code = npc.npc_code === 'npc_forest_warrior' ? ['warrior_taunt', 'shield_counter', 'guard_break'][slot - 1]
+      : npc.npc_code === 'npc_forest_mage' ? ['arcane_shackle', 'ember_burst'][slot - 1]
         : ['healing_prayer', 'blessing_aegis', 'sanctified_bolt'][slot - 1];
     const npcMember = members.find(item => Number(item.id) === Number(npc.character_id));
     const pending: PendingAction = Number(jsonObject(npcMember?.cooldowns)[code] ?? 0) > 0 ? { type: 'attack' } : { type: 'skill', slot };

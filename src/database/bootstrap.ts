@@ -22,7 +22,7 @@ const schemaStatements = [
     PRIMARY KEY (id), UNIQUE KEY uk_regions_code (code)
   ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS characters (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, player_id BIGINT UNSIGNED NOT NULL, name VARCHAR(24) NOT NULL,
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, player_id BIGINT UNSIGNED NULL, npc_id BIGINT UNSIGNED NULL, npc_code VARCHAR(64) NULL, name VARCHAR(24) NOT NULL,
     gender VARCHAR(8) NOT NULL DEFAULT '未设定', free_name_change_used TINYINT(1) NOT NULL DEFAULT 0, free_gender_change_used TINYINT(1) NOT NULL DEFAULT 0,
     level INT UNSIGNED NOT NULL DEFAULT 1, experience BIGINT UNSIGNED NOT NULL DEFAULT 0, skill_points INT UNSIGNED NOT NULL DEFAULT 1,
     constitution SMALLINT UNSIGNED NOT NULL, spirit SMALLINT UNSIGNED NOT NULL, strength SMALLINT UNSIGNED NOT NULL,
@@ -38,7 +38,7 @@ const schemaStatements = [
     stat_formula_version SMALLINT UNSIGNED NOT NULL DEFAULT 1, current_region_id BIGINT UNSIGNED NOT NULL,
     pos_x INT NOT NULL, pos_y INT NOT NULL, pos_z INT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (id), UNIQUE KEY uk_characters_player (player_id), KEY idx_character_position (current_region_id, pos_x, pos_y, pos_z),
+    PRIMARY KEY (id), UNIQUE KEY uk_characters_player (player_id), UNIQUE KEY uk_characters_npc_id (npc_id), UNIQUE KEY uk_characters_npc_code (npc_code), KEY idx_character_position (current_region_id, pos_x, pos_y, pos_z),
     CONSTRAINT fk_character_player FOREIGN KEY (player_id) REFERENCES players(id),
     CONSTRAINT fk_character_region FOREIGN KEY (current_region_id) REFERENCES map_regions(id)
   ) ENGINE=InnoDB`,
@@ -297,6 +297,13 @@ export const initializeSchema = async (pool: Pool) => {
   }
   try { await pool.query('ALTER TABLE player_inventory ADD COLUMN acquired_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   try { await pool.query('ALTER TABLE player_story_progress ADD COLUMN stage TINYINT UNSIGNED NOT NULL DEFAULT 1'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  try { await pool.query('ALTER TABLE characters MODIFY COLUMN player_id BIGINT UNSIGNED NULL'); } catch (error: any) { if (error?.code !== 'ER_FK_INCOMPATIBLE_COLUMNS') throw error; }
+  try { await pool.query('ALTER TABLE characters ADD COLUMN npc_id BIGINT UNSIGNED NULL'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  try { await pool.query('ALTER TABLE characters ADD COLUMN npc_code VARCHAR(64) NULL'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  try { await pool.query('ALTER TABLE characters ADD UNIQUE KEY uk_characters_npc_id (npc_id)'); } catch (error: any) { if (error?.code !== 'ER_DUP_KEYNAME') throw error; }
+  try { await pool.query('ALTER TABLE characters ADD UNIQUE KEY uk_characters_npc_code (npc_code)'); } catch (error: any) { if (error?.code !== 'ER_DUP_KEYNAME') throw error; }
+  await pool.query(`UPDATE characters c JOIN players p ON p.id=c.player_id SET c.player_id=NULL,c.npc_id=CASE p.qq_user_id WHEN 'npc_forest_warrior' THEN 900000001 WHEN 'npc_forest_mage' THEN 900000002 WHEN 'npc_forest_priest' THEN 900000003 END,c.npc_code=p.qq_user_id WHERE p.qq_user_id IN ('npc_forest_warrior','npc_forest_mage','npc_forest_priest')`);
+  await pool.query(`DELETE FROM players WHERE qq_user_id IN ('npc_forest_warrior','npc_forest_mage','npc_forest_priest')`);
   await pool.query(`UPDATE item_definitions SET item_category=CASE code WHEN 'holy_sword_shirulu' THEN '武器' WHEN 'demon_sword_aphia' THEN '武器' WHEN 'healing_herb' THEN '药剂' WHEN 'wolf_fang' THEN '兽材' ELSE item_category END, stackable=CASE WHEN item_type='equipment' THEN 0 ELSE 1 END`);
   await pool.query(`UPDATE item_definitions SET codex_id=CONCAT(CASE WHEN item_type='equipment' THEN CASE item_category WHEN '武器' THEN '11' WHEN '副手' THEN '12' WHEN '头部' THEN '13' WHEN '上装' THEN '14' WHEN '腰部' THEN '15' WHEN '下装' THEN '16' WHEN '脚部' THEN '17' WHEN '项链' THEN '18' WHEN '手镯' THEN '19' WHEN '戒指' THEN '10' ELSE '19' END WHEN item_type='consumable' THEN CASE item_category WHEN '药剂' THEN '21' WHEN '食物' THEN '22' ELSE '23' END WHEN item_type='material' THEN CASE item_category WHEN '食材' THEN '31' WHEN '草药' THEN '32' ELSE '39' END ELSE '99' END, LPAD(id,5,'0')) WHERE codex_id IS NULL`);
   try { await pool.query('ALTER TABLE item_definitions ADD UNIQUE KEY uk_item_codex_id (codex_id)'); } catch (error: any) { if (error?.code !== 'ER_DUP_KEYNAME') throw error; }
@@ -511,20 +518,18 @@ export const initializeSchema = async (pool: Pool) => {
     ((SELECT id FROM map_regions WHERE code='dark_forest'), '藤蔓垂落在前方，树影在雾里扭曲成陌生的形状。')`);
   await pool.query(`INSERT IGNORE INTO player_inventory (character_id, item_id, quantity)
     SELECT c.id, i.id, 3 FROM characters c JOIN item_definitions i ON i.code='healing_herb'`);
-  await pool.query(`INSERT INTO players (qq_user_id,qq_nickname,status) VALUES
-    ('npc_forest_warrior','莱昂','active'),('npc_forest_mage','伊芙','active'),('npc_forest_priest','希娅','active')
-    ON DUPLICATE KEY UPDATE qq_nickname=VALUES(qq_nickname),status='active'`);
-  await pool.query(`INSERT IGNORE INTO characters (player_id,name,gender,level,experience,skill_points,constitution,spirit,strength,intelligence,agility,perception,constitution_growth,spirit_growth,strength_growth,intelligence_growth,agility_growth,perception_growth,adventurer_registered,hp_max,mp_max,current_hp,current_mp,physical_attack,magic_attack,physical_defense,magic_defense,accuracy,evasion,crit_rate_bp,crit_damage_bp,crit_resist_bp,crit_damage_reduction_bp,tenacity,speed,current_region_id,pos_x,pos_y,pos_z)
-    SELECT p.id, v.name, '未设定', 10, 900, 0, v.constitution,v.spirit,v.strength,v.intelligence,v.agility,v.perception, 0,0,0,0,0,0, 1, v.hp,v.mp,v.hp,v.mp,v.patk,v.matk,v.pdef,v.mdef,v.accuracy,v.evasion,500,15000,300,500,0,v.speed,(SELECT id FROM map_regions WHERE code='dark_forest'),0,-60,0
-    FROM players p JOIN (SELECT 'npc_forest_warrior' AS code,'莱昂' AS name,50 AS constitution,20 AS spirit,52 AS strength,12 AS intelligence,28 AS agility,24 AS perception,1150 AS hp,520 AS mp,170 AS patk,55 AS matk,145 AS pdef,85 AS mdef,110 AS accuracy,72 AS evasion,86 AS speed
-      UNION ALL SELECT 'npc_forest_mage','伊芙',24,52,12,55,30,34,820,1150,55,185,78,120,116,82,94
-      UNION ALL SELECT 'npc_forest_priest','希娅',38,55,18,38,25,32,1040,1100,72,145,115,145,105,78,82) v ON v.code=p.qq_user_id`);
+  await pool.query(`INSERT INTO characters (player_id,npc_id,npc_code,name,gender,level,experience,skill_points,constitution,spirit,strength,intelligence,agility,perception,constitution_growth,spirit_growth,strength_growth,intelligence_growth,agility_growth,perception_growth,adventurer_registered,hp_max,mp_max,current_hp,current_mp,physical_attack,magic_attack,physical_defense,magic_defense,accuracy,evasion,crit_rate_bp,crit_damage_bp,crit_resist_bp,crit_damage_reduction_bp,tenacity,speed,current_region_id,pos_x,pos_y,pos_z)
+    SELECT NULL, v.npc_id, v.code, v.name, '未设定', 10, 900, 0, v.constitution,v.spirit,v.strength,v.intelligence,v.agility,v.perception, 0,0,0,0,0,0, 1, v.hp,v.mp,v.hp,v.mp,v.patk,v.matk,v.pdef,v.mdef,v.accuracy,v.evasion,500,15000,300,500,0,v.speed,(SELECT id FROM map_regions WHERE code='dark_forest'),0,-60,0
+    FROM (SELECT 900000001 AS npc_id,'npc_forest_warrior' AS code,'莱昂' AS name,50 AS constitution,20 AS spirit,52 AS strength,12 AS intelligence,28 AS agility,24 AS perception,1150 AS hp,520 AS mp,170 AS patk,55 AS matk,145 AS pdef,85 AS mdef,110 AS accuracy,72 AS evasion,86 AS speed
+      UNION ALL SELECT 900000002,'npc_forest_mage','伊芙',24,52,12,55,30,34,820,1150,55,185,78,120,116,82,94
+      UNION ALL SELECT 900000003,'npc_forest_priest','希娅',38,55,18,38,25,32,1040,1100,72,145,115,145,105,78,82) v
+    ON DUPLICATE KEY UPDATE name=VALUES(name),npc_id=VALUES(npc_id),level=VALUES(level),hp_max=VALUES(hp_max),mp_max=VALUES(mp_max),current_hp=VALUES(current_hp),current_mp=VALUES(current_mp),physical_attack=VALUES(physical_attack),magic_attack=VALUES(magic_attack),physical_defense=VALUES(physical_defense),magic_defense=VALUES(magic_defense),accuracy=VALUES(accuracy),evasion=VALUES(evasion),speed=VALUES(speed)`);
   await pool.query(`INSERT IGNORE INTO player_skills (character_id,skill_id,quick_slot)
-    SELECT c.id,s.id,v.slot FROM characters c JOIN players p ON p.id=c.player_id JOIN (
+    SELECT c.id,s.id,v.slot FROM characters c JOIN (
       SELECT 'npc_forest_warrior' AS code,'warrior_taunt' AS skill_code,1 AS slot UNION ALL SELECT 'npc_forest_warrior','shield_counter',2 UNION ALL SELECT 'npc_forest_warrior','guard_break',3
       UNION ALL SELECT 'npc_forest_mage','arcane_shackle',1 UNION ALL SELECT 'npc_forest_mage','ember_burst',2
       UNION ALL SELECT 'npc_forest_priest','healing_prayer',1 UNION ALL SELECT 'npc_forest_priest','blessing_aegis',2 UNION ALL SELECT 'npc_forest_priest','sanctified_bolt',3
-    ) v ON v.code=p.qq_user_id JOIN skill_definitions s ON s.code=v.skill_code`);
+    ) v ON v.code=c.npc_code JOIN skill_definitions s ON s.code=v.skill_code`);
   await pool.query(`INSERT IGNORE INTO player_quick_items (character_id, quick_slot, item_id)
     SELECT c.id, 1, i.id FROM characters c JOIN item_definitions i ON i.code='healing_herb'`);
 };
