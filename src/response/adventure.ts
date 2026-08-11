@@ -104,7 +104,7 @@ export const inventoryHandler = async () => { const [event] = useEvent(); const 
 const movementPanel = async (qqUserId: string, description: string) => { const [bag, nearby] = await Promise.all([inventory(qqUserId), nearbyPoints(qqUserId)]); const resting = nearby.character.activity_status !== 'active'; return outsidePanel('行动', movedLocationText(nearby.character), bag.movementSpeed, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), description, nearby.points, resting); };
 const showMoveResult = async (message: any, qqUserId: string, result: any) => {
   if (result.kind === 'story') {
-    await message.send({ format: chapterFormat(1, '我在雾里听见了兵刃碰撞的声音。那声响被湿润的枝叶过滤得断断续续，却仍清晰地指向前方。\n\n这里不该有人。至少，不该有人像我一样独自在密林深处徘徊。') });
+    await message.send({ format: chapterFormat(1, '你在林中听见了兵刃碰撞的声音。\n那声响被湿润的枝叶过滤得断断续续，却仍清晰地指向前方。\n是也有人在附件战斗吗？') });
     return;
   }
   if (result.kind !== 'encounter') { const panel = await movementPanel(qqUserId, result.text); const nearby = await nearbyPoints(qqUserId); await message.send({ format: panel.addButtonGroup(panelButtons(nearby.character.activity_status !== 'active')) }); return; }

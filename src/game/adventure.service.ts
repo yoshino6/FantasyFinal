@@ -474,8 +474,8 @@ export const forestGuideAdvance = async (qqUserId: string, action: string) => wi
   const [rows] = await connection.execute<(RowDataPacket & { status: string; stage: number })[]>('SELECT status,stage FROM player_story_progress WHERE character_id=? AND story_code=\'forest_guide\' FOR UPDATE', [character.id]);
   const story = rows[0]; if (!story || story.status !== 'met') throw new Error('这段故事已经结束了。');
   const stage = Number(story.stage);
-  const pages: Record<number, { action: string; text: string }> = {
-    1: { action: '循声而去', text: '我停下脚步。潮湿的风从林间掠过，兵刃相击的脆响和短促的吟唱声却穿透了雾气。那声音离得不远——也许有人需要帮助，也许只是另一场我不该靠近的厮杀。\n\n我握紧武器，压低呼吸，循着声音走去。' },
+  const pages: Record<number, { action: string; text?: string }> = {
+    1: { action: '循声而去' },
     2: { action: '上前打招呼', text: '我拨开最后一丛沾着露水的灌木，看见三人正收起武器。为首的青年背着剑盾，红发少女指尖还缠着未散的火星，白袍少女则正替受伤的同伴施展治愈术。\n\n他们显然也发现了我。与其让误会在沉默里滋长，我决定先上前打招呼。' },
     3: { action: '我也不清楚，一觉醒来就在这儿了', text: '战士把盾牌背回身后，笑着自我介绍：他叫莱昂，是战士；红发少女伊芙是法师；白袍的希娅则是牧师。\n\n他们说自己接下了讨伐森林史莱姆的悬赏，正循着痕迹搜寻。莱昂打量着我身上未干的露水，困惑地问：\n\n“你为什么会一个人在这种地方？”\n\n我沉默片刻，只能把自己也无法理解的经历告诉他们。' },
     4: { action: '', text: '“我也不清楚，”我如实回答，“一觉醒来，就已经在这片森林里了。”\n\n三人交换了一个复杂的眼神。希娅没有继续追问，只是轻声说，百纳镇就在密林南方——那是一座接纳各族居民的边境小镇，猫人、矮人、精灵与人类都能在那里找到落脚处。\n\n莱昂朝森林深处扬了扬下巴：“我们先解决那只史莱姆。你要不要和我们一起？结束后，我们带你去百纳镇。”' }
@@ -483,8 +483,9 @@ export const forestGuideAdvance = async (qqUserId: string, action: string) => wi
   const page = pages[stage]; if (!page) throw new Error('故事进度异常。');
   if (page.action && action !== page.action) throw new Error('现在还不能做出这个选择。');
   if (stage < 4) {
+    const nextPage = pages[stage + 1]; if (!nextPage?.text) throw new Error('下一段剧情缺失。');
     await connection.execute('UPDATE player_story_progress SET stage=stage+1 WHERE character_id=? AND story_code=\'forest_guide\'', [character.id]);
-    return { stage: stage + 1, text: pages[stage + 1].text, battleChoice: undefined as 'join' | 'depart' | undefined };
+    return { stage: stage + 1, text: nextPage.text, battleChoice: undefined as 'join' | 'depart' | undefined };
   }
   if (action !== '加入' && action !== '婉拒并询问城镇位置') throw new Error('请选择加入队伍，或婉拒并询问城镇位置。');
   await connection.execute('UPDATE player_story_progress SET stage=5 WHERE character_id=? AND story_code=\'forest_guide\'', [character.id]);
