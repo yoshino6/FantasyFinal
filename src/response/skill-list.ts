@@ -119,7 +119,7 @@ export const upgradeSkillHandler = async () => {
 export const upgradeSpecializationHandler = async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
   const specialization = ({ 过充: 'overcharge', 瞬息: 'instant', 节能: 'efficient', 强效: 'potent' } as const)[String(route.param('specialization')) as '过充' | '瞬息' | '节能' | '强效'];
-  try { const result = await upgradeSkillSpecialization(event.current.UserId, Number(route.param('id')), specialization); await message.send({ format: messageFormat('专精升级', `「${result.name}」的专精已提升至 Lv.${result.level}。`) }); }
+  try { const result = await upgradeSkillSpecialization(event.current.UserId, Number(route.param('id')), specialization); await message.send({ format: messageFormat('专精升级', `「${result.name}」的专精已提升至 Lv.${result.level}。\n技能等级已提升至 Lv.${result.skillLevel}`) }); }
   catch (error) { await message.send({ format: messageFormat('升级失败', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
 

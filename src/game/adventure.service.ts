@@ -346,15 +346,17 @@ export const upgradeSkill = async (qqUserId: string, skillId: number) => withTra
 
 export const upgradeSkillSpecialization = async (qqUserId: string, skillId: number, specialization: 'overcharge' | 'instant' | 'efficient' | 'potent') => withTransaction(async connection => {
   const character = await characterFor(qqUserId);
-  const [skills] = await connection.execute<(RowDataPacket & { name: string; category: string })[]>('SELECT s.name,s.category FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.skill_id=? FOR UPDATE', [character.id, skillId]);
+  const [skills] = await connection.execute<(RowDataPacket & { name: string; category: string; level: number; max_level: number })[]>('SELECT s.name,s.category,ps.level,s.max_level FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.skill_id=? FOR UPDATE', [character.id, skillId]);
   const skill = skills[0]; if (!skill || skill.category === 'passive') throw new Error('只能升级已学习的主动技能专精。');
+  if (Number(skill.level) >= Number(skill.max_level)) throw new Error('该技能已达到最高等级。');
   await connection.execute('INSERT IGNORE INTO player_skill_specializations (character_id,skill_id,specialization) VALUES (?,?,?)', [character.id, skillId, specialization]);
   const [rows] = await connection.execute<(RowDataPacket & { level: number })[]>('SELECT level FROM player_skill_specializations WHERE character_id=? AND skill_id=? AND specialization=? FOR UPDATE', [character.id, skillId, specialization]);
   const level = Number(rows[0].level); if (level >= 100) throw new Error('该专精已达到最高等级。');
   if (Number(character.skill_points) < 1) throw new Error('技能点不足，升级需要 1 点。');
   await connection.execute('UPDATE characters SET skill_points=skill_points-1 WHERE id=?', [character.id]);
   await connection.execute('UPDATE player_skill_specializations SET level=level+1 WHERE character_id=? AND skill_id=? AND specialization=?', [character.id, skillId, specialization]);
-  return { name: skill.name, specialization, level: level + 1 };
+  await connection.execute('UPDATE player_skills SET level=level+1 WHERE character_id=? AND skill_id=?', [character.id, skillId]);
+  return { name: skill.name, skillLevel: Number(skill.level) + 1, specialization, level: level + 1 };
 });
 
 export const upgradeAppraisal = async (qqUserId: string, direction: 'range' | 'information') => withTransaction(async connection => {
