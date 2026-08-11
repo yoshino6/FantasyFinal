@@ -762,7 +762,10 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
       log.push(`➤【${member.name}】${label}`); if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, 'member', target, 'target', 'on_cast', log); if (!strike.hit) { log.push(`　➥[${targetName(target)}]闪避了攻击`); continue; }
       const elemental = weaknessMultiplier(target, damageType); const damage = Math.max(1, Math.floor(strike.damage * elemental)); const oldHp = Number(target.current_hp); target.current_hp = Math.max(0, oldHp - damage); if (!target.current_hp) target.is_defeated = 1;
       await connection.execute('UPDATE combat_threat SET threat=threat+? WHERE session_id=? AND spawn_id=? AND character_id=?', [damage, session.combat_id, target.id, member.id]); if (modifiers.lifestealPct && choice.type === 'attack') member.current_hp = Math.min(Number(member.hp_max), Number(member.current_hp) + Math.floor(damage * modifiers.lifestealPct / 100));
-      log.push(`　➥${elemental > 1 ? '[克制]' : elemental < 1 ? '[抗性]' : ''}${strike.crit ? '[暴击!]' : ''}对【${targetName(target)}】造成 ${damage} 点${kind}伤害(${oldHp}→${target.current_hp})`);
+      const observer = appraisalForTarget(appraisal, Number(target.level));
+      log.push(observer
+        ? `　➥${observer.informationLevel >= 4 ? elemental > 1 ? '[克制]' : elemental < 1 ? '[抗性]' : '' : ''}${strike.crit ? '[暴击!]' : ''}对【${targetName(target)}】造成 ${damage} 点${kind}伤害(${oldHp}→${target.current_hp})`
+        : `　➥对【？？？】造成 ？？？ 点${kind}伤害(？？？→？？？)`);
       if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, 'member', target, 'target', 'on_hit', log);
     } else {
       const monsterTarget = targets.find(item => Number(item.id) === turn.id)!; if (monsterTarget.is_defeated) continue;
@@ -791,7 +794,10 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
     await connection.execute('UPDATE monster_spawns SET current_hp=?,defeated_at=IF(?,NOW(),defeated_at) WHERE id=?', [target.current_hp, target.is_defeated ? 1 : 0, target.id]);
     await connection.execute('UPDATE combat_targets SET current_mp=?,cooldowns=?,is_defeated=? WHERE session_id=? AND spawn_id=?', [target.current_mp, JSON.stringify(cooldowns), target.is_defeated ? 1 : 0, session.combat_id, target.id]);
   }
-  for (const target of targets) if (!canAppraiseTarget(appraisal, Number(target.level))) for (let index = 0; index < log.length; index += 1) log[index] = log[index].replaceAll(target.name, '？？？');
+  for (const target of targets) if (!canAppraiseTarget(appraisal, Number(target.level))) for (let index = 0; index < log.length; index += 1) {
+    if (!log[index].includes(target.name)) continue;
+    log[index] = log[index].replaceAll(target.name, '？？？').replace(/(损失|恢复) \d+ HP\(\d+→\d+\)/g, '$1 ？？？ HP(？？？→？？？)');
+  }
   for (const member of members) await connection.execute('UPDATE combat_members SET current_hp=?,current_mp=?,is_defeated=?,pending_action=NULL WHERE session_id=? AND character_id=?', [member.current_hp, member.current_mp, member.is_defeated ? 1 : 0, session.combat_id, member.id]);
   if (aliveMembers.every(member => (jsonObject(member.pending_action) as unknown as PendingAction).type === 'escape')) { await connection.execute('UPDATE combat_sessions SET state=\'escaped\' WHERE id=?', [session.combat_id]); return { ended: true, waiting: false, log: `${log.join('\n')}\n\n队伍一同撤离了战斗。` }; }
   if (targets.every(target => target.is_defeated)) return { ended: true, waiting: false, log: log.join('\n'), settlement: await finishPartyVictory(connection, session.combat_id, members, targets) };
