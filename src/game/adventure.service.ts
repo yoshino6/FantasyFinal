@@ -358,7 +358,9 @@ const moveToPosition = async (connection: PoolConnection, qqUserId: string, x: n
     WHERE cs.state='active' AND (cs.character_id=? OR cm.character_id=?) LIMIT 1 FOR UPDATE`, [character.id, character.id]);
   if (activeCombat.length) throw new Error('战斗尚未结束，无法移动。');
   const [encounters] = await connection.execute<RowDataPacket[]>('SELECT id FROM monster_spawns WHERE region_id=? AND pos_x=? AND pos_y=? AND pos_z=? AND defeated_at IS NULL LIMIT 1 FOR UPDATE', [character.current_region_id, character.pos_x, character.pos_y, character.pos_z]);
-  if (encounters[0]) throw new Error('当前格子存在敌对生物，请先选择战斗或交涉。');
+  const [escapeTokens] = await connection.execute<RowDataPacket[]>('SELECT character_id FROM encounter_escape_tokens WHERE character_id=? AND region_id=? AND pos_x=? AND pos_y=? AND pos_z=? FOR UPDATE', [character.id, character.current_region_id, character.pos_x, character.pos_y, character.pos_z]);
+  if (encounters[0] && !escapeTokens[0]) throw new Error('当前格子存在敌对生物，请先选择战斗、交涉或躲避。');
+  if (escapeTokens[0]) await connection.execute('DELETE FROM encounter_escape_tokens WHERE character_id=?', [character.id]);
   const [partyRows] = await connection.execute<(RowDataPacket & { leader_character_id: number })[]>('SELECT p.leader_character_id FROM party_members pm JOIN parties p ON p.id=pm.party_id WHERE pm.character_id=?', [character.id]);
   if (partyRows[0] && Number(partyRows[0].leader_character_id) !== character.id) throw new Error('组队状态下仅队长可以移动。');
   const distance = Math.abs(x - Number(character.pos_x)) + Math.abs(y - Number(character.pos_y));
@@ -457,8 +459,14 @@ export const encounterAction = async (qqUserId: string, spawnId: number, action:
   const primary = found.spawns[0];
   const playerNegotiation = Math.max(1, Math.floor(Number(found.character.spirit) + Number(found.character.intelligence) + Number(found.character.perception) / 2));
   if (action === 'avoid') {
-    if (Number(found.character.perception) + random(1, 20) >= monsterCombatStats(primary).perception) return '你借助感知绕开了敌人，没有进入战斗。';
-    const started = await chooseTarget(qqUserId, spawnId); return `躲避失败！\n目标：${started.spawn.name}\n进入战斗：/攻击｜/技能 1-4｜/道具 1-4｜/逃跑`;
+    return withTransaction(async connection => {
+      const character = await characterFor(qqUserId); const members = await partyCombatants(connection, character); const monster = monsterCombatStats(primary);
+      const canAvoid = Number(character.perception) > monster.perception || Number(character.speed) > monster.speed;
+      for (const member of members) await connection.execute('INSERT INTO encounter_escape_tokens (character_id,region_id,pos_x,pos_y,pos_z) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE region_id=VALUES(region_id),pos_x=VALUES(pos_x),pos_y=VALUES(pos_y),pos_z=VALUES(pos_z)', [member.id, character.current_region_id, character.pos_x, character.pos_y, character.pos_z]);
+      if (canAvoid) return '你抢在敌人反应之前脱离了遭遇，可以继续移动。';
+      const victim = members.find(member => Number(member.id) === Number(character.id)) ?? character; const strike = resolveStrike(monster.physicalAttack, Number(victim.physical_defense), monster.accuracy, Number(victim.evasion), monster.crit, Number(victim.crit_resist_bp), monster.critDamage, Number(victim.crit_damage_reduction_bp));
+      return !strike.hit ? `躲避不及，${primary.name} 发起追击，但【${victim.name}】闪避了攻击。\n你们仍成功脱离遭遇，可以继续移动。` : `躲避不及，${primary.name} 发起追击，对【${victim.name}】造成 ${strike.damage} 点物理伤害。\n你们仍成功脱离遭遇，可以继续移动。`;
+    });
   }
   if (action === 'persuade') {
     const monsterNegotiation = Math.max(1, Math.floor(Object.values(monsterAttributes(primary)).reduce((total, value) => total + Number(value), 0)));

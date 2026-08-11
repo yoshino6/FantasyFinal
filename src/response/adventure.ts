@@ -13,7 +13,7 @@ const battleButtons = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
   if (battle.appraisal.learned) buttons.addRow().addButton('鉴识', '/鉴识', { type: 'command', autoEnter: true, style: 'blue' });
   return buttons;
 };
-const encounterButtons = (spawnId: number, canAmbush = false) => Format.createButtonGroup().addRow().addButton(canAmbush ? '偷袭' : '战斗', canAmbush ? `/偷袭 ${spawnId}` : `/目标 ${spawnId}`, { type: 'command', autoEnter: true, style: 'blue' }).addButton('交涉', `/交涉 ${spawnId}`, { type: 'command', autoEnter: true });
+const encounterButtons = (spawnId: number, canAmbush = false) => Format.createButtonGroup().addRow().addButton(canAmbush ? '偷袭' : '战斗', canAmbush ? `/偷袭 ${spawnId}` : `/目标 ${spawnId}`, { type: 'command', autoEnter: true, style: 'blue' }).addButton('交涉', `/交涉 ${spawnId}`, { type: 'command', autoEnter: true }).addButton('躲避', `/躲避 ${spawnId}`, { type: 'command', autoEnter: true });
 const battleStateText = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
   const teammates = battle.members.filter(member => member.id !== battle.characterId);
   const members = battle.members.map(member => {
