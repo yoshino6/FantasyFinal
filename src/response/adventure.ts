@@ -34,7 +34,7 @@ const appendCombatLog = (markdown: ReturnType<typeof Format.createMarkdown>, tex
     if (line === '————') { markdown.addNewline().addNewline().addText('————————').addNewline().addNewline(); continue; }
     if (line.startsWith('➥') || line.startsWith('$')) markdown.addBlockquote(line.replaceAll('$', '\\$')).addNewline();
     else if (line.startsWith('➤')) markdown.addNewline().addText(line).addNewline();
-    else markdown.addText(line).addNewline();
+    else markdown.addText(line.startsWith('#') ? line.replaceAll('#', '\\#') : line).addNewline();
   }
   return markdown;
 };
