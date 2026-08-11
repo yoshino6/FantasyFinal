@@ -999,7 +999,7 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
       log.push(`➤【${targetName(monsterTarget)}】${skill ? `释放技能「${identifiedMonster ? skill.name : '？？？'}」` : '普通攻击'}`);
       if (bite) { log.push('　#必中#该攻击必定命中'); log.push('　#獠牙#该攻击暴击+25%'); }
       if (!strike.hit) { log.push(`　➥[${victim.name}]闪避了攻击`); continue; }
-      const barrier = effectValue('member', Number(victim.id), 'barrier'); const damage = Math.max(1, Math.floor(strike.damage * (1 - Math.min(80, barrier) / 100));
+      const barrier = effectValue('member', Number(victim.id), 'barrier'); const damage = Math.max(1, Math.floor(strike.damage * (1 - Math.min(80, barrier) / 100)));
       const oldHp = Number(victim.current_hp); victim.current_hp = Math.max(0, oldHp - damage); if (!victim.current_hp) victim.is_defeated = 1; log.push(`　➥${strike.crit ? '[暴击!]' : ''}对【${victim.name}】造成 ${damage} 点${skill?.category === 'magic' ? '魔法' : '物理'}伤害(${oldHp}→${victim.current_hp})`); if (skill) await applySkillEffects(connection, session.combat_id, Number(skill.id), monsterTarget, 'target', victim, 'member', 'on_hit', log);
     }
   }
