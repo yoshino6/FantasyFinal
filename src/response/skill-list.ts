@@ -68,7 +68,7 @@ export const skillDetailHandler = async () => {
       (Object.keys(names) as Array<keyof typeof names>).forEach((key, index) => {
         const level = Number(skill.specializations[key] ?? 1); markdown.addText(`${'①②③④'.charAt(index)}${names[key]} Lv.${level}/100 `);
         if (level < 100) markdown.addButton('[升级(SP1)]', { data: `/升级专精 ${skill.id} ${names[key]}`, autoEnter: false });
-        markdown.addNewline().addBlockquote(descriptions[key]).addNewline();
+        markdown.addNewline().addBlockquote(descriptions[key]).addNewline().addNewline();
       });
       markdown.addNewline().addText(`当前技能点：${skill.skillPoints}`);
       const buttons = Format.createButtonGroup().addRow().addButton('返回技能列表', '/技能列表 已学习', { type: 'command', autoEnter: true, style: 'blue' });
