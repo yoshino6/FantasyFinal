@@ -10,13 +10,13 @@ export default async () => {
     const result = await inventoryView(event.current.UserId, category);
     const markdown = Format.createMarkdown().addTitle('背包');
     if (!category) {
-      markdown.addText('\n\n最近获得：');
+      markdown.addText('\n\n最近获得：\n');
       if (!result.recent.length) markdown.addText('暂无获得记录。');
-      for (const item of result.recent) markdown.addText(' ').addButton(`[${item.item_category}]${item.name}`, { data: `/物品图鉴 ${item.codex_id}`, autoEnter: false });
+      for (const item of result.recent) markdown.addButton(`[${item.item_category}]${item.name}`, { data: `/物品图鉴 ${item.codex_id}`, autoEnter: false }).addNewline();
     } else {
       markdown.addText(`\n\n${category}：\n\n`);
       for (const item of result.instances) markdown.addButton(`[${item.item_category}]${item.name}`, { data: `/装备详情 ${item.id}`, autoEnter: false }).addText(`\n品质 ${Number(item.quality).toFixed(2)}%｜耐久 ${item.durability}/${item.durability_max}\n\n`);
-      for (const item of result.stacked) markdown.addButton(`[${item.item_category}]${item.name}`, { data: `/物品图鉴 ${item.codex_id}`, autoEnter: false }).addText(` ×${item.quantity}\n${item.description}\n\n`);
+      for (const item of result.stacked) markdown.addButton(`[${item.item_category}]${item.name}`, { data: `/物品图鉴 ${item.codex_id}`, autoEnter: false }).addText(` ×${item.quantity}\n`);
       if (!result.instances.length && !result.stacked.length) markdown.addText('该分类暂无物品。');
     }
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow()
