@@ -16,8 +16,9 @@ export const currentLocationText = (character: LocationCharacter) => areaText(ch
 export const movedLocationText = (character: LocationCharacter) => areaText(character, '移动至');
 
 export const outsidePanel = (title: string, location: string, speed: number, range: number, x: number, y: number, description: string, points: NearbyPoint[], resting = false) => {
-  const markdown = Format.createMarkdown().addTitle(title)
-    .addText(`\n\n${location}\n\n${description}\n\n${resting ? '状态：休息中（每秒恢复 1% 生命与魔力）\n' : ''}移动速度：${speed}\n感知范围：${range}\n\n周边目标：\n`);
+  const town = location.includes('百纳镇');
+  const markdown = Format.createMarkdown().addTitle(town ? '百纳镇·城镇面板' : title)
+    .addText(`\n\n${location}\n\n${description}\n\n${resting ? '状态：休息中（每秒恢复 1% 生命与魔力）\n' : ''}${town ? '城镇导览：已标记镇内绝大多数居民与设施。' : `移动速度：${speed}\n感知范围：${range}`}\n\n${town ? '城镇人物与设施：' : '周边目标：'}\n`);
   if (!points.length) markdown.addText('空空如也');
   else {
     for (const point of points) {

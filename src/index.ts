@@ -68,6 +68,7 @@ appGroup.use({ path: '怪物详情', schema: { usage: '/怪物详情 <编号>', 
 appGroup.use({ path: '切换目标', schema: { usage: '/切换目标 <编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/adventure').then(module => ({ default: module.switchTargetHandler })))
 appGroup.use({ path: '躲避', schema: { usage: '/躲避 <编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/encounter').then(module => ({ default: module.encounterHandler('avoid', '躲避') })))
 appGroup.use({ path: '交涉', schema: { usage: '/交涉 <编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/encounter').then(module => ({ default: module.encounterHandler('persuade', '交涉') })))
+appGroup.use({ path: '初章 包容之镇', schema: { usage: '/初章 包容之镇 <选项>', args: [{ name: 'action', rules: [{ required: true, type: 'enum', enum: ['循声而去', '上前打招呼', '我也不清楚，一觉醒来就在这儿了', '加入', '婉拒并询问城镇位置'] }] }] } }, () => import('./response/adventure').then(module => ({ default: module.forestGuideHandler })))
 appGroup.use('攻击', () => import('./response/combat').then(module => ({ default: module.attack })))
 appGroup.use('鉴识', () => import('./response/combat-appraisal'))
 appGroup.use({ path: '技能', schema: { usage: '/技能 <1-4>', args: [{ name: 'slot', rules: [{ required: true, type: 'number', min: 1, max: 4 }] }] } }, () => import('./response/combat').then(module => ({ default: module.skill })))
