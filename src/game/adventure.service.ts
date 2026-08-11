@@ -78,6 +78,10 @@ const movementSpeedFrom = (speed: number, level: number) => {
   const levelCap = Math.min(10, 3 + Math.floor(Math.max(0, level - 1) / 10));
   return Math.max(1, Math.min(10, levelCap, statSpeed));
 };
+const roundTowardInitialTiming = (initial: number, raw: number) => {
+  if (initial <= 0) return raw > 2 ? Math.max(1, Math.floor(raw) - 1) : 0;
+  return raw < initial ? Math.ceil(raw) : Math.floor(raw);
+};
 
 const characterFor = async (qqUserId: string): Promise<CharacterRow> => {
   const pool = await getPool(); const [rows] = await pool.execute<CharacterRow[]>(`SELECT c.*, r.name AS region_name FROM characters c JOIN players p ON p.id=c.player_id JOIN map_regions r ON r.id=c.current_region_id WHERE p.qq_user_id=? LIMIT 1`, [qqUserId]);
@@ -299,9 +303,9 @@ export const skillDetail = async (qqUserId: string, skillId: number) => {
   const actualPower = Math.floor((Number(skill.power) + (level - 1) * Number(skill.power_per_level)) * Math.pow(1.08, overcharge) * Math.pow(.96, instant));
   const actualManaCost = Math.max(0, Math.ceil(Number(skill.mana_cost) * Math.pow(1.16, overcharge) * Math.pow(.92, efficient)));
   const baseCooldown = Math.max(0, Number(skill.cooldown_turns) - (level - 1) * Number(skill.cooldown_reduction_per_level));
-  const actualCooldown = Math.max(0, Math.ceil(Math.max(1, baseCooldown) * Math.pow(1.08, overcharge) * Math.pow(.92, instant)) - (baseCooldown === 0 ? 1 : 0));
+  const actualCooldown = Math.max(0, roundTowardInitialTiming(Number(skill.cooldown_turns), Math.max(1, baseCooldown) * Math.pow(1.08, overcharge) * Math.pow(.92, instant)));
   const baseChant = Number(skill.chant_turns);
-  const actualChant = Math.max(0, Math.ceil(Math.max(1, baseChant) * Math.pow(1.08, overcharge) * Math.pow(.92, instant)) - (baseChant === 0 ? 1 : 0));
+  const actualChant = Math.max(0, roundTowardInitialTiming(baseChant, Math.max(1, baseChant) * Math.pow(1.08, overcharge) * Math.pow(.92, instant)));
   return { ...skill, level, learned, characterLevel: Number(character.level), skillPoints: Number(character.skill_points), appraisal: progress, specializations, actualPower, actualManaCost, actualCooldown, actualChant, nextUpgradeCost: skill.code === 'appraisal' ? null : !learned || level >= Number(skill.max_level) ? null : Number(skill.upgrade_cost) + level - 1 };
 };
 
@@ -854,7 +858,7 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
         const skill = skills[0]; if (!skill) { log.push(`➤【${member.name}】释放技能\n　➥技能栏为空。`); continue; }
         const [specializationRows] = await connection.execute<(RowDataPacket & { specialization: string; level: number })[]>('SELECT specialization,level FROM player_skill_specializations WHERE character_id=? AND skill_id=?', [member.id, skill.id]); const specializations = new Map(specializationRows.map(row => [row.specialization, Number(row.level) - 1])); const overcharge = Math.max(0, specializations.get('overcharge') ?? 0); const instant = Math.max(0, specializations.get('instant') ?? 0); const efficient = Math.max(0, specializations.get('efficient') ?? 0);
         const manaCost = Math.max(skill.mana_cost ? 1 : 0, Math.ceil(Number(skill.mana_cost) * Math.pow(1.16, overcharge) * Math.pow(.92, efficient) * (modifiers.manaAffinity ? .7 : 1)) - modifiers.manaCostReduction); if (Number(member.current_mp) < manaCost) { log.push(`➤【${member.name}】释放技能「${skill.name}」\n　➥MP不足。`); continue; }
-        member.current_mp -= manaCost; const cooldowns = jsonObject(member.cooldowns); const baseCooldown = Math.max(0, Number(skill.cooldown_turns) - (Number(skill.level) - 1) * Number(skill.cooldown_reduction_per_level)); const cooldown = Math.max(0, Math.ceil(Math.max(1, baseCooldown) * Math.pow(1.08, overcharge) * Math.pow(.92, instant)) - (baseCooldown === 0 ? 1 : 0)); cooldowns[skill.code] = cooldown + 1; member.cooldowns = cooldowns; skillId = Number(skill.id); label = `释放技能「${skill.name}」`; kind = skill.category === 'magic' ? '魔法' : '物理'; damageType = skill.damage_type; attack = (skill.category === 'magic' ? Number(member.magic_attack) + modifiers.magicAttack : Number(member.physical_attack) + modifiers.physicalAttack) * (Number(skill.power) + (Number(skill.level) - 1) * Number(skill.power_per_level)) * Math.pow(1.08, overcharge) * Math.pow(.96, instant) / 100; power = skill.category === 'magic' ? 1 + modifiers.magicDamagePct / 100 : 1;
+        member.current_mp -= manaCost; const cooldowns = jsonObject(member.cooldowns); const baseCooldown = Math.max(0, Number(skill.cooldown_turns) - (Number(skill.level) - 1) * Number(skill.cooldown_reduction_per_level)); const cooldown = Math.max(0, roundTowardInitialTiming(Number(skill.cooldown_turns), Math.max(1, baseCooldown) * Math.pow(1.08, overcharge) * Math.pow(.92, instant))); cooldowns[skill.code] = cooldown + 1; member.cooldowns = cooldowns; skillId = Number(skill.id); label = `释放技能「${skill.name}」`; kind = skill.category === 'magic' ? '魔法' : '物理'; damageType = skill.damage_type; attack = (skill.category === 'magic' ? Number(member.magic_attack) + modifiers.magicAttack : Number(member.physical_attack) + modifiers.physicalAttack) * (Number(skill.power) + (Number(skill.level) - 1) * Number(skill.power_per_level)) * Math.pow(1.08, overcharge) * Math.pow(.96, instant) / 100; power = skill.category === 'magic' ? 1 + modifiers.magicDamagePct / 100 : 1;
       }
       const monster = monsterCombatStats(target); const vulnerability = effectValue('target', Number(target.id), 'vulnerability'); const baseDefense = kind === '魔法' ? monster.magicDefense : monster.physicalDefense; const defense = Math.floor(baseDefense * (1 - (kind === '魔法' ? 0 : Math.min(90, modifiers.ignoreDefensePct + vulnerability)) / 100)); const strike = resolveStrike(attack * power * (Number(session.turn_no) === 1 ? 1 + Number(session.opening_damage_bonus) : 1), defense, Number(member.accuracy), monster.evasion, Number(member.crit_rate_bp) + modifiers.critRateBp, monster.critResist, Number(member.crit_damage_bp), monster.critReduction);
       log.push(`➤【${member.name}】${label}`); if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, 'member', target, 'target', 'on_cast', log); if (!strike.hit) { log.push(`　➥[${targetName(target)}]闪避了攻击`); continue; }
