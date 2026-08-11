@@ -91,7 +91,7 @@ const chapterFormat = (stage: number, text: string) => {
   const buttons = Format.createButtonGroup().addRow();
   if (stage === 1) buttons.addButton('循声而去', '/初章 包容之镇 循声而去', { type: 'command', autoEnter: true, style: 'blue' });
   if (stage === 2) buttons.addButton('上前打招呼', '/初章 包容之镇 上前打招呼', { type: 'command', autoEnter: true, style: 'blue' });
-  if (stage === 3) buttons.addButton('我也不清楚，一觉醒来就在这儿了', '/初章 包容之镇 我也不清楚，一觉醒来就在这儿了', { type: 'command', autoEnter: true, style: 'blue' });
+  if (stage === 3) buttons.addButton('我也不清楚，睁开眼时就在这儿了', '/初章 包容之镇 我也不清楚，睁开眼时就在这儿了', { type: 'command', autoEnter: true, style: 'blue' });
   if (stage === 4) {
     buttons.addButton('加入', '/初章 包容之镇 加入', { type: 'command', autoEnter: true, style: 'blue' });
     buttons.addButton('婉拒并询问城镇位置', '/初章 包容之镇 婉拒并询问城镇位置', { type: 'command', autoEnter: true });

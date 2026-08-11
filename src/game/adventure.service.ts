@@ -476,9 +476,9 @@ export const forestGuideAdvance = async (qqUserId: string, action: string) => wi
   const stage = Number(story.stage);
   const pages: Record<number, { action: string; text?: string }> = {
     1: { action: '循声而去' },
-    2: { action: '上前打招呼', text: '我拨开最后一丛沾着露水的灌木，看见三人正收起武器。为首的青年背着剑盾，红发少女指尖还缠着未散的火星，白袍少女则正替受伤的同伴施展治愈术。\n\n他们显然也发现了我。与其让误会在沉默里滋长，我决定先上前打招呼。' },
-    3: { action: '我也不清楚，一觉醒来就在这儿了', text: '战士把盾牌背回身后，笑着自我介绍：他叫莱昂，是战士；红发少女伊芙是法师；白袍的希娅则是牧师。\n\n他们说自己接下了讨伐森林史莱姆的悬赏，正循着痕迹搜寻。莱昂打量着我身上未干的露水，困惑地问：\n\n“你为什么会一个人在这种地方？”\n\n我沉默片刻，只能把自己也无法理解的经历告诉他们。' },
-    4: { action: '', text: '“我也不清楚，”我如实回答，“一觉醒来，就已经在这片森林里了。”\n\n三人交换了一个复杂的眼神。希娅没有继续追问，只是轻声说，百纳镇就在密林南方——那是一座接纳各族居民的边境小镇，猫人、矮人、精灵与人类都能在那里找到落脚处。\n\n莱昂朝森林深处扬了扬下巴：“我们先解决那只史莱姆。你要不要和我们一起？结束后，我们带你去百纳镇。”' }
+    2: { action: '上前打招呼', text: '你拨开最后一丛沾着露水的灌木，望见有三人正擦拭着武器。\n为首的青年手持剑盾，红发少女指尖还缠着未散的火星，白袍少女则正替受伤的同伴施展治愈术。\n\n他们循着动静也发现了你。' },
+    3: { action: '我也不清楚，睁开眼时就在这儿了', text: '战士把盾牌背回身后，笑着做了自我介绍。\n他叫莱昂，是一名战士；那位红发少女伊芙是法师；白袍的希娅则是牧师。\n\n他们说自己接下了讨伐森林史莱姆的悬赏，正循着痕迹搜寻。\n莱昂打量着我身上未干的露水，略显困惑：\n\n“你为什么会一个人在这种地方？”\n\n我沉默片刻，不好坦白自己转生到这里的事实。' },
+    4: { action: '', text: '“我也不清楚，”\n我如实回答，\n“我今早一睁开眼，就已经在这片森林里了。”\n\n他们三人交换了一个复杂的眼神,没有继续追问\n希娅轻声说，百纳镇就在密林南方————那是一座接纳各族居民的包容小镇，半兽人、矮人、精灵与人类都能在那里找到落脚处。\n\n莱昂朝森林深处扬了扬下巴：“我们先解决那只史莱姆。你要不要和我们一起？结束后，我们带你去百纳镇。”' }
   };
   const page = pages[stage]; if (!page) throw new Error('故事进度异常。');
   if (page.action && action !== page.action) throw new Error('现在还不能做出这个选择。');
@@ -489,7 +489,7 @@ export const forestGuideAdvance = async (qqUserId: string, action: string) => wi
   }
   if (action !== '加入' && action !== '婉拒并询问城镇位置') throw new Error('请选择加入队伍，或婉拒并询问城镇位置。');
   await connection.execute('UPDATE player_story_progress SET stage=5 WHERE character_id=? AND story_code=\'forest_guide\'', [character.id]);
-  return { stage: 5, text: action === '加入' ? '我点头答应。莱昂立刻展开地图，伊芙用火星标出黏液痕迹的去向，希娅则为我们补上祝福。我们并肩踏入更深的雾中。' : '我婉拒了邀请，并向他们确认百纳镇的方向。莱昂刚抬手指向南方，脚下的水洼便骤然鼓起——一团庞大的翠绿胶质撞开落叶，堵住了去路。', battleChoice: action === '加入' ? 'join' as const : 'depart' as const };
+  return { stage: 5, text: action === '加入' ? '我点头答应。\n莱昂立刻展开地图，伊芙用火星标出黏液痕迹的去向，希娅则为我们补上祝福。\n我们并肩踏入更深的丛林中。' : '我婉拒了邀请，并向他们确认百纳镇的方向。\n莱昂刚抬手指向南方，脚下的水洼便骤然鼓起。\n一团庞大的翠绿胶质撞开落叶，堵住了去路。', battleChoice: action === '加入' ? 'join' as const : 'depart' as const };
 });
 
 export const forestGuideChoice = async (qqUserId: string, choice: 'join' | 'depart') => withTransaction(async connection => {
@@ -520,8 +520,8 @@ export const forestGuideChoice = async (qqUserId: string, choice: 'join' | 'depa
   return {
     spawnId,
     text: choice === 'join'
-      ? '战士举起盾牌，法师与牧师分别在两侧站定。循着黏液拖出的湿痕，你们找到了盘踞在古树根旁的森林史莱姆。三人示意你一同迎战。'
-      : '你谢绝同行，朝百纳镇的方向继续赶路。可才走出几步，森林史莱姆便从树影后的水洼中弹出，将你与正准备离开的三人一并卷入战斗。'
+      ? '莱昂举起盾牌，伊芙与希娅分别在其身后两侧站定。\n三人示意你一同迎战。'
+      : '"小心！"\n莱昂一马当先，将你挡在身后。\n他举起盾牌，伊芙与希娅分别在其身后两侧站定。'
   };
 });
 
