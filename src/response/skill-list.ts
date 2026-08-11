@@ -1,5 +1,5 @@
 import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
-import { learnSkill, skillDetail, skillList, toggleSkillShortcut, upgradeAppraisal, upgradeSkill } from '../game/adventure.service';
+import { learnSkill, skillDetail, skillList, toggleSkillShortcut, upgradeAppraisal, upgradeSkill, upgradeSkillSpecialization } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
 
 const categoryNames: Record<string, string> = { physical: '物理', magic: '魔法', utility: '辅助', passive: '被动' };
@@ -50,6 +50,31 @@ export const skillDetailHandler = async () => {
       await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) });
       return;
     }
+    if (skill.learned && skill.category !== 'passive') {
+      const names = { overcharge: '过充', instant: '瞬息', efficient: '节能', potent: '强效' } as const;
+      const descriptions = {
+        overcharge: '每提升一级，威力提升8%，蓝耗提升16%，冷却减缓8%，吟咏减缓8%。',
+        instant: '每提升一级，冷却加速8%，吟咏加速8%，威力降低4%。',
+        efficient: '每提升一级，蓝耗降低8%。',
+        potent: '每提升一级，技能效果提升8%，效果时间提升8%，威力降低16%。'
+      } as const;
+      const category = skill.category === 'physical' ? '物理' : skill.category === 'magic' ? '魔法' : '属性';
+      const markdown = Format.createMarkdown().addTitle('技能详情').addNewline().addNewline().addText(`【${skill.name}】Lv.${skill.level}\n`)
+        .addBlockquote(`类别：${category}`).addNewline().addBlockquote(`威力：${skill.actualPower}`).addNewline().addBlockquote(`冷却：${skill.actualCooldown}`).addNewline().addBlockquote(`蓝耗：${skill.actualManaCost}`).addNewline().addBlockquote(`吟咏：${skill.actualChant}`).addNewline().addBlockquote('效果：').addNewline();
+      const effects = String(skill.effects ?? '').split('、').filter(Boolean);
+      if (!effects.length) markdown.addBlockquote('  无').addNewline();
+      else effects.forEach((effect, index) => markdown.addBlockquote(`  ${'①②③④⑤'.charAt(index)}${effect}`).addNewline());
+      markdown.addNewline().addText('专精：\n');
+      (Object.keys(names) as Array<keyof typeof names>).forEach((key, index) => {
+        const level = Number(skill.specializations[key] ?? 1); markdown.addText(`${'①②③④'.charAt(index)}${names[key]} Lv.${level}/100 `);
+        if (level < 100) markdown.addButton('[升级(SP1)]', { data: `/升级专精 ${skill.id} ${names[key]}`, autoEnter: false });
+        markdown.addNewline().addBlockquote(descriptions[key]).addNewline();
+      });
+      markdown.addNewline().addText(`当前技能点：${skill.skillPoints}`);
+      const buttons = Format.createButtonGroup().addRow().addButton('返回技能列表', '/技能列表 已学习', { type: 'command', autoEnter: true, style: 'blue' });
+      await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) });
+      return;
+    }
     const levelText = skill.learned ? `Lv.${skill.level}/${skill.max_level}` : `未学习｜SP:${skill.learn_cost}`;
     const costText = !skill.learned
       ? `学习消耗：${skill.learn_cost} 技能点`
@@ -88,6 +113,13 @@ export const skillShortcutHandler = async () => {
 export const upgradeSkillHandler = async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
   try { const result = await upgradeSkill(event.current.UserId, Number(route.param('id'))); await message.send({ format: messageFormat('技能升级', `「${result.name}」已提升至 Lv.${result.level}，消耗 ${result.cost} 技能点。`) }); }
+  catch (error) { await message.send({ format: messageFormat('升级失败', error instanceof Error ? error.message : '请稍后重试。') }); }
+};
+
+export const upgradeSpecializationHandler = async () => {
+  const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
+  const specialization = ({ 过充: 'overcharge', 瞬息: 'instant', 节能: 'efficient', 强效: 'potent' } as const)[String(route.param('specialization')) as '过充' | '瞬息' | '节能' | '强效'];
+  try { const result = await upgradeSkillSpecialization(event.current.UserId, Number(route.param('id')), specialization); await message.send({ format: messageFormat('专精升级', `「${result.name}」的专精已提升至 Lv.${result.level}。`) }); }
   catch (error) { await message.send({ format: messageFormat('升级失败', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
 
