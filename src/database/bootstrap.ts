@@ -378,11 +378,11 @@ export const initializeSchema = async (pool: Pool) => {
     ((SELECT id FROM skill_definitions WHERE code='goblin_fire'),(SELECT id FROM effect_definitions WHERE code='burn'),1,2,1,'enemy','on_hit')
     ON DUPLICATE KEY UPDATE effect_level=VALUES(effect_level),value_override=VALUES(value_override),duration_override=VALUES(duration_override),target_scope=VALUES(target_scope),trigger_timing=VALUES(trigger_timing)`);
   await pool.query(`INSERT INTO monster_templates (code, name, monster_class, level, constitution, spirit, strength, intelligence, agility, perception, constitution_growth, spirit_growth, strength_growth, intelligence_growth, agility_growth, perception_growth, skill_sequence, experience, drops_json) VALUES
-    ('ball_rabbit', '球兔', 'normal', 1, 5,3,4,3,14,7, 0.4,0.2,0.3,0.2,0.9,0.4, JSON_ARRAY('hop','scratch'), 12, JSON_ARRAY(JSON_OBJECT('code','healing_herb','chance',0.15,'quantity',1))),
-    ('spike_boar', '刺猪', 'normal', 1, 11,2,12,2,5,4, 0.5,0.1,0.6,0.1,0.3,0.2, JSON_ARRAY('charge','scratch'), 18, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',0.35,'quantity',1))),
-    ('vine_snake', '藤蛇', 'normal', 1, 7,3,6,2,10,8, 0.4,0.2,0.4,0.1,0.7,0.5, JSON_ARRAY('bite','constrict'), 17, JSON_ARRAY(JSON_OBJECT('code','healing_herb','chance',0.2,'quantity',1))),
-    ('black_bear', '乌熊', 'normal', 2, 11,4,12,2,4,5, 0.5,0.2,0.6,0.1,0.2,0.3, JSON_ARRAY('maul','howl'), 26, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',0.6,'quantity',1))),
-    ('mist_wolf', '幽狼', 'normal', 2, 5,3,7,3,11,9, 0.3,0.2,0.4,0.2,0.8,0.6, JSON_ARRAY('mist_pounce','bite','scratch'), 25, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',0.65,'quantity',1))),
+    ('ball_rabbit', '球兔', 'normal', 1, 5,3,4,3,14,7, 0.4,0.2,0.3,0.2,0.9,0.4, JSON_ARRAY('hop','scratch'), 36, JSON_ARRAY(JSON_OBJECT('code','healing_herb','chance',0.15,'quantity',1))),
+    ('spike_boar', '刺猪', 'normal', 1, 11,2,12,2,5,4, 0.5,0.1,0.6,0.1,0.3,0.2, JSON_ARRAY('charge','scratch'), 54, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',0.35,'quantity',1))),
+    ('vine_snake', '藤蛇', 'normal', 1, 7,3,6,2,10,8, 0.4,0.2,0.4,0.1,0.7,0.5, JSON_ARRAY('bite','constrict'), 51, JSON_ARRAY(JSON_OBJECT('code','healing_herb','chance',0.2,'quantity',1))),
+    ('black_bear', '乌熊', 'normal', 2, 11,4,12,2,4,5, 0.5,0.2,0.6,0.1,0.2,0.3, JSON_ARRAY('maul','howl'), 78, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',0.6,'quantity',1))),
+    ('mist_wolf', '幽狼', 'normal', 2, 5,3,7,3,11,9, 0.3,0.2,0.4,0.2,0.8,0.6, JSON_ARRAY('mist_pounce','bite','scratch'), 75, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',0.65,'quantity',1))),
     ('roll_rabbit', '滚兔', 'elite', 3, 10,7,9,7,22,15, 0.9,0.7,0.8,0.6,1.5,1.1, JSON_ARRAY('hop','charge','scratch'), 54, JSON_ARRAY(JSON_OBJECT('code','healing_herb','chance',0.3,'quantity',1))),
     ('tusk_boar', '獠猪', 'elite', 4, 21,5,25,4,11,9, 1.4,0.3,1.6,0.3,0.8,0.6, JSON_ARRAY('charge','maul','scratch'), 74, JSON_ARRAY(JSON_OBJECT('code','wolf_fang','chance',0.75,'quantity',1))),
     ('vine_python', '藤蚺', 'elite', 4, 14,8,14,7,21,16, 1.0,0.7,1.0,0.6,1.4,1.1, JSON_ARRAY('bite','constrict','scratch'), 78, JSON_ARRAY(JSON_OBJECT('code','healing_herb','chance',0.4,'quantity',1))),

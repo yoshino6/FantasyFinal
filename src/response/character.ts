@@ -14,7 +14,7 @@ export default async () => {
     const gender = character.gender === '男' ? '♂' : character.gender === '女' ? '♀' : '?';
     const markdown = Format.createMarkdown().addTitle('角色信息').addText(`\n\n昵称：${character.name} `)
       .addButton('[改名]', { data: '/改名 ', autoEnter: false }).addText(` \n性别：${gender}`)
-      .addButton('[改性]', { data: '/改性 ', autoEnter: false }).addText(`\n等级：Lv.${character.level}｜经验 ${character.experience}\n\n${content}`);
+      .addButton('[改性]', { data: '/改性 ', autoEnter: false }).addText(`\n等级：Lv.${character.level}\n经验：${character.experience}/${character.level * 100}\n\n${content}`);
     await message.send({ format: Format.create().addMarkdown(markdown) });
   } catch (error) {
     logger.error({ err: error, userId: event.current.UserId }, 'load character failed');
