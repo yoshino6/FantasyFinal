@@ -31,8 +31,10 @@ const appendCombatLog = (markdown: ReturnType<typeof Format.createMarkdown>, tex
   for (const rawLine of text.split('\n')) {
     const line = rawLine.trimStart();
     if (!line) { markdown.addNewline(); continue; }
-    if (line.startsWith('➥')) markdown.addBlockquote(line.replaceAll('$', '\\$')).addNewline();
-    else markdown.addText(`${line}\n`);
+    if (line === '————') { markdown.addNewline().addNewline().addText('————————').addNewline().addNewline(); continue; }
+    if (line.startsWith('➥') || line.startsWith('$')) markdown.addBlockquote(line.replaceAll('$', '\\$')).addNewline();
+    else if (line.startsWith('➤')) markdown.addNewline().addText(line).addNewline();
+    else markdown.addText(line).addNewline();
   }
   return markdown;
 };
@@ -46,6 +48,10 @@ const ambushStartFormat = (battle: Awaited<ReturnType<typeof battleStatus>>) => 
   const markdown = Format.createMarkdown().addTitle('战斗开始').addNewline().addNewline()
     .addBlockquote('你看准目标，疾速突进——').addNewline()
     .addBlockquote('（首回合直击伤害+50%）').addNewline().addNewline();
+  return Format.create().addMarkdown(appendBattleState(markdown, battle)).addButtonGroup(battleButtons(battle));
+};
+const battleStartFormat = (text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => {
+  const markdown = Format.createMarkdown().addTitle('战斗开始').addNewline().addNewline().addBlockquote(text).addNewline().addNewline();
   return Format.create().addMarkdown(appendBattleState(markdown, battle)).addButtonGroup(battleButtons(battle));
 };
 const negotiationFailureFormat = (text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => {
@@ -111,7 +117,7 @@ export const moveHandler = async () => { const [event] = useEvent(); const [rout
 export const goToHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await showMoveResult(message, event.current.UserId, await moveTo(event.current.UserId, Number(route.param('x')), Number(route.param('y')))); } catch (error) { await fail(message, error, '无法前往该位置'); } };
 export const targetHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await chooseTarget(event.current.UserId, Number(route.param('id'))); const battle = await battleStatus(event.current.UserId); await message.send({ format: battleFormat('战斗开始', `遭遇 ${battle.targets.map(target => `[${target.name}]`).join('、')}！`, battle) }); } catch (error) { await fail(message, error, '无法锁定目标'); } };
 export const ambushHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await chooseTarget(event.current.UserId, Number(route.param('id')), true); const battle = await battleStatus(event.current.UserId); await message.send({ format: ambushStartFormat(battle) }); } catch (error) { await fail(message, error, '无法发动偷袭'); } };
-export const forestGuideHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const progress = await forestGuideAdvance(event.current.UserId, String(route.param('action'))); if (!progress.battleChoice) { await message.send({ format: chapterFormat(progress.stage, progress.text) }); return; } await message.send({ format: chapterFormat(5, progress.text) }); const result = await forestGuideChoice(event.current.UserId, progress.battleChoice); await chooseTarget(event.current.UserId, result.spawnId); const battle = await battleStatus(event.current.UserId); await message.send({ format: battleFormat('战斗开始', result.text, battle) }); } catch (error) { await fail(message, error, '初章推进失败'); } };
+export const forestGuideHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const progress = await forestGuideAdvance(event.current.UserId, String(route.param('action'))); if (!progress.battleChoice) { await message.send({ format: chapterFormat(progress.stage, progress.text) }); return; } await message.send({ format: chapterFormat(5, progress.text) }); const result = await forestGuideChoice(event.current.UserId, progress.battleChoice); await chooseTarget(event.current.UserId, result.spawnId); const battle = await battleStatus(event.current.UserId); await message.send({ format: battleStartFormat(result.text, battle) }); } catch (error) { await fail(message, error, '初章推进失败'); } };
 export const switchTargetHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await switchCombatTarget(event.current.UserId, Number(route.param('id'))); const battle = await battleStatus(event.current.UserId); await message.send({ format: battleFormat('切换目标', '目标已切换。', battle) }); } catch (error) { await fail(message, error, '无法切换目标'); } };
 const actionHandler = (action: 'attack' | 'skill' | 'item' | 'escape') => async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const result = await combatAction(event.current.UserId, action, Number(route.param('slot')) || undefined); if (result.ended) { await message.send({ format: finalBattleFormat(result.log) }); const settlement = result.settlement; const victory = isVictorySettlement(settlement); const format = victory ? victoryFormat(settlement) : Format.create().addMarkdown(Format.createMarkdown().addTitle('战斗结算').addNewline().addNewline().addText(settlement ?? '战斗结束。')); const nearby = victory ? undefined : await nearbyPoints(event.current.UserId); const buttons = victory ? victoryButtons() : panelButtons(nearby?.character.activity_status !== 'active').addRow().addButton('技能列表', '/技能列表', { type: 'command', autoEnter: true, style: 'blue' }); await message.send({ format: format.addButtonGroup(buttons) }); } else { const battle = await battleStatus(event.current.UserId); await message.send({ format: battleFormat(result.waiting ? '行动已确认' : '战斗回合', result.log, battle) }); } } catch (error) { try { const battle = await battleStatus(event.current.UserId); await message.send({ format: battleErrorFormat(error instanceof Error ? error.message : '操作无法完成。', battle) }); } catch { await fail(message, error, '操作失败'); } } };
 export const attackHandler = actionHandler('attack'); export const skillHandler = actionHandler('skill'); export const itemHandler = actionHandler('item'); export const escapeHandler = actionHandler('escape');
