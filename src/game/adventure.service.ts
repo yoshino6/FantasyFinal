@@ -796,9 +796,10 @@ const effectMessage = (effect: { code: string; name: string; effect_type: string
             : effect.code === 'stun' ? '进入眩晕状态'
               : effect.code === 'barrier' ? `获得${percent}%生命值护盾`
                 : effect.code === 'regeneration' ? '进入再生状态'
+                  : effect.code === 'mana_regeneration' ? '进入回流状态'
                   : effect.effect_type === 'cleanse' ? '祛除全部异常状态'
                     : '效果生效';
-  return `${marker === '$' ? '➥' : ''}${marker}${effect.name}${marker}${detail}${duration ? `(${duration})` : ''}${stacks > 1 ? `×${stacks}` : ''}`;
+  return `${marker}${effect.name}${marker}${detail}${duration ? `(${duration})` : ''}${stacks > 1 ? `×${stacks}` : ''}`;
 };
 
 const applySkillEffects = async (connection: PoolConnection, sessionId: string, skillId: number, caster: { id: number }, casterKind: 'member' | 'target', target: { id: number }, targetKind: 'member' | 'target', timing: 'on_hit' | 'on_cast', log: string[]) => {
@@ -834,6 +835,11 @@ const processTurnEffects = async (connection: PoolConnection, sessionId: string,
       if (!(target as any).current_hp) (target as any).is_defeated = 1;
       const marker = effect.effect_type === 'damage_over_time' ? '$' : '&';
       log.push(`§${marker}${effect.name}${marker}${effect.effect_type === 'damage_over_time' ? '损失' : '恢复'} ${amount} HP(${oldHp}→${(target as any).current_hp})`);
+    }
+    if (effect.effect_type === 'mana_regen') {
+      const maxMp = Number(effect.target_kind === 'member' ? (target as CombatMemberRow).mp_max : (target as CombatTargetRow).current_mp); const oldMp = Number((target as any).current_mp); const amount = Math.max(1, Math.floor(maxMp * Number(effect.value) * Number(effect.stacks) / 100));
+      (target as any).current_mp = Math.min(maxMp, oldMp + amount);
+      log.push(`§&${effect.name}&恢复 ${amount} MP(${oldMp}→${(target as any).current_mp})`);
     }
     if (Number(effect.remaining_turns) <= 1) await connection.execute('DELETE FROM combat_status_effects WHERE id=?', [effect.id]);
     else await connection.execute('UPDATE combat_status_effects SET remaining_turns=remaining_turns-1 WHERE id=?', [effect.id]);
@@ -924,12 +930,13 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
     const turn = Number(session.turn_no);
     const slot = npc.npc_code === 'npc_forest_warrior' ? (turn % 3 === 1 ? 1 : turn % 3 === 2 ? 2 : 3)
       : npc.npc_code === 'npc_forest_mage' ? (turn % 2 === 1 ? 1 : 2)
-        : (turn % 3 === 1 ? 2 : turn % 3 === 2 ? 1 : 3);
+        : (turn % 4 === 1 ? 2 : turn % 4 === 2 ? 1 : turn % 4 === 3 ? 4 : 3);
     const code = npc.npc_code === 'npc_forest_warrior' ? ['warrior_taunt', 'shield_counter', 'guard_break'][slot - 1]
       : npc.npc_code === 'npc_forest_mage' ? ['arcane_shackle', 'ember_burst'][slot - 1]
-        : ['healing_prayer', 'blessing_aegis', 'sanctified_bolt'][slot - 1];
+        : ['healing_prayer', 'blessing_aegis', 'sanctified_bolt', 'mana_benediction'][slot - 1];
     const npcMember = members.find(item => Number(item.id) === Number(npc.character_id));
-    const pending: PendingAction = Number(jsonObject(npcMember?.cooldowns)[code] ?? 0) > 0 ? { type: 'attack' } : { type: 'skill', slot };
+    const [skillRows] = await connection.execute<(RowDataPacket & { mana_cost: number })[]>('SELECT s.mana_cost FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.quick_slot=?', [npc.character_id, slot]);
+    const pending: PendingAction = Number(jsonObject(npcMember?.cooldowns)[code] ?? 0) > 0 || !skillRows[0] || Number(npcMember?.current_mp ?? 0) < Number(skillRows[0].mana_cost) ? { type: 'attack' } : { type: 'skill', slot };
     await connection.execute('UPDATE combat_members SET pending_action=? WHERE session_id=? AND character_id=?', [JSON.stringify(pending), session.combat_id, npc.character_id]);
     if (npcMember) npcMember.pending_action = JSON.stringify(pending);
   }
@@ -976,6 +983,12 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
         log.push(`➤【${member.name}】${label}`);
         for (const ally of members.filter(item => !item.is_defeated)) if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, 'member', ally, 'member', 'on_cast', []);
         log.push('#护盾#全队获得18%生命值护盾(3)');
+        continue;
+      }
+      if (skillCode === 'mana_benediction') {
+        log.push(`➤【${member.name}】${label}`);
+        for (const ally of members.filter(item => !item.is_defeated)) if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, 'member', ally, 'member', 'on_cast', []);
+        log.push('#回流#全队每回合恢复5%魔力(3)');
         continue;
       }
       const monster = monsterCombatStats(target); const vulnerability = effectValue('target', Number(target.id), 'vulnerability'); const baseDefense = kind === '魔法' ? monster.magicDefense : monster.physicalDefense; const defense = Math.floor(baseDefense * (1 - (kind === '魔法' ? 0 : Math.min(90, modifiers.ignoreDefensePct + vulnerability)) / 100)); const strike = resolveStrike(attack * power * (Number(session.turn_no) === 1 ? 1 + Number(session.opening_damage_bonus) : 1), defense, Number(member.accuracy), monster.evasion, Number(member.crit_rate_bp) + modifiers.critRateBp, monster.critResist, Number(member.crit_damage_bp), monster.critReduction);

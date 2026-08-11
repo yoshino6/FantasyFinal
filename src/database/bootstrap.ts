@@ -120,7 +120,7 @@ const schemaStatements = [
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS effect_definitions (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, code VARCHAR(64) NOT NULL, name VARCHAR(64) NOT NULL,
-    effect_type ENUM('damage_over_time','stat_modifier','cleanse','control','shield','heal_over_time') NOT NULL,
+    effect_type ENUM('damage_over_time','stat_modifier','cleanse','control','shield','heal_over_time','mana_regen') NOT NULL,
     default_value DECIMAL(8,3) NOT NULL DEFAULT 0, default_duration TINYINT UNSIGNED NOT NULL DEFAULT 0,
     max_level TINYINT UNSIGNED NOT NULL DEFAULT 1, max_stacks TINYINT UNSIGNED NOT NULL DEFAULT 1, stackable TINYINT(1) NOT NULL DEFAULT 0,
     description TEXT NOT NULL, PRIMARY KEY (id), UNIQUE KEY uk_effect_code (code)
@@ -256,6 +256,7 @@ export const initializeSchema = async (pool: Pool) => {
   for (const column of ['current_mp INT UNSIGNED NOT NULL DEFAULT 0', 'cooldowns JSON NULL']) {
     try { await pool.query(`ALTER TABLE combat_targets ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }
+  await pool.query("ALTER TABLE effect_definitions MODIFY COLUMN effect_type ENUM('damage_over_time','stat_modifier','cleanse','control','shield','heal_over_time','mana_regen') NOT NULL");
   await pool.query('UPDATE combat_targets SET cooldowns=JSON_OBJECT() WHERE cooldowns IS NULL');
   await pool.query('ALTER TABLE combat_targets MODIFY COLUMN cooldowns JSON NOT NULL');
   try { await pool.query('ALTER TABLE combat_members ADD COLUMN cooldowns JSON NULL'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
@@ -365,6 +366,7 @@ export const initializeSchema = async (pool: Pool) => {
     ('ember_burst', '爆炎术', 'magic', 60, 2, 155, '将凝聚的火焰瞬间引爆。'),
     ('healing_prayer', '治愈祷言', 'magic', 65, 1, 0, '为生命最低的同伴恢复生命，并赋予短暂再生。'),
     ('blessing_aegis', '守护祝福', 'magic', 75, 3, 0, '为全体同伴施加护盾与再生祝福。'),
+    ('mana_benediction', '灵泉祝祷', 'magic', 80, 5, 0, '为全体同伴施加回流祝福，每回合恢复最大魔力的 5%。'),
     ('sanctified_bolt', '圣辉弹', 'magic', 50, 1, 115, '以圣光轰击敌人，并为自身覆上一层守护。'),
     ('appraisal', '鉴识', 'passive', 0, 0, 0, '学会后可识别怪物词条，并解锁怪物属性查看。'),
     ('growth_blessing', '成长祝福', 'passive', 0, 0, 0, '所有获得的经验值翻倍。'),
@@ -398,7 +400,8 @@ export const initializeSchema = async (pool: Pool) => {
     ('stun','眩晕','control',1,1,3,1,0,'无法进行一次行动。'),
     ('purify','净化','cleanse',1,0,1,1,0,'移除目标全部异常状态。'),
     ('barrier','护盾','shield',12,3,5,1,0,'获得相当于最大生命值一定比例的护盾。'),
-    ('regeneration','再生','heal_over_time',4,3,5,1,0,'每回合恢复最大生命值一定比例。')
+    ('regeneration','再生','heal_over_time',4,3,5,1,0,'每回合恢复最大生命值一定比例。'),
+    ('mana_regeneration','回流','mana_regen',5,3,1,1,0,'每回合恢复最大魔力一定比例。')
     ON DUPLICATE KEY UPDATE name=VALUES(name),default_value=VALUES(default_value),default_duration=VALUES(default_duration),max_level=VALUES(max_level),max_stacks=VALUES(max_stacks),stackable=VALUES(stackable),description=VALUES(description)`);
   await pool.query(`INSERT INTO skill_effects (skill_id,effect_id,effect_level,value_override,duration_override,target_scope,trigger_timing) VALUES
     ((SELECT id FROM skill_definitions WHERE code='armor_break'),(SELECT id FROM effect_definitions WHERE code='vulnerability'),1,NULL,NULL,'enemy','on_hit'),
@@ -422,6 +425,7 @@ export const initializeSchema = async (pool: Pool) => {
     ((SELECT id FROM skill_definitions WHERE code='healing_prayer'),(SELECT id FROM effect_definitions WHERE code='regeneration'),1,6,2,'ally','on_cast'),
     ((SELECT id FROM skill_definitions WHERE code='blessing_aegis'),(SELECT id FROM effect_definitions WHERE code='barrier'),1,18,3,'ally','on_cast'),
     ((SELECT id FROM skill_definitions WHERE code='blessing_aegis'),(SELECT id FROM effect_definitions WHERE code='regeneration'),1,4,3,'ally','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='mana_benediction'),(SELECT id FROM effect_definitions WHERE code='mana_regeneration'),1,5,3,'ally','on_cast'),
     ((SELECT id FROM skill_definitions WHERE code='sanctified_bolt'),(SELECT id FROM effect_definitions WHERE code='barrier'),1,12,2,'self','on_cast')
     ON DUPLICATE KEY UPDATE effect_level=VALUES(effect_level),value_override=VALUES(value_override),duration_override=VALUES(duration_override),target_scope=VALUES(target_scope),trigger_timing=VALUES(trigger_timing)`);
   await pool.query(`INSERT INTO monster_templates (code, name, monster_class, level, constitution, spirit, strength, intelligence, agility, perception, constitution_growth, spirit_growth, strength_growth, intelligence_growth, agility_growth, perception_growth, skill_sequence, experience, drops_json) VALUES
@@ -528,7 +532,7 @@ export const initializeSchema = async (pool: Pool) => {
     SELECT c.id,s.id,v.slot FROM characters c JOIN (
       SELECT 'npc_forest_warrior' AS code,'warrior_taunt' AS skill_code,1 AS slot UNION ALL SELECT 'npc_forest_warrior','shield_counter',2 UNION ALL SELECT 'npc_forest_warrior','guard_break',3
       UNION ALL SELECT 'npc_forest_mage','arcane_shackle',1 UNION ALL SELECT 'npc_forest_mage','ember_burst',2
-      UNION ALL SELECT 'npc_forest_priest','healing_prayer',1 UNION ALL SELECT 'npc_forest_priest','blessing_aegis',2 UNION ALL SELECT 'npc_forest_priest','sanctified_bolt',3
+      UNION ALL SELECT 'npc_forest_priest','healing_prayer',1 UNION ALL SELECT 'npc_forest_priest','blessing_aegis',2 UNION ALL SELECT 'npc_forest_priest','sanctified_bolt',3 UNION ALL SELECT 'npc_forest_priest','mana_benediction',4
     ) v ON v.code=c.npc_code JOIN skill_definitions s ON s.code=v.skill_code`);
   await pool.query(`INSERT IGNORE INTO player_quick_items (character_id, quick_slot, item_id)
     SELECT c.id, 1, i.id FROM characters c JOIN item_definitions i ON i.code='healing_herb'`);
