@@ -30,6 +30,7 @@ const schemaStatements = [
     constitution_growth DECIMAL(4,1) NOT NULL DEFAULT 0, spirit_growth DECIMAL(4,1) NOT NULL DEFAULT 0, strength_growth DECIMAL(4,1) NOT NULL DEFAULT 0,
     intelligence_growth DECIMAL(4,1) NOT NULL DEFAULT 0, agility_growth DECIMAL(4,1) NOT NULL DEFAULT 0, perception_growth DECIMAL(4,1) NOT NULL DEFAULT 0,
     adventurer_registered TINYINT(1) NOT NULL DEFAULT 0,
+    adventurer_rank ENUM('F','E','D','C','B','A','S','SS','SSS') NOT NULL DEFAULT 'F', profession_code VARCHAR(32) NULL,
     hp_max INT UNSIGNED NOT NULL, mp_max INT UNSIGNED NOT NULL, current_hp INT UNSIGNED NOT NULL, current_mp INT UNSIGNED NOT NULL,
     activity_status ENUM('active','resting','unconscious') NOT NULL DEFAULT 'active', rest_started_at DATETIME NULL, physical_attack INT UNSIGNED NOT NULL, magic_attack INT UNSIGNED NOT NULL,
     physical_defense INT UNSIGNED NOT NULL, magic_defense INT UNSIGNED NOT NULL, accuracy INT UNSIGNED NOT NULL, evasion INT UNSIGNED NOT NULL,
@@ -93,6 +94,14 @@ const schemaStatements = [
   , `CREATE TABLE IF NOT EXISTS player_blessings (
     character_id BIGINT UNSIGNED NOT NULL, code VARCHAR(64) NOT NULL,
     PRIMARY KEY (character_id), CONSTRAINT fk_blessing_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS profession_definitions (
+    code VARCHAR(32) NOT NULL, name VARCHAR(32) NOT NULL, description TEXT NOT NULL, growth_json JSON NOT NULL, skill_codes_json JSON NOT NULL,
+    PRIMARY KEY (code)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_guild_chats (
+    character_id BIGINT UNSIGNED NOT NULL, chat_count INT UNSIGNED NOT NULL DEFAULT 0,
+    PRIMARY KEY (character_id), CONSTRAINT fk_guild_chat_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS skill_definitions (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, code VARCHAR(64) NOT NULL, name VARCHAR(64) NOT NULL,
@@ -270,6 +279,9 @@ export const initializeSchema = async (pool: Pool) => {
   }
   await pool.query("ALTER TABLE registration_sessions MODIFY stage ENUM('story','audience','question','destination','danger','choice') NOT NULL DEFAULT 'story'");
   await pool.query("ALTER TABLE player_story_progress MODIFY COLUMN status ENUM('met','joined','declined','awaiting_arrival','arrival_story','guild_story','completed') NOT NULL DEFAULT 'met'");
+  for (const column of ["adventurer_rank ENUM('F','E','D','C','B','A','S','SS','SSS') NOT NULL DEFAULT 'F'", 'profession_code VARCHAR(32) NULL']) {
+    try { await pool.query(`ALTER TABLE characters ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  }
   await pool.query("ALTER TABLE player_equipment MODIFY slot ENUM('weapon','offhand','shoulder','upper','waist','lower','feet','necklace','bracelet','ring') NOT NULL");
   try { await pool.query('ALTER TABLE player_equipment ADD COLUMN instance_id BIGINT UNSIGNED NULL'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   await pool.query(`UPDATE player_equipment pe JOIN (SELECT character_id,item_id,MIN(id) AS instance_id FROM player_item_instances GROUP BY character_id,item_id) ii ON ii.character_id=pe.character_id AND ii.item_id=pe.item_id SET pe.instance_id=ii.instance_id WHERE pe.instance_id IS NULL`);
@@ -310,6 +322,12 @@ export const initializeSchema = async (pool: Pool) => {
   await pool.query(`DELETE FROM players WHERE qq_user_id IN ('npc_forest_warrior','npc_forest_mage','npc_forest_priest')`);
   await pool.query(`UPDATE item_definitions SET item_category=CASE code WHEN 'holy_sword_shirulu' THEN '武器' WHEN 'demon_sword_aphia' THEN '武器' WHEN 'healing_herb' THEN '药剂' WHEN 'wolf_fang' THEN '兽材' ELSE item_category END, stackable=CASE WHEN item_type='equipment' THEN 0 ELSE 1 END`);
   await pool.query(`UPDATE item_definitions SET codex_id=CONCAT(CASE WHEN item_type='equipment' THEN CASE item_category WHEN '武器' THEN '11' WHEN '副手' THEN '12' WHEN '头部' THEN '13' WHEN '上装' THEN '14' WHEN '腰部' THEN '15' WHEN '下装' THEN '16' WHEN '脚部' THEN '17' WHEN '项链' THEN '18' WHEN '手镯' THEN '19' WHEN '戒指' THEN '10' ELSE '19' END WHEN item_type='consumable' THEN CASE item_category WHEN '药剂' THEN '21' WHEN '食物' THEN '22' ELSE '23' END WHEN item_type='material' THEN CASE item_category WHEN '食材' THEN '31' WHEN '草药' THEN '32' ELSE '39' END ELSE '99' END, LPAD(id,5,'0')) WHERE codex_id IS NULL`);
+  await pool.query(`INSERT INTO profession_definitions (code,name,description,growth_json,skill_codes_json) VALUES
+    ('warrior','战士','以剑盾守护同伴、在前线承受风暴的战斗职业。',JSON_OBJECT('constitution',8,'strength',8),JSON_ARRAY('sword_shield_mastery','warrior_taunt_player','shield_bash_player')),
+    ('mage','法师','以敏锐思维编织元素与奥术的远程施法职业。',JSON_OBJECT('spirit',8,'intelligence',8),JSON_ARRAY('arcane_mastery','fire_lance','frost_barrier')),
+    ('rogue','盗贼','擅长身法、潜行与抓住敌人破绽的灵巧职业。',JSON_OBJECT('agility',8,'perception',8),JSON_ARRAY('shadow_step','backstab','smoke_screen')),
+    ('priest','牧师','以信念守望队伍、提供治疗与祝福的支援职业。',JSON_OBJECT('constitution',4,'spirit',10,'intelligence',4),JSON_ARRAY('holy_prayer','healing_light','blessing_hymn'))
+    ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),growth_json=VALUES(growth_json),skill_codes_json=VALUES(skill_codes_json)`);
   try { await pool.query('ALTER TABLE item_definitions ADD UNIQUE KEY uk_item_codex_id (codex_id)'); } catch (error: any) { if (error?.code !== 'ER_DUP_KEYNAME') throw error; }
   await pool.execute(
     `INSERT INTO map_regions (code, name, description, min_x, max_x, min_y, max_y, min_z, max_z, is_spawn_enabled, danger_level)
@@ -326,6 +344,7 @@ export const initializeSchema = async (pool: Pool) => {
     ('demon_sword_aphia', '魔剑·阿菲娅', '寄宿深渊意志的漆黑魔剑。', '初始恩赐', 'equipment', '武器', 3.20, 0, JSON_OBJECT('artifact','demon_sword','magicAttackPct',16,'mpPct',33,'accuracyPct',33)),
     ('rename_card', '改名卡', '用于再次修改角色昵称。首次改名免费，此后每次改名消耗一张。', '特殊途径获得', 'consumable', '特殊', 0.01, 1, JSON_OBJECT('characterChange','name')),
     ('gender_change_card', '改性卡', '用于再次修改角色性别。首次改性免费，此后每次改性消耗一张。', '特殊途径获得', 'consumable', '特殊', 0.01, 1, JSON_OBJECT('characterChange','gender'))
+    ,('adventurer_card', '冒险者卡片', '记录冒险者身份、等级与职业的银白色卡片。', '百纳镇冒险者公会', 'consumable', '特殊', 0.01, 1, JSON_OBJECT('adventurerCard',true))
     ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description), obtain_source = VALUES(obtain_source), item_category = VALUES(item_category), stackable = VALUES(stackable), effect_json = VALUES(effect_json)`);
   await pool.query(`UPDATE item_definitions SET codex_id=CONCAT(CASE WHEN item_type='equipment' THEN CASE item_category WHEN '武器' THEN '11' WHEN '副手' THEN '12' WHEN '头部' THEN '13' WHEN '上装' THEN '14' WHEN '腰部' THEN '15' WHEN '下装' THEN '16' WHEN '脚部' THEN '17' WHEN '项链' THEN '18' WHEN '手镯' THEN '19' WHEN '戒指' THEN '10' ELSE '19' END WHEN item_type='consumable' THEN CASE item_category WHEN '药剂' THEN '21' WHEN '食物' THEN '22' ELSE '23' END WHEN item_type='material' THEN CASE item_category WHEN '食材' THEN '31' WHEN '草药' THEN '32' ELSE '39' END ELSE '99' END, LPAD(id,5,'0')) WHERE codex_id IS NULL`);
   await pool.query(`INSERT INTO skill_definitions (code, name, category, mana_cost, cooldown_turns, power, description) VALUES
@@ -376,6 +395,20 @@ export const initializeSchema = async (pool: Pool) => {
     ('mana_affinity', '魔力亲和', 'passive', 0, 0, 0, '技能魔力消耗降低 30%。'),
     ('lucky_favor', '幸运眷顾', 'passive', 0, 0, 0, '战利品掉落概率提高 20%。')
     ON DUPLICATE KEY UPDATE name=VALUES(name),mana_cost=VALUES(mana_cost),cooldown_turns=VALUES(cooldown_turns),power=VALUES(power),description=VALUES(description)`);
+  await pool.query(`INSERT INTO skill_definitions (code,name,category,damage_type,mana_cost,cooldown_turns,power,learn_cost,max_level,description) VALUES
+    ('sword_shield_mastery','剑盾精通','passive','无',0,0,0,99,1,'装备长剑时攻击提高8%，装备盾牌时防御提高8%。'),
+    ('warrior_taunt_player','嘲讽','utility','无',25,2,0,99,5,'令全体队友仇恨减半，并将减少的仇恨转移给自身。'),
+    ('shield_bash_player','盾击','physical','打击',45,2,130,99,5,'攻击敌人，并令自身下回合受到的伤害降低50%。'),
+    ('arcane_mastery','奥术精通','passive','无',0,0,0,99,1,'魔法攻击提高8%，最大魔力提高8%。'),
+    ('fire_lance','炎枪术','magic','火',55,2,150,99,5,'凝聚炽热火枪贯穿目标。'),
+    ('frost_barrier','冰霜护壁','magic','冰',60,3,0,99,5,'为自身施加护盾，并降低近身敌人的速度。'),
+    ('shadow_step','影步','passive','无',0,0,0,99,1,'闪避提高8%，移动速度提高1。'),
+    ('backstab','背刺','physical','刺击',45,2,155,99,5,'从敌人破绽处发动致命刺击。'),
+    ('smoke_screen','烟幕','utility','无',35,3,0,99,5,'降低全体敌人的命中，提升队伍闪避。'),
+    ('holy_prayer','圣祷','passive','无',0,0,0,99,1,'治疗效果提高10%，最大魔力提高5%。'),
+    ('healing_light','治愈之光','magic','光',50,1,0,99,5,'恢复一名生命最低队友的生命。'),
+    ('blessing_hymn','祝福圣歌','magic','光',65,3,0,99,5,'为全队施加短暂的攻击与防御祝福。')
+    ON DUPLICATE KEY UPDATE name=VALUES(name),category=VALUES(category),damage_type=VALUES(damage_type),mana_cost=VALUES(mana_cost),cooldown_turns=VALUES(cooldown_turns),power=VALUES(power),description=VALUES(description)`);
   await pool.query(`UPDATE skill_definitions SET damage_type=CASE code WHEN 'arcane_bolt' THEN '奥术' WHEN 'heavy_strike' THEN '打击' WHEN 'armor_break' THEN '斩击' WHEN 'fireball' THEN '火' WHEN 'toxic_edge' THEN '刺击' WHEN 'purifying_light' THEN '光' WHEN 'frost_bind' THEN '冰' WHEN 'bloodletting' THEN '斩击' WHEN 'hop' THEN '打击' WHEN 'jump_strike' THEN '打击' WHEN 'charge' THEN '刺击' WHEN 'bite' THEN '斩击' WHEN 'bite_slash' THEN '斩击' WHEN 'howl' THEN '暗' WHEN 'war_cry' THEN '暗' WHEN 'scratch' THEN '斩击' WHEN 'shell_bash' THEN '打击' WHEN 'shell_breaker' THEN '打击' WHEN 'spore_dart' THEN '木' WHEN 'spore_bolt' THEN '木' WHEN 'sonic_screech' THEN '暗' WHEN 'echo_shock' THEN '暗' WHEN 'thorn_shot' THEN '刺击' WHEN 'thorn_stab' THEN '刺击' WHEN 'mist_pounce' THEN '斩击' WHEN 'mist_step_slash' THEN '斩击' WHEN 'constrict' THEN '打击' WHEN 'maul' THEN '斩击' WHEN 'goblin_slash' THEN '斩击' WHEN 'goblin_fire' THEN '火' WHEN 'slime_bash' THEN '打击' WHEN 'acid_spray' THEN '水' WHEN 'regenerate_slime' THEN '木' WHEN 'guard_break' THEN '打击' WHEN 'warrior_taunt' THEN '打击' WHEN 'shield_counter' THEN '打击' WHEN 'arcane_shackle' THEN '奥术' WHEN 'ember_burst' THEN '火' WHEN 'healing_prayer' THEN '光' WHEN 'blessing_aegis' THEN '光' WHEN 'sanctified_bolt' THEN '光' ELSE damage_type END`);
   await pool.query(`UPDATE skill_definitions SET learn_cost=CASE code WHEN 'heavy_strike' THEN 1 WHEN 'armor_break' THEN 1 WHEN 'arcane_bolt' THEN 1 WHEN 'bloodletting' THEN 1 WHEN 'jump_strike' THEN 1 WHEN 'bite_slash' THEN 1 WHEN 'charge' THEN 1 WHEN 'shell_breaker' THEN 1 WHEN 'thorn_stab' THEN 1 WHEN 'mist_step_slash' THEN 1 WHEN 'spore_bolt' THEN 2 WHEN 'echo_shock' THEN 2 WHEN 'war_cry' THEN 2 WHEN 'toxic_edge' THEN 2 WHEN 'fireball' THEN 2 WHEN 'frost_bind' THEN 2 WHEN 'purifying_light' THEN 3 ELSE 99 END, upgrade_cost=CASE code WHEN 'heavy_strike' THEN 1 WHEN 'armor_break' THEN 1 WHEN 'arcane_bolt' THEN 1 WHEN 'bloodletting' THEN 1 WHEN 'jump_strike' THEN 1 WHEN 'bite_slash' THEN 1 WHEN 'charge' THEN 1 WHEN 'shell_breaker' THEN 1 WHEN 'thorn_stab' THEN 1 WHEN 'mist_step_slash' THEN 1 WHEN 'spore_bolt' THEN 2 WHEN 'echo_shock' THEN 2 WHEN 'war_cry' THEN 2 WHEN 'toxic_edge' THEN 2 WHEN 'fireball' THEN 2 WHEN 'frost_bind' THEN 2 WHEN 'purifying_light' THEN 3 ELSE 99 END, max_level=CASE WHEN code IN ('hop','bite','howl','scratch','shell_bash','spore_dart','sonic_screech','thorn_shot','mist_pounce','constrict','maul','goblin_slash','goblin_fire') THEN 1 ELSE 5 END, power_per_level=CASE WHEN code IN ('hop','bite','howl','scratch','shell_bash','spore_dart','sonic_screech','thorn_shot','mist_pounce','constrict','maul','goblin_slash','goblin_fire') THEN 0 ELSE 15 END, cooldown_reduction_per_level=CASE WHEN code IN ('heavy_strike','armor_break','fireball','toxic_edge','purifying_light','frost_bind','bloodletting','jump_strike','bite_slash','charge','war_cry','shell_breaker','spore_bolt','echo_shock','thorn_stab','mist_step_slash') THEN 1 ELSE 0 END`);
   await pool.query(`UPDATE skill_definitions SET category='passive',learn_cost=CASE WHEN code='appraisal' THEN 1 ELSE 99 END,upgrade_cost=99,max_level=1,power_per_level=0,passive_effect_json=CASE code

@@ -188,7 +188,26 @@ export const registerAdventurer = async (qqUserId: string) => withTransaction(as
   const [rows] = await connection.execute<(RowDataPacket & { id: number; level: number; adventurer_registered: number })[]>('SELECT id,level,adventurer_registered FROM characters WHERE player_id=? FOR UPDATE', [player.id]);
   if (!rows[0]) throw new Error('请先完成转生。');
   if (rows[0].adventurer_registered) return false;
-  if (Number(rows[0].level) < 5) throw new Error('公会只接纳 Lv.5 及以上的见习者；继续冒险后再来。');
   await connection.execute('UPDATE characters SET adventurer_registered=1 WHERE id=?', [rows[0].id]);
+  const [card] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM item_definitions WHERE code=\'adventurer_card\' LIMIT 1', []);
+  if (card[0]) await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,1) ON DUPLICATE KEY UPDATE quantity=quantity+1,acquired_at=NOW()', [rows[0].id, card[0].id]);
   return true;
+});
+
+export const adventurerProfile = async (qqUserId: string) => {
+  const pool = await getPool(); const [rows] = await pool.execute<(RowDataPacket & { id: number; name: string; level: number; experience: number; adventurer_registered: number; adventurer_rank: string; profession_code: string | null; profession_name: string | null })[]>(`SELECT c.id,c.name,c.level,c.experience,c.adventurer_registered,c.adventurer_rank,c.profession_code,p.name AS profession_name
+    FROM characters c JOIN players pl ON pl.id=c.player_id LEFT JOIN profession_definitions p ON p.code=c.profession_code WHERE pl.qq_user_id=? LIMIT 1`, [qqUserId]);
+  if (!rows[0]) throw new Error('请先创建角色。'); return rows[0];
+};
+
+export const chooseProfession = async (qqUserId: string, code: string) => withTransaction(async connection => {
+  const player = await getPlayer(connection, qqUserId);
+  const [characters] = await connection.execute<(RowDataPacket & { id: number; adventurer_registered: number; profession_code: string | null })[]>('SELECT id,adventurer_registered,profession_code FROM characters WHERE player_id=? FOR UPDATE', [player.id]); const character = characters[0];
+  if (!character?.adventurer_registered) throw new Error('完成冒险者注册后才能选择职业。');
+  if (character.profession_code) throw new Error('已选择职业，暂不可更改。');
+  const [professions] = await connection.execute<(RowDataPacket & { code: string; growth_json: unknown; skill_codes_json: unknown })[]>('SELECT code,growth_json,skill_codes_json FROM profession_definitions WHERE code=? LIMIT 1 FOR UPDATE', [code]); const profession = professions[0];
+  if (!profession) throw new Error('该职业暂未开放。'); const growth = typeof profession.growth_json === 'string' ? JSON.parse(profession.growth_json) : profession.growth_json as Record<string, number>; const skills = typeof profession.skill_codes_json === 'string' ? JSON.parse(profession.skill_codes_json) : profession.skill_codes_json as string[];
+  await connection.execute('UPDATE characters SET profession_code=?,constitution_growth=constitution_growth+?,spirit_growth=spirit_growth+?,strength_growth=strength_growth+?,intelligence_growth=intelligence_growth+?,agility_growth=agility_growth+?,perception_growth=perception_growth+? WHERE id=?', [code, Number(growth.constitution ?? 0), Number(growth.spirit ?? 0), Number(growth.strength ?? 0), Number(growth.intelligence ?? 0), Number(growth.agility ?? 0), Number(growth.perception ?? 0), character.id]);
+  for (const skillCode of skills) await connection.execute('INSERT IGNORE INTO player_skills (character_id,skill_id) SELECT ?,id FROM skill_definitions WHERE code=?', [character.id, skillCode]);
+  return code;
 });
