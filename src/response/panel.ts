@@ -1,5 +1,5 @@
 import { Format, logger, useEvent, useMessage } from 'alemonjs';
-import { battleStatus, inventory, nearbyPoints, resumeAction, startRest, type NearbyPoint } from '../game/adventure.service';
+import { battleStatus, inventory, nearbyPoints, resumeAction, startRest, type MapLandmark, type NearbyPoint } from '../game/adventure.service';
 import { messageFormat, sendWithTextFallback } from '../game/message';
 
 const directionText = (point: NearbyPoint, x: number, y: number) => {
@@ -15,11 +15,13 @@ const areaText = (character: LocationCharacter, verb: '位于' | '移动至') =>
 export const currentLocationText = (character: LocationCharacter) => areaText(character, '位于');
 export const movedLocationText = (character: LocationCharacter) => areaText(character, '移动至');
 
-export const outsidePanel = (title: string, location: string, speed: number, range: number, x: number, y: number, description: string, points: NearbyPoint[], resting = false) => {
-  const [descriptionText, mapText] = description.split('\n\n地图标识：\n');
+export const outsidePanel = (title: string, location: string, speed: number, range: number, x: number, y: number, description: string, points: NearbyPoint[], resting = false, landmarks: MapLandmark[] = []) => {
   const markdown = Format.createMarkdown().addTitle(title)
     .addText(`\n\n${location}\n\n${descriptionText}\n\n${resting ? '状态：休息中（每秒恢复 1% 生命与魔力）\n' : ''}移动速度：${speed}\n感知范围：${range}`);
-  if (mapText) markdown.addNewline().addNewline().addText('地图标识：').addNewline().addBlockquote(mapText);
+  if (landmarks.length) {
+    markdown.addNewline().addNewline().addText('地图标识：').addNewline();
+    for (const landmark of landmarks) markdown.addButton(landmark.name, { data: `/前往 ${landmark.x} ${landmark.y}`, autoEnter: false }).addNewline();
+  }
   markdown.addText('\n\n周边目标：\n');
   if (!points.length) markdown.addText('空空如也');
   else {
@@ -64,8 +66,8 @@ export default async () => {
       const x = Number(nearby.character.pos_x); const y = Number(nearby.character.pos_y);
       const location = currentLocationText(nearby.character);
       const resting = nearby.character.activity_status !== 'active';
-      const mapText = nearby.mapUnlocked ? `\n\n地图标识：\n${nearby.landmarks.join('\n')}` : '';
-      await sendWithTextFallback(message, outsidePanel('操作面板', location, bag.movementSpeed, nearby.range, x, y, nearby.description + mapText, nearby.points, resting).addButtonGroup(panelButtons(resting)), `【操作面板】\n${location}\n\n${nearby.description}${mapText}\n\n移动速度：${bag.movementSpeed}\n感知范围：${nearby.range}${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
+      const mapText = nearby.mapUnlocked ? `\n\n地图标识：\n${nearby.landmarks.map(landmark => landmark.name).join('\n')}` : '';
+      await sendWithTextFallback(message, outsidePanel('操作面板', location, bag.movementSpeed, nearby.range, x, y, nearby.description, nearby.points, resting, nearby.landmarks).addButtonGroup(panelButtons(resting)), `【操作面板】\n${location}\n\n${nearby.description}${mapText}\n\n移动速度：${bag.movementSpeed}\n感知范围：${nearby.range}${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
     }
   } catch (error) {
     logger.error({ err: error, userId: event.current.UserId }, 'open panel failed');
@@ -75,7 +77,7 @@ export default async () => {
 
 const showRestPanel = async (message: any, qqUserId: string, text: string) => {
   const [bag, nearby] = await Promise.all([inventory(qqUserId), nearbyPoints(qqUserId)]); const resting = nearby.character.activity_status !== 'active';
-  const panel = outsidePanel('操作面板', currentLocationText(nearby.character), bag.movementSpeed, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), text, nearby.points, resting).addButtonGroup(panelButtons(resting));
+  const panel = outsidePanel('操作面板', currentLocationText(nearby.character), bag.movementSpeed, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), text, nearby.points, resting, nearby.landmarks).addButtonGroup(panelButtons(resting));
   await sendWithTextFallback(message, panel, `【操作面板】\n${text}`);
 };
 export const restHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await startRest(event.current.UserId); await showRestPanel(message, event.current.UserId, result.message); } catch (error) { await message.send({ format: messageFormat('无法休息', error instanceof Error ? error.message : '请稍后重试。') }); } };

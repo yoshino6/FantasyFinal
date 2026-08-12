@@ -403,6 +403,7 @@ export const explore = async (qqUserId: string) => {
 };
 
 export type NearbyPoint = { type: '怪物' | 'NPC' | '地标'; name: string; x: number; y: number; distance: number };
+export type MapLandmark = { name: string; x: number; y: number };
 
 const perceptionRange = (perception: number) => Math.max(2, Math.floor(perception / 5));
 
@@ -420,8 +421,8 @@ export const nearbyPoints = async (qqUserId: string) => {
     .filter(item => item.distance <= range)
     .sort((a, b) => a.distance - b.distance || a.name.localeCompare(b.name, 'zh-CN'));
   const [mapUnlocked] = await pool.execute<RowDataPacket[]>('SELECT 1 FROM player_story_progress WHERE character_id=? AND story_code=\'baina_map\' AND status=\'completed\' LIMIT 1', [character.id]);
-  const [landmarks] = mapUnlocked[0] && character.region_name === '百纳镇' ? await pool.execute<(RowDataPacket & { name: string })[]>('SELECT name FROM map_npcs WHERE region_id=? ORDER BY name', [character.current_region_id]) : [[] as any];
-  return { character, range, points, landmarks: landmarks.map(item => item.name), mapUnlocked: Boolean(mapUnlocked[0]), description: descriptions[0]?.description ?? '四周一片寂静，暂时没有发现异常。' };
+  const [landmarks] = mapUnlocked[0] && character.region_name === '百纳镇' ? await pool.execute<(RowDataPacket & MapLandmark)[]>('SELECT name,pos_x AS x,pos_y AS y FROM map_npcs WHERE region_id=? ORDER BY name', [character.current_region_id]) : [[] as any];
+  return { character, range, points, landmarks: landmarks.map(item => ({ name: item.name, x: Number(item.x), y: Number(item.y) })), mapUnlocked: Boolean(mapUnlocked[0]), description: descriptions[0]?.description ?? '四周一片寂静，暂时没有发现异常。' };
 };
 
 const moveToPosition = async (connection: PoolConnection, qqUserId: string, x: number, y: number, restrictToPerception: boolean, speedLimit?: number) => {
