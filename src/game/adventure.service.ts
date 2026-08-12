@@ -97,7 +97,7 @@ const characterFor = async (qqUserId: string): Promise<CharacterRow> => {
   const pool = await getPool(); const [rows] = await pool.execute<CharacterRow[]>(`SELECT c.*, r.name AS region_name FROM characters c JOIN players p ON p.id=c.player_id JOIN map_regions r ON r.id=c.current_region_id WHERE p.qq_user_id=? LIMIT 1`, [qqUserId]);
   if (!rows[0]) throw new Error('请先发送“注册”创建角色。');
   const character = rows[0];
-  if (character.activity_status === 'resting' && character.rest_started_at) {
+  if ((character.activity_status === 'resting' || character.activity_status === 'unconscious') && character.rest_started_at) {
     const seconds = Math.floor((Date.now() - new Date(character.rest_started_at).getTime()) / 1000);
     if (seconds > 0) {
       character.current_hp = Math.min(Number(character.hp_max), Number(character.current_hp) + Math.max(1, Math.ceil(Number(character.hp_max) / 100)) * seconds);

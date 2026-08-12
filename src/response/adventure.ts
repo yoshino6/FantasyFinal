@@ -2,6 +2,7 @@ import { Format, logger, useEvent, useMessage, useRoute } from 'alemonjs';
 import { battleStatus, combatAction, chooseTarget, continueForestArrival, currentEncounter, encounterAction, explore, forestGuideAdvance, forestGuideChoice, inventory, move, moveTo, nearbyPoints, switchCombatTarget, talkToNpc, type VictorySettlement } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
 import { movedLocationText, outsidePanel, panelButtons } from './panel';
+import pearGuideImage from '../assets/game/story/pear-guide.png';
 
 const fail = async (message: any, error: unknown, title = '操作失败') => message.send({ format: messageFormat(title, error instanceof Error ? error.message : '请稍后重试。') });
 const moveButtons = panelButtons;
@@ -99,7 +100,9 @@ const chapterFormat = (stage: number, text: string) => {
 
 const townArrivalFormat = (stage: number, text: string, completed = false, guildStory = false) => {
   if (completed) return null;
-  const markdown = Format.createMarkdown().addTitle(guildStory ? `初临·百纳镇·冒险者工会（${stage}/3）` : `初临·百纳镇（${stage}/6）`).addNewline().addNewline().addText(text);
+  const markdown = Format.createMarkdown().addTitle(guildStory ? `初临·百纳镇·冒险者工会（${stage}/3）` : `初临·百纳镇（${stage}/6）`).addNewline().addNewline();
+  if (guildStory) markdown.addImage(pearGuideImage, { width: 360 });
+  markdown.addText(text);
   const label = guildStory ? '继续' : stage === 4 ? '你说什么？勇者是什么意思？' : stage === 6 ? '挥手告别' : '继续';
   return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton(label, '/继续剧情', { type: 'command', autoEnter: true, style: 'blue' }));
 };
