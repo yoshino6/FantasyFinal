@@ -427,6 +427,8 @@ export const nearbyPoints = async (qqUserId: string) => {
 
 const moveToPosition = async (connection: PoolConnection, qqUserId: string, x: number, y: number, restrictToPerception: boolean, speedLimit?: number) => {
   const character = await characterFor(qqUserId);
+  const [travels] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_travels WHERE character_id=? FOR UPDATE', [character.id]);
+  if (travels[0]) throw new Error('你正在前往目标地点，请等待抵达或取消移动。');
   ensureActionAvailable(character);
   const [activeCombat] = await connection.execute<RowDataPacket[]>(`SELECT cs.id FROM combat_sessions cs LEFT JOIN combat_members cm ON cm.session_id=cs.id
     WHERE cs.state='active' AND (cs.character_id=? OR cm.character_id=?) LIMIT 1 FOR UPDATE`, [character.id, character.id]);
@@ -481,8 +483,40 @@ export const move = async (qqUserId: string, direction: string) => withTransacti
 export const moveTo = async (qqUserId: string, x: number, y: number) => {
   if (!Number.isInteger(x) || !Number.isInteger(y)) throw new Error('目标坐标必须为整数。');
   const carry = await inventory(qqUserId);
-  return withTransaction(async connection => moveToPosition(connection, qqUserId, x, y, true, carry.movementSpeed));
+  return withTransaction(async connection => {
+    const character = await characterFor(qqUserId); const distance = Math.abs(x - Number(character.pos_x)) + Math.abs(y - Number(character.pos_y));
+    const [unlocked] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_story_progress WHERE character_id=? AND story_code=\'baina_map\' AND status=\'completed\' LIMIT 1', [character.id]);
+    if (!unlocked[0] || distance <= carry.movementSpeed) return moveToPosition(connection, qqUserId, x, y, true, carry.movementSpeed);
+    ensureActionAvailable(character);
+    const [combat] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM combat_members cm JOIN combat_sessions cs ON cs.id=cm.session_id WHERE cm.character_id=? AND cs.state=\'active\' LIMIT 1 FOR UPDATE', [character.id]);
+    if (combat[0]) throw new Error('战斗尚未结束，无法移动。');
+    const [encounters] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM monster_spawns WHERE region_id=? AND pos_x=? AND pos_y=? AND pos_z=? AND defeated_at IS NULL LIMIT 1 FOR UPDATE', [character.current_region_id, character.pos_x, character.pos_y, character.pos_z]);
+    if (encounters[0]) throw new Error('当前格子存在敌对生物，请先选择战斗、交涉或躲避。');
+    const [existing] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_travels WHERE character_id=? FOR UPDATE', [character.id]); if (existing[0]) throw new Error('你正在前往目标地点，请等待抵达或取消移动。');
+    const [regions] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>('SELECT id,name FROM map_regions WHERE ? BETWEEN min_x AND max_x AND ? BETWEEN min_y AND max_y AND ? BETWEEN min_z AND max_z ORDER BY danger_level DESC LIMIT 1', [x, y, character.pos_z]); const region = regions[0];
+    if (!region || Number(region.id) !== Number(character.current_region_id)) throw new Error('当前只能在已解锁地图的同一区域内远距离前往。');
+    const seconds = Math.ceil(distance / carry.movementSpeed);
+    await connection.execute('INSERT INTO player_travels (character_id,region_id,target_x,target_y,target_z,arrival_at) VALUES (?,?,?,?,?,DATE_ADD(NOW(),INTERVAL ? SECOND))', [character.id, region.id, x, y, character.pos_z, seconds]);
+    return { kind: 'travel' as const, regionName: region.name, x, y, seconds, remaining: seconds };
+  });
 };
+
+export const travelStatus = async (qqUserId: string) => {
+  const character = await characterFor(qqUserId); const pool = await getPool(); const [rows] = await pool.execute<(RowDataPacket & { target_x: number; target_y: number; target_z: number; started_at: Date; arrival_at: Date; region_name: string })[]>(`SELECT t.target_x,t.target_y,t.target_z,t.started_at,t.arrival_at,r.name AS region_name FROM player_travels t JOIN map_regions r ON r.id=t.region_id WHERE t.character_id=?`, [character.id]); const travel = rows[0];
+  if (!travel) return null; const remaining = Math.max(0, Math.ceil((new Date(travel.arrival_at).getTime() - Date.now()) / 1000));
+  const seconds = Math.max(1, Math.ceil((new Date(travel.arrival_at).getTime() - new Date(travel.started_at).getTime()) / 1000));
+  return { x: Number(travel.target_x), y: Number(travel.target_y), z: Number(travel.target_z), regionName: travel.region_name, seconds, remaining };
+};
+
+export const completeTravel = async (qqUserId: string) => withTransaction(async connection => {
+  const character = await characterFor(qqUserId); const [rows] = await connection.execute<(RowDataPacket & { target_x: number; target_y: number; target_z: number; arrival_at: Date })[]>('SELECT target_x,target_y,target_z,arrival_at FROM player_travels WHERE character_id=? FOR UPDATE', [character.id]); const travel = rows[0]; if (!travel || new Date(travel.arrival_at).getTime() > Date.now()) return null;
+  await connection.execute('DELETE FROM player_travels WHERE character_id=?', [character.id]);
+  return moveToPosition(connection, qqUserId, Number(travel.target_x), Number(travel.target_y), false);
+});
+
+export const cancelTravel = async (qqUserId: string) => withTransaction(async connection => {
+  const character = await characterFor(qqUserId); const [rows] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_travels WHERE character_id=? FOR UPDATE', [character.id]); if (!rows[0]) throw new Error('当前没有进行中的移动。'); await connection.execute('DELETE FROM player_travels WHERE character_id=?', [character.id]); return character;
+});
 
 export const forestGuideAdvance = async (qqUserId: string, action: string) => withTransaction(async connection => {
   const character = await characterFor(qqUserId);

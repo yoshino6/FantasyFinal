@@ -62,6 +62,7 @@ appGroup.use({ path: '移动', schema: { usage: '/移动 <上|下|左|右>', arg
 appGroup.use('休息', () => import('./response/panel').then(module => ({ default: module.restHandler })))
 appGroup.use('行动', () => import('./response/panel').then(module => ({ default: module.resumeActionHandler })))
 appGroup.use({ path: '前往', schema: { usage: '/前往 <横坐标> <纵坐标>', args: [{ name: 'x', rules: [{ required: true, type: 'number' }] }, { name: 'y', rules: [{ required: true, type: 'number' }] }] } }, () => import('./response/go-to'))
+appGroup.use('取消移动', () => import('./response/adventure').then(module => ({ default: module.cancelTravelHandler })))
 appGroup.use({ path: '目标', schema: { usage: '/目标 <编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/target'))
 appGroup.use({ path: '偷袭', schema: { usage: '/偷袭 <编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/adventure').then(module => ({ default: module.ambushHandler })))
 appGroup.use({ path: '怪物详情', schema: { usage: '/怪物详情 <编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/monster-detail'))

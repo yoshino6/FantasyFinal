@@ -1,5 +1,5 @@
 import { Format, logger, useEvent, useMessage } from 'alemonjs';
-import { battleStatus, inventory, nearbyPoints, resumeAction, startRest, type MapLandmark, type NearbyPoint } from '../game/adventure.service';
+import { battleStatus, completeTravel, inventory, nearbyPoints, resumeAction, startRest, travelStatus, type MapLandmark, type NearbyPoint } from '../game/adventure.service';
 import { messageFormat, sendWithTextFallback } from '../game/message';
 
 const directionText = (point: NearbyPoint, x: number, y: number) => {
@@ -51,11 +51,17 @@ const battlePanel = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
   if (battle.appraisal.learned) buttons.addRow().addButton('鉴识', '/鉴识', { type: 'command', autoEnter: true, style: 'blue' });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
+const travelPanel = (travel: NonNullable<Awaited<ReturnType<typeof travelStatus>>>) => Format.create()
+  .addMarkdown(Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText(`正在前往${travel.regionName}（${travel.x}, ${travel.y}）\n预计耗时${travel.seconds}s\n当前剩余${travel.remaining}s`))
+  .addButtonGroup(Format.createButtonGroup().addRow().addButton('取消移动', '/取消移动', { type: 'command', autoEnter: true, style: 'blue' }));
 
 export default async () => {
   const [event] = useEvent();
   const [message] = useMessage();
   try {
+    const travel = await travelStatus(event.current.UserId);
+    if (travel && travel.remaining > 0) { await message.send({ format: travelPanel(travel) }); return; }
+    if (travel) await completeTravel(event.current.UserId);
     try {
       const battle = await battleStatus(event.current.UserId);
       await sendWithTextFallback(message, battlePanel(battle), `【战斗面板】\n${battle.members.map(member => `【${member.name}】HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}`).join('\n')}\n${battle.targets.map(target => `敌方 #${target.id} ${target.name} HP ${target.hp}/${target.hpMax}`).join('\n')}\n/攻击｜/技能 1｜/道具 1｜/逃跑`);
