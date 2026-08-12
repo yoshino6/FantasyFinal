@@ -319,8 +319,8 @@ export const initializeSchema = async (pool: Pool) => {
   await pool.query(`INSERT INTO item_definitions (code, name, description, obtain_source, item_type, item_category, weight, stackable, effect_json) VALUES
     ('healing_herb', '微光草药', '恢复 30 点生命。', '野外采集与探索发现', 'consumable', '药剂', 0.20, 1, JSON_OBJECT('heal', 30)),
     ('wolf_fang', '幽狼之牙', '可出售的普通材料。', '野外怪物掉落', 'material', '兽材', 0.15, 1, NULL),
-    ('holy_sword_shirulu', '圣剑·希尔露', '物攻 +20、暴击属性 +80；普攻无视 25% 防御，并回复伤害的 10% 生命。', '初始恩赐', 'equipment', '武器', 3.50, 0, JSON_OBJECT('physicalAttack',20,'critRateBp',80,'ignoreDefensePct',25,'lifestealPct',10)),
-    ('demon_sword_aphia', '魔剑·阿菲娅', '魔攻 +25；魔法技能伤害 +30%，魔力消耗 -2。', '初始恩赐', 'equipment', '武器', 3.20, 0, JSON_OBJECT('magicAttack',25,'magicDamagePct',30,'manaCostReduction',2)),
+    ('holy_sword_shirulu', '圣剑·希尔露', '物攻+16%，暴击属性+33%，暴伤属性+33%。普攻与斩击技能恒为物理伤害；暴击时使目标物防降低16%，持续3回合，可叠加。', '初始恩赐', 'equipment', '武器', 3.50, 0, JSON_OBJECT('artifact','holy_sword','physicalAttackPct',16,'critRatePct',33,'critDamagePct',33)),
+    ('demon_sword_aphia', '魔剑·阿菲娅', '魔攻+16%，魔力+33%，命中属性+33%。普攻与斩击技能恒为魔法伤害；命中时获得16%增伤，持续3回合，可叠加。', '初始恩赐', 'equipment', '武器', 3.20, 0, JSON_OBJECT('artifact','demon_sword','magicAttackPct',16,'mpPct',33,'accuracyPct',33)),
     ('rename_card', '改名卡', '用于再次修改角色昵称。首次改名免费，此后每次改名消耗一张。', '特殊途径获得', 'consumable', '特殊', 0.01, 1, JSON_OBJECT('characterChange','name')),
     ('gender_change_card', '改性卡', '用于再次修改角色性别。首次改性免费，此后每次改性消耗一张。', '特殊途径获得', 'consumable', '特殊', 0.01, 1, JSON_OBJECT('characterChange','gender'))
     ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description), obtain_source = VALUES(obtain_source), item_category = VALUES(item_category), stackable = VALUES(stackable), effect_json = VALUES(effect_json)`);
@@ -401,7 +401,9 @@ export const initializeSchema = async (pool: Pool) => {
     ('purify','净化','cleanse',1,0,1,1,0,'移除目标全部异常状态。'),
     ('barrier','护盾','shield',12,3,5,1,0,'获得相当于最大生命值一定比例的护盾。'),
     ('regeneration','再生','heal_over_time',4,3,5,1,0,'每回合恢复最大生命值一定比例。'),
-    ('mana_regeneration','回流','mana_regen',5,3,1,1,0,'每回合恢复最大魔力一定比例。')
+    ('mana_regeneration','回流','mana_regen',5,3,1,1,0,'每回合恢复最大魔力一定比例。'),
+    ('sword_break','破甲剑痕','stat_modifier',16,3,1,5,1,'物理防御降低，可叠加。'),
+    ('demon_surge','魔剑激涌','stat_modifier',16,3,1,5,1,'造成伤害提高，可叠加。')
     ON DUPLICATE KEY UPDATE name=VALUES(name),default_value=VALUES(default_value),default_duration=VALUES(default_duration),max_level=VALUES(max_level),max_stacks=VALUES(max_stacks),stackable=VALUES(stackable),description=VALUES(description)`);
   await pool.query(`INSERT INTO skill_effects (skill_id,effect_id,effect_level,value_override,duration_override,target_scope,trigger_timing) VALUES
     ((SELECT id FROM skill_definitions WHERE code='armor_break'),(SELECT id FROM effect_definitions WHERE code='vulnerability'),1,NULL,NULL,'enemy','on_hit'),
