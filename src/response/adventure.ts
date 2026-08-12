@@ -40,8 +40,8 @@ const appendCombatLog = (markdown: ReturnType<typeof Format.createMarkdown>, tex
   return markdown;
 };
 const battleFormat = (_title: string, text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => {
-  const lines = text.split('\n'); if (/^战斗<\d+>回合$/.test(lines[0])) lines.shift();
-  const markdown = Format.createMarkdown().addTitle(`战斗<${battle.turn}>回合`);
+  const lines = text.split('\n'); const turn = /^战斗<(\d+)>回合$/.exec(lines[0]); if (turn) lines.shift();
+  const markdown = Format.createMarkdown().addTitle(`战斗<${turn ? Number(turn[1]) : battle.turn}>回合`);
   if (lines.join('\n')) appendCombatLog(markdown, lines.join('\n')).addNewline();
   return Format.create().addMarkdown(appendBattleState(markdown, battle)).addButtonGroup(battleButtons(battle));
 };
@@ -65,7 +65,7 @@ const battleErrorFormat = (text: string, battle: Awaited<ReturnType<typeof battl
   return Format.create().addMarkdown(appendBattleState(markdown, battle)).addButtonGroup(battleButtons(battle));
 };
 const finalBattleFormat = (log: string) => {
-  const lines = log.split('\n'); const turn = /^战斗<(\d+)>回合$/.exec(lines[0]); const title = turn ? `战斗<${Number(turn[1]) + 1}>回合` : '战斗'; if (turn) lines.shift();
+  const lines = log.split('\n'); const turn = /^战斗<(\d+)>回合$/.exec(lines[0]); const title = turn ? `战斗<${Number(turn[1])}>回合` : '战斗'; if (turn) lines.shift();
   const markdown = Format.createMarkdown().addTitle(title);
   if (lines.join('\n')) appendCombatLog(markdown, lines.join('\n'));
   return Format.create().addMarkdown(markdown);
