@@ -935,21 +935,50 @@ export const currentEncounter = async (qqUserId: string) => {
   return { character, spawns, canAmbush: members.every(member => Number(member.speed) > fastestMonster), text: texts[0]?.description ?? `${spawns[0].name} 拦住了你的去路。` };
 };
 
-export const continueForestArrival = async (qqUserId: string) => withTransaction(async connection => {
-  const character = await characterFor(qqUserId); const [story] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_story_progress WHERE character_id=? AND story_code=\'forest_guide\' AND status=\'awaiting_arrival\' FOR UPDATE', [character.id]);
-  if (!story[0]) throw new Error('当前没有待继续的剧情。');
-  const [town] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM map_regions WHERE code=\'baina_town\' LIMIT 1'); if (!town[0]) throw new Error('百纳镇地图尚未准备好。');
-  await connection.execute('UPDATE characters SET current_region_id=?,pos_x=-26,pos_y=-135 WHERE id=?', [town[0].id, character.id]);
+export type TownArrivalStory = { stage: number; text: string; completed: boolean };
+
+const townArrivalScenes: Record<number, string> = {
+  1: '三人冒险队将你带到百纳镇——猫拉瑞亚的边缘。\n城镇看上去规模不小，先映入眼帘的是目光望不到头的城墙。城墙约莫五六米高，由厚重的石砖堆砌而成，其缝隙有青苔蔓延，但表面却光亮整洁。它看上去被维护得很好。\n古旧的金属城门旁，驻守着两名士兵模样的壮汉。我们进城时，他们友好地向我们打了个招呼。\n此时天色正晌，城门后一幅熙熙攘攘的景象。',
+  2: '这边貌似是交易兽材的集市。路边散乱地摆放着不少猎物，其身后伫立的摊主看似都不好招惹。依然有不少人上前问价，对货物比比划划。\n莱昂将我带到一个摊前，一名浅黄发色的猫族少女正在和摊主讨价还价。\n“什么喵？3银币太贵了喵~把我卖了都买不起喵……能给个优惠喵？吾一定常来光顾喵！”\n“那你多买点吧，3个算你10银币好了。”\n“成交！”\n似乎怕店主反悔，少女不假思索地丢下银币，将摊上三枚亮闪闪的兽核攥在了手里。',
+  3: '“嗨，梨子喵！你又在花冤枉钱了！”\n莱昂走向前去，瞪了摊主一眼。那人悻悻地将一枚银币退了回去。\n“啊，我……我才没有算错！这……这一枚是……是是打赏给店家的。”\n少女的脸瞬间就红了。\n“嗷，这样啊——那我还回去了哟？”\n“别……别呀！”\n莱昂将银币高高举起，少女蹦跳着想要够回属于她的银币。你望着这幅景象，感觉异世界生活似乎也不赖。',
+  4: '闹够了后，莱昂向我指了指。\n“梨子喵，交给你一个任务。这位是初来乍到的勇者大人，你带他去咱们这儿的工会看看吧。”\n“勇……勇者！”\n她朝你望过来，眼神散发出星星般闪烁的光芒。\n听到这话，你心头瞬间警惕起来。',
+  5: '“嘿，你也别藏了，瞧你这奇装异服的，还能瞒得过我？”莱昂一脸得意，“你也别害怕，我已经见识过数十位莅临此地的转生者了，每年总能遇上这么几位。”\n“原来如此。我早就对你们接纳我这么快而感到奇怪了。能带我去见见那些转生者吗？”\n“我们还有点事儿，要赶去铁匠铺一趟。让梨子喵先带你去冒险者公会看看吧。那里是众多冒险者汇聚之地，你在那儿说不定能碰上老乡呢！”\n莱昂拍了拍我肩，挥挥手带着队友离去。他渐行渐远，抛下了一段令人意味深长的话。',
+  6: '“你们的到来，并没有缓解这片世界的焦灼。\n有的人为恶一方兴风作浪，有的人却在遍地留下不朽的传说。\n远道而来的朋友，希望下次遇见时，你还能恪守底线，守住真我。”\n“祝您武运昌顺！”'
+};
+
+export const continueForestArrival = async (qqUserId: string): Promise<TownArrivalStory> => withTransaction(async connection => {
+  const character = await characterFor(qqUserId);
+  const [storyRows] = await connection.execute<(RowDataPacket & { status: string; stage: number })[]>('SELECT status,stage FROM player_story_progress WHERE character_id=? AND story_code=\'forest_guide\' FOR UPDATE', [character.id]);
+  const story = storyRows[0];
+  if (!story || !['awaiting_arrival', 'arrival_story'].includes(story.status)) throw new Error('当前没有待继续的剧情。');
+  const [town] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM map_regions WHERE code=\'baina_town\' LIMIT 1');
+  if (!town[0]) throw new Error('百纳镇地图尚未准备好。');
+
+  if (story.status === 'awaiting_arrival') {
+    await connection.execute('UPDATE characters SET current_region_id=?,pos_x=-26,pos_y=-135 WHERE id=?', [town[0].id, character.id]);
+    await connection.execute('UPDATE player_story_progress SET status=\'arrival_story\',stage=1 WHERE character_id=? AND story_code=\'forest_guide\'', [character.id]);
+    const [party] = await connection.execute<(RowDataPacket & { id: string })[]>('SELECT id FROM parties WHERE leader_character_id=? LIMIT 1', [character.id]);
+    if (party[0]) await connection.execute('DELETE FROM parties WHERE id=?', [party[0].id]);
+    return { stage: 1, text: townArrivalScenes[1], completed: false };
+  }
+
+  const stage = Number(story.stage);
+  if (stage < 6) {
+    const nextStage = stage + 1;
+    await connection.execute('UPDATE player_story_progress SET stage=? WHERE character_id=? AND story_code=\'forest_guide\'', [nextStage, character.id]);
+    return { stage: nextStage, text: townArrivalScenes[nextStage], completed: false };
+  }
+
   await connection.execute('UPDATE player_story_progress SET status=\'completed\' WHERE character_id=? AND story_code=\'forest_guide\'', [character.id]);
-  const [party] = await connection.execute<(RowDataPacket & { id: string })[]>('SELECT id FROM parties WHERE leader_character_id=? LIMIT 1', [character.id]); if (party[0]) await connection.execute('DELETE FROM parties WHERE id=?', [party[0].id]);
-  return '三人冒险队将你带到百纳镇——猫拉瑞亚的边缘。暮色里的灯火逐一亮起，各族居民的招呼声与石板街的脚步声交织在一起。一个扎着梨色发带的少女正站在你身边，朝你热情挥手。';
+  await connection.execute('INSERT INTO player_story_progress (character_id,story_code,status) VALUES (?,\'baina_map\',\'completed\') ON DUPLICATE KEY UPDATE status=\'completed\'', [character.id]);
+  return { stage: 6, completed: true, text: '“欢迎来到百纳镇！”\n那名猫族少女热情地凑上前。\n“呐呐，勇者大人是第一次来吧？我来带你认路！”\n她在身后一阵乱摸，掏出一张标满图记的城镇地图塞进你手中。\n\n【百纳镇地图已解锁】' };
 });
 
 export const talkToNpc = async (qqUserId: string, code: string) => withTransaction(async connection => {
   const character = await characterFor(qqUserId); const [npcs] = await connection.execute<(RowDataPacket & { code: string; name: string })[]>('SELECT code,name FROM map_npcs WHERE region_id=? AND pos_x=? AND pos_y=? AND pos_z=? AND code=? LIMIT 1', [character.current_region_id, character.pos_x, character.pos_y, character.pos_z, code]); const npc = npcs[0]; if (!npc) throw new Error('这位居民已经离开了。');
   if (npc.code !== 'pear_guide') return `你与${npc.name}交谈了一会儿。`;
   await connection.execute('INSERT INTO player_story_progress (character_id,story_code,status) VALUES (?,\'baina_map\',\'completed\') ON DUPLICATE KEY UPDATE status=\'completed\'', [character.id]);
-  return '“欢迎来到百纳镇！”梨子热情地凑上前，像是早已等候多时。“第一次来吧？我来带你认路！”\n\n她将一张标满图记的城镇地图塞进你手中。百纳镇地图已解锁。';
+  return '“欢迎来到百纳镇！”梨子喵热情地凑上前，像是早已等候多时。“第一次来吧？我来带你认路！”\n\n她将一张标满图记的城镇地图塞进你手中。百纳镇地图已解锁。';
 });
 
 const persistBattleMembers = async (connection: PoolConnection, members: CombatMemberRow[], forceRest = false) => {

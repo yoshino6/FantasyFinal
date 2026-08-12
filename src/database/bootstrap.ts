@@ -269,7 +269,7 @@ export const initializeSchema = async (pool: Pool) => {
     await pool.query(`ALTER TABLE monster_templates MODIFY COLUMN ${column}`);
   }
   await pool.query("ALTER TABLE registration_sessions MODIFY stage ENUM('story','audience','question','destination','danger','choice') NOT NULL DEFAULT 'story'");
-  await pool.query("ALTER TABLE player_story_progress MODIFY COLUMN status ENUM('met','joined','declined','awaiting_arrival','completed') NOT NULL DEFAULT 'met'");
+  await pool.query("ALTER TABLE player_story_progress MODIFY COLUMN status ENUM('met','joined','declined','awaiting_arrival','arrival_story','completed') NOT NULL DEFAULT 'met'");
   await pool.query("ALTER TABLE player_equipment MODIFY slot ENUM('weapon','offhand','shoulder','upper','waist','lower','feet','necklace','bracelet','ring') NOT NULL");
   try { await pool.query('ALTER TABLE player_equipment ADD COLUMN instance_id BIGINT UNSIGNED NULL'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   await pool.query(`UPDATE player_equipment pe JOIN (SELECT character_id,item_id,MIN(id) AS instance_id FROM player_item_instances GROUP BY character_id,item_id) ii ON ii.character_id=pe.character_id AND ii.item_id=pe.item_id SET pe.instance_id=ii.instance_id WHERE pe.instance_id IS NULL`);
@@ -502,17 +502,12 @@ export const initializeSchema = async (pool: Pool) => {
     FROM map_regions r JOIN monster_templates t ON t.code IN ('ball_rabbit','spike_boar','vine_snake','black_bear','mist_wolf','roll_rabbit','tusk_boar','vine_python','pitch_bear','shadow_wolf','goblin')
     WHERE r.code='dark_forest'
     ON DUPLICATE KEY UPDATE spawn_weight=VALUES(spawn_weight)`);
+  await pool.query(`DELETE n FROM map_npcs n JOIN map_regions r ON r.id=n.region_id WHERE r.code='baina_town' AND n.code NOT IN ('pear_guide','guild_counter')`);
   await pool.query(`INSERT INTO map_npcs (region_id, code, name, description, pos_x, pos_y, pos_z) VALUES
-    ((SELECT id FROM map_regions WHERE code='baina_town'), 'pear_guide', '梨子（新人引导）', '笑容明快的新手引导员，像是正专程在等你。', -26, -135, 0),
+    ((SELECT id FROM map_regions WHERE code='baina_town'), 'pear_guide', '梨子喵（新人引导）', '笑容明快的猫族新手引导员，像是正专程在等你。', -26, -135, 0),
     ((SELECT id FROM map_regions WHERE code='world_tree'), 'tree_keeper', '树守·阿鲁', '守望世界树的沉默老人。', 0, 0, 0),
     ((SELECT id FROM map_regions WHERE code='dark_forest'), 'lost_hunter', '迷途猎人', '在薄雾中寻找归路的年轻猎人。', 12, -48, 0),
-    ((SELECT id FROM map_regions WHERE code='baina_town'), 'guild_counter', '冒险者公会', '承接委托、登记冒险者与交换情报的大厅。', -8, -116, 0),
-    ((SELECT id FROM map_regions WHERE code='baina_town'), 'cat_baker', '猫娘烘焙师·米娅', '耳尖轻颤的猫娘正把热面包摆上橱窗。', -6, -151, 0),
-    ((SELECT id FROM map_regions WHERE code='baina_town'), 'dwarf_smith', '矮人铁匠·布鲁姆', '浓密胡须上沾着火星的矮人工匠。', -45, -118, 0),
-    ((SELECT id FROM map_regions WHERE code='baina_town'), 'elf_herbalist', '精灵药师·赛芙', '长耳精灵在药圃间辨认草叶。', -11, -157, 0),
-    ((SELECT id FROM map_regions WHERE code='baina_town'), 'beastman_guard', '兽人卫兵·卡尔', '负责看守密林方向城门的兽人。', -49, -158, 0),
-    ((SELECT id FROM map_regions WHERE code='baina_town'), 'human_innkeeper', '旅店主·诺拉', '笑容温和的人类旅店主正擦拭柜台。', -39, -154, 0),
-    ((SELECT id FROM map_regions WHERE code='baina_town'), 'lizard_trader', '蜥蜴人商贩·萨兹', '来自南方沼泽的蜥蜴人售卖旅行杂货。', -47, -143, 0)
+    ((SELECT id FROM map_regions WHERE code='baina_town'), 'guild_counter', '冒险者公会', '承接委托、登记冒险者与交换情报的大厅。', -8, -116, 0)
     ON DUPLICATE KEY UPDATE name=VALUES(name), description=VALUES(description), pos_x=VALUES(pos_x), pos_y=VALUES(pos_y), pos_z=VALUES(pos_z)`);
   await pool.query(`INSERT INTO map_special_objects (region_id, code, name, description, pos_x, pos_y, pos_z) VALUES
     ((SELECT id FROM map_regions WHERE code='world_tree'), 'world_tree_altar', '世界树祭坛', '被古老根须环抱的石质祭坛。', 0, 0, 0),
