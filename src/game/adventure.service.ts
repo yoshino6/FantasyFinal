@@ -47,7 +47,8 @@ const monsterCombatStats = (monster: MonsterAttributes & { level: number }) => {
 const materializeMonster = <T extends SpawnRow>(monster: T, revealTraits = false): T => {
   const stats = monsterCombatStats(monster);
   const traits = traitList(monster.traits_json);
-  return Object.assign(monster, { name: `${revealTraits ? traits.map(trait => trait.name).join('') : ''}${monster.name}`, hp_max: stats.hpMax, attack: stats.physicalAttack, defense: stats.physicalDefense, speed: stats.speed });
+  const baseName = String(monster.name).replace(/^(?:虚弱的|凶猛的|迅捷的|坚韧的)+/, '');
+  return Object.assign({}, monster, { name: `${revealTraits ? traits.map(trait => trait.name).join('') : ''}${baseName}`, hp_max: stats.hpMax, attack: stats.physicalAttack, defense: stats.physicalDefense, speed: stats.speed });
 };
 const materializeMonsters = <T extends SpawnRow>(monsters: T[], revealTraits = false) => monsters.map(monster => materializeMonster(monster, revealTraits)).sort((left, right) => monsterCombatStats(right).perception - monsterCombatStats(left).perception || Number(left.id) - Number(right.id));
 const pickWeighted = <T extends { spawn_weight: number }>(items: T[]) => {
@@ -828,10 +829,14 @@ const applySkillEffects = async (connection: PoolConnection, sessionId: string, 
       log.push(effectMessage(effect, value, Number(effect.duration), 1, effectTargetKind === casterKind ? '#' : '$')); continue;
     }
     const [existing] = await connection.execute<(RowDataPacket & { id: number; stacks: number })[]>('SELECT id,stacks FROM combat_status_effects WHERE session_id=? AND target_kind=? AND target_id=? AND effect_id=? FOR UPDATE', [sessionId, effectTargetKind, targetId, effect.id]);
-    if (existing[0]) {
-      const stacks = effect.stackable ? Math.min(Number(effect.max_stacks), Number(existing[0].stacks) + 1) : 1;
-      await connection.execute('UPDATE combat_status_effects SET effect_level=?,value=?,stacks=?,remaining_turns=GREATEST(remaining_turns,?) WHERE id=?', [effect.effect_level, value, stacks, effect.duration, existing[0].id]);
+    if (effect.stackable) {
+      const currentStacks = existing.reduce((total, row) => total + Number(row.stacks), 0);
+      const stacks = Math.min(Number(effect.max_stacks), currentStacks + 1);
+      if (currentStacks < Number(effect.max_stacks)) await connection.execute('INSERT INTO combat_status_effects (session_id,target_kind,target_id,effect_id,effect_level,value,remaining_turns) VALUES (?,?,?,?,?,?,?)', [sessionId, effectTargetKind, targetId, effect.id, effect.effect_level, value, effect.duration]);
       log.push(effectMessage(effect, value, Number(effect.duration), stacks, effectTargetKind === casterKind ? '#' : '$'));
+    } else if (existing[0]) {
+      await connection.execute('UPDATE combat_status_effects SET effect_level=?,value=?,stacks=1,remaining_turns=GREATEST(remaining_turns,?) WHERE id=?', [effect.effect_level, value, effect.duration, existing[0].id]);
+      log.push(effectMessage(effect, value, Number(effect.duration), 1, effectTargetKind === casterKind ? '#' : '$'));
     } else {
       await connection.execute('INSERT INTO combat_status_effects (session_id,target_kind,target_id,effect_id,effect_level,value,remaining_turns) VALUES (?,?,?,?,?,?,?)', [sessionId, effectTargetKind, targetId, effect.id, effect.effect_level, value, effect.duration]);
       log.push(effectMessage(effect, value, Number(effect.duration), 1, effectTargetKind === casterKind ? '#' : '$'));
@@ -914,10 +919,10 @@ const finishPartyVictory = async (connection: PoolConnection, sessionId: string,
 
 const applyArtifactEffect = async (connection: PoolConnection, sessionId: string, code: 'sword_break' | 'demon_surge', targetKind: 'member' | 'target', targetId: number, log: string[]) => {
   const [effects] = await connection.execute<(RowDataPacket & { id: number; name: string; default_value: number; default_duration: number; max_stacks: number })[]>('SELECT id,name,default_value,default_duration,max_stacks FROM effect_definitions WHERE code=?', [code]); const effect = effects[0]; if (!effect) return;
-  const [existing] = await connection.execute<(RowDataPacket & { id: number; stacks: number })[]>('SELECT id,stacks FROM combat_status_effects WHERE session_id=? AND target_kind=? AND target_id=? AND effect_id=? FOR UPDATE', [sessionId, targetKind, targetId, effect.id]);
-  const stacks = existing[0] ? Math.min(Number(effect.max_stacks), Number(existing[0].stacks) + 1) : 1;
-  if (existing[0]) await connection.execute('UPDATE combat_status_effects SET stacks=?,remaining_turns=GREATEST(remaining_turns,?) WHERE id=?', [stacks, effect.default_duration, existing[0].id]);
-  else await connection.execute('INSERT INTO combat_status_effects (session_id,target_kind,target_id,effect_id,effect_level,value,remaining_turns) VALUES (?,?,?,?,?,?,?)', [sessionId, targetKind, targetId, effect.id, 1, effect.default_value, effect.default_duration]);
+  const [existing] = await connection.execute<(RowDataPacket & { stacks: number })[]>('SELECT stacks FROM combat_status_effects WHERE session_id=? AND target_kind=? AND target_id=? AND effect_id=? FOR UPDATE', [sessionId, targetKind, targetId, effect.id]);
+  const currentStacks = existing.reduce((total, row) => total + Number(row.stacks), 0);
+  const stacks = Math.min(Number(effect.max_stacks), currentStacks + 1);
+  if (currentStacks < Number(effect.max_stacks)) await connection.execute('INSERT INTO combat_status_effects (session_id,target_kind,target_id,effect_id,effect_level,value,remaining_turns) VALUES (?,?,?,?,?,?,?)', [sessionId, targetKind, targetId, effect.id, 1, effect.default_value, effect.default_duration]);
   log.push(`${targetKind === 'member' ? '#' : '$'}${effect.name}${targetKind === 'member' ? '#' : '$'}${code === 'sword_break' ? `物防降低${effect.default_value}%` : `伤害提高${effect.default_value}%`}(${effect.default_duration})${stacks > 1 ? `×${stacks}` : ''}`);
 };
 

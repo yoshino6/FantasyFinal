@@ -5,16 +5,16 @@ import { messageFormat } from '../game/message';
 const equipmentSections = (effectJson: unknown) => {
   const effect = (typeof effectJson === 'string' ? JSON.parse(effectJson) : effectJson ?? {}) as Record<string, unknown>;
   if (effect.artifact === 'holy_sword') return {
-    attributes: ['物理攻击 +16%', '暴击属性 +33%', '暴击伤害 +33%'],
+    attributes: ['物理攻击 +16%', '暴击 +33%', '暴伤 +33%'],
     effects: ['普攻与斩击技能恒为物理伤害。', '普攻或斩击技能暴击时，给予目标1层[破甲剑痕]。', '$破甲剑痕$目标物理防御降低16%，持续3回合，可叠加。']
   };
   if (effect.artifact === 'demon_sword') return {
-    attributes: ['魔法攻击 +16%', '魔力 +33%', '命中属性 +33%'],
+    attributes: ['魔法攻击 +16%', '魔力 +33%', '命中 +33%'],
     effects: ['普攻与斩击技能恒为魔法伤害。', '普攻或斩击技能命中时，给予自身1层[魔剑激涌]。', '#魔剑激涌#自身伤害提高16%，持续3回合，可叠加。']
   };
   const labels: Record<string, string> = {
-    physicalAttack: '物理攻击', magicAttack: '魔法攻击', critRateBp: '暴击属性', physicalAttackPct: '物理攻击',
-    magicAttackPct: '魔法攻击', critRatePct: '暴击属性', critDamagePct: '暴击伤害', accuracyPct: '命中属性', mpPct: '魔力'
+    physicalAttack: '物理攻击', magicAttack: '魔法攻击', critRateBp: '暴击', physicalAttackPct: '物理攻击',
+    magicAttackPct: '魔法攻击', critRatePct: '暴击', critDamagePct: '暴伤', accuracyPct: '命中', mpPct: '魔力'
   };
   const attributes = Object.entries(effect)
     .filter(([key, value]) => labels[key] && Number(value))
