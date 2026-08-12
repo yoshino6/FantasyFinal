@@ -448,7 +448,8 @@ const moveToPosition = async (connection: PoolConnection, qqUserId: string, x: n
   if (partyRows[0]) await connection.execute('UPDATE characters c JOIN party_members pm ON pm.character_id=c.id SET c.current_region_id=?,c.pos_x=?,c.pos_y=? WHERE pm.party_id=(SELECT party_id FROM party_members WHERE character_id=? LIMIT 1)', [region.id, x, y, character.id]);
   else await connection.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=? WHERE id=?', [region.id, x, y, character.id]);
   const [spawnRows] = await connection.execute<SpawnRow[]>(`SELECT s.id,s.template_id,t.name,t.monster_class,t.level,s.current_hp,s.traits_json,COALESCE(s.skill_sequence,t.skill_sequence) AS skill_sequence,${monsterAttributeColumns},t.experience,t.drops_json FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? AND s.defeated_at IS NULL FOR UPDATE`, [region.id, x, y, character.pos_z]);
-  const spawns = materializeMonsters(spawnRows, await hasPassiveSkill(connection, character.id, 'appraisal'));
+  const appraisal = await appraisalProfileFor(connection, [character.id]);
+  const spawns = materializeMonsters(spawnRows, appraisal.informationLevel >= 2);
   const moved = { ...character, current_region_id: region.id, region_name: region.name, pos_x: x, pos_y: y };
   if (spawns.length) {
     const members = await partyCombatants(connection, character);
@@ -568,7 +569,8 @@ export const chooseTarget = async (qqUserId: string, spawnId: number, ambush = f
   const [existing] = await connection.execute<RowDataPacket[]>(`SELECT cs.id FROM combat_sessions cs JOIN combat_members cm ON cm.session_id=cs.id WHERE cm.character_id IN (${members.map(() => '?').join(',')}) AND cs.state='active' LIMIT 1 FOR UPDATE`, members.map(member => member.id));
   if (existing[0]) throw new Error('队伍正在战斗中，请先结束当前战斗。');
   const [spawnRows] = await connection.execute<SpawnRow[]>(`SELECT s.id,s.template_id,t.name,t.monster_class,t.level,s.current_hp,s.traits_json,COALESCE(s.skill_sequence,t.skill_sequence) AS skill_sequence,${monsterAttributeColumns},t.experience,t.drops_json,t.weakness_json,t.resistance_json FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? AND s.defeated_at IS NULL FOR UPDATE`, [character.current_region_id, character.pos_x, character.pos_y, character.pos_z]);
-  const spawns = materializeMonsters(spawnRows, await hasPassiveSkill(connection, character.id, 'appraisal'));
+  const appraisal = await appraisalProfileFor(connection, [character.id]);
+  const spawns = materializeMonsters(spawnRows, appraisal.informationLevel >= 2);
   const selected = spawns.find(spawn => Number(spawn.id) === spawnId); if (!selected) throw new Error('目标已离开当前位置或已被击败。');
   const canAmbush = members.every(member => Number(member.speed) > Math.max(...spawns.map(spawn => monsterCombatStats(spawn).speed)));
   if (ambush && !canAmbush) throw new Error('队伍速度不足，无法发动偷袭。');
@@ -929,7 +931,8 @@ const applyArtifactEffect = async (connection: PoolConnection, sessionId: string
 export const currentEncounter = async (qqUserId: string) => {
   const character = await characterFor(qqUserId); const pool = await getPool();
   const [rows] = await pool.execute<SpawnRow[]>(`SELECT s.id,s.template_id,t.name,t.monster_class,t.level,s.current_hp,s.traits_json,COALESCE(s.skill_sequence,t.skill_sequence) AS skill_sequence,${monsterAttributeColumns},t.experience,t.drops_json,t.weakness_json,t.resistance_json FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? AND s.defeated_at IS NULL`, [character.current_region_id, character.pos_x, character.pos_y, character.pos_z]);
-  const spawns = materializeMonsters(rows, await hasPassiveSkill(pool, character.id, 'appraisal')); if (!spawns.length) return null;
+  const appraisal = await appraisalProfileFor(pool, [character.id]);
+  const spawns = materializeMonsters(rows, appraisal.informationLevel >= 2); if (!spawns.length) return null;
   const members = await partyCombatants(pool, character); const fastestMonster = Math.max(...spawns.map(spawn => monsterCombatStats(spawn).speed));
   const [texts] = await pool.execute<(RowDataPacket & { description: string })[]>('SELECT description FROM monster_encounter_texts WHERE monster_template_id=? ORDER BY RAND() LIMIT 1', [spawns[0].template_id]);
   return { character, spawns, canAmbush: members.every(member => Number(member.speed) > fastestMonster), text: texts[0]?.description ?? `${spawns[0].name} 拦住了你的去路。` };
