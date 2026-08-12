@@ -938,7 +938,7 @@ export const currentEncounter = async (qqUserId: string) => {
   return { character, spawns, canAmbush: members.every(member => Number(member.speed) > fastestMonster), text: texts[0]?.description ?? `${spawns[0].name} 拦住了你的去路。` };
 };
 
-export type TownArrivalStory = { stage: number; text: string; completed: boolean; chapter: 'town' | 'guild' };
+export type TownArrivalStory = { stage: number; text: string; completed: boolean; chapter: 'town' | 'guild'; arrivalBuilding?: 'guild_counter' };
 
 const townArrivalScenes: Record<number, string> = {
   1: '三人冒险队将你带到百纳镇——猫拉瑞亚的边缘。\n城镇看上去规模不小，先映入眼帘的是目光望不到头的城墙。城墙约莫五六米高，由厚重的石砖堆砌而成，其缝隙有青苔蔓延，但表面却光亮整洁。它看上去被维护得很好。\n古旧的金属城门旁，驻守着两名士兵模样的壮汉。我们进城时，他们友好地向我们打了个招呼。\n此时天色正晌，城门后一幅熙熙攘攘的景象。',
@@ -980,7 +980,8 @@ export const continueForestArrival = async (qqUserId: string): Promise<TownArriv
     }
     await connection.execute('UPDATE player_story_progress SET status=\'completed\' WHERE character_id=? AND story_code=\'forest_guide\'', [character.id]);
     await connection.execute('INSERT INTO player_story_progress (character_id,story_code,status) VALUES (?,\'baina_map\',\'completed\') ON DUPLICATE KEY UPDATE status=\'completed\'', [character.id]);
-    return { stage: 3, completed: true, text: '【百纳镇地图已解锁】', chapter: 'guild' };
+    await connection.execute('UPDATE characters SET current_region_id=?,pos_x=-8,pos_y=-116 WHERE id=?', [town[0].id, character.id]);
+    return { stage: 3, completed: true, text: '【百纳镇地图已解锁】', chapter: 'guild', arrivalBuilding: 'guild_counter' };
   }
   if (stage < 6) {
     const nextStage = stage + 1;

@@ -107,6 +107,28 @@ const townArrivalFormat = (stage: number, text: string, completed = false, guild
   return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton(label, '/继续剧情', { type: 'command', autoEnter: true, style: 'blue' }));
 };
 
+const buildingEncounterFormat = (name: string, code: string, location: string) => {
+  const markdown = Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText(location).addNewline().addNewline().addText(name);
+  const buttons = Format.createButtonGroup().addRow().addButton('进入', `/建筑进入 ${code}`, { type: 'command', autoEnter: true, style: 'blue' }).addButton('忽略', `/建筑忽略 ${code}`, { type: 'command', autoEnter: true });
+  return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
+};
+
+const guildInteriorFormat = (area = '大厅') => {
+  const hour = new Date().getHours();
+  const scene = hour < 11
+    ? '晨光透过高窗落在木制地板上，工作人员正精神饱满地整理委托。早到的冒险者围着热茶交流昨夜的见闻，整座公会洋溢着新一天的期待。'
+    : hour < 18
+      ? '明亮的日光照进宽敞大厅，归来的队伍带着笑意结算报酬，新出发的冒险者在公告板前讨论路线。每个人都在为自己的目标努力。'
+      : '暖黄的魔石灯逐一点亮，忙碌了一天的冒险者在集结区分享收获。前台仍耐心接待每一位来客，工会在夜色里依旧温暖而可靠。';
+  const markdown = Format.createMarkdown().addTitle('百纳镇·冒险者公会').addNewline().addNewline().addBlockquote(area === '大厅' ? scene : `你来到冒险者公会的${area}。${scene}`);
+  const buttons = Format.createButtonGroup()
+    .addRow().addButton('前往 前台', '/建筑区域 guild_counter 前台', { type: 'command', autoEnter: true, style: 'blue' }).addButton('前往 集结区', '/建筑区域 guild_counter 集结区', { type: 'command', autoEnter: true, style: 'blue' })
+    .addRow().addButton('前往 悬赏板', '/建筑区域 guild_counter 悬赏板', { type: 'command', autoEnter: true, style: 'blue' }).addButton('前往 委托板', '/建筑区域 guild_counter 委托板', { type: 'command', autoEnter: true, style: 'blue' })
+    .addRow().addButton('前往 餐厅', '/建筑区域 guild_counter 餐厅', { type: 'command', autoEnter: true, style: 'blue' }).addButton('前往 工会商店', '/建筑区域 guild_counter 工会商店', { type: 'command', autoEnter: true, style: 'blue' })
+    .addRow().addButton('离开 冒险者公会', '/建筑离开 guild_counter', { type: 'command', autoEnter: true });
+  return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
+};
+
 export const exploreHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await explore(event.current.UserId); const targets = result.spawns.length ? `\n\n可选目标\n${result.spawns.map(s => result.canViewMonsterInfo ? `#${s.id} ${s.name} Lv.${s.level}｜HP ${s.current_hp}/${s.hp_max}` : `#${s.id} ???`).join('\n')}\n\n发送 /目标 编号 进入战斗。` : ''; await message.send({ format: messageFormat('探索', result.text + targets) }); } catch (error) { logger.warn({ err: error }, 'explore failed'); await fail(message, error); } };
 export const inventoryHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const bag = await inventory(event.current.UserId); await message.send({ format: messageFormat('冒险背包', `负重 ${bag.weight.toFixed(2)}/${bag.capacity}｜速度惩罚 -${bag.speedPenalty}\n当前速度 ${bag.speed}\n\n${bag.items.length ? bag.items.map(i => `${i.equipped_slot ? `[已装备·${i.equipped_slot}] ` : i.quick_slot ? `[道具${i.quick_slot}] ` : ''}${i.name} ×${i.quantity}（${i.weight}kg）`).join('\n') : '背包为空。'}`) }); } catch (error) { await fail(message, error); } };
 const movementPanel = async (qqUserId: string, description: string) => { const [bag, nearby] = await Promise.all([inventory(qqUserId), nearbyPoints(qqUserId)]); const resting = nearby.character.activity_status !== 'active'; const mapText = nearby.mapUnlocked ? `\n\n地图标识：\n${nearby.landmarks.join('\n')}` : ''; return outsidePanel('行动', movedLocationText(nearby.character), bag.movementSpeed, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), description + mapText, nearby.points, resting); };
@@ -116,6 +138,7 @@ const showMoveResult = async (message: any, qqUserId: string, result: any) => {
     return;
   }
   if (result.kind === 'npc') {
+    if (result.npc.code === 'guild_counter') { await message.send({ format: buildingEncounterFormat(result.npc.name, result.npc.code, movedLocationText(result.character)) }); return; }
     const markdown = Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText(movedLocationText(result.character)).addNewline().addBlockquote(result.text).addNewline().addNewline().addText(result.npc.name);
     const buttons = Format.createButtonGroup().addRow().addButton('对话', `/NPC对话 ${result.npc.code}`, { type: 'command', autoEnter: true, style: 'blue' }).addButton('忽略', `/NPC忽略 ${result.npc.code}`, { type: 'command', autoEnter: true });
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) }); return;
@@ -139,15 +162,28 @@ export const continueStoryHandler = async () => {
     const story = await continueForestArrival(event.current.UserId);
     const storyFormat = townArrivalFormat(story.stage, story.text, story.completed, story.chapter === 'guild');
     if (storyFormat) { await message.send({ format: storyFormat }); return; }
+    if (story.arrivalBuilding) { await message.send({ format: buildingEncounterFormat('冒险者公会', story.arrivalBuilding, '你移动至百纳镇·猫拉瑞亚(-8, -116)') }); return; }
     const panel = await movementPanel(event.current.UserId, story.text);
     const nearby = await nearbyPoints(event.current.UserId);
     await message.send({ format: panel.addButtonGroup(panelButtons(nearby.character.activity_status !== 'active')) });
   } catch (error) { await fail(message, error, '无法继续剧情'); }
 };
+export const buildingHandler = (action: 'enter' | 'ignore' | 'leave' | 'area') => async () => {
+  const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
+  try {
+    const code = String(route.param('code'));
+    if (code !== 'guild_counter') throw new Error('这座建筑暂未开放。');
+    if (action === 'enter') { await message.send({ format: guildInteriorFormat() }); return; }
+    if (action === 'area') { await message.send({ format: guildInteriorFormat(String(route.param('area'))) }); return; }
+    const panel = await movementPanel(event.current.UserId, action === 'leave' ? '你离开了冒险者公会，回到门前的石板街。' : '你暂时没有进入冒险者公会。');
+    const nearby = await nearbyPoints(event.current.UserId);
+    await message.send({ format: panel.addButtonGroup(panelButtons(nearby.character.activity_status !== 'active')) });
+  } catch (error) { await fail(message, error, '建筑操作失败'); }
+};
 export const npcEncounterHandler = (action: 'talk' | 'ignore') => async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const code = String(route.param('code')); if (action === 'ignore') { const panel = await movementPanel(event.current.UserId, '你暂时没有上前搭话，继续留意四周。'); const nearby = await nearbyPoints(event.current.UserId); await message.send({ format: panel.addButtonGroup(panelButtons(nearby.character.activity_status !== 'active')) }); return; } const text = await talkToNpc(event.current.UserId, code); const panel = await movementPanel(event.current.UserId, text); const nearby = await nearbyPoints(event.current.UserId); await message.send({ format: panel.addButtonGroup(panelButtons(nearby.character.activity_status !== 'active')) }); } catch (error) { await fail(message, error, '对话失败'); } };
 export const moveHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await showMoveResult(message, event.current.UserId, await move(event.current.UserId, String(route.param('direction')))); } catch (error) { if (error instanceof Error && error.message.includes('当前格子存在敌对生物') && await showBlockedEncounter(message, event.current.UserId)) return; await fail(message, error, '无法移动'); } };
 export const goToHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await showMoveResult(message, event.current.UserId, await moveTo(event.current.UserId, Number(route.param('x')), Number(route.param('y')))); } catch (error) { if (error instanceof Error && error.message.includes('当前格子存在敌对生物') && await showBlockedEncounter(message, event.current.UserId)) return; await fail(message, error, '无法前往该位置'); } };
-export const targetHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await chooseTarget(event.current.UserId, Number(route.param('id'))); const battle = await battleStatus(event.current.UserId); await message.send({ format: battleFormat('战斗开始', `遭遇 ${battle.targets.map(target => `[${target.name}]`).join('、')}！`, battle) }); } catch (error) { await fail(message, error, '无法锁定目标'); } };
+export const targetHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await chooseTarget(event.current.UserId, Number(route.param('id'))); const battle = await battleStatus(event.current.UserId); await message.send({ format: battleStartFormat(`遭遇 ${battle.targets.map(target => `[${target.name}]`).join('、')}！`, battle) }); } catch (error) { await fail(message, error, '无法锁定目标'); } };
 export const ambushHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await chooseTarget(event.current.UserId, Number(route.param('id')), true); const battle = await battleStatus(event.current.UserId); await message.send({ format: ambushStartFormat(battle) }); } catch (error) { await fail(message, error, '无法发动偷袭'); } };
 export const forestGuideHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const progress = await forestGuideAdvance(event.current.UserId, String(route.param('action'))); if (!progress.battleChoice) { await message.send({ format: chapterFormat(progress.stage, progress.text) }); return; } await message.send({ format: chapterFormat(5, progress.text) }); const result = await forestGuideChoice(event.current.UserId, progress.battleChoice); await chooseTarget(event.current.UserId, result.spawnId); const battle = await battleStatus(event.current.UserId); await message.send({ format: battleStartFormat(result.text, battle) }); } catch (error) { await fail(message, error, '初章推进失败'); } };
 export const switchTargetHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await switchCombatTarget(event.current.UserId, Number(route.param('id'))); const battle = await battleStatus(event.current.UserId); await message.send({ format: battleFormat('切换目标', '目标已切换。', battle) }); } catch (error) { await fail(message, error, '无法切换目标'); } };
