@@ -910,6 +910,15 @@ const finishPartyVictory = async (connection: PoolConnection, sessionId: string,
   return { kind: 'victory', members: rewards, arrivalPending } as VictorySettlement;
 };
 
+export const currentEncounter = async (qqUserId: string) => {
+  const character = await characterFor(qqUserId); const pool = await getPool();
+  const [rows] = await pool.execute<SpawnRow[]>(`SELECT s.id,s.template_id,t.name,t.monster_class,t.level,s.current_hp,s.traits_json,COALESCE(s.skill_sequence,t.skill_sequence) AS skill_sequence,${monsterAttributeColumns},t.experience,t.drops_json,t.weakness_json,t.resistance_json FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? AND s.defeated_at IS NULL`, [character.current_region_id, character.pos_x, character.pos_y, character.pos_z]);
+  const spawns = materializeMonsters(rows, await hasPassiveSkill(pool, character.id, 'appraisal')); if (!spawns.length) return null;
+  const members = await partyCombatants(pool, character); const fastestMonster = Math.max(...spawns.map(spawn => monsterCombatStats(spawn).speed));
+  const [texts] = await pool.execute<(RowDataPacket & { description: string })[]>('SELECT description FROM monster_encounter_texts WHERE monster_template_id=? ORDER BY RAND() LIMIT 1', [spawns[0].template_id]);
+  return { character, spawns, canAmbush: members.every(member => Number(member.speed) > fastestMonster), text: texts[0]?.description ?? `${spawns[0].name} 拦住了你的去路。` };
+};
+
 export const continueForestArrival = async (qqUserId: string) => withTransaction(async connection => {
   const character = await characterFor(qqUserId); const [story] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_story_progress WHERE character_id=? AND story_code=\'forest_guide\' AND status=\'awaiting_arrival\' FOR UPDATE', [character.id]);
   if (!story[0]) throw new Error('当前没有待继续的剧情。');
