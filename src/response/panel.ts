@@ -17,13 +17,17 @@ export const movedLocationText = (character: LocationCharacter) => areaText(char
 
 export const outsidePanel = (title: string, location: string, speed: number, range: number, x: number, y: number, description: string, points: NearbyPoint[], resting = false) => {
   const town = location.includes('百纳镇');
+  const [descriptionText, mapText] = description.split('\n\n地图标识：\n');
   const markdown = Format.createMarkdown().addTitle(town ? '百纳镇·城镇面板' : title)
-    .addText(`\n\n${location}\n\n${description}\n\n${resting ? '状态：休息中（每秒恢复 1% 生命与魔力）\n' : ''}${town ? '城镇导览：已标记镇内绝大多数居民与设施。' : `移动速度：${speed}\n感知范围：${range}`}\n\n${town ? '城镇人物与设施：' : '周边目标：'}\n`);
+    .addText(`\n\n${location}\n\n${descriptionText}\n\n${resting ? '状态：休息中（每秒恢复 1% 生命与魔力）\n' : ''}${town ? '城镇导览：已标记镇内绝大多数居民与设施。' : `移动速度：${speed}\n感知范围：${range}`}`);
+  if (mapText) markdown.addNewline().addNewline().addText('地图标识：').addNewline().addBlockquote(mapText);
+  markdown.addText(`\n\n${town ? '城镇人物与设施：' : '周边目标：'}\n`);
   if (!points.length) markdown.addText('空空如也');
   else {
     for (const point of points) {
-      if (speed >= point.distance) markdown.addButton(`【${point.type}】${point.name}`, { data: `/前往 ${point.x} ${point.y}`, autoEnter: false });
-      else markdown.addText(`【${point.type}】${point.name}`);
+      const label = `${point.type === 'NPC' ? '' : `【${point.type}】`}${point.name}`;
+      if (speed >= point.distance) markdown.addButton(label, { data: `/前往 ${point.x} ${point.y}`, autoEnter: false });
+      else markdown.addText(label);
       markdown.addText(` · ${directionText(point, x, y)}${point.distance}\n`);
     }
   }
@@ -57,11 +61,12 @@ export default async () => {
     } catch (error) {
       if (!(error instanceof Error) || !error.message.includes('当前不在战斗中')) throw error;
       const [bag, nearby] = await Promise.all([inventory(event.current.UserId), nearbyPoints(event.current.UserId)]);
-      const targets = nearby.points.length ? `\n\n周边目标\n${nearby.points.map(point => `【${point.type}】${point.name} · ${directionText(point, Number(nearby.character.pos_x), Number(nearby.character.pos_y))}${point.distance}${bag.movementSpeed >= point.distance ? `：/前往 ${point.x} ${point.y}` : ''}`).join('\n')}` : '\n\n没有发现任何目标。';
+      const targets = nearby.points.length ? `\n\n周边目标\n${nearby.points.map(point => `${point.type === 'NPC' ? '' : `【${point.type}】`}${point.name} · ${directionText(point, Number(nearby.character.pos_x), Number(nearby.character.pos_y))}${point.distance}${bag.movementSpeed >= point.distance ? `：/前往 ${point.x} ${point.y}` : ''}`).join('\n')}` : '\n\n没有发现任何目标。';
       const x = Number(nearby.character.pos_x); const y = Number(nearby.character.pos_y);
       const location = currentLocationText(nearby.character);
       const resting = nearby.character.activity_status !== 'active';
-      await sendWithTextFallback(message, outsidePanel('操作面板', location, bag.movementSpeed, nearby.range, x, y, nearby.description, nearby.points, resting).addButtonGroup(panelButtons(resting)), `【操作面板】\n${location}\n\n${nearby.description}\n\n移动速度：${bag.movementSpeed}\n感知范围：${nearby.range}${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
+      const mapText = nearby.mapUnlocked ? `\n\n地图标识：\n${nearby.landmarks.join('\n')}` : '';
+      await sendWithTextFallback(message, outsidePanel('操作面板', location, bag.movementSpeed, nearby.range, x, y, nearby.description + mapText, nearby.points, resting).addButtonGroup(panelButtons(resting)), `【操作面板】\n${location}\n\n${nearby.description}${mapText}\n\n移动速度：${bag.movementSpeed}\n感知范围：${nearby.range}${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
     }
   } catch (error) {
     logger.error({ err: error, userId: event.current.UserId }, 'open panel failed');

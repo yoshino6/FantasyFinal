@@ -15,7 +15,7 @@ type CombatEffectRow = RowDataPacket & { id: number; target_kind: 'member' | 'ta
 type CombatModifiers = { weaponName?: string; physicalAttack: number; magicAttack: number; critRateBp: number; ignoreDefensePct: number; lifestealPct: number; magicDamagePct: number; manaCostReduction: number; experienceMultiplier: number; dropBonus: number; manaAffinity: boolean };
 type AppraisalMember = { characterId: number; level: number; rangeLevel: number; informationLevel: number };
 type AppraisalProfile = { learned: boolean; rangeLevel: number; informationLevel: number; members: AppraisalMember[] };
-export type VictorySettlement = { kind: 'victory'; members: { name: string; experience: number; levelText?: string; drops: { name: string; quantity: number; itemType: string; codexId: string | null; instanceId?: number }[]; learned: { id: number; name: string }[] }[]; arrivalText?: string };
+export type VictorySettlement = { kind: 'victory'; members: { name: string; experience: number; levelText?: string; drops: { name: string; quantity: number; itemType: string; codexId: string | null; instanceId?: number }[]; learned: { id: number; name: string }[] }[]; arrivalPending?: boolean };
 const monsterAttributeColumns = `${attributes.map(attribute => `t.${attribute},t.${attribute}_growth`).join(',')}`;
 const lowMonsterTraits: MonsterTrait[] = [
   { code: 'fierce', name: '凶猛的', physicalAttackPct: 10 }, { code: 'sturdy', name: '坚韧的', hpPct: 10 },
@@ -407,7 +407,7 @@ const perceptionRange = (perception: number) => Math.max(2, Math.floor(perceptio
 
 export const nearbyPoints = async (qqUserId: string) => {
   const character = await characterFor(qqUserId);
-  const range = character.region_name === '百纳镇' ? 100 : perceptionRange(Number(character.perception));
+  const range = perceptionRange(Number(character.perception));
   const pool = await getPool();
   const bounds = [character.current_region_id, Number(character.pos_x) - range, Number(character.pos_x) + range, Number(character.pos_y) - range, Number(character.pos_y) + range, character.pos_z];
   const [monsters] = await pool.execute<(RowDataPacket & { name: string; x: number; y: number })[]>(`SELECT t.name,s.pos_x AS x,s.pos_y AS y FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.region_id=? AND s.pos_x BETWEEN ? AND ? AND s.pos_y BETWEEN ? AND ? AND s.pos_z=? AND s.defeated_at IS NULL`, bounds);
@@ -418,7 +418,9 @@ export const nearbyPoints = async (qqUserId: string) => {
   const points = [...monsters.map(item => point('怪物', item)), ...npcs.map(item => point('NPC', item)), ...objects.map(item => point('地标', item))]
     .filter(item => item.distance <= range)
     .sort((a, b) => a.distance - b.distance || a.name.localeCompare(b.name, 'zh-CN'));
-  return { character, range, points, description: descriptions[0]?.description ?? '四周一片寂静，暂时没有发现异常。' };
+  const [mapUnlocked] = await pool.execute<RowDataPacket[]>('SELECT 1 FROM player_story_progress WHERE character_id=? AND story_code=\'baina_map\' AND status=\'completed\' LIMIT 1', [character.id]);
+  const [landmarks] = mapUnlocked[0] && character.region_name === '百纳镇' ? await pool.execute<(RowDataPacket & { name: string })[]>('SELECT name FROM map_npcs WHERE region_id=? ORDER BY name', [character.current_region_id]) : [[] as any];
+  return { character, range, points, landmarks: landmarks.map(item => item.name), mapUnlocked: Boolean(mapUnlocked[0]), description: descriptions[0]?.description ?? '四周一片寂静，暂时没有发现异常。' };
 };
 
 const moveToPosition = async (connection: PoolConnection, qqUserId: string, x: number, y: number, restrictToPerception: boolean, speedLimit?: number) => {
@@ -453,6 +455,8 @@ const moveToPosition = async (connection: PoolConnection, qqUserId: string, x: n
     const [texts] = await connection.execute<(RowDataPacket & { description: string })[]>('SELECT description FROM monster_encounter_texts WHERE monster_template_id=? ORDER BY RAND() LIMIT 1', [spawns[0].template_id]);
     return { character: moved, kind: 'encounter' as const, spawns, canAmbush: members.every(member => Number(member.speed) > fastestMonster), text: texts[0]?.description ?? `${spawns[0].name} 拦住了你的去路。` };
   }
+  const [npcs] = await connection.execute<(RowDataPacket & { code: string; name: string; description: string })[]>('SELECT code,name,description FROM map_npcs WHERE region_id=? AND pos_x=? AND pos_y=? AND pos_z=? LIMIT 1', [region.id, x, y, character.pos_z]);
+  if (npcs[0]) return { character: moved, kind: 'npc' as const, npc: npcs[0], text: npcs[0].description };
   if (region.code === 'dark_forest' && Number(character.level) >= 5) {
     const [story] = await connection.execute<(RowDataPacket & { status: string })[]>('SELECT status FROM player_story_progress WHERE character_id=? AND story_code=\'forest_guide\' FOR UPDATE', [character.id]);
     if (!story[0]) {
@@ -891,23 +895,37 @@ const finishPartyVictory = async (connection: PoolConnection, sessionId: string,
     rewards.push({ name: member.name, experience, levelText: gainedPoints ? `升级至 Lv.${newLevel}，获得 ${gainedPoints} 技能点` : undefined, drops, learned });
   }
   const [guideBattle] = await connection.execute<RowDataPacket[]>(`SELECT 1 FROM combat_targets ct JOIN monster_spawns s ON s.id=ct.spawn_id JOIN monster_templates t ON t.id=s.template_id WHERE ct.session_id=? AND t.code='forest_slime' LIMIT 1`, [sessionId]);
-  let arrivalText: string | undefined;
+  let arrivalPending = false;
   if (guideBattle[0]) {
     const [townRows] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM map_regions WHERE code=\'baina_town\' LIMIT 1');
     if (townRows[0]) {
       for (const member of members) {
         const [story] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_story_progress WHERE character_id=? AND story_code=\'forest_guide\' AND status IN (\'joined\',\'declined\') LIMIT 1', [member.id]);
         if (!story[0]) continue;
-        await connection.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=? WHERE id=?', [townRows[0].id, -26, -135, member.id]);
-        await connection.execute('UPDATE player_story_progress SET status=\'completed\' WHERE character_id=? AND story_code=\'forest_guide\'', [member.id]);
-        const [escortParty] = await connection.execute<(RowDataPacket & { id: string })[]>('SELECT id FROM parties WHERE leader_character_id=? LIMIT 1', [member.id]);
-        if (escortParty[0]) await connection.execute('DELETE FROM parties WHERE id=?', [escortParty[0].id]);
-        arrivalText = '战斗结束后，三名冒险者依约带你穿过密林南缘。暮色中，百纳镇的灯火次第亮起：人类、猫人、矮人、精灵与更多种族在这座包容的边境城镇共同生活。你已抵达百纳镇（-26，-135）。';
+        await connection.execute('UPDATE player_story_progress SET status=\'awaiting_arrival\' WHERE character_id=? AND story_code=\'forest_guide\'', [member.id]);
+        arrivalPending = true;
       }
     }
   }
-  return { kind: 'victory', members: rewards, arrivalText } as VictorySettlement;
+  return { kind: 'victory', members: rewards, arrivalPending } as VictorySettlement;
 };
+
+export const continueForestArrival = async (qqUserId: string) => withTransaction(async connection => {
+  const character = await characterFor(qqUserId); const [story] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_story_progress WHERE character_id=? AND story_code=\'forest_guide\' AND status=\'awaiting_arrival\' FOR UPDATE', [character.id]);
+  if (!story[0]) throw new Error('当前没有待继续的剧情。');
+  const [town] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM map_regions WHERE code=\'baina_town\' LIMIT 1'); if (!town[0]) throw new Error('百纳镇地图尚未准备好。');
+  await connection.execute('UPDATE characters SET current_region_id=?,pos_x=-26,pos_y=-135 WHERE id=?', [town[0].id, character.id]);
+  await connection.execute('UPDATE player_story_progress SET status=\'completed\' WHERE character_id=? AND story_code=\'forest_guide\'', [character.id]);
+  const [party] = await connection.execute<(RowDataPacket & { id: string })[]>('SELECT id FROM parties WHERE leader_character_id=? LIMIT 1', [character.id]); if (party[0]) await connection.execute('DELETE FROM parties WHERE id=?', [party[0].id]);
+  return '三人冒险队将你带到百纳镇——猫拉瑞亚的边缘。暮色里的灯火逐一亮起，各族居民的招呼声与石板街的脚步声交织在一起。一个扎着梨色发带的少女正站在你身边，朝你热情挥手。';
+});
+
+export const talkToNpc = async (qqUserId: string, code: string) => withTransaction(async connection => {
+  const character = await characterFor(qqUserId); const [npcs] = await connection.execute<(RowDataPacket & { code: string; name: string })[]>('SELECT code,name FROM map_npcs WHERE region_id=? AND pos_x=? AND pos_y=? AND pos_z=? AND code=? LIMIT 1', [character.current_region_id, character.pos_x, character.pos_y, character.pos_z, code]); const npc = npcs[0]; if (!npc) throw new Error('这位居民已经离开了。');
+  if (npc.code !== 'pear_guide') return `你与${npc.name}交谈了一会儿。`;
+  await connection.execute('INSERT INTO player_story_progress (character_id,story_code,status) VALUES (?,\'baina_map\',\'completed\') ON DUPLICATE KEY UPDATE status=\'completed\'', [character.id]);
+  return '“欢迎来到百纳镇！”梨子热情地凑上前，像是早已等候多时。“第一次来吧？我来带你认路！”\n\n她将一张标满图记的城镇地图塞进你手中。百纳镇地图已解锁。';
+});
 
 const persistBattleMembers = async (connection: PoolConnection, members: CombatMemberRow[], forceRest = false) => {
   for (const member of members) {
