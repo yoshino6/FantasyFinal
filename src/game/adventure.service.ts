@@ -935,7 +935,7 @@ export const currentEncounter = async (qqUserId: string) => {
   return { character, spawns, canAmbush: members.every(member => Number(member.speed) > fastestMonster), text: texts[0]?.description ?? `${spawns[0].name} 拦住了你的去路。` };
 };
 
-export type TownArrivalStory = { stage: number; text: string; completed: boolean };
+export type TownArrivalStory = { stage: number; text: string; completed: boolean; chapter: 'town' | 'guild' };
 
 const townArrivalScenes: Record<number, string> = {
   1: '三人冒险队将你带到百纳镇——猫拉瑞亚的边缘。\n城镇看上去规模不小，先映入眼帘的是目光望不到头的城墙。城墙约莫五六米高，由厚重的石砖堆砌而成，其缝隙有青苔蔓延，但表面却光亮整洁。它看上去被维护得很好。\n古旧的金属城门旁，驻守着两名士兵模样的壮汉。我们进城时，他们友好地向我们打了个招呼。\n此时天色正晌，城门后一幅熙熙攘攘的景象。',
@@ -946,11 +946,17 @@ const townArrivalScenes: Record<number, string> = {
   6: '“你们的到来，并没有缓解这片世界的焦灼。\n有的人为恶一方兴风作浪，有的人却在遍地留下不朽的传说。\n远道而来的朋友，希望下次遇见时，你还能恪守底线，守住真我。”\n“祝您武运昌顺！”'
 };
 
+const guildArrivalScenes: Record<number, string> = {
+  1: '“欢迎来到百纳镇！”\n那名猫族少女热情地凑上前。\n“吾名阿克谢尔·梨子，如您所见，我是人类与猫族的混血。”\n“你这名字……不错。很有味道。”\n“那……那个……我出生的时候，父亲与母亲取名各取了一半。所以就……”\n梨子喵抓紧衣角，俏脸微红。但很快她就重新抖擞起来。\n“呐呐，勇者大人是第一次吧？我来给你带路！”\n她在身后一阵乱摸，掏出一张标满图记的城镇地图塞进我手中，俏脸微红。\n一只柔软但有力的小手牵住了你，向城镇中央一路小跑。',
+  2: '梨子喵牵着你穿过纵横交错的石板街。路旁的招牌随着风轻轻碰撞，行商的叫卖声、铁锤落在砧板上的脆响与不知名的方言混在一起。\n“这里是百纳镇最热闹的地方喵！只要不惹麻烦，什么种族都能在这里找到落脚处。”\n她一边介绍，一边在地图上点出高塔、市场与冒险者公会的位置。最后，她指向街道尽头那座挂着剑与麦穗徽记的宽大建筑。\n“到了那里，勇者大人就可以正式登记身份、接取委托，也能向其他冒险者打听转生者的消息喵。”',
+  3: '冒险者公会的大门在眼前缓缓打开。温暖的灯光从门缝里流出来，混着麦酒、羊皮纸与金属的气味。\n柜台前有人为委托争得面红耳赤，也有人带着新鲜的伤口低声结算报酬；更深处的公告板上，密密麻麻贴满了通往未知的纸页。\n梨子喵松开你的手，认真地整了整衣领。\n“从这里开始，勇者大人就要自己选择路了喵。不过别担心，梨子喵会在镇上帮你的！”'
+};
+
 export const continueForestArrival = async (qqUserId: string): Promise<TownArrivalStory> => withTransaction(async connection => {
   const character = await characterFor(qqUserId);
   const [storyRows] = await connection.execute<(RowDataPacket & { status: string; stage: number })[]>('SELECT status,stage FROM player_story_progress WHERE character_id=? AND story_code=\'forest_guide\' FOR UPDATE', [character.id]);
   const story = storyRows[0];
-  if (!story || !['awaiting_arrival', 'arrival_story'].includes(story.status)) throw new Error('当前没有待继续的剧情。');
+  if (!story || !['awaiting_arrival', 'arrival_story', 'guild_story'].includes(story.status)) throw new Error('当前没有待继续的剧情。');
   const [town] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM map_regions WHERE code=\'baina_town\' LIMIT 1');
   if (!town[0]) throw new Error('百纳镇地图尚未准备好。');
 
@@ -959,19 +965,29 @@ export const continueForestArrival = async (qqUserId: string): Promise<TownArriv
     await connection.execute('UPDATE player_story_progress SET status=\'arrival_story\',stage=1 WHERE character_id=? AND story_code=\'forest_guide\'', [character.id]);
     const [party] = await connection.execute<(RowDataPacket & { id: string })[]>('SELECT id FROM parties WHERE leader_character_id=? LIMIT 1', [character.id]);
     if (party[0]) await connection.execute('DELETE FROM parties WHERE id=?', [party[0].id]);
-    return { stage: 1, text: townArrivalScenes[1], completed: false };
+    return { stage: 1, text: townArrivalScenes[1], completed: false, chapter: 'town' };
   }
 
   const stage = Number(story.stage);
+  if (story.status === 'guild_story') {
+    if (stage < 3) {
+      const nextStage = stage + 1;
+      await connection.execute('UPDATE player_story_progress SET stage=? WHERE character_id=? AND story_code=\'forest_guide\'', [nextStage, character.id]);
+      return { stage: nextStage, text: guildArrivalScenes[nextStage], completed: false, chapter: 'guild' };
+    }
+    await connection.execute('UPDATE player_story_progress SET status=\'completed\' WHERE character_id=? AND story_code=\'forest_guide\'', [character.id]);
+    await connection.execute('INSERT INTO player_story_progress (character_id,story_code,status) VALUES (?,\'baina_map\',\'completed\') ON DUPLICATE KEY UPDATE status=\'completed\'', [character.id]);
+    return { stage: 3, completed: true, text: '【百纳镇地图已解锁】', chapter: 'guild' };
+  }
   if (stage < 6) {
     const nextStage = stage + 1;
     await connection.execute('UPDATE player_story_progress SET stage=? WHERE character_id=? AND story_code=\'forest_guide\'', [nextStage, character.id]);
-    return { stage: nextStage, text: townArrivalScenes[nextStage], completed: false };
+    return { stage: nextStage, text: townArrivalScenes[nextStage], completed: false, chapter: 'town' };
   }
 
-  await connection.execute('UPDATE player_story_progress SET status=\'completed\' WHERE character_id=? AND story_code=\'forest_guide\'', [character.id]);
+  await connection.execute('UPDATE player_story_progress SET status=\'guild_story\',stage=1 WHERE character_id=? AND story_code=\'forest_guide\'', [character.id]);
   await connection.execute('INSERT INTO player_story_progress (character_id,story_code,status) VALUES (?,\'baina_map\',\'completed\') ON DUPLICATE KEY UPDATE status=\'completed\'', [character.id]);
-  return { stage: 6, completed: true, text: '“欢迎来到百纳镇！”\n那名猫族少女热情地凑上前。\n“呐呐，勇者大人是第一次来吧？我来带你认路！”\n她在身后一阵乱摸，掏出一张标满图记的城镇地图塞进你手中。\n\n【百纳镇地图已解锁】' };
+  return { stage: 1, completed: false, text: guildArrivalScenes[1], chapter: 'guild' };
 });
 
 export const talkToNpc = async (qqUserId: string, code: string) => withTransaction(async connection => {

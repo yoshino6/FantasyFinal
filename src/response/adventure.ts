@@ -97,10 +97,10 @@ const chapterFormat = (stage: number, text: string) => {
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 
-const townArrivalFormat = (stage: number, text: string, completed = false) => {
+const townArrivalFormat = (stage: number, text: string, completed = false, guildStory = false) => {
   if (completed) return null;
-  const markdown = Format.createMarkdown().addTitle(`初临·百纳镇（${stage}/6）`).addNewline().addNewline().addText(text);
-  const label = stage === 4 ? '你说什么？勇者是什么意思？' : stage === 6 ? '挥手告别' : '继续';
+  const markdown = Format.createMarkdown().addTitle(guildStory ? `初临·百纳镇·冒险者工会（${stage}/3）` : `初临·百纳镇（${stage}/6）`).addNewline().addNewline().addText(text);
+  const label = guildStory ? '继续' : stage === 4 ? '你说什么？勇者是什么意思？' : stage === 6 ? '挥手告别' : '继续';
   return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton(label, '/继续剧情', { type: 'command', autoEnter: true, style: 'blue' }));
 };
 
@@ -134,7 +134,7 @@ export const continueStoryHandler = async () => {
   const [event] = useEvent(); const [message] = useMessage();
   try {
     const story = await continueForestArrival(event.current.UserId);
-    const storyFormat = townArrivalFormat(story.stage, story.text, story.completed);
+    const storyFormat = townArrivalFormat(story.stage, story.text, story.completed, story.chapter === 'guild');
     if (storyFormat) { await message.send({ format: storyFormat }); return; }
     const panel = await movementPanel(event.current.UserId, story.text);
     const nearby = await nearbyPoints(event.current.UserId);
