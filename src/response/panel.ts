@@ -20,7 +20,10 @@ export const outsidePanel = (title: string, location: string, speed: number, ran
     .addText(`\n\n${location}\n\n${description}\n\n${resting ? '状态：休息中（每秒恢复 1% 生命与魔力）\n' : ''}移动速度：${speed}\n感知范围：${range}`);
   if (landmarks.length) {
     markdown.addNewline().addNewline().addText('地图标识：').addNewline();
-    for (const landmark of landmarks) markdown.addButton(landmark.name, { data: `/前往 ${landmark.x} ${landmark.y}`, autoEnter: false }).addNewline();
+    for (const landmark of landmarks) {
+      const seconds = Math.max(1, Math.ceil((Math.abs(landmark.x - x) + Math.abs(landmark.y - y)) / speed));
+      markdown.addText('> ').addButton(landmark.name, { data: `/前往 ${landmark.x} ${landmark.y}`, autoEnter: false }).addText(`（${landmark.x}, ${landmark.y}）[预计${seconds}s]`).addNewline();
+    }
   }
   markdown.addText('\n\n周边目标：\n');
   if (!points.length) markdown.addText('空空如也');
