@@ -100,6 +100,11 @@ const jsonArray = (value: unknown): unknown[] => {
   if (typeof value !== 'string' || !value.trim()) return [];
   try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
 };
+const dropQuantity = (drop: Record<string, unknown>) => {
+  const minimum = Math.max(1, Math.floor(Number(drop.min_quantity ?? drop.quantity ?? 1)));
+  const maximum = Math.max(minimum, Math.floor(Number(drop.max_quantity ?? drop.quantity ?? minimum)));
+  return minimum + Math.floor(Math.random() * (maximum - minimum + 1));
+};
 const movementSpeedFrom = (speed: number, level: number) => {
   const statSpeed = Math.floor(1 + Math.sqrt(Math.max(0, speed - 100) / 30));
   const levelCap = Math.min(10, 3 + Math.floor(Math.max(0, level - 1) / 10));
@@ -732,7 +737,7 @@ export const encounterAction = async (qqUserId: string, spawnId: number, action:
       for (const rawDrop of jsonArray(target.drops_json)) {
         const drop = jsonObject(rawDrop); if (!drop.code || Math.random() >= Math.min(1, Number(drop.chance ?? 1) * .2)) continue;
         const [items] = await connection.execute<(RowDataPacket & { id: number; name: string; item_type: string })[]>('SELECT id,name,item_type FROM item_definitions WHERE code=?', [String(drop.code)]); const item = items[0]; if (!item) continue;
-        const quantity = Math.max(1, Number(drop.quantity ?? 1)); await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [found.character.id, item.id]);
+        const quantity = dropQuantity(drop); await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [found.character.id, item.id]);
         if (item.item_type === 'equipment') for (let index = 0; index < quantity; index += 1) await connection.execute('INSERT INTO player_item_instances (character_id,item_id) VALUES (?,?)', [found.character.id, item.id]);
         else await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),acquired_at=NOW()', [found.character.id, item.id, quantity]);
         rewards.push(`${item.name}×${quantity}`);
@@ -814,7 +819,7 @@ const finishVictory = async (connection: PoolConnection, character: CharacterRow
   const rewards: string[] = [];
   for (const drop of drops) if (Math.random() <= Math.min(1, Number(drop.chance ?? 1) + modifiers.dropBonus)) {
     const [items] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>('SELECT id,name FROM item_definitions WHERE code=?', [drop.code]);
-    if (items[0]) { await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),acquired_at=NOW()', [character.id, items[0].id, drop.quantity ?? 1]); rewards.push(`${items[0].name}×${drop.quantity ?? 1}`); }
+    if (items[0]) { const quantity = dropQuantity(drop); await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),acquired_at=NOW()', [character.id, items[0].id, quantity]); rewards.push(`${items[0].name}×${quantity}`); }
   }
   return `胜利！获得经验 ${experience}${modifiers.experienceMultiplier > 1 ? '（成长祝福生效）' : ''}${rewards.length ? `，掉落 ${rewards.join('、')}` : ''}。`;
 };
@@ -886,7 +891,13 @@ export const legacyCombatAction = async (qqUserId: string, action: 'attack' | 's
   return { log: `${log}\n\n你 HP ${combat.player_hp}/${character.hp_max}｜MP ${combat.player_mp}/${character.mp_max}\n敌方 HP ${combat.current_hp}/${combat.hp_max}`, ended: false };
 });
 
-const weaknessMultiplier = (target: CombatTargetRow, damageType: string) => stringList(target.weakness_json).includes(damageType) ? 1.5 : stringList(target.resistance_json).includes(damageType) ? .75 : 1;
+const physicalDamageTypes = new Set(['斩击', '刺击', '打击']);
+const physicalWeaknessMultiplier = (target: CombatTargetRow, damageType: string) => {
+  if (!physicalDamageTypes.has(damageType)) return 1;
+  if (stringList(target.weakness_json).includes(damageType)) return 2;
+  if (stringList(target.resistance_json).includes(damageType)) return .5;
+  return 1;
+};
 const threatTarget = (members: CombatMemberRow[], threat: Map<number, number>) => {
   const alive = members.filter(member => !member.is_defeated); const total = alive.reduce((sum, member) => sum + Math.max(1, threat.get(Number(member.id)) ?? 1), 0); let roll = Math.random() * total;
   for (const member of alive) { roll -= Math.max(1, threat.get(Number(member.id)) ?? 1); if (roll < 0) return member; }
@@ -987,7 +998,7 @@ const finishPartyVictory = async (connection: PoolConnection, sessionId: string,
     for (const target of targets) for (const rawDrop of jsonArray(target.drops_json)) {
       const drop = jsonObject(rawDrop); if (!drop.code || Math.random() > Math.min(1, Number(drop.chance ?? 1) + modifiers.dropBonus)) continue;
       const [items] = await connection.execute<(RowDataPacket & { id: number; name: string; item_type: string; codex_id: string | null })[]>('SELECT id,name,item_type,codex_id FROM item_definitions WHERE code=?', [String(drop.code)]); const item = items[0]; if (!item) continue;
-      const quantity = Math.max(1, Number(drop.quantity ?? 1));
+      const quantity = dropQuantity(drop);
       await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [member.id, item.id]);
       if (item.item_type === 'equipment') {
         for (let index = 0; index < quantity; index += 1) {
@@ -1173,13 +1184,13 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
         const oldHp = Number(member.current_hp); member.current_hp = Math.min(Number(member.hp_max), oldHp + Number(jsonObject(item.effect_json).heal ?? 0)); await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=?', [member.id, item.item_id]); log.push(`➤【${member.name}】使用[${item.name}]\n　➥HP ${oldHp}→${member.current_hp}`); continue;
       }
       const target = targets.find(item => Number(item.id) === Number(member.selected_target_id) && !item.is_defeated) ?? targets.find(item => !item.is_defeated); if (!target) continue;
-      const modifiers = await modifiersFor(connection, Number(member.id)); const swordAction = choice.type === 'attack'; let skillScale = 1; let attack = (Number(member.physical_attack) + modifiers.physicalAttack) * (1 + modifiers.physicalAttackPct / 100); let power = 1; let kind = '物理'; let damageType = '斩击'; let label = '普通攻击'; let skillId: number | undefined; let skillCode: string | undefined;
+      const modifiers = await modifiersFor(connection, Number(member.id)); const swordAction = choice.type === 'attack'; let skillScale = 1; let attack = (Number(member.physical_attack) + modifiers.physicalAttack) * (1 + modifiers.physicalAttackPct / 100); let power = 1; let kind = '物理'; let damageType = '斩击'; let element = ''; let label = '普通攻击'; let skillId: number | undefined; let skillCode: string | undefined;
       if (choice.type === 'skill') {
         const [skills] = await connection.execute<(RowDataPacket & { id: number; code: string; name: string; category: 'physical' | 'magic'; damage_type: string; element: string; mana_cost: number; cooldown_turns: number; cooldown_reduction_per_level: number; power: number; level: number; power_per_level: number })[]>('SELECT s.id,s.code,s.name,s.category,s.damage_type,s.element,s.mana_cost,s.cooldown_turns,s.cooldown_reduction_per_level,s.power,ps.level,s.power_per_level FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.quick_slot=?', [member.id, choice.slot]);
         const skill = skills[0]; if (!skill) { log.push(`➤【${member.name}】释放技能\n　➥技能栏为空。`); continue; }
         const [specializationRows] = await connection.execute<(RowDataPacket & { specialization: string; level: number })[]>('SELECT specialization,level FROM player_skill_specializations WHERE character_id=? AND skill_id=?', [member.id, skill.id]); const specializations = new Map(specializationRows.map(row => [row.specialization, Number(row.level) - 1])); const overcharge = Math.max(0, specializations.get('overcharge') ?? 0); const instant = Math.max(0, specializations.get('instant') ?? 0); const efficient = Math.max(0, specializations.get('efficient') ?? 0);
         const manaCost = Math.max(skill.mana_cost ? 1 : 0, Math.ceil(Number(skill.mana_cost) * Math.pow(1.16, overcharge) * Math.pow(.92, efficient) * (modifiers.manaAffinity ? .7 : 1)) - modifiers.manaCostReduction); if (Number(member.current_mp) < manaCost) { log.push(`➤【${member.name}】释放技能「${skill.name}」\n　➥MP不足。`); continue; }
-        member.current_mp -= manaCost; const cooldowns = jsonObject(member.cooldowns); const baseCooldown = Math.max(0, Number(skill.cooldown_turns) - (Number(skill.level) - 1) * Number(skill.cooldown_reduction_per_level)); const cooldown = Math.max(0, roundTowardInitialTiming(Number(skill.cooldown_turns), Math.max(1, baseCooldown) * Math.pow(1.08, overcharge) * Math.pow(.92, instant))); cooldowns[skill.code] = cooldown + 1; member.cooldowns = cooldowns; skillId = Number(skill.id); skillCode = skill.code; label = `释放技能「${skill.name}」`; kind = skill.category === 'magic' ? '魔法' : '物理'; damageType = skill.damage_type; skillScale = (Number(skill.power) + (Number(skill.level) - 1) * Number(skill.power_per_level)) * Math.pow(1.08, overcharge) * Math.pow(.96, instant) / 100; attack = (skill.category === 'magic' ? (Number(member.magic_attack) + modifiers.magicAttack) * (1 + modifiers.magicAttackPct / 100) : (Number(member.physical_attack) + modifiers.physicalAttack) * (1 + modifiers.physicalAttackPct / 100)) * skillScale; power = skill.category === 'magic' ? 1 + modifiers.magicDamagePct / 100 : 1;
+        member.current_mp -= manaCost; const cooldowns = jsonObject(member.cooldowns); const baseCooldown = Math.max(0, Number(skill.cooldown_turns) - (Number(skill.level) - 1) * Number(skill.cooldown_reduction_per_level)); const cooldown = Math.max(0, roundTowardInitialTiming(Number(skill.cooldown_turns), Math.max(1, baseCooldown) * Math.pow(1.08, overcharge) * Math.pow(.92, instant))); cooldowns[skill.code] = cooldown + 1; member.cooldowns = cooldowns; skillId = Number(skill.id); skillCode = skill.code; label = `释放技能「${skill.name}」`; kind = skill.category === 'magic' ? '魔法' : '物理'; damageType = skill.damage_type; element = skill.element; skillScale = (Number(skill.power) + (Number(skill.level) - 1) * Number(skill.power_per_level)) * Math.pow(1.08, overcharge) * Math.pow(.96, instant) / 100; attack = (skill.category === 'magic' ? (Number(member.magic_attack) + modifiers.magicAttack) * (1 + modifiers.magicAttackPct / 100) : (Number(member.physical_attack) + modifiers.physicalAttack) * (1 + modifiers.physicalAttackPct / 100)) * skillScale; power = skill.category === 'magic' ? 1 + modifiers.magicDamagePct / 100 : 1;
       }
       if (skillCode === 'warrior_taunt_player') {
         log.push(`➤【${member.name}】${label}`);
@@ -1216,11 +1227,14 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
       if (artifactAction && modifiers.artifact === 'demon_sword') { kind = '魔法'; attack = (Number(member.magic_attack) + modifiers.magicAttack) * (1 + modifiers.magicAttackPct / 100) * skillScale; }
       const monster = monsterCombatStats(target); const vulnerability = effectValue('target', Number(target.id), 'vulnerability') + effectValue('target', Number(target.id), 'sword_break'); const surge = effectValue('member', Number(member.id), 'demon_surge'); const baseDefense = kind === '魔法' ? monster.magicDefense : monster.physicalDefense; const defense = Math.floor(baseDefense * (1 - (kind === '魔法' ? 0 : Math.min(90, modifiers.ignoreDefensePct + vulnerability)) / 100)); const strike = resolveStrike(attack * power * (1 + surge / 100) * (Number(session.turn_no) === 1 ? 1 + Number(session.opening_damage_bonus) : 1), defense, Number(member.accuracy) * (1 + modifiers.accuracyPct / 100), monster.evasion, (Number(member.crit_rate_bp) + modifiers.critRateBp) * (1 + modifiers.critRatePct / 100), monster.critResist, Number(member.crit_damage_bp) * (1 + modifiers.critDamagePct / 100), monster.critReduction);
       log.push(`➤【${member.name}】${label}`); if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, 'member', target, 'target', 'on_cast', log); if (!strike.hit) { log.push(`　➥【${targetName(target)}】闪避了攻击`); continue; }
-      const elemental = weaknessMultiplier(target, damageType) * elementalMultiplier(member.element_mastery_json, target.element_resistance_json, skillCode ? (damageType === '无' ? '' : damageType) : ''); const damage = Math.max(1, Math.floor(strike.damage * elemental)); const oldHp = Number(target.current_hp); target.current_hp = Math.max(0, oldHp - damage); if (!target.current_hp) target.is_defeated = 1;
+      const physicalMultiplier = kind === '物理' ? physicalWeaknessMultiplier(target, damageType) : 1;
+      const elementalMultiplierValue = elementalMultiplier(member.element_mastery_json, target.element_resistance_json, element);
+      const damageMultiplier = physicalMultiplier * elementalMultiplierValue;
+      const damage = Math.max(1, Math.floor(strike.damage * damageMultiplier)); const oldHp = Number(target.current_hp); target.current_hp = Math.max(0, oldHp - damage); if (!target.current_hp) target.is_defeated = 1;
       await connection.execute('UPDATE combat_threat SET threat=threat+? WHERE session_id=? AND spawn_id=? AND character_id=?', [damage, session.combat_id, target.id, member.id]); if (skillCode === 'warrior_taunt') { await connection.execute('UPDATE combat_threat SET threat=threat+600 WHERE session_id=? AND spawn_id=? AND character_id=?', [session.combat_id, target.id, member.id]); log.push('　#挑衅#目标的注意力被莱昂牢牢吸引'); } if (modifiers.lifestealPct && choice.type === 'attack') member.current_hp = Math.min(Number(member.hp_max), Number(member.current_hp) + Math.floor(damage * modifiers.lifestealPct / 100));
       const observer = appraisalForTarget(appraisal, Number(target.level));
       log.push(observer
-        ? `　➥${observer.informationLevel >= 4 ? elemental > 1 ? '[克制]' : elemental < 1 ? '[抗性]' : '' : ''}${strike.crit ? '[暴击!]' : ''}对【${targetName(target)}】造成 ${damage}点${kind}伤害(${oldHp}→${target.current_hp})`
+        ? `　➥${observer.informationLevel >= 4 ? damageMultiplier > 1 ? '[克制]' : damageMultiplier < 1 ? '[抗性]' : '' : ''}${strike.crit ? '[暴击!]' : ''}对【${targetName(target)}】造成 ${damage}点${kind}伤害(${oldHp}→${target.current_hp})`
         : `　➥对【???】造成 ???点${kind}伤害(???→???)`);
       if (artifactAction && modifiers.artifact === 'holy_sword' && strike.crit) await applyArtifactEffect(connection, session.combat_id, 'sword_break', 'target', Number(target.id), log);
       if (artifactAction && modifiers.artifact === 'demon_sword') await applyArtifactEffect(connection, session.combat_id, 'demon_surge', 'member', Number(member.id), log);
