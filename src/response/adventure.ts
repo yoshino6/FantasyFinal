@@ -1,9 +1,13 @@
 import { Format, logger, useEvent, useMessage, useRoute } from 'alemonjs';
+import { readFile } from 'node:fs/promises';
 import { battleStatus, cancelTravel, combatAction, chooseTarget, completeTravel, continueForestArrival, currentEncounter, encounterAction, explore, forestGuideAdvance, forestGuideChoice, inventory, move, moveTo, nearbyPoints, switchCombatTarget, talkToNpc, type VictorySettlement } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
 import { movedLocationText, outsidePanel, panelButtons } from './panel';
 import pearGuideImage from '../assets/game/story/pear-guide.png';
 import { adventurerProfile, chooseProfession, registerAdventurer } from '../game/character.service';
+
+const pearGuideImagePath = decodeURIComponent(pearGuideImage).replace(/^([a-zA-Z]):(?![\\/])/, '$1:\\');
+const pearGuideImageBuffer = () => readFile(pearGuideImagePath);
 
 const fail = async (message: any, error: unknown, title = '操作失败') => message.send({ format: messageFormat(title, error instanceof Error ? error.message : '请稍后重试。') });
 const moveButtons = panelButtons;
@@ -103,13 +107,17 @@ const chapterFormat = (stage: number, text: string) => {
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 
-const townArrivalFormat = (stage: number, text: string, completed = false, guildStory = false) => {
+const townArrivalFormat = async (stage: number, text: string, completed = false, guildStory = false) => {
   if (completed) return null;
   const markdown = Format.createMarkdown().addTitle(guildStory ? `初临·百纳镇·冒险者工会（${stage}/3）` : `初临·百纳镇（${stage}/6）`).addNewline().addNewline();
-  if (guildStory) markdown.addImage(pearGuideImage, { width: 360 });
   markdown.addText(text);
   const label = guildStory ? '继续' : stage === 4 ? '你说什么？勇者是什么意思？' : stage === 6 ? '挥手告别' : '继续';
-  return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton(label, '/继续剧情', { type: 'command', autoEnter: true, style: 'blue' }));
+  const format = Format.create();
+  if (guildStory) {
+    try { format.addImage(await pearGuideImageBuffer()); }
+    catch (error) { logger.warn({ err: error, pearGuideImage: pearGuideImagePath }, 'load pear guide image failed'); }
+  }
+  return format.addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton(label, '/继续剧情', { type: 'command', autoEnter: true, style: 'blue' }));
 };
 
 const buildingEncounterFormat = (name: string, code: string, location: string) => {
@@ -144,11 +152,11 @@ const guildInteriorFormat = (area = '大厅') => {
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 
-const professionDetails: Record<string, { name: string; blessing: string; passive: string; active: string }> = {
-  warrior: { name: '战士', blessing: '体质成长+8，力量成长+8', passive: '【剑盾精通】装备长剑类武器时，攻击+8%。装备盾牌类武器时，防御+8%。\n【盾反】受到物理伤害时，有25%几率对伤害来源发动一次普通攻击。', active: '【嘲讽】全体队友的仇恨值减半，减少的仇恨转移至自身。\n【盾击】攻击敌人，并使自身下回合受到的伤害降低50%。' },
-  mage: { name: '法师', blessing: '精神成长+8，智力成长+8', passive: '【奥术精通】魔法攻击提高8%，最大魔力提高8%。', active: '【炎枪术】凝聚炽热火枪贯穿敌人。\n【冰霜护壁】为自身施加护盾，并降低近身敌人的速度。' },
-  rogue: { name: '盗贼', blessing: '敏捷成长+8，感知成长+8', passive: '【影步】闪避提高8%，移动速度提高1。', active: '【背刺】从敌人破绽处发动高伤害刺击。\n【烟幕】降低全体敌人的命中，提升队伍闪避。' },
-  priest: { name: '牧师', blessing: '体质成长+4，精神成长+10，智力成长+4', passive: '【圣祷】治疗效果提高10%，最大魔力提高5%。', active: '【治愈之光】恢复生命最低队友的生命。\n【祝福圣歌】为全队施加短暂的攻击与防御祝福。' }
+const professionDetails: Record<string, { name: string; blessing: string; skills: string }> = {
+  warrior: { name: '战士', blessing: '体质成长+2，力量成长+2', skills: '【长剑精通】（被动）装备长剑类武器时，物攻+25%。副手装备时效果减半。\n【盾牌精通】（被动）装备盾牌类武器时，双防+25%。副手装备时效果减半。' },
+  mage: { name: '法师', blessing: '精神成长+2，智力成长+2', skills: '【法杖精通】（被动）装备法杖类武器时，魔攻+25%。副手装备时效果减半。\n【法书精通】（被动）装备法书类武器时，吟唱速度+70%。副手装备时效果减半。' },
+  priest: { name: '牧师', blessing: '体质成长+2，精神成长+2', skills: '【法书精通】（被动）装备法书类武器时，吟唱速度+70%。副手装备时效果减半。\n【法球精通】（被动）装备法球类武器时，魔力上限+70%。副手装备时效果减半。' },
+  rogue: { name: '盗贼', blessing: '敏捷成长+2，感知成长+2', skills: '【匕首精通】（被动）装备匕首类武器时，双攻+20%。副手装备时效果减半。\n【拳刃精通】（被动）装备拳刃类武器时，暴击+25%，暴伤+25%。副手装备时效果减半。' }
 };
 const professionCodeByName: Record<string, string> = { 战士: 'warrior', 法师: 'mage', 盗贼: 'rogue', 牧师: 'priest' };
 const guildChatTopics = [
@@ -180,7 +188,7 @@ const professionSelectFormat = async (qqUserId: string) => {
 };
 const professionDetailFormat = async (qqUserId: string, name: string) => {
   const profile = await adventurerProfile(qqUserId); const code = professionCodeByName[name]; const detail = professionDetails[code]; if (!detail) throw new Error('未知职业。');
-  const markdown = Format.createMarkdown().addTitle(`职业·${detail.name}`).addNewline().addNewline().addText(`①职业赐福：${detail.blessing}\n②被动技能：\n${detail.passive}\n③主动技能：\n${detail.active}`);
+  const markdown = Format.createMarkdown().addTitle(`职业·${detail.name}`).addNewline().addNewline().addText(`①职业赐福：${detail.blessing}\n②职业技能：\n${detail.skills}`);
   const buttons = Format.createButtonGroup().addRow();
   if (!profile.profession_code) buttons.addButton(`选择 ${detail.name}`, `/选择职业 ${detail.name}`, { type: 'command', autoEnter: true, style: 'blue' });
   buttons.addButton('返回职业选择', '/职业选择', { type: 'command', autoEnter: true });
@@ -218,7 +226,7 @@ export const continueStoryHandler = async () => {
   const [event] = useEvent(); const [message] = useMessage();
   try {
     const story = await continueForestArrival(event.current.UserId);
-    const storyFormat = townArrivalFormat(story.stage, story.text, story.completed, story.chapter === 'guild');
+    const storyFormat = await townArrivalFormat(story.stage, story.text, story.completed, story.chapter === 'guild');
     if (storyFormat) { await message.send({ format: storyFormat }); return; }
     if (story.arrivalBuilding) { await message.send({ format: buildingEncounterFormat('冒险者公会', story.arrivalBuilding, '你移动至百纳镇·猫拉瑞亚(-8, -116)') }); return; }
     const panel = await movementPanel(event.current.UserId, story.text);
@@ -242,6 +250,7 @@ export const guildRegistrationHandler = async () => { const [event] = useEvent()
 export const professionHandler = (action: 'select' | 'detail' | 'choose') => async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { if (action === 'select') { await message.send({ format: await professionSelectFormat(event.current.UserId) }); return; } const name = String(route.param('name')); if (action === 'detail') { await message.send({ format: await professionDetailFormat(event.current.UserId, name) }); return; } const code = professionCodeByName[name]; if (!code) throw new Error('未知职业。'); await chooseProfession(event.current.UserId, code); await message.send({ format: await guildFrontDeskFormat(event.current.UserId, `莫妮卡郑重地在档案上盖下印记。“恭喜您成为一名${name}。愿您始终记得最初踏上旅途的理由。”`) }); } catch (error) { await fail(message, error, '职业操作失败'); } };
 export const guildChatHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const profile = await adventurerProfile(event.current.UserId); const pool = await (await import('../database/pool')).getPool(); await pool.execute('INSERT INTO player_guild_chats (character_id,chat_count) VALUES (?,1) ON DUPLICATE KEY UPDATE chat_count=chat_count+1', [profile.id]); const [rows] = await pool.execute<any[]>('SELECT chat_count FROM player_guild_chats WHERE character_id=?', [profile.id]); const index = (Number(rows[0]?.chat_count ?? 1) - 1) % guildChatTopics.length; await message.send({ format: await guildFrontDeskFormat(event.current.UserId, guildChatTopics[index]) }); } catch (error) { await fail(message, error, '闲聊失败'); } };
 export const adventurerCardHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const profile = await adventurerProfile(event.current.UserId); if (!profile.adventurer_registered) throw new Error('尚未完成冒险者注册。'); const pool = await (await import('../database/pool')).getPool(); const [skills] = await pool.execute<any[]>('SELECT s.name,ps.level FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? ORDER BY ps.learned_at,s.id', [profile.id]); const markdown = Format.createMarkdown().addTitle('冒险者卡片').addNewline().addNewline().addText(`姓名：${profile.name}\n冒险者等级：RANK ${profile.adventurer_rank}\n角色等级：Lv.${profile.level}\n职业：${profile.profession_name ?? '未选择'}\n资历：百纳镇冒险者公会登记在册\n\n精通技能：\n${skills.length ? skills.map((skill: any) => `【${skill.name}】Lv.${skill.level}`).join('\n') : '尚未掌握技能'}`); await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('返回前台', '/建筑区域 guild_counter 前台', { type: 'command', autoEnter: true, style: 'blue' })) }); } catch (error) { await fail(message, error, '无法查看卡片'); } };
+export const pearGuideHandler = async () => { const [message] = useMessage(); try { await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('梨子喵').addNewline().addNewline()).addImage(await pearGuideImageBuffer()) }); } catch (error) { await fail(message, error, '无法展示梨子喵'); } };
 export const npcEncounterHandler = (action: 'talk' | 'ignore') => async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const code = String(route.param('code')); if (action === 'ignore') { const [bag, nearby] = await Promise.all([inventory(event.current.UserId), nearbyPoints(event.current.UserId)]); const panel = outsidePanel('行动', currentLocationText(nearby.character), bag.movementSpeed, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), '你暂时没有上前搭话，继续留意四周。', nearby.points, nearby.character.activity_status !== 'active', nearby.landmarks); await message.send({ format: panel.addButtonGroup(panelButtons(nearby.character.activity_status !== 'active')) }); return; } const text = await talkToNpc(event.current.UserId, code); const panel = await movementPanel(event.current.UserId, text); const nearby = await nearbyPoints(event.current.UserId); await message.send({ format: panel.addButtonGroup(panelButtons(nearby.character.activity_status !== 'active')) }); } catch (error) { await fail(message, error, '对话失败'); } };
 export const moveHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await showMoveResult(message, event.current.UserId, await move(event.current.UserId, String(route.param('direction')))); } catch (error) { if (error instanceof Error && error.message.includes('当前格子存在敌对生物') && await showBlockedEncounter(message, event.current.UserId)) return; await fail(message, error, '无法移动'); } };
 export const goToHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const result = await moveTo(event.current.UserId, Number(route.param('x')), Number(route.param('y'))); if (result.kind === 'travel') { await message.send({ format: travelFormat('开始前往', result.regionName, result.x, result.y, result.seconds, result.remaining) }); scheduleTravelCompletion(message, event.current.UserId, result.remaining); return; } await showMoveResult(message, event.current.UserId, result); } catch (error) { if (error instanceof Error && error.message.includes('当前格子存在敌对生物') && await showBlockedEncounter(message, event.current.UserId)) return; await fail(message, error, '无法前往该位置'); } };

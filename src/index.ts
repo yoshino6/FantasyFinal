@@ -81,6 +81,7 @@ appGroup.use({ path: '职业查看', schema: { usage: '/职业查看 <职业>', 
 appGroup.use({ path: '选择职业', schema: { usage: '/选择职业 <职业>', args: [{ name: 'name', rules: [{ required: true, type: 'enum', enum: ['战士', '法师', '盗贼', '牧师'] }] }] } }, () => import('./response/adventure').then(module => ({ default: module.professionHandler('choose') })))
 appGroup.use('前台闲聊', () => import('./response/adventure').then(module => ({ default: module.guildChatHandler })))
 appGroup.use('卡片', () => import('./response/adventure').then(module => ({ default: module.adventurerCardHandler })))
+appGroup.use('梨子喵', () => import('./response/adventure').then(module => ({ default: module.pearGuideHandler })))
 appGroup.use({ path: 'NPC对话', schema: { usage: '/NPC对话 <编号>', args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/adventure').then(module => ({ default: module.npcEncounterHandler('talk') })))
 appGroup.use({ path: 'NPC忽略', schema: { usage: '/NPC忽略 <编号>', args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/adventure').then(module => ({ default: module.npcEncounterHandler('ignore') })))
 appGroup.use('攻击', () => import('./response/combat').then(module => ({ default: module.attack })))

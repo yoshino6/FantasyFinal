@@ -9,7 +9,7 @@ export default async () => {
     const character = await getCharacter(event.current.UserId);
     const content = !character ? '发送“注册”开始异世界之旅。' : !character.adventurerRegistered
       ? '属性暂时隐藏'
-      : `恩赐：${character.giftName ?? '无'}\n\n${characterText(character, character, character.growth, character.regionName, character.x, character.y, character.z)}`;
+      : `恩赐：${character.giftName ?? '无'}\n\n${characterText(character, character, character.growth, character.regionName, character.x, character.y, character.z, character.elementMastery, character.elementResistance)}`;
     if (!character) { await message.send({ format: messageFormat('尚未注册', content) }); return; }
     const gender = character.gender === '男' ? '♂' : character.gender === '女' ? '♀' : '?';
     const markdown = Format.createMarkdown().addTitle('角色信息').addText(`\n\n昵称：${character.name} `)

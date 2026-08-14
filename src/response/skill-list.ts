@@ -2,7 +2,7 @@ import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
 import { learnSkill, skillDetail, skillList, toggleSkillShortcut, upgradeAppraisal, upgradeSkill, upgradeSkillSpecialization } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
 
-const categoryNames: Record<string, string> = { physical: '物理', magic: '魔法', utility: '辅助', passive: '被动' };
+const categoryNames: Record<string, string> = { physical: '物理', magic: '魔法', utility: '辅助', passive: '被动', special: '特殊' };
 
 const skillListFormat = async (qqUserId: string, view: '已学习' | '未学习') => {
   const data = await skillList(qqUserId); const markdown = Format.createMarkdown().addTitle('技能列表').addNewline().addNewline().addText(`剩余技能点：${data.skillPoints}\n`);
@@ -58,9 +58,9 @@ export const skillDetailHandler = async () => {
         efficient: '每提升一级，蓝耗降低8%。',
         potent: '每提升一级，技能效果提升8%，效果时间提升8%，威力降低16%。'
       } as const;
-      const category = skill.category === 'physical' ? '物理' : skill.category === 'magic' ? '魔法' : '属性';
+      const category = categoryNames[skill.category] ?? '特殊';
       const markdown = Format.createMarkdown().addTitle('技能详情').addNewline().addNewline().addText(`【${skill.name}】Lv.${skill.level}\n`)
-        .addBlockquote(`类别：${category}`).addNewline().addBlockquote(`威力：${skill.actualPower}`).addNewline().addBlockquote(`冷却：${skill.actualCooldown}`).addNewline().addBlockquote(`蓝耗：${skill.actualManaCost}`).addNewline().addBlockquote(`吟咏：${skill.actualChant}`).addNewline().addBlockquote('效果：').addNewline();
+        .addBlockquote(`类别：${category}`).addNewline().addBlockquote(`种类：${skill.skill_kind}`).addNewline().addBlockquote(`属性：${skill.element}`).addNewline().addBlockquote(`距离：${skill.range_type}`).addNewline().addBlockquote(`威力：${skill.actualPower}`).addNewline().addBlockquote(`冷却：${skill.actualCooldown}`).addNewline().addBlockquote(`蓝耗：${skill.actualManaCost}`).addNewline().addBlockquote(`吟咏：${skill.actualChant}`).addNewline().addBlockquote('效果：').addNewline();
       const effects = String(skill.effects ?? '').split('、').filter(Boolean);
       if (!effects.length) markdown.addBlockquote('  无').addNewline();
       else effects.forEach((effect, index) => markdown.addBlockquote(`  ${'①②③④⑤'.charAt(index)}${effect}`).addNewline());
@@ -86,7 +86,7 @@ export const skillDetailHandler = async () => {
       : '';
     const combatText = skill.category === 'passive'
       ? `类别：${categoryNames.passive}\n被动效果：${skill.description}`
-      : `类别：${categoryNames[skill.category] ?? '辅助'}｜属性：${skill.damage_type}\n威力：${skill.actualPower}\n魔力消耗：${skill.mana_cost}\n冷却：${skill.actualCooldown} 回合\n特殊效果：${skill.effects ?? '无'}`;
+      : `类别：${categoryNames[skill.category] ?? '辅助'}｜种类：${skill.skill_kind}｜属性：${skill.element}｜距离：${skill.range_type}\n威力：${skill.actualPower}\n魔力消耗：${skill.mana_cost}\n冷却：${skill.actualCooldown} 回合\n特殊效果：${skill.effects ?? '无'}`;
     const text = `【${skill.name}】${levelText}\n${skill.description}\n\n${combatText}${appraisalText}\n\n${costText}`;
     const buttons = Format.createButtonGroup().addRow().addButton('返回技能列表', skill.learned ? '/技能列表 已学习' : '/技能列表 未学习', { type: 'command', autoEnter: true });
     if (!skill.learned) buttons.addButton('学习', `/学习技能 ${skill.id}`, { type: 'command', autoEnter: true, style: 'blue' });
