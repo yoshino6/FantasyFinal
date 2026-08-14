@@ -3,6 +3,7 @@ import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { calculateDerivedStats } from './constants';
 import { recalculateCharacterStats } from './character.service';
+import { advanceBountyProgress } from './bounty.service';
 import { attributes, type Allocation } from './types';
 
 type CharacterRow = RowDataPacket & { id: number; player_id: number; npc_code: string | null; name: string; level: number; experience: number; skill_points: number; hp_max: number; mp_max: number; current_hp: number; current_mp: number; activity_status: 'active' | 'resting' | 'unconscious'; rest_started_at: Date | null; physical_attack: number; magic_attack: number; physical_defense: number; magic_defense: number; accuracy: number; evasion: number; crit_rate_bp: number; crit_damage_bp: number; crit_resist_bp: number; crit_damage_reduction_bp: number; speed: number; perception: number; spirit: number; intelligence: number; element_mastery_json: unknown; element_resistance_json: unknown; adventurer_registered: number; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string };
@@ -115,6 +116,8 @@ const roundTowardInitialTiming = (initial: number, raw: number) => {
   return raw < initial ? Math.ceil(raw) : Math.floor(raw);
 };
 const activeSkillUpgradeCost = (level: number) => Math.floor(Math.max(1, level) / 10) + 1;
+const weaponMasteryCodes = new Set(['longsword_mastery', 'shield_mastery', 'staff_mastery', 'spellbook_mastery', 'orb_mastery', 'dagger_mastery', 'fistblade_mastery']);
+const masteryUpgradeCost = (level: number) => Math.max(1, level) * 2;
 
 const characterFor = async (qqUserId: string): Promise<CharacterRow> => {
   const pool = await getPool(); const [rows] = await pool.execute<CharacterRow[]>(`SELECT c.*, r.name AS region_name FROM characters c JOIN players p ON p.id=c.player_id JOIN map_regions r ON r.id=c.current_region_id WHERE p.qq_user_id=? LIMIT 1`, [qqUserId]);
@@ -177,11 +180,12 @@ const canAppraiseTarget = (profile: AppraisalProfile, targetLevel: number) => Bo
 
 const modifiersFor = async (connection: PoolConnection, characterId: number): Promise<CombatModifiers> => {
   const [rows] = await connection.execute<(RowDataPacket & { name: string | null; effect_json: string | null; weapon_type: string | null; slot: 'weapon' | 'offhand' })[]>(`SELECT i.name,i.weapon_type,pe.slot,COALESCE(ii.effect_json,i.effect_json) AS effect_json FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id WHERE pe.character_id=? AND pe.slot IN ('weapon','offhand')`, [characterId]);
-  const [passiveRows] = await connection.execute<(RowDataPacket & { code: string; passive_effect_json: unknown })[]>(`SELECT s.code,s.passive_effect_json FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND s.category='passive'`, [characterId]);
+  const [passiveRows] = await connection.execute<(RowDataPacket & { id: number; code: string; passive_effect_json: unknown })[]>(`SELECT s.id,s.code,s.passive_effect_json FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND s.category='passive'`, [characterId]);
+  const [specializationRows] = await connection.execute<(RowDataPacket & { skill_id: number; specialization: string; level: number })[]>('SELECT skill_id,specialization,level FROM player_skill_specializations WHERE character_id=?', [characterId]);
   const effect = jsonObject(rows.find(row => row.slot === 'weapon')?.effect_json);
   const passives = new Map(passiveRows.map(row => [row.code, jsonObject(row.passive_effect_json)]));
   const growth = passives.get('growth_blessing'); const lucky = passives.get('lucky_favor'); const mana = passives.get('mana_affinity');
-  const mastery = (key: string) => [...passives.values()].reduce((result, passive) => { const type = String(passive.weaponType ?? ''); const matched = rows.find(row => row.weapon_type === type); if (!matched) return result; const scale = matched.slot === 'offhand' ? .5 : 1; return result + Number(passive[key] ?? 0) * scale; }, 0);
+  const mastery = (key: string) => passiveRows.reduce((result, row) => { const passive = jsonObject(row.passive_effect_json); const type = String(passive.weaponType ?? ''); const matched = rows.find(item => item.weapon_type === type); if (!matched) return result; const proficiency = Math.min(5, Math.max(1, Number(specializationRows.find(item => Number(item.skill_id) === Number(row.id) && item.specialization === 'overcharge')?.level ?? 1))); const focus = Math.min(6, Math.max(1, Number(specializationRows.find(item => Number(item.skill_id) === Number(row.id) && item.specialization === 'instant')?.level ?? 1))); const scale = matched.slot === 'offhand' ? .5 + (focus - 1) * .1 : 1; return result + Number(passive[key] ?? 0) * proficiency * scale; }, 0);
   return { weaponName: rows.find(row => row.slot === 'weapon')?.name ?? undefined, artifact: effect.artifact === 'holy_sword' || effect.artifact === 'demon_sword' ? effect.artifact : undefined, physicalAttack: Number(effect.physicalAttack ?? 0), magicAttack: Number(effect.magicAttack ?? 0), physicalAttackPct: Number(effect.physicalAttackPct ?? 0) + mastery('physicalAttackPct'), magicAttackPct: Number(effect.magicAttackPct ?? 0) + mastery('magicAttackPct'), physicalDefensePct: mastery('physicalDefensePct'), magicDefensePct: mastery('magicDefensePct'), critRatePct: Number(effect.critRatePct ?? 0) + mastery('critRatePct'), critDamagePct: Number(effect.critDamagePct ?? 0) + mastery('critDamagePct'), accuracyPct: Number(effect.accuracyPct ?? 0), mpPct: Number(effect.mpPct ?? 0) + mastery('mpPct'), chantSpeedPct: mastery('chantSpeedPct'), critRateBp: Number(effect.critRateBp ?? 0), ignoreDefensePct: Number(effect.ignoreDefensePct ?? 0), lifestealPct: Number(effect.lifestealPct ?? 0), magicDamagePct: Number(effect.magicDamagePct ?? 0), manaCostReduction: Number(effect.manaCostReduction ?? 0), experienceMultiplier: Number(growth?.experienceMultiplier ?? 1), dropBonus: Number(lucky?.dropBonusPct ?? 0) / 100, manaAffinity: Boolean(mana) };
 };
 
@@ -355,7 +359,8 @@ export const skillDetail = async (qqUserId: string, skillId: number) => {
   const actualCooldown = Math.max(0, roundTowardInitialTiming(Number(skill.cooldown_turns), Math.max(1, baseCooldown) * Math.pow(1.08, overcharge) * Math.pow(.92, instant)));
   const baseChant = Number(skill.chant_turns);
   const actualChant = Math.max(0, roundTowardInitialTiming(baseChant, Math.max(1, baseChant) * Math.pow(1.08, overcharge) * Math.pow(.92, instant)));
-  return { ...skill, level, learned, characterLevel: Number(character.level), skillPoints: Number(character.skill_points), appraisal: progress, specializations, actualPower, actualManaCost, actualCooldown, actualChant, specializationUpgradeCost: !learned || skill.category === 'passive' || level >= Number(skill.max_level) ? null : activeSkillUpgradeCost(level), nextUpgradeCost: skill.code === 'appraisal' ? null : !learned || level >= Number(skill.max_level) ? null : activeSkillUpgradeCost(level) };
+  const weaponMastery = weaponMasteryCodes.has(skill.code);
+  return { ...skill, level, learned, characterLevel: Number(character.level), skillPoints: Number(character.skill_points), appraisal: progress, specializations, weaponMastery, actualPower, actualManaCost, actualCooldown, actualChant, masteryProficiencyCost: weaponMastery && Number(specializations.overcharge ?? 1) < 5 ? masteryUpgradeCost(Number(specializations.overcharge ?? 1)) : null, masteryFocusCost: weaponMastery && Number(specializations.instant ?? 1) < 6 ? masteryUpgradeCost(Number(specializations.instant ?? 1)) : null, specializationUpgradeCost: !learned || skill.category === 'passive' || level >= Number(skill.max_level) ? null : activeSkillUpgradeCost(level), nextUpgradeCost: skill.code === 'appraisal' ? null : !learned || level >= Number(skill.max_level) ? null : activeSkillUpgradeCost(level) };
 };
 
 export const learnSkill = async (qqUserId: string, skillId: number) => withTransaction(async connection => {
@@ -395,13 +400,13 @@ export const upgradeSkill = async (qqUserId: string, skillId: number) => withTra
 
 export const upgradeSkillSpecialization = async (qqUserId: string, skillId: number, specialization: 'overcharge' | 'instant' | 'efficient' | 'potent') => withTransaction(async connection => {
   const character = await characterFor(qqUserId);
-  const [skills] = await connection.execute<(RowDataPacket & { name: string; category: string; level: number; max_level: number })[]>('SELECT s.name,s.category,ps.level,s.max_level FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.skill_id=? FOR UPDATE', [character.id, skillId]);
-  const skill = skills[0]; if (!skill || skill.category === 'passive') throw new Error('只能升级已学习的主动技能专精。');
-  if (Number(skill.level) >= Number(skill.max_level)) throw new Error('该技能已达到最高等级。');
+  const [skills] = await connection.execute<(RowDataPacket & { code: string; name: string; category: string; level: number; max_level: number })[]>('SELECT s.code,s.name,s.category,ps.level,s.max_level FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.skill_id=? FOR UPDATE', [character.id, skillId]);
+  const skill = skills[0]; const weaponMastery = Boolean(skill && weaponMasteryCodes.has(skill.code)); if (!skill || (skill.category === 'passive' && !weaponMastery)) throw new Error('只能升级已学习的主动技能或装备专精。');
+  if (!weaponMastery && Number(skill.level) >= Number(skill.max_level)) throw new Error('该技能已达到最高等级。');
   await connection.execute('INSERT IGNORE INTO player_skill_specializations (character_id,skill_id,specialization) VALUES (?,?,?)', [character.id, skillId, specialization]);
   const [rows] = await connection.execute<(RowDataPacket & { level: number })[]>('SELECT level FROM player_skill_specializations WHERE character_id=? AND skill_id=? AND specialization=? FOR UPDATE', [character.id, skillId, specialization]);
-  const level = Number(rows[0].level); if (level >= 100) throw new Error('该专精已达到最高等级。');
-  const cost = activeSkillUpgradeCost(Number(skill.level)); if (Number(character.skill_points) < cost) throw new Error(`技能点不足，升级需要 ${cost} 点。`);
+  const level = Number(rows[0].level); const maximum = weaponMastery ? specialization === 'overcharge' ? 5 : 6 : 100; if (level >= maximum) throw new Error('该专精已达到最高等级。');
+  const cost = weaponMastery ? masteryUpgradeCost(level) : activeSkillUpgradeCost(Number(skill.level)); if (Number(character.skill_points) < cost) throw new Error(`技能点不足，升级需要 ${cost} 点。`);
   await connection.execute('UPDATE characters SET skill_points=skill_points-? WHERE id=?', [cost, character.id]);
   await connection.execute('UPDATE player_skill_specializations SET level=level+1 WHERE character_id=? AND skill_id=? AND specialization=?', [character.id, skillId, specialization]);
   await connection.execute('UPDATE player_skills SET level=level+1 WHERE character_id=? AND skill_id=?', [character.id, skillId]);
@@ -994,6 +999,7 @@ const finishPartyVictory = async (connection: PoolConnection, sessionId: string,
     const oldLevel = Number(member.level); const newLevel = Math.max(oldLevel, Math.floor((Number(member.experience) + experience) / 100) + 1); const gainedPoints = newLevel - oldLevel;
     await connection.execute('UPDATE characters SET level=?,experience=experience+?,skill_points=skill_points+? WHERE id=?', [newLevel, experience, gainedPoints, member.id]);
     if (gainedPoints) await recalculateCharacterStats(connection, Number(member.id));
+    await advanceBountyProgress(connection, Number(member.id), targets.map(target => Number(target.template_id)));
     const drops: VictorySettlement['members'][number]['drops'] = [];
     for (const target of targets) for (const rawDrop of jsonArray(target.drops_json)) {
       const drop = jsonObject(rawDrop); if (!drop.code || Math.random() > Math.min(1, Number(drop.chance ?? 1) + modifiers.dropBonus)) continue;
@@ -1255,7 +1261,7 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
       if (skill) { monsterTarget.current_mp -= Number(skill.mana_cost); cooldowns[skill.code] = Number(skill.cooldown_turns) + 1; monsterTarget.cooldowns = cooldowns; }
       const multiplier = Number(skill?.power ?? 100) / 100; const monster = monsterCombatStats(monsterTarget); const bite = skill?.code === 'bite';
       const monsterAttack = skill?.category === 'magic' ? monster.magicAttack : monster.physicalAttack; const victimModifiers = await modifiersFor(connection, Number(victim.id)); const victimDefense = (skill?.category === 'magic' ? Number(victim.magic_defense) * (1 + victimModifiers.magicDefensePct / 100) : Number(victim.physical_defense) * (1 + victimModifiers.physicalDefensePct / 100));
-      const strike = resolveStrike(monsterAttack * multiplier, victimDefense, monster.accuracy, Number(victim.evasion), monster.crit + (bite ? 2500 : 0), Number(victim.crit_resist_bp), monster.critDamage, Number(victim.crit_damage_reduction_bp), bite);
+      const strike = resolveStrike(monsterAttack * multiplier, victimDefense, monster.accuracy, Number(victim.evasion), monster.crit + (bite ? 500 : 0), Number(victim.crit_resist_bp), monster.critDamage, Number(victim.crit_damage_reduction_bp), bite);
       const identifiedMonster = Boolean(appraisalForTarget(appraisal, Number(monsterTarget.level)));
       log.push(`➤【${targetName(monsterTarget)}】${skill ? `释放技能「${identifiedMonster ? skill.name : '???'}」` : '普通攻击'}`);
       if (bite) { log.push('　#必中#该攻击必定命中'); log.push('　#獠牙#该攻击暴击+25%'); }

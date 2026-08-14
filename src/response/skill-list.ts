@@ -50,6 +50,26 @@ export const skillDetailHandler = async () => {
       await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) });
       return;
     }
+    if (skill.weaponMastery && skill.learned) {
+      const proficiency = Number(skill.specializations.overcharge ?? 1); const focus = Number(skill.specializations.instant ?? 1);
+      const masteryText = ({
+        longsword_mastery: { weapon: '长剑', stat: '物攻', perLevel: 5 }, shield_mastery: { weapon: '盾牌', stat: '物防、魔防', perLevel: 5 },
+        staff_mastery: { weapon: '法杖', stat: '魔攻', perLevel: 5 }, spellbook_mastery: { weapon: '法书', stat: '吟唱速度', perLevel: 14 },
+        orb_mastery: { weapon: '法球', stat: '魔力上限', perLevel: 14 }, dagger_mastery: { weapon: '匕首', stat: '物攻、魔攻', perLevel: 4 },
+        fistblade_mastery: { weapon: '拳刃', stat: '暴击、暴伤', perLevel: 5 }
+      } as const)[skill.code] ?? { weapon: '对应', stat: '属性', perLevel: 0 };
+      const offhandText = focus >= 6 ? '效果无衰减。' : `仅有${50 + (focus - 1) * 10}%效果。`;
+      const effectText = `装备${masteryText.weapon}类武器时，${masteryText.stat}+${masteryText.perLevel * proficiency}%。副手装备时，${offhandText}`;
+      const markdown = Format.createMarkdown().addTitle('技能详情').addNewline().addNewline().addText(`【${skill.name}】Lv.${skill.level}\n`)
+        .addBlockquote('类别：被动').addNewline().addBlockquote(`效果：${effectText}`).addNewline().addNewline().addText(`专精：\n①娴熟 Lv.${proficiency}/5 `);
+      if (skill.masteryProficiencyCost !== null) markdown.addButton(`[升级(SP${skill.masteryProficiencyCost})]`, { data: `/升级专精 ${skill.id} 娴熟`, autoEnter: false });
+      markdown.addNewline().addBlockquote(`每提升一级，${masteryText.stat}+${masteryText.perLevel}%。`).addNewline().addNewline().addText(`②随心 Lv.${focus}/6 `);
+      if (skill.masteryFocusCost !== null) markdown.addButton(`[升级(SP${skill.masteryFocusCost})]`, { data: `/升级专精 ${skill.id} 随心`, autoEnter: false });
+      markdown.addNewline().addBlockquote('每提升一级，副手装备效果+10%。').addNewline().addNewline().addText(`当前技能点：${skill.skillPoints}`);
+      const buttons = Format.createButtonGroup().addRow().addButton('返回技能列表', '/技能列表 已学习', { type: 'command', autoEnter: true, style: 'blue' });
+      await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) });
+      return;
+    }
     if (skill.learned && skill.category !== 'passive') {
       const names = { overcharge: '过充', instant: '瞬息', efficient: '节能', potent: '强效' } as const;
       const descriptions = {
@@ -118,7 +138,7 @@ export const upgradeSkillHandler = async () => {
 
 export const upgradeSpecializationHandler = async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
-  const specialization = ({ 过充: 'overcharge', 瞬息: 'instant', 节能: 'efficient', 强效: 'potent' } as const)[String(route.param('specialization')) as '过充' | '瞬息' | '节能' | '强效'];
+  const specialization = ({ 过充: 'overcharge', 瞬息: 'instant', 节能: 'efficient', 强效: 'potent', 娴熟: 'overcharge', 随心: 'instant' } as const)[String(route.param('specialization')) as '过充' | '瞬息' | '节能' | '强效' | '娴熟' | '随心'];
   try { const result = await upgradeSkillSpecialization(event.current.UserId, Number(route.param('id')), specialization); await message.send({ format: messageFormat('技能升级', `「${result.name}」已提升至 Lv.${result.skillLevel}\n消耗 ${result.cost} 技能点。`) }); }
   catch (error) { await message.send({ format: messageFormat('升级失败', error instanceof Error ? error.message : '请稍后重试。') }); }
 };

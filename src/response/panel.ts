@@ -58,7 +58,7 @@ const travelPanel = (travel: NonNullable<Awaited<ReturnType<typeof travelStatus>
   const hunting = travel.activityType === 'hunt';
   return Format.create()
     .addMarkdown(Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText(`${hunting ? '正在寻怪' : `正在前往${travel.regionName}（${travel.x}, ${travel.y}）`}\n预计耗时${travel.seconds}s\n当前剩余${travel.remaining}s`))
-    .addButtonGroup(Format.createButtonGroup().addRow().addButton(hunting ? '取消寻怪' : '取消移动', hunting ? '/取消寻怪' : '/取消移动', { type: 'command', autoEnter: true, style: 'blue' }));
+    .addButtonGroup(Format.createButtonGroup().addRow().addButton('刷新', '/刷新行动', { type: 'command', autoEnter: true, style: 'blue' }).addButton(hunting ? '取消寻怪' : '取消移动', hunting ? '/取消寻怪' : '/取消移动', { type: 'command', autoEnter: true, style: 'blue' }));
 };
 
 export default async () => {

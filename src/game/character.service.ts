@@ -28,7 +28,7 @@ const distribute = (total: number, precision = 1) => {
   for (let remaining = units - attributes.length; remaining > 0; remaining--) values[randomInRange(0, values.length - 1)]++;
   return Object.fromEntries(attributes.map((key, index) => [key, values[index] * precision])) as Allocation;
 };
-const finalAttributes = (row: Record<string, unknown>) => Object.fromEntries(attributes.map(key => [key, Number(row[key] ?? 0) + Number(row[`${key}_growth`] ?? 0) * Math.max(0, Number(row.level ?? 1) - 1)])) as Allocation;
+const finalAttributes = (row: Record<string, unknown>) => Object.fromEntries(attributes.map(key => [key, Number(row[key] ?? 0) + Number(row[`${key}_growth`] ?? row[`${key}Growth`] ?? 0) * Math.max(0, Number(row.level ?? 1) - 1)])) as Allocation;
 
 export const recalculateCharacterStats = async (connection: PoolConnection, characterId: number) => {
   const [rows] = await connection.execute<(RowDataPacket & Record<string, unknown>)[]>('SELECT * FROM characters WHERE id=? FOR UPDATE', [characterId]);

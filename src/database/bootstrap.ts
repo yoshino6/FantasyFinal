@@ -24,7 +24,7 @@ const schemaStatements = [
   `CREATE TABLE IF NOT EXISTS characters (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, player_id BIGINT UNSIGNED NULL, npc_id BIGINT UNSIGNED NULL, npc_code VARCHAR(64) NULL, name VARCHAR(24) NOT NULL,
     gender VARCHAR(8) NOT NULL DEFAULT '未设定', free_name_change_used TINYINT(1) NOT NULL DEFAULT 0, free_gender_change_used TINYINT(1) NOT NULL DEFAULT 0,
-    level INT UNSIGNED NOT NULL DEFAULT 1, experience BIGINT UNSIGNED NOT NULL DEFAULT 0, skill_points INT UNSIGNED NOT NULL DEFAULT 1,
+    level INT UNSIGNED NOT NULL DEFAULT 1, experience BIGINT UNSIGNED NOT NULL DEFAULT 0, skill_points INT UNSIGNED NOT NULL DEFAULT 1, copper_coins BIGINT UNSIGNED NOT NULL DEFAULT 0,
     constitution SMALLINT UNSIGNED NOT NULL, spirit SMALLINT UNSIGNED NOT NULL, strength SMALLINT UNSIGNED NOT NULL,
     intelligence SMALLINT UNSIGNED NOT NULL, agility SMALLINT UNSIGNED NOT NULL, perception SMALLINT UNSIGNED NOT NULL,
     constitution_growth DECIMAL(4,1) NOT NULL DEFAULT 0, spirit_growth DECIMAL(4,1) NOT NULL DEFAULT 0, strength_growth DECIMAL(4,1) NOT NULL DEFAULT 0,
@@ -37,7 +37,7 @@ const schemaStatements = [
     crit_rate_bp INT UNSIGNED NOT NULL, crit_damage_bp INT UNSIGNED NOT NULL, crit_resist_bp INT UNSIGNED NOT NULL,
     crit_damage_reduction_bp INT UNSIGNED NOT NULL, tenacity INT UNSIGNED NOT NULL, speed INT UNSIGNED NOT NULL,
     element_mastery_json JSON NULL, element_resistance_json JSON NULL,
-    stat_formula_version SMALLINT UNSIGNED NOT NULL DEFAULT 1, current_region_id BIGINT UNSIGNED NOT NULL,
+    stat_formula_version SMALLINT UNSIGNED NOT NULL DEFAULT 2, current_region_id BIGINT UNSIGNED NOT NULL,
     pos_x INT NOT NULL, pos_y INT NOT NULL, pos_z INT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id), UNIQUE KEY uk_characters_player (player_id), UNIQUE KEY uk_characters_npc_id (npc_id), UNIQUE KEY uk_characters_npc_code (npc_code), KEY idx_character_position (current_region_id, pos_x, pos_y, pos_z),
@@ -103,6 +103,20 @@ const schemaStatements = [
   , `CREATE TABLE IF NOT EXISTS player_guild_chats (
     character_id BIGINT UNSIGNED NOT NULL, chat_count INT UNSIGNED NOT NULL DEFAULT 0,
     PRIMARY KEY (character_id), CONSTRAINT fk_guild_chat_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS bounty_notices (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, refresh_key CHAR(10) NOT NULL, title VARCHAR(96) NOT NULL, target_template_id BIGINT UNSIGNED NOT NULL,
+    required_count SMALLINT UNSIGNED NOT NULL, copper_reward INT UNSIGNED NOT NULL, is_active TINYINT(1) NOT NULL DEFAULT 1,
+    expires_at DATETIME NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id), UNIQUE KEY uk_bounty_refresh_target (refresh_key,target_template_id), KEY idx_bounty_active (is_active,expires_at)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_bounties (
+    character_id BIGINT UNSIGNED NOT NULL, bounty_id BIGINT UNSIGNED NOT NULL, progress SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    status ENUM('accepted','completed','claimed') NOT NULL DEFAULT 'accepted', accepted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at DATETIME NULL, claimed_at DATETIME NULL,
+    PRIMARY KEY (character_id,bounty_id), KEY idx_player_bounty_status (character_id,status),
+    CONSTRAINT fk_player_bounty_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
+    CONSTRAINT fk_player_bounty_notice FOREIGN KEY (bounty_id) REFERENCES bounty_notices(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_travels (
     character_id BIGINT UNSIGNED NOT NULL, region_id BIGINT UNSIGNED NOT NULL, target_x INT NOT NULL, target_y INT NOT NULL, target_z INT NOT NULL,
@@ -292,7 +306,7 @@ export const initializeSchema = async (pool: Pool) => {
   }
   await pool.query("ALTER TABLE registration_sessions MODIFY stage ENUM('story','audience','question','destination','danger','choice') NOT NULL DEFAULT 'story'");
   await pool.query("ALTER TABLE player_story_progress MODIFY COLUMN status ENUM('met','joined','declined','awaiting_arrival','arrival_story','guild_story','completed') NOT NULL DEFAULT 'met'");
-  for (const column of ["adventurer_rank ENUM('F','E','D','C','B','A','S','SS','SSS') NOT NULL DEFAULT 'F'", 'profession_code VARCHAR(32) NULL']) {
+  for (const column of ["adventurer_rank ENUM('F','E','D','C','B','A','S','SS','SSS') NOT NULL DEFAULT 'F'", 'profession_code VARCHAR(32) NULL', 'copper_coins BIGINT UNSIGNED NOT NULL DEFAULT 0']) {
     try { await pool.query(`ALTER TABLE characters ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }
   for (const column of ['element_mastery_json JSON NULL', 'element_resistance_json JSON NULL']) {
@@ -447,17 +461,21 @@ export const initializeSchema = async (pool: Pool) => {
   await pool.query(`UPDATE skill_definitions SET skill_kind=CASE category WHEN 'physical' THEN CASE damage_type WHEN '斩击' THEN '斩击' WHEN '刺击' THEN '刺击' ELSE '打击' END WHEN 'magic' THEN CASE WHEN damage_type IN ('水','火','土','木','风','冰','雷','光','暗') THEN '元素' WHEN damage_type='奥术' THEN '能量' ELSE '灵异' END WHEN 'utility' THEN '辅助' WHEN 'passive' THEN '被动' ELSE skill_kind END, element=CASE WHEN category='magic' AND damage_type IN ('水','火','土','木','风','冰','雷','光','暗') THEN damage_type ELSE '无' END, range_type=CASE WHEN category='physical' THEN '近战' WHEN category='magic' THEN '远程' WHEN category='utility' THEN '全体' WHEN category='passive' THEN '自身' ELSE range_type END`);
   await pool.query(`UPDATE skill_definitions SET category='magic',damage_type=CASE code WHEN 'vine_hex' THEN '木' WHEN 'vine_bolt' THEN '木' WHEN 'moonbolt' THEN '暗' WHEN 'moonlight_bolt' THEN '暗' END,skill_kind='元素',element=CASE code WHEN 'vine_hex' THEN '木' WHEN 'vine_bolt' THEN '木' WHEN 'moonbolt' THEN '暗' WHEN 'moonlight_bolt' THEN '暗' END,range_type='远程',learn_cost=CASE WHEN code IN ('vine_bolt','moonlight_bolt') THEN 1 ELSE 99 END,upgrade_cost=CASE WHEN code IN ('vine_bolt','moonlight_bolt') THEN 1 ELSE 99 END,max_level=CASE WHEN code IN ('vine_hex','moonbolt') THEN 1 ELSE 5 END,power_per_level=CASE WHEN code IN ('vine_hex','moonbolt') THEN 0 ELSE 15 END WHERE code IN ('vine_hex','vine_bolt','moonbolt','moonlight_bolt')`);
   await pool.query(`INSERT INTO skill_definitions (code,name,category,damage_type,skill_kind,element,range_type,mana_cost,cooldown_turns,power,learn_cost,upgrade_cost,max_level,power_per_level,description,passive_effect_json) VALUES
-    ('longsword_mastery','长剑精通','passive','无','精通','无','自身',0,0,0,99,99,1,0,'装备长剑类武器时物攻提高25%，副手装备时效果减半。',JSON_OBJECT('weaponType','长剑','physicalAttackPct',25)),
-    ('shield_mastery','盾牌精通','passive','无','精通','无','自身',0,0,0,99,99,1,0,'装备盾牌类武器时双防提高25%，副手装备时效果减半。',JSON_OBJECT('weaponType','盾牌','physicalDefensePct',25,'magicDefensePct',25)),
-    ('staff_mastery','法杖精通','passive','无','精通','无','自身',0,0,0,99,99,1,0,'装备法杖类武器时魔攻提高25%，副手装备时效果减半。',JSON_OBJECT('weaponType','法杖','magicAttackPct',25)),
-    ('spellbook_mastery','法书精通','passive','无','精通','无','自身',0,0,0,99,99,1,0,'装备法书类武器时吟唱速度提高70%，副手装备时效果减半。',JSON_OBJECT('weaponType','法书','chantSpeedPct',70)),
-    ('orb_mastery','法球精通','passive','无','精通','无','自身',0,0,0,99,99,1,0,'装备法球类武器时魔力上限提高70%，副手装备时效果减半。',JSON_OBJECT('weaponType','法球','mpPct',70)),
-    ('dagger_mastery','匕首精通','passive','无','精通','无','自身',0,0,0,99,99,1,0,'装备匕首类武器时双攻提高20%，副手装备时效果减半。',JSON_OBJECT('weaponType','匕首','physicalAttackPct',20,'magicAttackPct',20)),
-    ('fistblade_mastery','拳刃精通','passive','无','精通','无','自身',0,0,0,99,99,1,0,'装备拳刃类武器时暴击、暴伤提高25%，副手装备时效果减半。',JSON_OBJECT('weaponType','拳刃','critRatePct',25,'critDamagePct',25))
-    ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),passive_effect_json=VALUES(passive_effect_json)`);
+    ('longsword_mastery','长剑精通','passive','无','精通','无','自身',0,0,0,99,99,10,0,'装备长剑类武器时物攻提高5%至25%，副手装备时可减免衰减。',JSON_OBJECT('weaponType','长剑','physicalAttackPct',5)),
+    ('shield_mastery','盾牌精通','passive','无','精通','无','自身',0,0,0,99,99,10,0,'装备盾牌类武器时双防提高5%至25%，副手装备时可减免衰减。',JSON_OBJECT('weaponType','盾牌','physicalDefensePct',5,'magicDefensePct',5)),
+    ('staff_mastery','法杖精通','passive','无','精通','无','自身',0,0,0,99,99,10,0,'装备法杖类武器时魔攻提高5%至25%，副手装备时可减免衰减。',JSON_OBJECT('weaponType','法杖','magicAttackPct',5)),
+    ('spellbook_mastery','法书精通','passive','无','精通','无','自身',0,0,0,99,99,10,0,'装备法书类武器时吟唱速度提高14%至70%，副手装备时可减免衰减。',JSON_OBJECT('weaponType','法书','chantSpeedPct',14)),
+    ('orb_mastery','法球精通','passive','无','精通','无','自身',0,0,0,99,99,10,0,'装备法球类武器时魔力上限提高14%至70%，副手装备时可减免衰减。',JSON_OBJECT('weaponType','法球','mpPct',14)),
+    ('dagger_mastery','匕首精通','passive','无','精通','无','自身',0,0,0,99,99,10,0,'装备匕首类武器时双攻提高4%至20%，副手装备时可减免衰减。',JSON_OBJECT('weaponType','匕首','physicalAttackPct',4,'magicAttackPct',4)),
+    ('fistblade_mastery','拳刃精通','passive','无','精通','无','自身',0,0,0,99,99,10,0,'装备拳刃类武器时暴击、暴伤提高5%至25%，副手装备时可减免衰减。',JSON_OBJECT('weaponType','拳刃','critRatePct',5,'critDamagePct',5))
+    ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),max_level=VALUES(max_level),passive_effect_json=VALUES(passive_effect_json)`);
   await pool.query(`DELETE ps FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE s.code IN ('sword_shield_mastery','warrior_counter','warrior_taunt_player','shield_bash_player','arcane_mastery','fire_lance','frost_barrier','shadow_step','backstab','smoke_screen','holy_prayer','healing_light','blessing_hymn')`);
   await pool.query(`INSERT IGNORE INTO player_skills (character_id,skill_id)
     SELECT c.id,s.id FROM characters c JOIN profession_definitions p ON p.code=c.profession_code JOIN skill_definitions s ON JSON_CONTAINS(p.skill_codes_json,JSON_QUOTE(s.code))`);
+  await pool.query(`INSERT IGNORE INTO player_skill_specializations (character_id,skill_id,specialization)
+    SELECT ps.character_id,ps.skill_id,'overcharge' FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE s.code IN ('longsword_mastery','shield_mastery','staff_mastery','spellbook_mastery','orb_mastery','dagger_mastery','fistblade_mastery')`);
+  await pool.query(`INSERT IGNORE INTO player_skill_specializations (character_id,skill_id,specialization)
+    SELECT ps.character_id,ps.skill_id,'instant' FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE s.code IN ('longsword_mastery','shield_mastery','staff_mastery','spellbook_mastery','orb_mastery','dagger_mastery','fistblade_mastery')`);
   await pool.query(`UPDATE skill_definitions SET damage_type=CASE code WHEN 'arcane_bolt' THEN '奥术' WHEN 'heavy_strike' THEN '打击' WHEN 'armor_break' THEN '斩击' WHEN 'fireball' THEN '火' WHEN 'toxic_edge' THEN '刺击' WHEN 'purifying_light' THEN '光' WHEN 'frost_bind' THEN '冰' WHEN 'bloodletting' THEN '斩击' WHEN 'hop' THEN '打击' WHEN 'jump_strike' THEN '打击' WHEN 'charge' THEN '刺击' WHEN 'bite' THEN '斩击' WHEN 'bite_slash' THEN '斩击' WHEN 'howl' THEN '暗' WHEN 'war_cry' THEN '暗' WHEN 'scratch' THEN '斩击' WHEN 'shell_bash' THEN '打击' WHEN 'shell_breaker' THEN '打击' WHEN 'spore_dart' THEN '木' WHEN 'spore_bolt' THEN '木' WHEN 'sonic_screech' THEN '暗' WHEN 'echo_shock' THEN '暗' WHEN 'thorn_shot' THEN '刺击' WHEN 'thorn_stab' THEN '刺击' WHEN 'mist_pounce' THEN '斩击' WHEN 'mist_step_slash' THEN '斩击' WHEN 'constrict' THEN '打击' WHEN 'maul' THEN '斩击' WHEN 'goblin_slash' THEN '斩击' WHEN 'goblin_fire' THEN '火' WHEN 'slime_bash' THEN '打击' WHEN 'acid_spray' THEN '水' WHEN 'regenerate_slime' THEN '木' WHEN 'guard_break' THEN '打击' WHEN 'warrior_taunt' THEN '打击' WHEN 'shield_counter' THEN '打击' WHEN 'arcane_shackle' THEN '奥术' WHEN 'ember_burst' THEN '火' WHEN 'healing_prayer' THEN '光' WHEN 'blessing_aegis' THEN '光' WHEN 'sanctified_bolt' THEN '光' ELSE damage_type END`);
   await pool.query(`UPDATE skill_definitions SET skill_kind=CASE category WHEN 'physical' THEN CASE damage_type WHEN '斩击' THEN '斩击' WHEN '刺击' THEN '刺击' ELSE '打击' END WHEN 'magic' THEN CASE WHEN damage_type IN ('水','火','土','木','风','冰','雷','光','暗') THEN '元素' WHEN damage_type='奥术' THEN '能量' ELSE '灵异' END WHEN 'utility' THEN '辅助' WHEN 'passive' THEN '被动' ELSE skill_kind END, element=CASE WHEN category='magic' AND damage_type IN ('水','火','土','木','风','冰','雷','光','暗') THEN damage_type ELSE '无' END, range_type=CASE WHEN category='physical' THEN '近战' WHEN category='magic' THEN '远程' WHEN category='utility' THEN '全体' WHEN category='passive' THEN '自身' ELSE range_type END`);
   await pool.query(`UPDATE characters SET element_mastery_json=COALESCE(element_mastery_json,JSON_OBJECT('水',0,'火',0,'土',0,'木',0,'风',0,'冰',0,'雷',0,'光',0,'暗',0)),element_resistance_json=COALESCE(element_resistance_json,JSON_OBJECT('水',0,'火',0,'土',0,'木',0,'风',0,'冰',0,'雷',0,'光',0,'暗',0))`);
@@ -649,11 +667,13 @@ export const initializeSchema = async (pool: Pool) => {
   await pool.query(`INSERT IGNORE INTO player_inventory (character_id, item_id, quantity)
     SELECT c.id, i.id, 3 FROM characters c JOIN item_definitions i ON i.code='healing_herb'`);
   await pool.query(`INSERT INTO characters (player_id,npc_id,npc_code,name,gender,level,experience,skill_points,constitution,spirit,strength,intelligence,agility,perception,constitution_growth,spirit_growth,strength_growth,intelligence_growth,agility_growth,perception_growth,adventurer_registered,hp_max,mp_max,current_hp,current_mp,physical_attack,magic_attack,physical_defense,magic_defense,accuracy,evasion,crit_rate_bp,crit_damage_bp,crit_resist_bp,crit_damage_reduction_bp,tenacity,speed,current_region_id,pos_x,pos_y,pos_z)
-    SELECT NULL, v.npc_id, v.code, v.name, '未设定', 10, 900, 0, v.constitution,v.spirit,v.strength,v.intelligence,v.agility,v.perception, 0,0,0,0,0,0, 1, v.hp,v.mp,v.hp,v.mp,v.patk,v.matk,v.pdef,v.mdef,v.accuracy,v.evasion,500,15000,300,500,0,v.speed,(SELECT id FROM map_regions WHERE code='dark_forest'),0,-60,0
-    FROM (SELECT 900000001 AS npc_id,'npc_forest_warrior' AS code,'莱昂' AS name,50 AS constitution,20 AS spirit,52 AS strength,12 AS intelligence,28 AS agility,24 AS perception,1150 AS hp,520 AS mp,170 AS patk,55 AS matk,145 AS pdef,85 AS mdef,110 AS accuracy,72 AS evasion,86 AS speed
-      UNION ALL SELECT 900000002,'npc_forest_mage','伊芙',24,52,12,55,30,34,820,1150,55,185,78,120,116,82,94
-      UNION ALL SELECT 900000003,'npc_forest_priest','希娅',38,55,18,38,25,32,1040,1100,72,145,115,145,105,78,82) v
-    ON DUPLICATE KEY UPDATE name=VALUES(name),npc_id=VALUES(npc_id),level=VALUES(level),hp_max=VALUES(hp_max),mp_max=VALUES(mp_max),current_hp=VALUES(current_hp),current_mp=VALUES(current_mp),physical_attack=VALUES(physical_attack),magic_attack=VALUES(magic_attack),physical_defense=VALUES(physical_defense),magic_defense=VALUES(magic_defense),accuracy=VALUES(accuracy),evasion=VALUES(evasion),speed=VALUES(speed)`);
+    SELECT NULL, v.npc_id, v.code, v.name, '未设定', 10, 900, 0, v.constitution,v.spirit,v.strength,v.intelligence,v.agility,v.perception, 0,0,0,0,0,0, 1, v.hp,v.mp,v.hp,v.mp,v.patk,v.matk,v.pdef,v.mdef,v.accuracy,v.evasion,100,3000,60,100,0,v.speed,(SELECT id FROM map_regions WHERE code='dark_forest'),0,-60,0
+    FROM (SELECT 900000001 AS npc_id,'npc_forest_warrior' AS code,'莱昂' AS name,50 AS constitution,20 AS spirit,52 AS strength,12 AS intelligence,28 AS agility,24 AS perception,1150 AS hp,520 AS mp,170 AS patk,55 AS matk,145 AS pdef,85 AS mdef,22 AS accuracy,14 AS evasion,86 AS speed
+      UNION ALL SELECT 900000002,'npc_forest_mage','伊芙',24,52,12,55,30,34,820,1150,55,185,78,120,23,16,94
+      UNION ALL SELECT 900000003,'npc_forest_priest','希娅',38,55,18,38,25,32,1040,1100,72,145,115,145,21,16,82) v
+    ON DUPLICATE KEY UPDATE name=VALUES(name),npc_id=VALUES(npc_id),level=VALUES(level),hp_max=VALUES(hp_max),mp_max=VALUES(mp_max),current_hp=VALUES(current_hp),current_mp=VALUES(current_mp),physical_attack=VALUES(physical_attack),magic_attack=VALUES(magic_attack),physical_defense=VALUES(physical_defense),magic_defense=VALUES(magic_defense),accuracy=VALUES(accuracy),evasion=VALUES(evasion),crit_rate_bp=VALUES(crit_rate_bp),crit_damage_bp=VALUES(crit_damage_bp),crit_resist_bp=VALUES(crit_resist_bp),crit_damage_reduction_bp=VALUES(crit_damage_reduction_bp),speed=VALUES(speed),stat_formula_version=2`);
+  await pool.query('ALTER TABLE characters ALTER stat_formula_version SET DEFAULT 2');
+  await pool.query('UPDATE characters SET accuracy=GREATEST(1,ROUND(accuracy/5)),evasion=GREATEST(1,ROUND(evasion/5)),crit_rate_bp=GREATEST(1,ROUND(crit_rate_bp/5)),crit_damage_bp=GREATEST(1,ROUND(crit_damage_bp/5)),crit_resist_bp=GREATEST(1,ROUND(crit_resist_bp/5)),crit_damage_reduction_bp=GREATEST(1,ROUND(crit_damage_reduction_bp/5)),stat_formula_version=2 WHERE stat_formula_version<2');
   await pool.query(`INSERT IGNORE INTO player_skills (character_id,skill_id,quick_slot)
     SELECT c.id,s.id,v.slot FROM characters c JOIN (
       SELECT 'npc_forest_warrior' AS code,'warrior_taunt' AS skill_code,1 AS slot UNION ALL SELECT 'npc_forest_warrior','shield_counter',2 UNION ALL SELECT 'npc_forest_warrior','guard_break',3

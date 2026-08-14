@@ -1,6 +1,6 @@
 import { Format, logger, useEvent, useMessage, useRoute } from 'alemonjs';
 import { readFile } from 'node:fs/promises';
-import { battleStatus, cancelTravel, combatAction, chooseTarget, completeTravel, continueForestArrival, currentEncounter, encounterAction, explore, forestGuideAdvance, forestGuideChoice, huntMonster, inventory, move, moveTo, nearbyPoints, switchCombatTarget, talkToNpc, type VictorySettlement } from '../game/adventure.service';
+import { battleStatus, cancelTravel, combatAction, chooseTarget, completeTravel, continueForestArrival, currentEncounter, encounterAction, explore, forestGuideAdvance, forestGuideChoice, huntMonster, inventory, move, moveTo, nearbyPoints, switchCombatTarget, talkToNpc, travelStatus, type VictorySettlement } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
 import { currentLocationText, movedLocationText, outsidePanel, panelButtons } from './panel';
 import pearGuideImage from '../assets/game/story/pear-guide.png';
@@ -124,7 +124,7 @@ const travelFormat = (title: string, regionName: string, x: number, y: number, t
   const hunting = activityType === 'hunt';
   return Format.create()
     .addMarkdown(Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText(`${hunting ? title : `${title}${regionName}（${x}, ${y}）`}\n预计耗时${total}s\n当前剩余${remaining}s`))
-    .addButtonGroup(Format.createButtonGroup().addRow().addButton(hunting ? '取消寻怪' : '取消移动', hunting ? '/取消寻怪' : '/取消移动', { type: 'command', autoEnter: true, style: 'blue' }));
+    .addButtonGroup(Format.createButtonGroup().addRow().addButton('刷新', '/刷新行动', { type: 'command', autoEnter: true, style: 'blue' }).addButton(hunting ? '取消寻怪' : '取消移动', hunting ? '/取消寻怪' : '/取消移动', { type: 'command', autoEnter: true, style: 'blue' }));
 };
 const travelTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const scheduleTravelCompletion = (message: any, qqUserId: string, seconds: number) => {
@@ -150,11 +150,11 @@ const guildInteriorFormat = (area = '大厅') => {
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 
-const professionDetails: Record<string, { name: string; blessing: string; skills: string }> = {
-  warrior: { name: '战士', blessing: '体质成长+2，力量成长+2', skills: '【长剑精通】（被动）装备长剑类武器时，物攻+25%。副手装备时效果减半。\n【盾牌精通】（被动）装备盾牌类武器时，双防+25%。副手装备时效果减半。' },
-  mage: { name: '法师', blessing: '精神成长+2，智力成长+2', skills: '【法杖精通】（被动）装备法杖类武器时，魔攻+25%。副手装备时效果减半。\n【法书精通】（被动）装备法书类武器时，吟唱速度+70%。副手装备时效果减半。' },
-  priest: { name: '牧师', blessing: '体质成长+2，精神成长+2', skills: '【法书精通】（被动）装备法书类武器时，吟唱速度+70%。副手装备时效果减半。\n【法球精通】（被动）装备法球类武器时，魔力上限+70%。副手装备时效果减半。' },
-  rogue: { name: '盗贼', blessing: '敏捷成长+2，感知成长+2', skills: '【匕首精通】（被动）装备匕首类武器时，双攻+20%。副手装备时效果减半。\n【拳刃精通】（被动）装备拳刃类武器时，暴击+25%，暴伤+25%。副手装备时效果减半。' }
+const professionDetails: Record<string, { name: string; blessing: string; skills: { name: string; description: string }[] }> = {
+  warrior: { name: '战士', blessing: '体质成长+2，力量成长+2', skills: [{ name: '长剑精通', description: '（被动）装备长剑类武器时，物攻+(5/25)%。副手装备时效果(减半/无衰减)。' }, { name: '盾牌精通', description: '（被动）装备盾牌类武器时，双防+(5/25)%。副手装备时效果(减半/无衰减)。' }] },
+  mage: { name: '法师', blessing: '精神成长+2，智力成长+2', skills: [{ name: '法杖精通', description: '（被动）装备法杖类武器时，魔攻+(5/25)%。副手装备时效果(减半/无衰减)。' }, { name: '法书精通', description: '（被动）装备法书类武器时，吟唱速度+(14/70)%。副手装备时效果(减半/无衰减)。' }] },
+  priest: { name: '牧师', blessing: '体质成长+2，精神成长+2', skills: [{ name: '法书精通', description: '（被动）装备法书类武器时，吟唱速度+(14/70)%。副手装备时效果(减半/无衰减)。' }, { name: '法球精通', description: '（被动）装备法球类武器时，魔力上限+(14/70)%。副手装备时效果(减半/无衰减)。' }] },
+  rogue: { name: '盗贼', blessing: '敏捷成长+2，感知成长+2', skills: [{ name: '匕首精通', description: '（被动）装备匕首类武器时，双攻+(4/20)%。副手装备时效果(减半/无衰减)。' }, { name: '拳刃精通', description: '（被动）装备拳刃类武器时，暴击、暴伤+(5/25)%。副手装备时效果(减半/无衰减)。' }] }
 };
 const professionCodeByName: Record<string, string> = { 战士: 'warrior', 法师: 'mage', 盗贼: 'rogue', 牧师: 'priest' };
 const guildChatTopics = [
@@ -186,7 +186,8 @@ const professionSelectFormat = async (qqUserId: string) => {
 };
 const professionDetailFormat = async (qqUserId: string, name: string) => {
   const profile = await adventurerProfile(qqUserId); const code = professionCodeByName[name]; const detail = professionDetails[code]; if (!detail) throw new Error('未知职业。');
-  const markdown = Format.createMarkdown().addTitle(`职业·${detail.name}`).addNewline().addNewline().addText(`①职业赐福：${detail.blessing}\n②职业技能：\n${detail.skills}`);
+  const markdown = Format.createMarkdown().addTitle(`职业·${detail.name}`).addNewline().addNewline().addText(`①职业赐福：${detail.blessing}\n②职业技能：\n`);
+  detail.skills.forEach(skill => markdown.addText(`【${skill.name}】\n`).addBlockquote(skill.description).addNewline().addNewline());
   const buttons = Format.createButtonGroup().addRow();
   if (!profile.profession_code) buttons.addButton(`选择 ${detail.name}`, `/选择职业 ${detail.name}`, { type: 'command', autoEnter: true, style: 'blue' });
   buttons.addButton('返回职业选择', '/职业选择', { type: 'command', autoEnter: true });
@@ -244,7 +245,7 @@ export const buildingHandler = (action: 'enter' | 'ignore' | 'leave' | 'area') =
     const code = String(route.param('code'));
     if (code !== 'guild_counter') throw new Error('这座建筑暂未开放。');
     if (action === 'enter') { await message.send({ format: guildInteriorFormat() }); return; }
-    if (action === 'area') { const area = String(route.param('area')); await message.send({ format: area === '前台' ? await guildFrontDeskFormat(event.current.UserId) : guildInteriorFormat(area) }); return; }
+    if (action === 'area') { const area = String(route.param('area')); if (area === '悬赏板') { const { bountyBoardFormat } = await import('./bounty'); await message.send({ format: await bountyBoardFormat(event.current.UserId) }); return; } await message.send({ format: area === '前台' ? await guildFrontDeskFormat(event.current.UserId) : guildInteriorFormat(area) }); return; }
     const panel = await movementPanel(event.current.UserId, action === 'leave' ? '你离开了冒险者公会，回到门前的石板街。' : '你暂时没有进入冒险者公会。');
     const nearby = await nearbyPoints(event.current.UserId);
     await message.send({ format: panel.addButtonGroup(panelButtons(nearby.character.activity_status !== 'active')) });
@@ -260,6 +261,7 @@ export const moveHandler = async () => { const [event] = useEvent(); const [rout
 export const goToHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const result = await moveTo(event.current.UserId, Number(route.param('x')), Number(route.param('y'))); if (result.kind === 'travel') { await message.send({ format: travelFormat('开始前往', result.regionName, result.x, result.y, result.seconds, result.remaining) }); scheduleTravelCompletion(message, event.current.UserId, result.remaining); return; } await showMoveResult(message, event.current.UserId, result); } catch (error) { if (error instanceof Error && error.message.includes('当前格子存在敌对生物') && await showBlockedEncounter(message, event.current.UserId)) return; await fail(message, error, '无法前往该位置'); } };
 export const huntHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await huntMonster(event.current.UserId); await message.send({ format: travelFormat('开始寻怪……', result.regionName, result.x, result.y, result.seconds, result.remaining, 'hunt') }); scheduleTravelCompletion(message, event.current.UserId, result.remaining); } catch (error) { await fail(message, error, '无法寻怪'); } };
 export const cancelTravelHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const cancelled = await cancelTravel(event.current.UserId); const timer = travelTimers.get(event.current.UserId); if (timer) clearTimeout(timer); travelTimers.delete(event.current.UserId); const [bag, nearby] = await Promise.all([inventory(event.current.UserId), nearbyPoints(event.current.UserId)]); const character = cancelled.character; const cancellationText = cancelled.activityType === 'hunt' ? '寻怪已取消' : '移动已取消'; const panel = outsidePanel('行动', `${cancellationText}\n${currentLocationText(character)}`, bag.movementSpeed, nearby.range, Number(character.pos_x), Number(character.pos_y), nearby.description, nearby.points, nearby.character.activity_status !== 'active', nearby.landmarks); await message.send({ format: panel.addButtonGroup(panelButtons(nearby.character.activity_status !== 'active')) }); } catch (error) { await fail(message, error, '取消行动失败'); } };
+export const refreshTravelHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const travel = await travelStatus(event.current.UserId); if (!travel) throw new Error('当前没有进行中的移动或寻怪。'); if (travel.remaining <= 0) { const result = await completeTravel(event.current.UserId); if (!result) throw new Error('当前没有进行中的移动或寻怪。'); await showMoveResult(message, event.current.UserId, result); return; } await message.send({ format: travelFormat(travel.activityType === 'hunt' ? '正在寻怪' : '正在前往', travel.regionName, travel.x, travel.y, travel.seconds, travel.remaining, travel.activityType) }); } catch (error) { await fail(message, error, '刷新行动失败'); } };
 export const targetHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await chooseTarget(event.current.UserId, Number(route.param('id'))); const battle = await battleStatus(event.current.UserId); await message.send({ format: battleStartFormat(`遭遇 ${battle.targets.map(target => `[${target.name}]`).join('、')}！`, battle) }); } catch (error) { await fail(message, error, '无法锁定目标'); } };
 export const ambushHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await chooseTarget(event.current.UserId, Number(route.param('id')), true); const battle = await battleStatus(event.current.UserId); await message.send({ format: ambushStartFormat(battle) }); } catch (error) { await fail(message, error, '无法发动偷袭'); } };
 export const forestGuideHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const progress = await forestGuideAdvance(event.current.UserId, String(route.param('action'))); if (!progress.battleChoice) { await message.send({ format: chapterFormat(progress.stage, progress.text) }); return; } await message.send({ format: chapterFormat(5, progress.text) }); const result = await forestGuideChoice(event.current.UserId, progress.battleChoice); await chooseTarget(event.current.UserId, result.spawnId); const battle = await battleStatus(event.current.UserId); await message.send({ format: battleStartFormat(result.text, battle) }); } catch (error) { await fail(message, error, '初章推进失败'); } };

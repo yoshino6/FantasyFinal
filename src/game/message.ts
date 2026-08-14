@@ -1,6 +1,5 @@
 import { Format, ResultCode } from 'alemonjs';
-import { attributeNames, gifts, type GiftCategory } from './constants';
-import { attributes, type Allocation, type DerivedStats, type Growth } from './types';
+import { gifts, type GiftCategory } from './constants';
 
 type MessageSender = {
   send: (params?: any) => Promise<Array<{ code: number }>>;
@@ -80,6 +79,3 @@ export const giftFormat = (category: GiftCategory = 'artifact') => {
     .addButton('神器', '/恩赐列表 神器', { type: 'command', autoEnter: true, style: category === 'artifact' ? 'blue' : undefined })
     .addButton('神技', '/恩赐列表 能力', { type: 'command', autoEnter: true, style: category === 'ability' ? 'blue' : undefined }));
 };
-
-export const characterText = (allocation: Allocation, stats: DerivedStats, growth: Growth, region: string, x: number, y: number, z: number, elementMastery: Record<string, number> = {}, elementResistance: Record<string, number> = {}) =>
-  `六维属性\n${attributes.map(key => `${attributeNames[key]} ${allocation[key]}`).join('｜')}\n\n战斗属性\n生命 ${Math.round(stats.hpMax)}｜魔力 ${Math.round(stats.mpMax)}\n物攻 ${Math.round(stats.physicalAttack)}｜魔攻 ${Math.round(stats.magicAttack)}\n物防 ${Math.round(stats.physicalDefense)}｜魔防 ${Math.round(stats.magicDefense)}\n命中 ${Math.round(stats.accuracy)}｜闪避 ${Math.round(stats.evasion)}｜暴击 ${Math.round(stats.critRateBp)}\n爆伤 ${Math.round(stats.critDamageBp)}｜爆免 ${Math.round(stats.critDamageReductionBp)}｜爆抗 ${Math.round(stats.critResistBp)}\n韧性 ${Math.round(stats.tenacity)}｜速度 ${Math.round(stats.speed)}\n\n元素精通\n${Object.entries(elementMastery).map(([element, value]) => `${element}${value >= 0 ? '+' : ''}${value}`).join('｜')}\n元素抗性\n${Object.entries(elementResistance).map(([element, value]) => `${element}${value >= 0 ? '+' : ''}${value}`).join('｜')}\n\n当前位置\n${region} (${x}, ${y}, ${z})`;

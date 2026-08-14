@@ -20,12 +20,12 @@ export const calculateDerivedStats = (value: Allocation): DerivedStats => ({
   magicAttack: 8 + value.intelligence * 2 + value.spirit + value.perception * 0.5 + value.agility * 0.4 + value.constitution * 0.2 + value.strength * 0.2,
   physicalDefense: 8 + value.constitution * 2 + value.strength + value.agility * 0.5 + value.perception * 0.25 + value.spirit * 0.25 + value.intelligence * 0.25,
   magicDefense: 8 + value.spirit * 2 + value.intelligence + value.perception * 0.5 + value.agility * 0.4 + value.constitution * 0.2 + value.strength * 0.2,
-  accuracy: 100 + value.agility * 20 + value.perception * 8 + value.intelligence * 4 + value.strength * 2 + value.constitution * 2 + value.spirit * 2,
-  evasion: 100 + value.agility * 20 + value.perception * 8 + value.intelligence * 4 + value.strength * 2 + value.constitution * 2 + value.spirit * 2,
-  critRateBp: 100 + value.perception * 20 + value.agility * 8 + value.intelligence * 4 + value.strength * 2 + value.constitution * 2 + value.spirit * 2,
-  critDamageBp: 100 + value.perception * 20 + value.strength * 8 + value.intelligence * 4 + value.agility * 2 + value.constitution * 2 + value.spirit * 2,
-  critResistBp: 100 + value.constitution * 20 + value.perception * 8 + value.spirit * 4 + value.strength * 2 + value.intelligence * 2 + value.agility * 2,
-  critDamageReductionBp: 100 + value.spirit * 20 + value.perception * 8 + value.constitution * 4 + value.intelligence * 2 + value.strength * 2 + value.agility * 2,
+  accuracy: (100 + value.agility * 20 + value.perception * 8 + value.intelligence * 4 + value.strength * 2 + value.constitution * 2 + value.spirit * 2) / 5,
+  evasion: (100 + value.agility * 20 + value.perception * 8 + value.intelligence * 4 + value.strength * 2 + value.constitution * 2 + value.spirit * 2) / 5,
+  critRateBp: (100 + value.perception * 20 + value.agility * 8 + value.intelligence * 4 + value.strength * 2 + value.constitution * 2 + value.spirit * 2) / 5,
+  critDamageBp: (100 + value.perception * 20 + value.strength * 8 + value.intelligence * 4 + value.agility * 2 + value.constitution * 2 + value.spirit * 2) / 5,
+  critResistBp: (100 + value.constitution * 20 + value.perception * 8 + value.spirit * 4 + value.strength * 2 + value.intelligence * 2 + value.agility * 2) / 5,
+  critDamageReductionBp: (100 + value.spirit * 20 + value.perception * 8 + value.constitution * 4 + value.intelligence * 2 + value.strength * 2 + value.agility * 2) / 5,
   tenacity: value.constitution * 4 + value.spirit * 3 + value.perception,
   speed: 100 + value.agility * 8
 });
