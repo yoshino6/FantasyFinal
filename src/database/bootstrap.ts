@@ -106,6 +106,7 @@ const schemaStatements = [
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_travels (
     character_id BIGINT UNSIGNED NOT NULL, region_id BIGINT UNSIGNED NOT NULL, target_x INT NOT NULL, target_y INT NOT NULL, target_z INT NOT NULL,
+    activity_type ENUM('move','hunt') NOT NULL DEFAULT 'move',
     started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, arrival_at DATETIME NOT NULL,
     PRIMARY KEY (character_id), CONSTRAINT fk_travel_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
     CONSTRAINT fk_travel_region FOREIGN KEY (region_id) REFERENCES map_regions(id) ON DELETE CASCADE
@@ -268,6 +269,7 @@ export const initializeSchema = async (pool: Pool) => {
   try { await pool.query('ALTER TABLE combat_sessions DROP INDEX uk_active_character'); } catch (error: any) { if (error?.code !== 'ER_CANT_DROP_FIELD_OR_KEY') throw error; }
   try { await pool.query('ALTER TABLE combat_sessions ADD KEY idx_combat_character_state (character_id, state)'); } catch (error: any) { if (error?.code !== 'ER_DUP_KEYNAME') throw error; }
   try { await pool.query('ALTER TABLE combat_sessions ADD COLUMN opening_damage_bonus DECIMAL(4,2) NOT NULL DEFAULT 0'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  try { await pool.query("ALTER TABLE player_travels ADD COLUMN activity_type ENUM('move','hunt') NOT NULL DEFAULT 'move'"); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   try { await pool.query('ALTER TABLE monster_spawns ADD KEY idx_spawn_active_region (region_id, defeated_at)'); } catch (error: any) { if (error?.code !== 'ER_DUP_KEYNAME') throw error; }
   for (const column of ['skill_sequence JSON NULL', 'traits_json JSON NULL', 'level INT UNSIGNED NULL', 'constitution SMALLINT UNSIGNED NULL', 'spirit SMALLINT UNSIGNED NULL', 'strength SMALLINT UNSIGNED NULL', 'intelligence SMALLINT UNSIGNED NULL', 'agility SMALLINT UNSIGNED NULL', 'perception SMALLINT UNSIGNED NULL']) {
     try { await pool.query(`ALTER TABLE monster_spawns ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }

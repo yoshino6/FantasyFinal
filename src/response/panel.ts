@@ -42,7 +42,7 @@ export const panelButtons = (resting = false) => Format.createButtonGroup()
     .addRow().addButton('装备', '/装备', { type: 'command', autoEnter: true }).addButton('上', '/移动 上', { type: 'command', autoEnter: true, style: resting ? undefined : 'blue' }).addButton('背包', '/背包', { type: 'command', autoEnter: true })
     .addRow().addButton('左', '/移动 左', { type: 'command', autoEnter: true, style: resting ? undefined : 'blue' }).addButton('角色', '/角色', { type: 'command', autoEnter: true }).addButton('右', '/移动 右', { type: 'command', autoEnter: true, style: resting ? undefined : 'blue' })
     .addRow().addButton('技能', '/技能列表', { type: 'command', autoEnter: true }).addButton('下', '/移动 下', { type: 'command', autoEnter: true, style: resting ? undefined : 'blue' }).addButton('队伍', '/队伍', { type: 'command', autoEnter: true })
-    .addRow().addButton(resting ? '行动' : '休息', resting ? '/行动' : '/休息', { type: 'command', autoEnter: true, style: 'blue' }).addButton('菜单', '/菜单', { type: 'command', autoEnter: true, style: 'blue' });
+    .addRow().addButton(resting ? '行动' : '休息', resting ? '/行动' : '/休息', { type: 'command', autoEnter: true, style: 'blue' }).addButton('寻怪', '/寻怪', { type: 'command', autoEnter: true, style: resting ? undefined : 'blue' }).addButton('菜单', '/菜单', { type: 'command', autoEnter: true, style: 'blue' });
 
 const battlePanel = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
   const markdown = Format.createMarkdown().addTitle('战斗面板').addNewline().addNewline().addText(`第 ${battle.turn} 回合\n${battle.members.map(member => `【${member.name}】HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}`).join('\n')}\n`);
@@ -54,9 +54,12 @@ const battlePanel = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
   if (battle.appraisal.learned) buttons.addRow().addButton('鉴识', '/鉴识', { type: 'command', autoEnter: true, style: 'blue' });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
-const travelPanel = (travel: NonNullable<Awaited<ReturnType<typeof travelStatus>>>) => Format.create()
-  .addMarkdown(Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText(`正在前往${travel.regionName}（${travel.x}, ${travel.y}）\n预计耗时${travel.seconds}s\n当前剩余${travel.remaining}s`))
-  .addButtonGroup(Format.createButtonGroup().addRow().addButton('取消移动', '/取消移动', { type: 'command', autoEnter: true, style: 'blue' }));
+const travelPanel = (travel: NonNullable<Awaited<ReturnType<typeof travelStatus>>>) => {
+  const hunting = travel.activityType === 'hunt';
+  return Format.create()
+    .addMarkdown(Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText(`${hunting ? '正在寻怪' : `正在前往${travel.regionName}（${travel.x}, ${travel.y}）`}\n预计耗时${travel.seconds}s\n当前剩余${travel.remaining}s`))
+    .addButtonGroup(Format.createButtonGroup().addRow().addButton(hunting ? '取消寻怪' : '取消移动', hunting ? '/取消寻怪' : '/取消移动', { type: 'command', autoEnter: true, style: 'blue' }));
+};
 
 export default async () => {
   const [event] = useEvent();

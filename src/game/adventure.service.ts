@@ -191,8 +191,20 @@ export const spawnMonsters = async () => {
     const blocked = new Set(blockedRows.map(row => `${row.pos_x},${row.pos_y},${row.pos_z}`));
     const [countRows] = await pool.execute<(RowDataPacket & { total: number })[]>('SELECT COUNT(*) AS total FROM monster_spawns WHERE region_id=? AND defeated_at IS NULL', [region.id]);
     const area = (region.max_x - region.min_x + 1) * (region.max_y - region.min_y + 1) * (region.max_z - region.min_z + 1);
-    const spawnLimit = Math.floor(area * 0.05);
-    for (let i = Number(countRows[0].total); i < spawnLimit; i++) {
+    const spawnLimit = Math.floor(area * 0.01);
+    let activeCount = Number(countRows[0].total);
+    if (activeCount > spawnLimit) {
+      const [excessRows] = await pool.execute<(RowDataPacket & { id: number })[]>(`SELECT s.id FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id
+        WHERE s.region_id=? AND s.defeated_at IS NULL AND t.monster_class<>'boss'
+          AND NOT EXISTS (SELECT 1 FROM combat_targets ct JOIN combat_sessions cs ON cs.id=ct.session_id WHERE ct.spawn_id=s.id AND cs.state='active')
+        ORDER BY s.spawned_at ASC LIMIT ?`, [region.id, activeCount - spawnLimit]);
+      if (excessRows.length) {
+        const ids = excessRows.map(row => Number(row.id));
+        await pool.execute(`UPDATE monster_spawns SET current_hp=0,defeated_at=NOW() WHERE id IN (${ids.map(() => '?').join(',')})`, ids);
+        activeCount -= ids.length;
+      }
+    }
+    for (let i = activeCount; i < spawnLimit; i++) {
       const template = pickWeighted(templates);
       let x = random(region.min_x, region.max_x); let y = random(region.min_y, region.max_y); let z = random(region.min_z, region.max_z);
       for (let attempt = 0; attempt < 32 && blocked.has(`${x},${y},${z}`); attempt++) { x = random(region.min_x, region.max_x); y = random(region.min_y, region.max_y); z = random(region.min_z, region.max_z); }
@@ -449,8 +461,8 @@ export const nearbyPoints = async (qqUserId: string) => {
 
 const moveToPosition = async (connection: PoolConnection, qqUserId: string, x: number, y: number, restrictToPerception: boolean, speedLimit?: number) => {
   const character = await characterFor(qqUserId);
-  const [travels] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_travels WHERE character_id=? FOR UPDATE', [character.id]);
-  if (travels[0]) throw new Error('你正在前往目标地点，请等待抵达或取消移动。');
+  const [travels] = await connection.execute<(RowDataPacket & { activity_type: 'move' | 'hunt' })[]>('SELECT activity_type FROM player_travels WHERE character_id=? FOR UPDATE', [character.id]);
+  if (travels[0]) throw new Error(travels[0].activity_type === 'hunt' ? '你正在寻怪，请等待完成或取消寻怪。' : '你正在前往目标地点，请等待抵达或取消移动。');
   ensureActionAvailable(character);
   const [activeCombat] = await connection.execute<RowDataPacket[]>(`SELECT cs.id FROM combat_sessions cs LEFT JOIN combat_members cm ON cm.session_id=cs.id
     WHERE cs.state='active' AND (cs.character_id=? OR cm.character_id=?) LIMIT 1 FOR UPDATE`, [character.id, character.id]);
@@ -514,14 +526,33 @@ export const moveTo = async (qqUserId: string, x: number, y: number) => {
     if (combat[0]) throw new Error('战斗尚未结束，无法移动。');
     const [encounters] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM monster_spawns WHERE region_id=? AND pos_x=? AND pos_y=? AND pos_z=? AND defeated_at IS NULL LIMIT 1 FOR UPDATE', [character.current_region_id, character.pos_x, character.pos_y, character.pos_z]);
     if (encounters[0]) throw new Error('当前格子存在敌对生物，请先选择战斗、交涉或躲避。');
-    const [existing] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_travels WHERE character_id=? FOR UPDATE', [character.id]); if (existing[0]) throw new Error('你正在前往目标地点，请等待抵达或取消移动。');
+    const [existing] = await connection.execute<(RowDataPacket & { activity_type: 'move' | 'hunt' })[]>('SELECT activity_type FROM player_travels WHERE character_id=? FOR UPDATE', [character.id]); if (existing[0]) throw new Error(existing[0].activity_type === 'hunt' ? '你正在寻怪，请等待完成或取消寻怪。' : '你正在前往目标地点，请等待抵达或取消移动。');
     const [regions] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>('SELECT id,name FROM map_regions WHERE ? BETWEEN min_x AND max_x AND ? BETWEEN min_y AND max_y AND ? BETWEEN min_z AND max_z ORDER BY danger_level DESC LIMIT 1', [x, y, character.pos_z]); const region = regions[0];
     if (!region || Number(region.id) !== Number(character.current_region_id)) throw new Error('当前只能在已解锁地图的同一区域内远距离前往。');
     const seconds = Math.ceil(distance / carry.movementSpeed);
-    await connection.execute('INSERT INTO player_travels (character_id,region_id,target_x,target_y,target_z,arrival_at) VALUES (?,?,?,?,?,DATE_ADD(NOW(),INTERVAL ? SECOND))', [character.id, region.id, x, y, character.pos_z, seconds]);
+    await connection.execute("INSERT INTO player_travels (character_id,region_id,target_x,target_y,target_z,activity_type,arrival_at) VALUES (?,?,?,?,?,'move',DATE_ADD(NOW(),INTERVAL ? SECOND))", [character.id, region.id, x, y, character.pos_z, seconds]);
     return { kind: 'travel' as const, regionName: region.name, x, y, seconds, remaining: seconds };
   });
 };
+export const huntMonster = async (qqUserId: string) => withTransaction(async connection => {
+  const character = await characterFor(qqUserId); ensureActionAvailable(character);
+  const [travels] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_travels WHERE character_id=? FOR UPDATE', [character.id]);
+  if (travels[0]) throw new Error('你正在进行移动或寻怪，请等待完成或取消当前行动。');
+  const [combat] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM combat_members cm JOIN combat_sessions cs ON cs.id=cm.session_id WHERE cm.character_id=? AND cs.state=\'active\' LIMIT 1 FOR UPDATE', [character.id]);
+  if (combat[0]) throw new Error('战斗尚未结束，无法寻怪。');
+  const [encounter] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM monster_spawns WHERE region_id=? AND pos_x=? AND pos_y=? AND pos_z=? AND defeated_at IS NULL LIMIT 1 FOR UPDATE', [character.current_region_id, character.pos_x, character.pos_y, character.pos_z]);
+  if (encounter[0]) throw new Error('当前格子存在敌对生物，请先选择战斗、交涉或躲避。');
+  const [partyRows] = await connection.execute<(RowDataPacket & { leader_character_id: number })[]>('SELECT p.leader_character_id FROM party_members pm JOIN parties p ON p.id=pm.party_id WHERE pm.character_id=?', [character.id]);
+  if (partyRows[0] && Number(partyRows[0].leader_character_id) !== Number(character.id)) throw new Error('组队状态下仅队长可以寻怪。');
+  const [targets] = await connection.execute<(RowDataPacket & { pos_x: number; pos_y: number; pos_z: number })[]>(`SELECT pos_x,pos_y,pos_z FROM monster_spawns
+    WHERE region_id=? AND pos_z=? AND defeated_at IS NULL
+    ORDER BY ABS(pos_x-?)+ABS(pos_y-?),id LIMIT 1 FOR UPDATE`, [character.current_region_id, character.pos_z, character.pos_x, character.pos_y]);
+  const target = targets[0]; if (!target) throw new Error('当前地图没有可寻找的怪物。');
+  const x = Number(target.pos_x); const y = Number(target.pos_y); const z = Number(target.pos_z);
+  const seconds = Math.max(1, Math.abs(x - Number(character.pos_x)) + Math.abs(y - Number(character.pos_y)));
+  await connection.execute("INSERT INTO player_travels (character_id,region_id,target_x,target_y,target_z,activity_type,arrival_at) VALUES (?,?,?,?,?,'hunt',DATE_ADD(NOW(),INTERVAL ? SECOND))", [character.id, character.current_region_id, x, y, z, seconds]);
+  return { kind: 'hunt' as const, regionName: character.region_name, x, y, seconds, remaining: seconds };
+});
 const elementValue = (value: unknown, element: string) => Number(jsonObject(value)[element] ?? 0);
 const elementalMultiplier = (attackerMastery: unknown, defenderResistance: unknown, element: string) => {
   if (!['水', '火', '土', '木', '风', '冰', '雷', '光', '暗'].includes(element)) return 1;
@@ -542,10 +573,10 @@ const elementalMultiplier = (attackerMastery: unknown, defenderResistance: unkno
 };
 
 export const travelStatus = async (qqUserId: string) => {
-  const character = await characterFor(qqUserId); const pool = await getPool(); const [rows] = await pool.execute<(RowDataPacket & { target_x: number; target_y: number; target_z: number; started_at: Date; arrival_at: Date; region_name: string })[]>(`SELECT t.target_x,t.target_y,t.target_z,t.started_at,t.arrival_at,r.name AS region_name FROM player_travels t JOIN map_regions r ON r.id=t.region_id WHERE t.character_id=?`, [character.id]); const travel = rows[0];
+  const character = await characterFor(qqUserId); const pool = await getPool(); const [rows] = await pool.execute<(RowDataPacket & { target_x: number; target_y: number; target_z: number; activity_type: 'move' | 'hunt'; started_at: Date; arrival_at: Date; region_name: string })[]>(`SELECT t.target_x,t.target_y,t.target_z,t.activity_type,t.started_at,t.arrival_at,r.name AS region_name FROM player_travels t JOIN map_regions r ON r.id=t.region_id WHERE t.character_id=?`, [character.id]); const travel = rows[0];
   if (!travel) return null; const remaining = Math.max(0, Math.ceil((new Date(travel.arrival_at).getTime() - Date.now()) / 1000));
   const seconds = Math.max(1, Math.ceil((new Date(travel.arrival_at).getTime() - new Date(travel.started_at).getTime()) / 1000));
-  return { x: Number(travel.target_x), y: Number(travel.target_y), z: Number(travel.target_z), regionName: travel.region_name, seconds, remaining };
+  return { x: Number(travel.target_x), y: Number(travel.target_y), z: Number(travel.target_z), activityType: travel.activity_type, regionName: travel.region_name, seconds, remaining };
 };
 
 export const completeTravel = async (qqUserId: string) => withTransaction(async connection => {
@@ -555,7 +586,7 @@ export const completeTravel = async (qqUserId: string) => withTransaction(async 
 });
 
 export const cancelTravel = async (qqUserId: string) => withTransaction(async connection => {
-  const character = await characterFor(qqUserId); const [rows] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_travels WHERE character_id=? FOR UPDATE', [character.id]); if (!rows[0]) throw new Error('当前没有进行中的移动。'); await connection.execute('DELETE FROM player_travels WHERE character_id=?', [character.id]); return character;
+  const character = await characterFor(qqUserId); const [rows] = await connection.execute<(RowDataPacket & { activity_type: 'move' | 'hunt' })[]>('SELECT activity_type FROM player_travels WHERE character_id=? FOR UPDATE', [character.id]); if (!rows[0]) throw new Error('当前没有进行中的移动或寻怪。'); await connection.execute('DELETE FROM player_travels WHERE character_id=?', [character.id]); return { character, activityType: rows[0].activity_type };
 });
 
 export const forestGuideAdvance = async (qqUserId: string, action: string) => withTransaction(async connection => {
