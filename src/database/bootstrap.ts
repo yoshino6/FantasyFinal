@@ -7,6 +7,11 @@ const schemaStatements = [
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id), UNIQUE KEY uk_players_qq_user_id (qq_user_id)
   ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS game_permissions (
+    qq_user_id VARCHAR(32) NOT NULL, role ENUM('owner','admin') NOT NULL, granted_by VARCHAR(32) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (qq_user_id), KEY idx_game_permissions_role (role)
+  ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS registration_sessions (
     id CHAR(36) NOT NULL, player_id BIGINT UNSIGNED NOT NULL, stage ENUM('story','audience','question','destination','danger','choice') NOT NULL DEFAULT 'story',
     constitution SMALLINT UNSIGNED NOT NULL DEFAULT 0, spirit SMALLINT UNSIGNED NOT NULL DEFAULT 0, strength SMALLINT UNSIGNED NOT NULL DEFAULT 0,
@@ -58,7 +63,7 @@ const schemaStatements = [
   , `CREATE TABLE IF NOT EXISTS item_definitions (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, code VARCHAR(64) NOT NULL, name VARCHAR(64) NOT NULL,
     description TEXT NOT NULL, obtain_source VARCHAR(128) NOT NULL DEFAULT '未知来源', item_type ENUM('consumable','material','equipment') NOT NULL DEFAULT 'material', item_category VARCHAR(32) NOT NULL DEFAULT '特殊', weapon_type VARCHAR(32) NULL, codex_id CHAR(7) NULL,
-    weight DECIMAL(8,2) NOT NULL DEFAULT 0, stack_limit INT UNSIGNED NOT NULL DEFAULT 99, stackable TINYINT(1) NOT NULL DEFAULT 1,
+    weight DECIMAL(8,2) NOT NULL DEFAULT 0, stack_limit INT UNSIGNED NOT NULL DEFAULT 99, stackable TINYINT(1) NOT NULL DEFAULT 1, is_tradeable TINYINT(1) NOT NULL DEFAULT 1,
     effect_json JSON NULL, PRIMARY KEY (id), UNIQUE KEY uk_item_code (code)
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_item_instances (
@@ -96,6 +101,18 @@ const schemaStatements = [
     character_id BIGINT UNSIGNED NOT NULL, code VARCHAR(64) NOT NULL,
     PRIMARY KEY (character_id), CONSTRAINT fk_blessing_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_mails (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, character_id BIGINT UNSIGNED NOT NULL, title VARCHAR(96) NOT NULL, content TEXT NOT NULL,
+    received_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, claimed_at DATETIME NULL, deleted_at DATETIME NULL,
+    PRIMARY KEY (id), KEY idx_mail_character_received (character_id,deleted_at,received_at),
+    CONSTRAINT fk_mail_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_mail_attachments (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, mail_id BIGINT UNSIGNED NOT NULL, item_id BIGINT UNSIGNED NOT NULL, quantity INT UNSIGNED NOT NULL,
+    PRIMARY KEY (id), KEY idx_mail_attachment_mail (mail_id),
+    CONSTRAINT fk_mail_attachment_mail FOREIGN KEY (mail_id) REFERENCES player_mails(id) ON DELETE CASCADE,
+    CONSTRAINT fk_mail_attachment_item FOREIGN KEY (item_id) REFERENCES item_definitions(id)
+  ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS profession_definitions (
     code VARCHAR(32) NOT NULL, name VARCHAR(32) NOT NULL, description TEXT NOT NULL, growth_json JSON NOT NULL, skill_codes_json JSON NOT NULL,
     PRIMARY KEY (code)
@@ -104,8 +121,13 @@ const schemaStatements = [
     character_id BIGINT UNSIGNED NOT NULL, chat_count INT UNSIGNED NOT NULL DEFAULT 0,
     PRIMARY KEY (character_id), CONSTRAINT fk_guild_chat_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS guild_shop_items (
+    item_id BIGINT UNSIGNED NOT NULL, buy_price INT UNSIGNED NOT NULL, sell_price INT UNSIGNED NOT NULL DEFAULT 0, is_active TINYINT(1) NOT NULL DEFAULT 1,
+    PRIMARY KEY (item_id), KEY idx_guild_shop_active (is_active,item_id),
+    CONSTRAINT fk_guild_shop_item FOREIGN KEY (item_id) REFERENCES item_definitions(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS bounty_notices (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, refresh_key CHAR(10) NOT NULL, title VARCHAR(96) NOT NULL, target_template_id BIGINT UNSIGNED NOT NULL,
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, refresh_key VARCHAR(32) NOT NULL, title VARCHAR(96) NOT NULL, target_template_id BIGINT UNSIGNED NOT NULL, source_spawn_id BIGINT UNSIGNED NULL,
     required_count SMALLINT UNSIGNED NOT NULL, copper_reward INT UNSIGNED NOT NULL, is_active TINYINT(1) NOT NULL DEFAULT 1,
     expires_at DATETIME NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id), UNIQUE KEY uk_bounty_refresh_target (refresh_key,target_template_id), KEY idx_bounty_active (is_active,expires_at)
@@ -117,6 +139,12 @@ const schemaStatements = [
     PRIMARY KEY (character_id,bounty_id), KEY idx_player_bounty_status (character_id,status),
     CONSTRAINT fk_player_bounty_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
     CONSTRAINT fk_player_bounty_notice FOREIGN KEY (bounty_id) REFERENCES bounty_notices(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS combat_ambushes (
+    spawn_id BIGINT UNSIGNED NOT NULL, character_id BIGINT UNSIGNED NOT NULL, ready_spawn_id BIGINT UNSIGNED NULL, status ENUM('waiting','ready','resolved') NOT NULL DEFAULT 'waiting',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (spawn_id,character_id), KEY idx_ambush_character_status (character_id,status),
+    CONSTRAINT fk_ambush_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_travels (
     character_id BIGINT UNSIGNED NOT NULL, region_id BIGINT UNSIGNED NOT NULL, target_x INT NOT NULL, target_y INT NOT NULL, target_z INT NOT NULL,
@@ -309,6 +337,9 @@ export const initializeSchema = async (pool: Pool) => {
   for (const column of ["adventurer_rank ENUM('F','E','D','C','B','A','S','SS','SSS') NOT NULL DEFAULT 'F'", 'profession_code VARCHAR(32) NULL', 'copper_coins BIGINT UNSIGNED NOT NULL DEFAULT 0']) {
     try { await pool.query(`ALTER TABLE characters ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }
+  try { await pool.query('ALTER TABLE bounty_notices ADD COLUMN source_spawn_id BIGINT UNSIGNED NULL'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  try { await pool.query('ALTER TABLE bounty_notices MODIFY COLUMN refresh_key VARCHAR(32) NOT NULL'); } catch (error: any) { if (error?.code !== 'ER_BAD_FIELD_ERROR') throw error; }
+  try { await pool.query('ALTER TABLE combat_ambushes ADD COLUMN ready_spawn_id BIGINT UNSIGNED NULL'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   for (const column of ['element_mastery_json JSON NULL', 'element_resistance_json JSON NULL']) {
     try { await pool.query(`ALTER TABLE characters ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
     try { await pool.query(`ALTER TABLE monster_templates ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
@@ -322,7 +353,7 @@ export const initializeSchema = async (pool: Pool) => {
   for (const column of ['constitution_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'spirit_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'strength_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'intelligence_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'agility_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'perception_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'adventurer_registered TINYINT(1) NOT NULL DEFAULT 0', "gender VARCHAR(8) NOT NULL DEFAULT '未设定'", 'free_name_change_used TINYINT(1) NOT NULL DEFAULT 0', 'free_gender_change_used TINYINT(1) NOT NULL DEFAULT 0']) {
     try { await pool.query(`ALTER TABLE characters ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }
-  for (const column of ["item_category VARCHAR(32) NOT NULL DEFAULT '特殊'", "obtain_source VARCHAR(128) NOT NULL DEFAULT '未知来源'", 'stackable TINYINT(1) NOT NULL DEFAULT 1', 'codex_id CHAR(7) NULL']) {
+  for (const column of ["item_category VARCHAR(32) NOT NULL DEFAULT '特殊'", "obtain_source VARCHAR(128) NOT NULL DEFAULT '未知来源'", 'stackable TINYINT(1) NOT NULL DEFAULT 1', 'is_tradeable TINYINT(1) NOT NULL DEFAULT 1', 'codex_id CHAR(7) NULL']) {
     try { await pool.query(`ALTER TABLE item_definitions ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }
   try { await pool.query('ALTER TABLE item_definitions ADD COLUMN weapon_type VARCHAR(32) NULL'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
@@ -353,6 +384,7 @@ export const initializeSchema = async (pool: Pool) => {
   await pool.query(`UPDATE characters c JOIN players p ON p.id=c.player_id SET c.player_id=NULL,c.npc_id=CASE p.qq_user_id WHEN 'npc_forest_warrior' THEN 900000001 WHEN 'npc_forest_mage' THEN 900000002 WHEN 'npc_forest_priest' THEN 900000003 END,c.npc_code=p.qq_user_id WHERE p.qq_user_id IN ('npc_forest_warrior','npc_forest_mage','npc_forest_priest')`);
   await pool.query(`DELETE FROM players WHERE qq_user_id IN ('npc_forest_warrior','npc_forest_mage','npc_forest_priest')`);
   await pool.query(`UPDATE item_definitions SET item_category=CASE code WHEN 'holy_sword_shirulu' THEN '武器' WHEN 'demon_sword_aphia' THEN '武器' WHEN 'healing_herb' THEN '药剂' WHEN 'wolf_fang' THEN '兽材' ELSE item_category END, stackable=CASE WHEN item_type='equipment' THEN 0 ELSE 1 END`);
+  await pool.query(`UPDATE item_definitions SET is_tradeable=0 WHERE item_category IN ('地图','特殊','任务','剧情') OR code='adventurer_card'`);
   await pool.query(`UPDATE item_definitions SET weapon_type=CASE code WHEN 'holy_sword_shirulu' THEN '长剑' WHEN 'demon_sword_aphia' THEN '长剑' ELSE weapon_type END`);
   await pool.query(`UPDATE item_definitions SET codex_id=CONCAT(CASE WHEN item_type='equipment' THEN CASE item_category WHEN '武器' THEN '11' WHEN '副手' THEN '12' WHEN '头部' THEN '13' WHEN '上装' THEN '14' WHEN '腰部' THEN '15' WHEN '下装' THEN '16' WHEN '脚部' THEN '17' WHEN '项链' THEN '18' WHEN '手镯' THEN '19' WHEN '戒指' THEN '10' ELSE '19' END WHEN item_type='consumable' THEN CASE item_category WHEN '药剂' THEN '21' WHEN '食物' THEN '22' ELSE '23' END WHEN item_type='material' THEN CASE item_category WHEN '食材' THEN '31' WHEN '草药' THEN '32' ELSE '39' END ELSE '99' END, LPAD(id,5,'0')) WHERE codex_id IS NULL`);
   await pool.query(`INSERT INTO profession_definitions (code,name,description,growth_json,skill_codes_json) VALUES
@@ -384,12 +416,20 @@ export const initializeSchema = async (pool: Pool) => {
     ('magic_claw', '魔力利爪', '由熊类巨爪凝成的锋利素材。', '熊类怪物掉落', 'material', '兽材', 0.10, 1, NULL),
     ('magic_heartcore', '魔力心核', '狼类魔力在心脏处凝聚而成的核心。', '狼类怪物掉落', 'material', '兽材', 0.08, 1, NULL),
     ('goblin_ear', '哥布林耳', '哥布林身上留下的辨识素材。', '哥布林掉落', 'material', '兽材', 0.03, 1, NULL),
+    ('riot_aura', '暴动的气息', '从暴动怪物身上剥离的躁动气息，隐约散发着危险的魔力。', '暴动怪物额外掉落', 'material', '兽材', 0.05, 1, NULL),
     ('holy_sword_shirulu', '圣剑·希尔露', '由星辉铸成的圣洁长剑。', '初始恩赐', 'equipment', '武器', 3.50, 0, JSON_OBJECT('artifact','holy_sword','physicalAttackPct',16,'critRatePct',33,'critDamagePct',33)),
     ('demon_sword_aphia', '魔剑·阿菲娅', '寄宿深渊意志的漆黑魔剑。', '初始恩赐', 'equipment', '武器', 3.20, 0, JSON_OBJECT('artifact','demon_sword','magicAttackPct',16,'mpPct',33,'accuracyPct',33)),
     ('rename_card', '改名卡', '用于再次修改角色昵称。首次改名免费，此后每次改名消耗一张。', '特殊途径获得', 'consumable', '特殊', 0.01, 1, JSON_OBJECT('characterChange','name')),
     ('gender_change_card', '改性卡', '用于再次修改角色性别。首次改性免费，此后每次改性消耗一张。', '特殊途径获得', 'consumable', '特殊', 0.01, 1, JSON_OBJECT('characterChange','gender'))
     ,('adventurer_card', '冒险者卡片', '记录冒险者身份、等级与职业的银白色卡片。', '百纳镇冒险者公会', 'consumable', '特殊', 0.01, 1, JSON_OBJECT('adventurerCard',true))
+    ,('map_baina_town', '地图·百纳镇', '标注百纳镇街巷、建筑与重要地点的城镇地图。', '梨子喵的新手引导', 'consumable', '地图', 0.01, 1, JSON_OBJECT('map','baina_town'))
+    ,('map_dark_forest', '地图·幽暗密林', '记录幽暗密林外围道路与危险地带的探索地图。', '百纳镇冒险者公会商店', 'consumable', '地图', 0.01, 1, JSON_OBJECT('map','dark_forest'))
+    ,('map_dark_forest_deep', '地图·幽暗密林深处', '标有幽暗密林深处的险路与古老遗迹的详尽地图。', '百纳镇冒险者公会商店', 'consumable', '地图', 0.01, 1, JSON_OBJECT('map','dark_forest_deep'))
     ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description), obtain_source = VALUES(obtain_source), item_category = VALUES(item_category), stackable = VALUES(stackable), effect_json = VALUES(effect_json)`);
+  await pool.query(`INSERT INTO guild_shop_items (item_id,buy_price,sell_price)
+    SELECT id,CASE code WHEN 'map_dark_forest' THEN 100 WHEN 'map_dark_forest_deep' THEN 1000 END,0
+    FROM item_definitions WHERE code IN ('map_dark_forest','map_dark_forest_deep')
+    ON DUPLICATE KEY UPDATE buy_price=VALUES(buy_price),sell_price=VALUES(sell_price),is_active=1`);
   await pool.query(`UPDATE item_definitions SET codex_id=CONCAT(CASE WHEN item_type='equipment' THEN CASE item_category WHEN '武器' THEN '11' WHEN '副手' THEN '12' WHEN '头部' THEN '13' WHEN '上装' THEN '14' WHEN '腰部' THEN '15' WHEN '下装' THEN '16' WHEN '脚部' THEN '17' WHEN '项链' THEN '18' WHEN '手镯' THEN '19' WHEN '戒指' THEN '10' ELSE '19' END WHEN item_type='consumable' THEN CASE item_category WHEN '药剂' THEN '21' WHEN '食物' THEN '22' ELSE '23' END WHEN item_type='material' THEN CASE item_category WHEN '食材' THEN '31' WHEN '草药' THEN '32' ELSE '39' END ELSE '99' END, LPAD(id,5,'0')) WHERE codex_id IS NULL`);
   await pool.query(`INSERT INTO skill_definitions (code, name, category, mana_cost, cooldown_turns, power, description) VALUES
     ('heavy_strike', '重击', 'physical', 55, 2, 180, '凝聚力量的沉重打击。'),

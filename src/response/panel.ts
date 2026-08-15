@@ -30,19 +30,21 @@ export const outsidePanel = (title: string, location: string, speed: number, ran
   else {
     for (const point of points) {
       const label = `${point.type === 'NPC' ? '' : `【${point.type}】`}${point.name}`;
+      markdown.addText('> ');
       if (speed >= point.distance) markdown.addButton(label, { data: `/前往 ${point.x} ${point.y}`, autoEnter: false });
       else markdown.addText(label);
-      markdown.addText(` · ${directionText(point, x, y)}${point.distance}\n`);
+      markdown.addText(` · ${directionText(point, x, y)}${point.distance}`).addNewline();
     }
   }
   return Format.create().addMarkdown(markdown);
 };
 
 export const panelButtons = (resting = false) => Format.createButtonGroup()
-    .addRow().addButton('装备', '/装备', { type: 'command', autoEnter: true }).addButton('上', '/移动 上', { type: 'command', autoEnter: true, style: resting ? undefined : 'blue' }).addButton('背包', '/背包', { type: 'command', autoEnter: true })
-    .addRow().addButton('左', '/移动 左', { type: 'command', autoEnter: true, style: resting ? undefined : 'blue' }).addButton('角色', '/角色', { type: 'command', autoEnter: true }).addButton('右', '/移动 右', { type: 'command', autoEnter: true, style: resting ? undefined : 'blue' })
-    .addRow().addButton('技能', '/技能列表', { type: 'command', autoEnter: true }).addButton('下', '/移动 下', { type: 'command', autoEnter: true, style: resting ? undefined : 'blue' }).addButton('队伍', '/队伍', { type: 'command', autoEnter: true })
-    .addRow().addButton(resting ? '行动' : '休息', resting ? '/行动' : '/休息', { type: 'command', autoEnter: true, style: 'blue' }).addButton('寻怪', '/寻怪', { type: 'command', autoEnter: true, style: resting ? undefined : 'blue' }).addButton('菜单', '/菜单', { type: 'command', autoEnter: true, style: 'blue' });
+    .addRow().addButton('寻怪', '/寻怪', { type: 'command', autoEnter: true }).addButton('上', '/移动 上', { type: 'command', autoEnter: true, style: resting ? undefined : 'blue' }).addButton('地图', '/地图', { type: 'command', autoEnter: true })
+    .addRow().addButton('左', '/移动 左', { type: 'command', autoEnter: true, style: resting ? undefined : 'blue' }).addButton(resting ? '行动' : '休息', resting ? '/行动' : '/休息', { type: 'command', autoEnter: true }).addButton('右', '/移动 右', { type: 'command', autoEnter: true, style: resting ? undefined : 'blue' })
+    .addRow().addButton('备用', '', { type: 'command', autoEnter: false }).addButton('下', '/移动 下', { type: 'command', autoEnter: true, style: resting ? undefined : 'blue' }).addButton('备用', '', { type: 'command', autoEnter: false })
+    .addRow().addButton('角色', '/角色', { type: 'command', autoEnter: true }).addButton('装备', '/装备', { type: 'command', autoEnter: true }).addButton('背包', '/背包', { type: 'command', autoEnter: true }).addButton('技能', '/技能列表', { type: 'command', autoEnter: true }).addButton('队伍', '/队伍', { type: 'command', autoEnter: true })
+    .addRow().addButton('菜单', '/菜单', { type: 'command', autoEnter: true });
 
 const battlePanel = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
   const markdown = Format.createMarkdown().addTitle('战斗面板').addNewline().addNewline().addText(`第 ${battle.turn} 回合\n${battle.members.map(member => `【${member.name}】HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}`).join('\n')}\n`);
