@@ -434,6 +434,9 @@ export const initializeSchema = async (pool: Pool) => {
     ('magic_heartcore', '魔力心核', '狼类魔力在心脏处凝聚而成的核心。', '狼类怪物掉落', 'material', '兽材', 0.08, 1, NULL),
     ('goblin_ear', '哥布林耳', '哥布林身上留下的辨识素材。', '哥布林掉落', 'material', '兽材', 0.03, 1, NULL),
     ('riot_aura', '暴动的气息', '从暴动怪物身上剥离的躁动气息，隐约散发着危险的魔力。', '暴动怪物额外掉落', 'material', '兽材', 0.05, 1, NULL),
+    ('copper_coin', '铜币', '最常见的流通货币，可直接计入货币余额。', '悬赏、交易与邮件发放', 'material', '货币', 0.00, 1, JSON_OBJECT('currency','copper','copper_value',1)),
+    ('silver_coin', '银币', '价值一百枚铜币的通用货币，可直接计入货币余额。', '悬赏、交易与邮件发放', 'material', '货币', 0.00, 1, JSON_OBJECT('currency','silver','copper_value',100)),
+    ('gold_coin', '金币', '价值一万枚铜币的珍贵货币，可直接计入货币余额。', '悬赏、交易与邮件发放', 'material', '货币', 0.00, 1, JSON_OBJECT('currency','gold','copper_value',10000)),
     ('holy_sword_shirulu', '圣剑·希尔露', '由星辉铸成的圣洁长剑。', '初始恩赐', 'equipment', '武器', 3.50, 0, JSON_OBJECT('artifact','holy_sword','physicalAttackPct',16,'critRatePct',33,'critDamagePct',33)),
     ('demon_sword_aphia', '魔剑·阿菲娅', '寄宿深渊意志的漆黑魔剑。', '初始恩赐', 'equipment', '武器', 3.20, 0, JSON_OBJECT('artifact','demon_sword','magicAttackPct',16,'mpPct',33,'accuracyPct',33)),
     ('rename_card', '改名卡', '用于再次修改角色昵称。首次改名免费，此后每次改名消耗一张。', '特殊途径获得', 'consumable', '特殊', 0.01, 1, JSON_OBJECT('characterChange','name')),
@@ -443,6 +446,7 @@ export const initializeSchema = async (pool: Pool) => {
     ,('map_dark_forest', '地图·幽暗密林', '记录幽暗密林外围道路与危险地带的探索地图。', '百纳镇冒险者公会商店', 'consumable', '地图', 0.01, 1, JSON_OBJECT('map','dark_forest'))
     ,('map_dark_forest_deep', '地图·幽暗密林深处', '标有幽暗密林深处的险路与古老遗迹的详尽地图。', '百纳镇冒险者公会商店', 'consumable', '地图', 0.01, 1, JSON_OBJECT('map','dark_forest_deep'))
     ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description), obtain_source = VALUES(obtain_source), item_category = VALUES(item_category), stackable = VALUES(stackable), effect_json = VALUES(effect_json)`);
+  await pool.query(`UPDATE item_definitions SET is_tradeable=0 WHERE code IN ('copper_coin','silver_coin','gold_coin')`);
   await pool.query(`INSERT INTO guild_shop_items (item_id,buy_price,sell_price)
     SELECT id,CASE code WHEN 'map_dark_forest' THEN 100 WHEN 'map_dark_forest_deep' THEN 1000 END,0
     FROM item_definitions WHERE code IN ('map_dark_forest','map_dark_forest_deep')

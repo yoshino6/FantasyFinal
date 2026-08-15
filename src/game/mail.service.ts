@@ -14,6 +14,12 @@ const validQuantity = (quantity: number) => {
   return quantity;
 };
 
+const currencyCopperValue: Record<string, number> = {
+  copper_coin: 1,
+  silver_coin: 100,
+  gold_coin: 10000
+};
+
 const characterFor = async (connection: Connection, qqUserId: string, lock = false) => {
   const [rows] = await connection.execute<CharacterRow[]>(`SELECT c.id,c.name FROM characters c JOIN players p ON p.id=c.player_id
     WHERE p.qq_user_id=? LIMIT 1${lock ? ' FOR UPDATE' : ''}`, [qqUserId]);
@@ -86,7 +92,10 @@ export const claimMail = async (qqUserId: string, mailId: number) => withTransac
   if (!attachments.length) throw new Error('这封邮件没有可领取的附件。');
   for (const attachment of attachments) {
     const quantity = Number(attachment.quantity);
-    if (attachment.item_type === 'equipment') {
+    const copperValue = currencyCopperValue[attachment.code];
+    if (copperValue) {
+      await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [copperValue * quantity, character.id]);
+    } else if (attachment.item_type === 'equipment') {
       for (let index = 0; index < quantity; index += 1) await connection.execute('INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max) VALUES (?,?,100,100,100)', [character.id, attachment.id]);
     } else {
       await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),acquired_at=NOW()', [character.id, attachment.id, quantity]);

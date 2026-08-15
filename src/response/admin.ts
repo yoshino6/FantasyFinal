@@ -24,7 +24,7 @@ const adminFormat = (role: PermissionRole | null) => {
 };
 
 const recipientLines = (markdown: ReturnType<typeof Format.createMarkdown>, edit: MailEdit) => {
-  if (edit.scope === 'global') { markdown.addText('接收人：全服已注册玩家').addNewline(); return; }
+  if (edit.scope === 'global') { markdown.addText('接收人：全服').addNewline(); return; }
   markdown.addText('接收人：').addButton('[@添加]', textButton('添加收件人', '管理员邮件 添加收件人 ')).addText(' ').addButton('[昵称添加]', textButton('添加昵称', '管理员邮件 添加昵称 ')).addNewline();
   const sequence = '①②③④⑤⑥⑦⑧⑨⑩';
   if (!edit.recipients.length) markdown.addBlockquote('暂未添加接收人。').addNewline();
@@ -40,26 +40,22 @@ export const mailEditFormat = (edit: MailEdit) => {
   if (!edit.attachments.length) markdown.addBlockquote('暂未添加附件。').addNewline();
   edit.attachments.forEach((attachment, index) => markdown.addText('> ').addText(`${sequence[index] ?? `${index + 1}.`}【${attachment.name}】× ${attachment.quantity} `).addButton('[删除]', textButton('删除附件', `管理员邮件 删除附件 ${attachment.itemId}`)).addNewline());
   const buttons = Format.createButtonGroup().addRow()
-    .addButton('暂存编辑', '管理员邮件 暂存编辑', { type: 'command', autoEnter: true })
-    .addButton('退出编辑', '管理员邮件 退出编辑', { type: 'command', autoEnter: true })
-    .addButton('发送', '管理员邮件 发送', { type: 'command', autoEnter: true, style: 'blue' });
+    .addButton('暂存编辑', '/管理员邮件 暂存编辑', { type: 'command', autoEnter: true })
+    .addButton('退出编辑', '/管理员邮件 退出编辑', { type: 'command', autoEnter: true })
+    .addButton('发送', '/管理员邮件 发送', { type: 'command', autoEnter: true, style: 'blue' });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 
 const previewFormat = (edit: MailEdit) => {
   const markdown = Format.createMarkdown().addTitle('邮件全部信息').addNewline().addNewline();
-  if (edit.scope === 'global') markdown.addText('接收人：全服已注册玩家').addNewline();
+  if (edit.scope === 'global') markdown.addText('接收人：全服').addNewline();
   else markdown.addText(`接收人：${edit.recipients.map(recipient => recipient.nickname).join('、')}`).addNewline();
   markdown.addText('内容：').addNewline().addBlockquote(edit.content).addNewline().addText('附件：').addNewline();
   edit.attachments.forEach(attachment => markdown.addBlockquote(`【${attachment.name}】× ${attachment.quantity}`).addNewline());
   return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow()
-    .addButton('返回编辑', '管理员邮件 继续编辑', { type: 'command', autoEnter: true })
-    .addButton('确认发放', '管理员邮件 确认发放', { type: 'command', autoEnter: true, style: 'blue' }));
+    .addButton('返回编辑', '/管理员邮件 继续编辑', { type: 'command', autoEnter: true })
+    .addButton('确认发放', '/管理员邮件 确认发放', { type: 'command', autoEnter: true, style: 'blue' }));
 };
-
-export const mailEditLockedFormat = () => Format.create().addMarkdown(Format.createMarkdown().addTitle('无法操作').addNewline().addNewline().addText('你正在编辑邮件，请先完成该项操作。')).addButtonGroup(Format.createButtonGroup().addRow()
-  .addButton('继续编辑', '管理员邮件 继续编辑', { type: 'command', autoEnter: true, style: 'blue' })
-  .addButton('暂存编辑', '管理员邮件 暂存编辑', { type: 'command', autoEnter: true }));
 
 const mentionedUserId = async () => { const [mention] = useMention(); const mentioned = await mention.findOne(); if (!mentioned.count || !mentioned.data) throw new Error('请在命令后 @ 一名玩家。'); return String(mentioned.data.UserId); };
 const showEdit = async (message: any, qqUserId: string, edit?: MailEdit) => message.send({ format: mailEditFormat(edit ?? await getMailEdit(qqUserId)) });
