@@ -10,7 +10,7 @@ type ItemRow = RowDataPacket & { id: number; code: string; name: string; item_ty
 
 const pageInfo = (page: number, total: number) => ({ page: Math.max(1, Math.min(Math.max(1, Math.ceil(total / PAGE_SIZE)), page)), totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)) });
 const validQuantity = (quantity: number) => {
-  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 999) throw new Error('数量必须是 1 至 999 之间的整数。');
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 999999) throw new Error('数量必须是 1 至 999999 之间的整数。');
   return quantity;
 };
 

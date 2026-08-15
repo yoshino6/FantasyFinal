@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
+import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { SESSION_TTL_MINUTES, calculateDerivedStats, gifts, isGiftCode } from './constants';
 import { attributes, type Allocation, type DerivedStats, type Growth } from './types';
@@ -30,10 +30,36 @@ const distribute = (total: number, precision = 1) => {
 };
 const finalAttributes = (row: Record<string, unknown>) => Object.fromEntries(attributes.map(key => [key, Number(row[key] ?? 0) + Number(row[`${key}_growth`] ?? row[`${key}Growth`] ?? 0) * Math.max(0, Number(row.level ?? 1) - 1)])) as Allocation;
 
-export const recalculateCharacterStats = async (connection: PoolConnection, characterId: number) => {
+const jsonRecord = (value: unknown): Record<string, unknown> => {
+  if (!value) return {};
+  if (typeof value !== 'string') return value as Record<string, unknown>;
+  try { return JSON.parse(value) as Record<string, unknown>; } catch { return {}; }
+};
+
+const withEquipmentStats = async (connection: Pool | PoolConnection, characterId: number, base: DerivedStats): Promise<DerivedStats> => {
+  const [rows] = await connection.execute<(RowDataPacket & { effect_json: unknown })[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json
+    FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
+    LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
+    WHERE pe.character_id=?`, [characterId]);
+  const effects = rows.map(row => jsonRecord(row.effect_json));
+  const flat = (key: string) => effects.reduce((total, effect) => total + Number(effect[key] ?? 0), 0);
+  const multiplier = (key: string) => effects.reduce((total, effect) => total * (1 + Number(effect[key] ?? 0) / 100), 1);
+  const stat = (value: number, rawKey: string, percentKey: string) => Math.max(0, Math.floor((value + flat(rawKey)) * multiplier(percentKey)));
+  return {
+    hpMax: stat(base.hpMax, 'hpMax', 'hpPct'), mpMax: stat(base.mpMax, 'mpMax', 'mpPct'),
+    physicalAttack: stat(base.physicalAttack, 'physicalAttack', 'physicalAttackPct'), magicAttack: stat(base.magicAttack, 'magicAttack', 'magicAttackPct'),
+    physicalDefense: stat(base.physicalDefense, 'physicalDefense', 'physicalDefensePct'), magicDefense: stat(base.magicDefense, 'magicDefense', 'magicDefensePct'),
+    accuracy: stat(base.accuracy, 'accuracy', 'accuracyPct'), evasion: stat(base.evasion, 'evasion', 'evasionPct'),
+    critRateBp: stat(base.critRateBp, 'critRateBp', 'critRatePct'), critDamageBp: stat(base.critDamageBp, 'critDamageBp', 'critDamagePct'),
+    critResistBp: stat(base.critResistBp, 'critResistBp', 'critResistPct'), critDamageReductionBp: stat(base.critDamageReductionBp, 'critDamageReductionBp', 'critDamageReductionPct'),
+    tenacity: stat(base.tenacity, 'tenacity', 'tenacityPct'), speed: stat(base.speed, 'speed', 'speedPct')
+  };
+};
+
+export const recalculateCharacterStats = async (connection: Pool | PoolConnection, characterId: number) => {
   const [rows] = await connection.execute<(RowDataPacket & Record<string, unknown>)[]>('SELECT * FROM characters WHERE id=? FOR UPDATE', [characterId]);
   const character = rows[0]; if (!character) return;
-  const stats = calculateDerivedStats(finalAttributes(character));
+  const stats = await withEquipmentStats(connection, characterId, calculateDerivedStats(finalAttributes(character)));
   await connection.execute('UPDATE characters SET hp_max=?,mp_max=?,current_hp=LEAST(current_hp,?),current_mp=LEAST(current_mp,?),physical_attack=?,magic_attack=?,physical_defense=?,magic_defense=?,accuracy=?,evasion=?,crit_rate_bp=?,crit_damage_bp=?,crit_resist_bp=?,crit_damage_reduction_bp=?,tenacity=?,speed=? WHERE id=?', [stats.hpMax, stats.mpMax, stats.hpMax, stats.mpMax, stats.physicalAttack, stats.magicAttack, stats.physicalDefense, stats.magicDefense, stats.accuracy, stats.evasion, stats.critRateBp, stats.critDamageBp, stats.critResistBp, stats.critDamageReductionBp, stats.tenacity, stats.speed, characterId]);
 };
 
@@ -156,7 +182,10 @@ export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: 
 });
 
 export const getCharacter = async (qqUserId: string): Promise<CharacterView | null> => {
-  const [rows] = await (await getPool()).execute<(RowDataPacket & CharacterView)[]>(
+  const pool = await getPool();
+  const [characterRows] = await pool.execute<(RowDataPacket & { id: number })[]>('SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1', [qqUserId]);
+  if (characterRows[0]) await withTransaction(async connection => recalculateCharacterStats(connection, Number(characterRows[0].id)));
+  const [rows] = await pool.execute<(RowDataPacket & CharacterView)[]>(
     `SELECT c.name, c.gender, c.level, c.experience, c.adventurer_registered AS adventurerRegistered, c.constitution, c.spirit, c.strength, c.intelligence, c.agility, c.perception, c.constitution_growth AS constitutionGrowth, c.spirit_growth AS spiritGrowth, c.strength_growth AS strengthGrowth, c.intelligence_growth AS intelligenceGrowth, c.agility_growth AS agilityGrowth, c.perception_growth AS perceptionGrowth, c.hp_max AS hpMax, c.mp_max AS mpMax, c.current_hp AS currentHp, c.current_mp AS currentMp, c.activity_status AS activityStatus, c.physical_attack AS physicalAttack, c.magic_attack AS magicAttack, c.physical_defense AS physicalDefense, c.magic_defense AS magicDefense, c.accuracy, c.evasion, c.crit_rate_bp AS critRateBp, c.crit_damage_bp AS critDamageBp, c.crit_resist_bp AS critResistBp, c.crit_damage_reduction_bp AS critDamageReductionBp, c.tenacity, c.speed, c.element_mastery_json AS elementMastery, c.element_resistance_json AS elementResistance, r.name AS regionName, c.pos_x AS x, c.pos_y AS y, c.pos_z AS z, COALESCE(i.name, b.code) AS giftName FROM characters c JOIN players p ON p.id = c.player_id JOIN map_regions r ON r.id=c.current_region_id LEFT JOIN player_equipment pe ON pe.character_id=c.id AND pe.slot='weapon' LEFT JOIN item_definitions i ON i.id=pe.item_id LEFT JOIN player_blessings b ON b.character_id=c.id WHERE p.qq_user_id = ? LIMIT 1`,
     [qqUserId]
   );

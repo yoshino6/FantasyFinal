@@ -188,7 +188,7 @@ const modifiersFor = async (connection: PoolConnection, characterId: number): Pr
   const passives = new Map(passiveRows.map(row => [row.code, jsonObject(row.passive_effect_json)]));
   const growth = passives.get('growth_blessing'); const lucky = passives.get('lucky_favor'); const mana = passives.get('mana_affinity');
   const mastery = (key: string) => passiveRows.reduce((result, row) => { const passive = jsonObject(row.passive_effect_json); const type = String(passive.weaponType ?? ''); const matched = rows.find(item => item.weapon_type === type); if (!matched) return result; const proficiency = Math.min(5, Math.max(1, Number(specializationRows.find(item => Number(item.skill_id) === Number(row.id) && item.specialization === 'overcharge')?.level ?? 1))); const focus = Math.min(6, Math.max(1, Number(specializationRows.find(item => Number(item.skill_id) === Number(row.id) && item.specialization === 'instant')?.level ?? 1))); const scale = matched.slot === 'offhand' ? .5 + (focus - 1) * .1 : 1; return result + Number(passive[key] ?? 0) * proficiency * scale; }, 0);
-  return { weaponName: rows.find(row => row.slot === 'weapon')?.name ?? undefined, artifact: effect.artifact === 'holy_sword' || effect.artifact === 'demon_sword' ? effect.artifact : undefined, physicalAttack: Number(effect.physicalAttack ?? 0), magicAttack: Number(effect.magicAttack ?? 0), physicalAttackPct: Number(effect.physicalAttackPct ?? 0) + mastery('physicalAttackPct'), magicAttackPct: Number(effect.magicAttackPct ?? 0) + mastery('magicAttackPct'), physicalDefensePct: mastery('physicalDefensePct'), magicDefensePct: mastery('magicDefensePct'), critRatePct: Number(effect.critRatePct ?? 0) + mastery('critRatePct'), critDamagePct: Number(effect.critDamagePct ?? 0) + mastery('critDamagePct'), accuracyPct: Number(effect.accuracyPct ?? 0), mpPct: Number(effect.mpPct ?? 0) + mastery('mpPct'), chantSpeedPct: mastery('chantSpeedPct'), critRateBp: Number(effect.critRateBp ?? 0), ignoreDefensePct: Number(effect.ignoreDefensePct ?? 0), lifestealPct: Number(effect.lifestealPct ?? 0), magicDamagePct: Number(effect.magicDamagePct ?? 0), manaCostReduction: Number(effect.manaCostReduction ?? 0), experienceMultiplier: Number(growth?.experienceMultiplier ?? 1), dropBonus: Number(lucky?.dropBonusPct ?? 0) / 100, manaAffinity: Boolean(mana) };
+  return { weaponName: rows.find(row => row.slot === 'weapon')?.name ?? undefined, artifact: effect.artifact === 'holy_sword' || effect.artifact === 'demon_sword' ? effect.artifact : undefined, physicalAttack: 0, magicAttack: 0, physicalAttackPct: mastery('physicalAttackPct'), magicAttackPct: mastery('magicAttackPct'), physicalDefensePct: mastery('physicalDefensePct'), magicDefensePct: mastery('magicDefensePct'), critRatePct: mastery('critRatePct'), critDamagePct: mastery('critDamagePct'), accuracyPct: 0, mpPct: mastery('mpPct'), chantSpeedPct: mastery('chantSpeedPct'), critRateBp: 0, ignoreDefensePct: Number(effect.ignoreDefensePct ?? 0), lifestealPct: Number(effect.lifestealPct ?? 0), magicDamagePct: Number(effect.magicDamagePct ?? 0), manaCostReduction: Number(effect.manaCostReduction ?? 0), experienceMultiplier: Number(growth?.experienceMultiplier ?? 1), dropBonus: Number(lucky?.dropBonusPct ?? 0) / 100, manaAffinity: Boolean(mana) };
 };
 
 export const spawnMonsters = async () => {
@@ -313,6 +313,7 @@ export const unequip = async (qqUserId: string, slot: string) => withTransaction
   `, [character.id, slot]);
   if (!rows[0]) throw new Error('该部位没有装备。');
   await connection.execute('DELETE FROM player_equipment WHERE character_id=? AND slot=?', [character.id, slot]);
+  await recalculateCharacterStats(connection, Number(character.id));
   return rows[0];
 });
 
@@ -331,6 +332,7 @@ export const equip = async (qqUserId: string, slot: string, instanceId: number) 
   if (sameDefinitions[0]) throw new Error('同类装备已穿戴在其他部位。');
   await connection.execute('DELETE FROM player_equipment WHERE character_id=? AND slot=?', [character.id, validSlot]);
   await connection.execute('INSERT INTO player_equipment (character_id,slot,item_id,instance_id) VALUES (?,?,?,?)', [character.id, validSlot, item.item_id, item.id]);
+  await recalculateCharacterStats(connection, Number(character.id));
   return item;
 });
 

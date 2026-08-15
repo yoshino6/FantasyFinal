@@ -115,7 +115,7 @@ const schemaStatements = [
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS admin_mail_edits (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, admin_qq_user_id VARCHAR(32) NOT NULL, recipient_scope ENUM('personal','global') NOT NULL,
-    content TEXT NOT NULL, status ENUM('editing','draft') NOT NULL DEFAULT 'editing',
+    title VARCHAR(96) NOT NULL DEFAULT '', content TEXT NOT NULL, status ENUM('editing','draft') NOT NULL DEFAULT 'editing',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id), UNIQUE KEY uk_admin_mail_edit_user (admin_qq_user_id), KEY idx_admin_mail_edit_status (status)
   ) ENGINE=InnoDB`
@@ -354,6 +354,7 @@ export const initializeSchema = async (pool: Pool) => {
   for (const column of ["adventurer_rank ENUM('F','E','D','C','B','A','S','SS','SSS') NOT NULL DEFAULT 'F'", 'profession_code VARCHAR(32) NULL', 'copper_coins BIGINT UNSIGNED NOT NULL DEFAULT 0']) {
     try { await pool.query(`ALTER TABLE characters ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }
+  try { await pool.query("ALTER TABLE admin_mail_edits ADD COLUMN title VARCHAR(96) NOT NULL DEFAULT '' AFTER recipient_scope"); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   try { await pool.query('ALTER TABLE bounty_notices ADD COLUMN source_spawn_id BIGINT UNSIGNED NULL'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   try { await pool.query('ALTER TABLE bounty_notices MODIFY COLUMN refresh_key VARCHAR(32) NOT NULL'); } catch (error: any) { if (error?.code !== 'ER_BAD_FIELD_ERROR') throw error; }
   try { await pool.query('ALTER TABLE combat_ambushes ADD COLUMN ready_spawn_id BIGINT UNSIGNED NULL'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
