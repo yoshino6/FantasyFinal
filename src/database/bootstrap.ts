@@ -113,6 +113,23 @@ const schemaStatements = [
     CONSTRAINT fk_mail_attachment_mail FOREIGN KEY (mail_id) REFERENCES player_mails(id) ON DELETE CASCADE,
     CONSTRAINT fk_mail_attachment_item FOREIGN KEY (item_id) REFERENCES item_definitions(id)
   ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS admin_mail_edits (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, admin_qq_user_id VARCHAR(32) NOT NULL, recipient_scope ENUM('personal','global') NOT NULL,
+    content TEXT NOT NULL, status ENUM('editing','draft') NOT NULL DEFAULT 'editing',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id), UNIQUE KEY uk_admin_mail_edit_user (admin_qq_user_id), KEY idx_admin_mail_edit_status (status)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS admin_mail_edit_recipients (
+    edit_id BIGINT UNSIGNED NOT NULL, qq_user_id VARCHAR(32) NOT NULL, nickname VARCHAR(64) NOT NULL,
+    PRIMARY KEY (edit_id,qq_user_id),
+    CONSTRAINT fk_admin_mail_edit_recipient_edit FOREIGN KEY (edit_id) REFERENCES admin_mail_edits(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS admin_mail_edit_attachments (
+    edit_id BIGINT UNSIGNED NOT NULL, item_id BIGINT UNSIGNED NOT NULL, quantity INT UNSIGNED NOT NULL,
+    PRIMARY KEY (edit_id,item_id),
+    CONSTRAINT fk_admin_mail_edit_attachment_edit FOREIGN KEY (edit_id) REFERENCES admin_mail_edits(id) ON DELETE CASCADE,
+    CONSTRAINT fk_admin_mail_edit_attachment_item FOREIGN KEY (item_id) REFERENCES item_definitions(id)
+  ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS profession_definitions (
     code VARCHAR(32) NOT NULL, name VARCHAR(32) NOT NULL, description TEXT NOT NULL, growth_json JSON NOT NULL, skill_codes_json JSON NOT NULL,
     PRIMARY KEY (code)
