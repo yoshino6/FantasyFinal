@@ -82,9 +82,8 @@ export const mailDetail = async (qqUserId: string, mailId: number) => {
   return { id: Number(mail.id), title: mail.title, content: mail.content, receivedAt: mail.received_at, claimed: Boolean(mail.claimed_at), attachmentCount: Number(mail.attachment_count), attachments: mail.attachment_summary ?? '无' };
 };
 
-export const claimMail = async (qqUserId: string, mailId: number) => withTransaction(async connection => {
-  const character = await characterFor(connection, qqUserId, true);
-  const [mails] = await connection.execute<(RowDataPacket & { id: number; claimed_at: Date | null })[]>('SELECT id,claimed_at FROM player_mails WHERE id=? AND character_id=? AND deleted_at IS NULL FOR UPDATE', [mailId, character.id]);
+const claimMailForCharacter = async (connection: PoolConnection, characterId: number, mailId: number) => {
+  const [mails] = await connection.execute<(RowDataPacket & { id: number; claimed_at: Date | null })[]>('SELECT id,claimed_at FROM player_mails WHERE id=? AND character_id=? AND deleted_at IS NULL FOR UPDATE', [mailId, characterId]);
   const mail = mails[0]; if (!mail) throw new Error('邮件不存在或已被删除。');
   if (mail.claimed_at) throw new Error('这封邮件的附件已经领取。');
   const [attachments] = await connection.execute<(ItemRow & { quantity: number })[]>(`SELECT a.item_id,a.quantity,i.id,i.code,i.name,i.item_type,i.stackable
@@ -94,16 +93,36 @@ export const claimMail = async (qqUserId: string, mailId: number) => withTransac
     const quantity = Number(attachment.quantity);
     const copperValue = currencyCopperValue[attachment.code];
     if (copperValue) {
-      await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [copperValue * quantity, character.id]);
+      await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [copperValue * quantity, characterId]);
     } else if (attachment.item_type === 'equipment') {
-      for (let index = 0; index < quantity; index += 1) await connection.execute('INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max) VALUES (?,?,100,100,100)', [character.id, attachment.id]);
+      for (let index = 0; index < quantity; index += 1) await connection.execute('INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max) VALUES (?,?,100,100,100)', [characterId, attachment.id]);
     } else {
-      await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),acquired_at=NOW()', [character.id, attachment.id, quantity]);
+      await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),acquired_at=NOW()', [characterId, attachment.id, quantity]);
     }
-    await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [character.id, attachment.id]);
+    await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [characterId, attachment.id]);
   }
   await connection.execute('UPDATE player_mails SET claimed_at=NOW() WHERE id=?', [mail.id]);
   return { items: attachments.map(item => ({ name: item.name, quantity: Number(item.quantity) })) };
+};
+
+export const claimMail = async (qqUserId: string, mailId: number) => withTransaction(async connection => {
+  const character = await characterFor(connection, qqUserId, true);
+  return claimMailForCharacter(connection, character.id, mailId);
+});
+
+export const claimAllMails = async (qqUserId: string) => withTransaction(async connection => {
+  const character = await characterFor(connection, qqUserId, true);
+  const [mails] = await connection.execute<(RowDataPacket & { id: number })[]>(`SELECT m.id FROM player_mails m
+    WHERE m.character_id=? AND m.deleted_at IS NULL AND m.claimed_at IS NULL
+    AND EXISTS (SELECT 1 FROM player_mail_attachments a WHERE a.mail_id=m.id)
+    ORDER BY m.id FOR UPDATE`, [character.id]);
+  if (!mails.length) throw new Error('没有可一键领取的邮件附件。');
+  const received = new Map<string, number>();
+  for (const mail of mails) {
+    const result = await claimMailForCharacter(connection, character.id, Number(mail.id));
+    for (const item of result.items) received.set(item.name, (received.get(item.name) ?? 0) + item.quantity);
+  }
+  return { mailCount: mails.length, items: [...received].map(([name, quantity]) => ({ name, quantity })) };
 });
 
 export const deleteMail = async (qqUserId: string, mailId: number) => withTransaction(async connection => {

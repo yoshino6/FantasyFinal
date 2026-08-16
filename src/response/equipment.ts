@@ -42,7 +42,7 @@ export const chooseEquipmentHandler = async () => {
     const slot = String(route.param('slot')); const items = await equipmentCandidates(event.current.UserId, slot);
     const markdown = Format.createMarkdown().addTitle(`装备·${slotNames[slot] ?? slot}`).addNewline();
     if (!items.length) markdown.addText('\n背包中没有可装备的该部位装备。');
-    for (const item of items) markdown.addText(`\n${item.name} #${item.id} `).addButton('[装备]', { data: `/穿戴装备 ${slot} ${item.id}`, autoEnter: false });
+    for (const item of items) markdown.addText(`\n${item.name} #${item.id}｜Lv.${item.required_level} `).addButton('[装备]', { data: `/穿戴装备 ${slot} ${item.id}`, autoEnter: false });
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('我的装备', '/装备', { type: 'command', autoEnter: true, style: 'blue' })) });
   } catch (error) { await message.send({ format: messageFormat('装备不可用', error instanceof Error ? error.message : '请稍后重试。') }); }
 };

@@ -76,6 +76,17 @@ export const openMailEdit = async (adminQqUserId: string, scope: Scope) => withT
   return loadEdit(connection, edit);
 });
 
+export const switchMailEditToGlobal = async (adminQqUserId: string) => withTransaction(async connection => {
+  await requireAdministrator(adminQqUserId, connection);
+  const edit = await requireEdit(connection, adminQqUserId);
+  if (edit.recipient_scope === 'personal') {
+    await connection.execute("UPDATE admin_mail_edits SET recipient_scope='global' WHERE id=?", [edit.id]);
+    await connection.execute('DELETE FROM admin_mail_edit_recipients WHERE edit_id=?', [edit.id]);
+    edit.recipient_scope = 'global';
+  }
+  return loadEdit(connection, edit);
+});
+
 export const getMailEdit = async (adminQqUserId: string) => {
   const pool = await getPool(); const edit = await editRow(pool, adminQqUserId);
   if (!edit) throw new Error('没有可继续的邮件编辑。');

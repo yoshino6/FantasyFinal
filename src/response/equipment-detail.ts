@@ -6,12 +6,12 @@ const equipmentSections = (effectJson: unknown, quality: number) => {
   const effect = (typeof effectJson === 'string' ? JSON.parse(effectJson) : effectJson ?? {}) as Record<string, unknown>;
   const scale = .6 + Math.max(0, Math.min(100, quality)) * .004;
   const labels: Record<string, string> = {
-    physicalAttack: '物理攻击', magicAttack: '魔法攻击', critRateBp: '暴击', physicalAttackPct: '物理攻击',
+    hpMax: '生命', mpMax: '魔力', physicalAttack: '物理攻击', magicAttack: '魔法攻击', physicalDefense: '物理防御', magicDefense: '魔法防御', accuracy: '命中', evasion: '闪避', speed: '速度', critRateBp: '暴击', physicalAttackPct: '物理攻击',
     magicAttackPct: '魔法攻击', critRatePct: '暴击', critDamagePct: '暴伤', accuracyPct: '命中', mpPct: '魔力'
   };
   const attributes = Object.entries(effect)
     .filter(([key, value]) => labels[key] && Number(value))
-    .map(([key, value]) => `${labels[key]} +${key.endsWith('Pct') ? `${(Number(value) * scale).toFixed(2)}%` : Math.floor(Number(value) * scale)}`);
+    .map(([key, value]) => `${labels[key]} +${key.endsWith('Pct') ? `${(Number(value) * scale).toFixed(1)}%` : Math.floor(Number(value) * scale)}`);
   const effectLabels: Record<string, string> = {
     ignoreDefensePct: '无视目标物理防御', lifestealPct: '造成伤害后恢复生命', magicDamagePct: '魔法伤害提高', manaCostReduction: '技能魔力消耗降低'
   };
@@ -32,7 +32,7 @@ export default async () => {
       .addTitle('装备详情')
       .addNewline()
       .addNewline()
-      .addText(`[${item.item_category}]${item.name}\n品质：${Number(item.quality).toFixed(2)}%\n耐久：${item.durability}/${item.durability_max}\n\n装备属性：`)
+      .addText(`[${item.item_category}]${item.name}\n装备等级：Lv.${item.required_level}\n品质：${Number(item.quality).toFixed(1)}%\n耐久：${item.durability}/${item.durability_max}\n\n装备属性：`)
       .addNewline();
 
     for (const attribute of sections.attributes.length ? sections.attributes : ['无']) {

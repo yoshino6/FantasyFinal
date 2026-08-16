@@ -169,12 +169,17 @@ const schemaStatements = [
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_forge_sessions (
     character_id BIGINT UNSIGNED NOT NULL, equipment_category VARCHAR(32) NULL, subtype VARCHAR(32) NULL, target_level SMALLINT UNSIGNED NULL,
+    entry_source ENUM('blacksmith','profession') NOT NULL DEFAULT 'blacksmith',
     PRIMARY KEY (character_id), CONSTRAINT fk_forge_session_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_forge_materials (
     character_id BIGINT UNSIGNED NOT NULL, item_id BIGINT UNSIGNED NOT NULL, quantity INT UNSIGNED NOT NULL,
     PRIMARY KEY (character_id,item_id), CONSTRAINT fk_forge_material_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
     CONSTRAINT fk_forge_material_item FOREIGN KEY (item_id) REFERENCES item_definitions(id)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_secondary_professions (
+    character_id BIGINT UNSIGNED NOT NULL, profession_code VARCHAR(32) NOT NULL, level SMALLINT UNSIGNED NOT NULL DEFAULT 1, proficiency BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    PRIMARY KEY (character_id), CONSTRAINT fk_secondary_profession_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_side_quests (
     character_id BIGINT UNSIGNED NOT NULL, quest_code VARCHAR(64) NOT NULL, status ENUM('accepted','completed','claimed') NOT NULL DEFAULT 'accepted', accepted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at DATETIME NULL, claimed_at DATETIME NULL,
@@ -257,6 +262,11 @@ const schemaStatements = [
     weakness_json JSON NULL, resistance_json JSON NULL, element_mastery_json JSON NULL, element_resistance_json JSON NULL,
     skill_sequence JSON NULL, experience INT UNSIGNED NOT NULL, drops_json JSON NULL,
     PRIMARY KEY (id), UNIQUE KEY uk_monster_code (code)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_monster_codex (
+    character_id BIGINT UNSIGNED NOT NULL, monster_template_id BIGINT UNSIGNED NOT NULL, unlocked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (character_id,monster_template_id), CONSTRAINT fk_monster_codex_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
+    CONSTRAINT fk_monster_codex_template FOREIGN KEY (monster_template_id) REFERENCES monster_templates(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS monster_skill_learn_rules (
     monster_template_id BIGINT UNSIGNED NOT NULL, source_skill_code VARCHAR(64) NOT NULL, skill_id BIGINT UNSIGNED NOT NULL, chance DECIMAL(6,5) NOT NULL,
@@ -393,6 +403,7 @@ export const initializeSchema = async (pool: Pool) => {
   }
   try { await pool.query("ALTER TABLE admin_mail_edits ADD COLUMN title VARCHAR(96) NOT NULL DEFAULT '' AFTER recipient_scope"); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   try { await pool.query('ALTER TABLE bounty_notices ADD COLUMN source_spawn_id BIGINT UNSIGNED NULL'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  try { await pool.query("ALTER TABLE player_forge_sessions ADD COLUMN entry_source ENUM('blacksmith','profession') NOT NULL DEFAULT 'blacksmith'"); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   try { await pool.query('ALTER TABLE bounty_notices MODIFY COLUMN refresh_key VARCHAR(32) NOT NULL'); } catch (error: any) { if (error?.code !== 'ER_BAD_FIELD_ERROR') throw error; }
   try { await pool.query('ALTER TABLE combat_ambushes ADD COLUMN ready_spawn_id BIGINT UNSIGNED NULL'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   for (const column of ['element_mastery_json JSON NULL', 'element_resistance_json JSON NULL']) {
@@ -474,6 +485,7 @@ export const initializeSchema = async (pool: Pool) => {
     ('magic_scale', '魔力鳞片', '带有自然魔力的蛇类鳞片。', '蛇类怪物掉落', 'material', '兽材', 0.05, 1, NULL),
     ('magic_claw', '魔力利爪', '由熊类巨爪凝成的锋利素材。', '熊类怪物掉落', 'material', '兽材', 0.10, 1, NULL),
     ('magic_heartcore', '魔力心核', '狼类魔力在心脏处凝聚而成的核心。', '狼类怪物掉落', 'material', '兽材', 0.08, 1, NULL),
+    ('magic_branch', '魔力枝叶', '树精枝梢上凝结的魔力叶片，仍散发着柔和的木属性气息。', '幽暗密林树精掉落', 'material', '锻材', 0.12, 1, NULL),
     ('goblin_ear', '哥布林耳', '哥布林身上留下的辨识素材。', '哥布林掉落', 'material', '兽材', 0.03, 1, NULL),
     ('riot_aura', '暴动的气息', '从暴动怪物身上剥离的躁动气息，隐约散发着危险的魔力。', '暴动怪物额外掉落', 'material', '兽材', 0.05, 1, NULL),
     ('living_wood', '活木', '仍带着微弱生命律动的木材，可用于基础精炼。', '后续开放获取', 'material', '锻材', 0.40, 1, NULL),
@@ -576,6 +588,9 @@ export const initializeSchema = async (pool: Pool) => {
     ('maul', '重爪', 'physical', 8, 2, 135, '以沉重利爪撕开目标。'),
     ('goblin_slash', '哥布林斩', 'physical', 5, 1, 115, '粗陋却迅速的短刃斩击。'),
     ('goblin_fire', '火种术', 'magic', 8, 2, 105, '投出一团不稳定的小火种。'),
+    ('root_bind', '根须禁锢', 'magic', 30, 3, 130, '树精唤醒地下根须，将目标牢牢缠在原地。'),
+    ('thorn_burst', '荆棘爆射', 'physical', 22, 2, 145, '树精将硬化荆棘骤然射出，留下难以愈合的伤口。'),
+    ('verdant_bolt', '苍翠魔弹', 'magic', 36, 2, 155, '汇聚浓郁木属性魔力，发射沉重的苍翠光弹。'),
     ('vine_hex', '藤咒', 'magic', 8, 1, 92, '藤蛇将微弱的自然魔力缠向目标，使其短暂迟缓。'),
     ('moonbolt', '雾月弹', 'magic', 9, 1, 96, '幽狼凝聚雾中的暗色魔力，射出一枚微弱的月影弹。'),
     ('vine_bolt', '藤蔓弹', 'magic', 50, 2, 122, '将藤蛇的藤咒改良为适合人类施展的木属性魔法。'),
@@ -614,6 +629,12 @@ export const initializeSchema = async (pool: Pool) => {
     ON DUPLICATE KEY UPDATE name=VALUES(name),category=VALUES(category),damage_type=VALUES(damage_type),skill_kind=VALUES(skill_kind),element=VALUES(element),range_type=VALUES(range_type),mana_cost=VALUES(mana_cost),cooldown_turns=VALUES(cooldown_turns),power=VALUES(power),description=VALUES(description)`);
   await pool.query(`UPDATE skill_definitions SET skill_kind=CASE category WHEN 'physical' THEN CASE damage_type WHEN '斩击' THEN '斩击' WHEN '刺击' THEN '刺击' ELSE '打击' END WHEN 'magic' THEN CASE WHEN damage_type IN ('水','火','土','木','风','冰','雷','光','暗') THEN '元素' WHEN damage_type='奥术' THEN '能量' ELSE '灵异' END WHEN 'utility' THEN '辅助' WHEN 'passive' THEN '被动' ELSE skill_kind END, element=CASE WHEN category='magic' AND damage_type IN ('水','火','土','木','风','冰','雷','光','暗') THEN damage_type ELSE '无' END, range_type=CASE WHEN category='physical' THEN '近战' WHEN category='magic' THEN '远程' WHEN category='utility' THEN '全体' WHEN category='passive' THEN '自身' ELSE range_type END`);
   await pool.query(`UPDATE skill_definitions SET category='magic',damage_type=CASE code WHEN 'vine_hex' THEN '木' WHEN 'vine_bolt' THEN '木' WHEN 'moonbolt' THEN '暗' WHEN 'moonlight_bolt' THEN '暗' END,skill_kind='元素',element=CASE code WHEN 'vine_hex' THEN '木' WHEN 'vine_bolt' THEN '木' WHEN 'moonbolt' THEN '暗' WHEN 'moonlight_bolt' THEN '暗' END,range_type='远程',learn_cost=CASE WHEN code IN ('vine_bolt','moonlight_bolt') THEN 1 ELSE 99 END,upgrade_cost=CASE WHEN code IN ('vine_bolt','moonlight_bolt') THEN 1 ELSE 99 END,max_level=CASE WHEN code IN ('vine_hex','moonbolt') THEN 1 ELSE 5 END,power_per_level=CASE WHEN code IN ('vine_hex','moonbolt') THEN 0 ELSE 15 END WHERE code IN ('vine_hex','vine_bolt','moonbolt','moonlight_bolt')`);
+  await pool.query(`UPDATE skill_definitions SET category=CASE code WHEN 'thorn_burst' THEN 'physical' ELSE 'magic' END,
+    damage_type=CASE code WHEN 'thorn_burst' THEN '刺击' ELSE '木' END,
+    skill_kind=CASE code WHEN 'thorn_burst' THEN '刺击' ELSE '元素' END,
+    element=CASE code WHEN 'thorn_burst' THEN '无' ELSE '木' END,
+    range_type='远程',learn_cost=99,upgrade_cost=99,max_level=1,power_per_level=0
+    WHERE code IN ('root_bind','thorn_burst','verdant_bolt')`);
   await pool.query(`INSERT INTO skill_definitions (code,name,category,damage_type,skill_kind,element,range_type,mana_cost,cooldown_turns,power,learn_cost,upgrade_cost,max_level,power_per_level,description,passive_effect_json) VALUES
     ('longsword_mastery','长剑精通','passive','无','精通','无','自身',0,0,0,99,99,10,0,'装备长剑类武器时物攻提高5%至25%，副手装备时可减免衰减。',JSON_OBJECT('weaponType','长剑','physicalAttackPct',5)),
     ('shield_mastery','盾牌精通','passive','无','精通','无','自身',0,0,0,99,99,10,0,'装备盾牌类武器时双防提高5%至25%，副手装备时可减免衰减。',JSON_OBJECT('weaponType','盾牌','physicalDefensePct',5,'magicDefensePct',5)),
@@ -693,6 +714,9 @@ export const initializeSchema = async (pool: Pool) => {
     ((SELECT id FROM skill_definitions WHERE code='thorn_shot'),(SELECT id FROM effect_definitions WHERE code='bleeding'),1,1,1,'enemy','on_hit'),
     ((SELECT id FROM skill_definitions WHERE code='constrict'),(SELECT id FROM effect_definitions WHERE code='slow'),1,6,1,'enemy','on_hit'),
     ((SELECT id FROM skill_definitions WHERE code='goblin_fire'),(SELECT id FROM effect_definitions WHERE code='burn'),1,1,1,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='root_bind'),(SELECT id FROM effect_definitions WHERE code='stun'),1,1,1,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='thorn_burst'),(SELECT id FROM effect_definitions WHERE code='bleeding'),1,4,2,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='verdant_bolt'),(SELECT id FROM effect_definitions WHERE code='slow'),1,25,2,'enemy','on_hit'),
     ((SELECT id FROM skill_definitions WHERE code='acid_spray'),(SELECT id FROM effect_definitions WHERE code='vulnerability'),1,12,2,'enemy','on_hit'),
     ((SELECT id FROM skill_definitions WHERE code='regenerate_slime'),(SELECT id FROM effect_definitions WHERE code='regeneration'),1,8,2,'self','on_cast'),
     ((SELECT id FROM skill_definitions WHERE code='guard_break'),(SELECT id FROM effect_definitions WHERE code='vulnerability'),1,18,2,'enemy','on_hit'),
@@ -719,15 +743,17 @@ export const initializeSchema = async (pool: Pool) => {
     ('pitch_bear', '漆熊', 'large', 5, 23,6,25,4,4,7, 1.4,0.3,1.5,0.2,0.3,0.4, JSON_ARRAY('maul','howl','bite'), 108, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',1,'quantity',2),JSON_OBJECT('code','beast_bone','chance',0.90,'quantity',2),JSON_OBJECT('code','beast_hide','chance',0.70,'quantity',2),JSON_OBJECT('code','beast_tendon','chance',0.45,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.25,'quantity',1),JSON_OBJECT('code','magic_claw','chance',0.50,'quantity',1))),
     ('shadow_wolf', '影狼', 'large', 5, 7,19,8,21,14,16, 0.5,1.2,0.5,1.4,0.9,1.0, JSON_ARRAY('mist_pounce','moonbolt','howl','bite'), 96, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',1,'quantity',2),JSON_OBJECT('code','beast_bone','chance',0.90,'quantity',2),JSON_OBJECT('code','beast_hide','chance',0.70,'quantity',2),JSON_OBJECT('code','beast_tendon','chance',0.45,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.25,'quantity',1),JSON_OBJECT('code','magic_heartcore','chance',0.50,'quantity',1))),
     ('goblin', '哥布林', 'elite', 4, 10,13,13,16,16,15, 0.8,1.0,0.9,1.2,1.1,1.0, JSON_ARRAY('goblin_slash','goblin_fire','scratch'), 82, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',0.35,'quantity',1),JSON_OBJECT('code','beast_bone','chance',0.70,'quantity',1),JSON_OBJECT('code','beast_hide','chance',0.35,'quantity',1),JSON_OBJECT('code','beast_tendon','chance',0.20,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.25,'quantity',1),JSON_OBJECT('code','goblin_ear','chance',0.50,'quantity',1))),
+    ('tree_ent', '树精', 'elite', 7, 24,18,20,22,14,18, 1.3,1.2,1.0,1.3,0.6,1.0, JSON_ARRAY('root_bind','thorn_burst','verdant_bolt'), 180, JSON_ARRAY(JSON_OBJECT('code','magic_branch','chance',1,'quantity',1),JSON_OBJECT('code','living_wood','chance',0.50,'quantity',1))),
     ('forest_slime', '森林史莱姆', 'boss', 8, 37,28,25,31,10,15, 1.6,1.4,1.1,1.3,0.5,0.8, JSON_ARRAY('slime_bash','acid_spray','regenerate_slime'), 260, JSON_ARRAY(JSON_OBJECT('code','healing_herb','chance',1,'min_quantity',6,'max_quantity',10)))
     ON DUPLICATE KEY UPDATE name=VALUES(name),monster_class=VALUES(monster_class),level=VALUES(level),constitution=VALUES(constitution),spirit=VALUES(spirit),strength=VALUES(strength),intelligence=VALUES(intelligence),agility=VALUES(agility),perception=VALUES(perception),constitution_growth=VALUES(constitution_growth),spirit_growth=VALUES(spirit_growth),strength_growth=VALUES(strength_growth),intelligence_growth=VALUES(intelligence_growth),agility_growth=VALUES(agility_growth),perception_growth=VALUES(perception_growth),skill_sequence=VALUES(skill_sequence),experience=VALUES(experience),drops_json=VALUES(drops_json)`);
-  await pool.query(`UPDATE monster_templates SET weakness_json=CASE code WHEN 'ball_rabbit' THEN JSON_ARRAY('刺击') WHEN 'spike_boar' THEN JSON_ARRAY('斩击') WHEN 'vine_snake' THEN JSON_ARRAY('斩击') WHEN 'black_bear' THEN JSON_ARRAY('刺击') WHEN 'mist_wolf' THEN JSON_ARRAY('打击') WHEN 'roll_rabbit' THEN JSON_ARRAY('刺击') WHEN 'tusk_boar' THEN JSON_ARRAY('斩击') WHEN 'vine_python' THEN JSON_ARRAY('斩击') WHEN 'pitch_bear' THEN JSON_ARRAY('刺击') WHEN 'shadow_wolf' THEN JSON_ARRAY('打击') WHEN 'goblin' THEN JSON_ARRAY('打击') WHEN 'forest_slime' THEN JSON_ARRAY('刺击') ELSE weakness_json END, resistance_json=CASE code WHEN 'ball_rabbit' THEN JSON_ARRAY('打击') WHEN 'spike_boar' THEN JSON_ARRAY('刺击') WHEN 'vine_snake' THEN JSON_ARRAY('刺击') WHEN 'black_bear' THEN JSON_ARRAY('打击') WHEN 'mist_wolf' THEN JSON_ARRAY('斩击') WHEN 'roll_rabbit' THEN JSON_ARRAY('打击') WHEN 'tusk_boar' THEN JSON_ARRAY('刺击') WHEN 'vine_python' THEN JSON_ARRAY('刺击') WHEN 'pitch_bear' THEN JSON_ARRAY('打击') WHEN 'shadow_wolf' THEN JSON_ARRAY('斩击') WHEN 'goblin' THEN JSON_ARRAY('刺击') WHEN 'forest_slime' THEN JSON_ARRAY('打击') ELSE resistance_json END`);
+  await pool.query(`UPDATE monster_templates SET weakness_json=CASE code WHEN 'ball_rabbit' THEN JSON_ARRAY('刺击') WHEN 'spike_boar' THEN JSON_ARRAY('斩击') WHEN 'vine_snake' THEN JSON_ARRAY('斩击') WHEN 'black_bear' THEN JSON_ARRAY('刺击') WHEN 'mist_wolf' THEN JSON_ARRAY('打击') WHEN 'roll_rabbit' THEN JSON_ARRAY('刺击') WHEN 'tusk_boar' THEN JSON_ARRAY('斩击') WHEN 'vine_python' THEN JSON_ARRAY('斩击') WHEN 'pitch_bear' THEN JSON_ARRAY('刺击') WHEN 'shadow_wolf' THEN JSON_ARRAY('打击') WHEN 'goblin' THEN JSON_ARRAY('打击') WHEN 'tree_ent' THEN JSON_ARRAY('斩击') WHEN 'forest_slime' THEN JSON_ARRAY('刺击') ELSE weakness_json END, resistance_json=CASE code WHEN 'ball_rabbit' THEN JSON_ARRAY('打击') WHEN 'spike_boar' THEN JSON_ARRAY('刺击') WHEN 'vine_snake' THEN JSON_ARRAY('刺击') WHEN 'black_bear' THEN JSON_ARRAY('打击') WHEN 'mist_wolf' THEN JSON_ARRAY('斩击') WHEN 'roll_rabbit' THEN JSON_ARRAY('打击') WHEN 'tusk_boar' THEN JSON_ARRAY('刺击') WHEN 'vine_python' THEN JSON_ARRAY('刺击') WHEN 'pitch_bear' THEN JSON_ARRAY('打击') WHEN 'shadow_wolf' THEN JSON_ARRAY('斩击') WHEN 'goblin' THEN JSON_ARRAY('刺击') WHEN 'tree_ent' THEN JSON_ARRAY('刺击') WHEN 'forest_slime' THEN JSON_ARRAY('打击') ELSE resistance_json END`);
   await pool.query(`UPDATE monster_templates SET element_mastery_json=CASE code
     WHEN 'vine_snake' THEN JSON_OBJECT('水',0,'火',0,'土',0,'木',12,'风',0,'冰',0,'雷',0,'光',0,'暗',0)
     WHEN 'vine_python' THEN JSON_OBJECT('水',0,'火',0,'土',0,'木',20,'风',0,'冰',0,'雷',0,'光',0,'暗',0)
     WHEN 'mist_wolf' THEN JSON_OBJECT('水',0,'火',0,'土',0,'木',0,'风',0,'冰',0,'雷',0,'光',0,'暗',12)
     WHEN 'shadow_wolf' THEN JSON_OBJECT('水',0,'火',0,'土',0,'木',0,'风',0,'冰',0,'雷',0,'光',0,'暗',20)
     WHEN 'goblin' THEN JSON_OBJECT('水',0,'火',10,'土',0,'木',0,'风',0,'冰',0,'雷',0,'光',0,'暗',0)
+    WHEN 'tree_ent' THEN JSON_OBJECT('水',0,'火',0,'土',0,'木',24,'风',0,'冰',0,'雷',0,'光',0,'暗',0)
     WHEN 'forest_slime' THEN JSON_OBJECT('水',12,'火',0,'土',0,'木',0,'风',0,'冰',0,'雷',0,'光',0,'暗',0)
     ELSE element_mastery_json END,
     element_resistance_json=CASE code
@@ -740,6 +766,7 @@ export const initializeSchema = async (pool: Pool) => {
     WHEN 'pitch_bear' THEN JSON_OBJECT('水',0,'火',0,'土',0,'木',0,'风',0,'冰',-15,'雷',0,'光',0,'暗',0)
     WHEN 'shadow_wolf' THEN JSON_OBJECT('水',0,'火',0,'土',0,'木',0,'风',0,'冰',0,'雷',0,'光',-15,'暗',15)
     WHEN 'goblin' THEN JSON_OBJECT('水',0,'火',10,'土',0,'木',0,'风',0,'冰',0,'雷',-10,'光',0,'暗',0)
+    WHEN 'tree_ent' THEN JSON_OBJECT('水',0,'火',-25,'土',8,'木',25,'风',0,'冰',0,'雷',0,'光',0,'暗',0)
     ELSE element_resistance_json END`);
   await pool.query(`DELETE r FROM monster_skill_learn_rules r JOIN monster_templates t ON t.id=r.monster_template_id WHERE t.code IN ('ball_rabbit','spike_boar','vine_snake','black_bear','mist_wolf','roll_rabbit','tusk_boar','vine_python','pitch_bear','shadow_wolf','goblin')`);
   await pool.query(`INSERT INTO monster_skill_learn_rules (monster_template_id,source_skill_code,skill_id,chance) VALUES
@@ -791,12 +818,14 @@ export const initializeSchema = async (pool: Pool) => {
     ((SELECT id FROM monster_templates WHERE code='shadow_wolf'), '影狼从两棵树的阴影间跃出，身形仿佛随薄雾忽明忽暗。'),
     ((SELECT id FROM monster_templates WHERE code='shadow_wolf'), '幽蓝瞳孔在黑暗中一闪，影狼已绕到了你的侧后方。'),
     ((SELECT id FROM monster_templates WHERE code='goblin'), '尖细的笑声从灌木后传来，哥布林握着短刃探出头。'),
-    ((SELECT id FROM monster_templates WHERE code='goblin'), '一团微弱火光在雾中跳动，哥布林正咧嘴念着听不懂的咒语。')`);
-  await pool.query(`DELETE p FROM map_monster_pools p JOIN map_regions r ON r.id=p.region_id JOIN monster_templates t ON t.id=p.monster_template_id WHERE r.code='dark_forest' AND t.code NOT IN ('ball_rabbit','spike_boar','vine_snake','black_bear','mist_wolf','roll_rabbit','tusk_boar','vine_python','pitch_bear','shadow_wolf','goblin')`);
-  await pool.query(`DELETE s FROM monster_spawns s JOIN map_regions r ON r.id=s.region_id JOIN monster_templates t ON t.id=s.template_id WHERE r.code='dark_forest' AND s.defeated_at IS NULL AND t.code NOT IN ('ball_rabbit','spike_boar','vine_snake','black_bear','mist_wolf','roll_rabbit','tusk_boar','vine_python','pitch_bear','shadow_wolf','goblin','forest_slime')`);
+    ((SELECT id FROM monster_templates WHERE code='goblin'), '一团微弱火光在雾中跳动，哥布林正咧嘴念着听不懂的咒语。'),
+    ((SELECT id FROM monster_templates WHERE code='tree_ent'), '前方的古树缓缓拔起根须，枝叶间亮起幽绿的魔力光点——那竟是一只树精。'),
+    ((SELECT id FROM monster_templates WHERE code='tree_ent'), '藤蔓忽然封住林间小径，沉睡的树精睁开树洞般的双眼，根须在泥土中翻涌。')`);
+  await pool.query(`DELETE p FROM map_monster_pools p JOIN map_regions r ON r.id=p.region_id JOIN monster_templates t ON t.id=p.monster_template_id WHERE r.code='dark_forest' AND t.code NOT IN ('ball_rabbit','spike_boar','vine_snake','black_bear','mist_wolf','roll_rabbit','tusk_boar','vine_python','pitch_bear','shadow_wolf','goblin','tree_ent')`);
+  await pool.query(`DELETE s FROM monster_spawns s JOIN map_regions r ON r.id=s.region_id JOIN monster_templates t ON t.id=s.template_id WHERE r.code='dark_forest' AND s.defeated_at IS NULL AND t.code NOT IN ('ball_rabbit','spike_boar','vine_snake','black_bear','mist_wolf','roll_rabbit','tusk_boar','vine_python','pitch_bear','shadow_wolf','goblin','tree_ent','forest_slime')`);
   await pool.query(`INSERT INTO map_monster_pools (region_id, monster_template_id, spawn_weight)
-    SELECT r.id, t.id, CASE t.code WHEN 'ball_rabbit' THEN 24 WHEN 'spike_boar' THEN 18 WHEN 'vine_snake' THEN 16 WHEN 'black_bear' THEN 12 WHEN 'mist_wolf' THEN 18 WHEN 'roll_rabbit' THEN 4 WHEN 'tusk_boar' THEN 3 WHEN 'vine_python' THEN 4 WHEN 'pitch_bear' THEN 1 WHEN 'shadow_wolf' THEN 3 WHEN 'goblin' THEN 4 END
-    FROM map_regions r JOIN monster_templates t ON t.code IN ('ball_rabbit','spike_boar','vine_snake','black_bear','mist_wolf','roll_rabbit','tusk_boar','vine_python','pitch_bear','shadow_wolf','goblin')
+    SELECT r.id, t.id, CASE t.code WHEN 'ball_rabbit' THEN 24 WHEN 'spike_boar' THEN 18 WHEN 'vine_snake' THEN 16 WHEN 'black_bear' THEN 12 WHEN 'mist_wolf' THEN 18 WHEN 'roll_rabbit' THEN 4 WHEN 'tusk_boar' THEN 3 WHEN 'vine_python' THEN 4 WHEN 'pitch_bear' THEN 1 WHEN 'shadow_wolf' THEN 3 WHEN 'goblin' THEN 4 WHEN 'tree_ent' THEN 3 END
+    FROM map_regions r JOIN monster_templates t ON t.code IN ('ball_rabbit','spike_boar','vine_snake','black_bear','mist_wolf','roll_rabbit','tusk_boar','vine_python','pitch_bear','shadow_wolf','goblin','tree_ent')
     WHERE r.code='dark_forest'
     ON DUPLICATE KEY UPDATE spawn_weight=VALUES(spawn_weight)`);
   await pool.query(`DELETE n FROM map_npcs n JOIN map_regions r ON r.id=n.region_id WHERE r.code='baina_town' AND n.code NOT IN ('pear_guide','guild_counter','blacksmith')`);

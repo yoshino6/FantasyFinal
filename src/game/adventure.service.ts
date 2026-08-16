@@ -63,7 +63,7 @@ const pickWeighted = <T extends { spawn_weight: number }>(items: T[]) => {
 };
 const random = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
 const randomItems = <T>(items: T[], count: number) => [...items].sort(() => Math.random() - .5).slice(0, count);
-const randomMonsterLevel = (monsterClass: string, defaultLevel: number) => monsterClass === 'normal' ? random(1, 5) : monsterClass === 'large' || monsterClass === 'elite' ? random(4, 9) : defaultLevel;
+const randomMonsterLevel = (monsterClass: string, defaultLevel: number) => monsterClass === 'normal' ? random(1, 5) : monsterClass === 'elite' && defaultLevel >= 7 ? random(7, 9) : monsterClass === 'large' || monsterClass === 'elite' ? random(4, 9) : defaultLevel;
 const randomMonsterBaseAttributes = (template: MonsterAttributes & { monster_class: string }): Allocation => {
   const total = template.monster_class === 'normal' ? random(45, 65)
     : template.monster_class === 'large' ? random(65, 90)
@@ -256,15 +256,15 @@ export const inventoryView = async (qqUserId: string, category?: '装备' | '道
 
 export const itemCodex = async (qqUserId: string, codexId: string) => {
   const character = await characterFor(qqUserId);
-  const [rows] = await (await getPool()).execute<(RowDataPacket & { codex_id: string; name: string; item_category: string; description: string; obtain_source: string; weight: number })[]>(`SELECT i.codex_id,i.name,i.item_category,i.description,i.obtain_source,i.weight FROM player_item_codex c JOIN item_definitions i ON i.id=c.item_id WHERE c.character_id=? AND i.codex_id=?`, [character.id, codexId]);
+  const [rows] = await (await getPool()).execute<(RowDataPacket & { codex_id: string; name: string; item_type: string; item_category: string; description: string; obtain_source: string; weight: number; effect_json: unknown })[]>(`SELECT i.codex_id,i.name,i.item_type,i.item_category,i.description,i.obtain_source,i.weight,i.effect_json FROM player_item_codex c JOIN item_definitions i ON i.id=c.item_id WHERE c.character_id=? AND i.codex_id=?`, [character.id, codexId]);
   if (!rows[0]) throw new Error('尚未解锁该物品图鉴。');
   return rows[0];
 };
 
 export const equipmentDetail = async (qqUserId: string, instanceId: number) => {
   const character = await characterFor(qqUserId);
-  const [rows] = await (await getPool()).execute<(RowDataPacket & { name: string; item_category: string; quality: number; durability: number; durability_max: number; effect_json: unknown; description: string })[]>(`
-    SELECT i.name,i.item_category,ii.quality,ii.durability,ii.durability_max,COALESCE(ii.effect_json,i.effect_json) AS effect_json,i.description
+  const [rows] = await (await getPool()).execute<(RowDataPacket & { name: string; item_category: string; required_level: number; quality: number; durability: number; durability_max: number; effect_json: unknown; description: string })[]>(`
+    SELECT i.name,i.item_category,i.required_level,ii.quality,ii.durability,ii.durability_max,COALESCE(ii.effect_json,i.effect_json) AS effect_json,i.description
     FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
     WHERE ii.id=? AND ii.character_id=? AND i.item_type='equipment'
   `, [instanceId, character.id]);
@@ -295,8 +295,8 @@ const requireEquipmentSlot = (slot: string) => {
 export const equipmentCandidates = async (qqUserId: string, slot: string) => {
   const validSlot = requireEquipmentSlot(slot); const character = await characterFor(qqUserId); const categories = equipmentSlotCategories[validSlot];
   const placeholders = categories.map(() => '?').join(',');
-  const [rows] = await (await getPool()).execute<(RowDataPacket & { id: number; name: string })[]>(`
-    SELECT ii.id,i.name FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
+  const [rows] = await (await getPool()).execute<(RowDataPacket & { id: number; name: string; required_level: number })[]>(`
+    SELECT ii.id,i.name,i.required_level FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
     LEFT JOIN player_equipment pe ON pe.character_id=ii.character_id AND pe.instance_id=ii.id
     WHERE ii.character_id=? AND i.item_type='equipment' AND i.item_category IN (${placeholders}) AND pe.instance_id IS NULL
     ORDER BY ii.acquired_at DESC,ii.id DESC
@@ -320,12 +320,13 @@ export const unequip = async (qqUserId: string, slot: string) => withTransaction
 export const equip = async (qqUserId: string, slot: string, instanceId: number) => withTransaction(async connection => {
   const validSlot = requireEquipmentSlot(slot); const character = await characterFor(qqUserId); const categories = equipmentSlotCategories[validSlot];
   const placeholders = categories.map(() => '?').join(',');
-  const [items] = await connection.execute<(RowDataPacket & { id: number; item_id: number; name: string })[]>(`
-    SELECT ii.id,ii.item_id,i.name FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
+  const [items] = await connection.execute<(RowDataPacket & { id: number; item_id: number; name: string; required_level: number })[]>(`
+    SELECT ii.id,ii.item_id,i.name,i.required_level FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
     WHERE ii.id=? AND ii.character_id=? AND i.item_type='equipment' AND i.item_category IN (${placeholders}) FOR UPDATE
   `, [instanceId, character.id, ...categories]);
   const item = items[0];
   if (!item) throw new Error('背包中没有这件可装备的物品。');
+  if (Number(character.level) < Number(item.required_level)) throw new Error(`等级不足：该装备需要 Lv.${item.required_level} 才能穿戴。`);
   const [occupied] = await connection.execute<(RowDataPacket & { slot: string })[]>('SELECT slot FROM player_equipment WHERE character_id=? AND instance_id=? FOR UPDATE', [character.id, instanceId]);
   if (occupied[0] && occupied[0].slot !== validSlot) throw new Error('这件装备正在其他部位穿戴。');
   const [sameDefinitions] = await connection.execute<(RowDataPacket & { slot: string })[]>('SELECT slot FROM player_equipment WHERE character_id=? AND item_id=? AND slot<>? FOR UPDATE', [character.id, item.item_id, validSlot]);
@@ -1055,6 +1056,7 @@ const applySkillEffects = async (connection: PoolConnection, sessionId: string, 
 
 const processTurnEffects = async (connection: PoolConnection, sessionId: string, targetKind: 'member' | 'target', targetId: number, members: CombatMemberRow[], targets: CombatTargetRow[], log: string[]) => {
   const effects = (await activeCombatEffects(connection, sessionId)).filter(effect => effect.target_kind === targetKind && Number(effect.target_id) === targetId);
+  let controlled = false;
   for (const effect of effects) {
     const target = effect.target_kind === 'member' ? members.find(member => Number(member.id) === Number(effect.target_id)) : targets.find(monster => Number(monster.id) === Number(effect.target_id));
     if (!target || target.is_defeated) { await connection.execute('DELETE FROM combat_status_effects WHERE id=?', [effect.id]); continue; }
@@ -1070,9 +1072,14 @@ const processTurnEffects = async (connection: PoolConnection, sessionId: string,
       (target as any).current_mp = Math.min(maxMp, oldMp + amount);
       log.push(`§&${effect.name}&恢复 ${amount} MP(${oldMp}→${(target as any).current_mp})`);
     }
+    if (effect.effect_type === 'control') {
+      controlled = true;
+      log.push(`§$${effect.name}$无法行动`);
+    }
     if (Number(effect.remaining_turns) <= 1) await connection.execute('DELETE FROM combat_status_effects WHERE id=?', [effect.id]);
     else await connection.execute('UPDATE combat_status_effects SET remaining_turns=remaining_turns-1 WHERE id=?', [effect.id]);
   }
+  return controlled;
 };
 
 const prepareResidualPartyAmbush = async (connection: PoolConnection, sessionId: string, members: CombatMemberRow[], targets: CombatTargetRow[]) => {
@@ -1185,6 +1192,8 @@ export const currentEncounter = async (qqUserId: string) => {
   const [occupiedRows] = await pool.execute<(RowDataPacket & { spawn_id: number })[]>(`SELECT ct.spawn_id FROM combat_targets ct JOIN combat_sessions cs ON cs.id=ct.session_id
     WHERE cs.state='active' AND ct.spawn_id IN (${rows.map(() => '?').join(',') || 'NULL'})`, rows.map(row => row.id));
   const spawns = materializeMonsters(rows, appraisal.informationLevel >= 2); if (!spawns.length) return null;
+  await pool.query(`INSERT IGNORE INTO player_monster_codex (character_id,monster_template_id) VALUES ${spawns.map(() => '(?,?)').join(',')}`,
+    spawns.flatMap(spawn => [character.id, Number(spawn.template_id)]));
   const members = await partyCombatants(pool, character); const fastestMonster = Math.max(...spawns.map(spawn => monsterCombatStats(spawn).speed));
   const [texts] = await pool.execute<(RowDataPacket & { description: string })[]>('SELECT description FROM monster_encounter_texts WHERE monster_template_id=? ORDER BY RAND() LIMIT 1', [spawns[0].template_id]);
   return { character, spawns, occupied: occupiedRows.some(row => Number(row.spawn_id) === Number(spawns[0]?.id)), canAmbush: members.every(member => Number(member.speed) > fastestMonster), text: texts[0]?.description ?? `${spawns[0].name} 拦住了你的去路。` };
@@ -1303,12 +1312,13 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
   let resolvedActions = 0;
   for (const turn of turns) {
     const logStart = log.length;
-    await processTurnEffects(connection, session.combat_id, turn.kind, turn.id, members, targets, log);
+    const controlled = await processTurnEffects(connection, session.combat_id, turn.kind, turn.id, members, targets, log);
     effects = await activeCombatEffects(connection, session.combat_id);
     if (turn.kind === 'member') {
       const member = members.find(item => Number(item.id) === turn.id)!; if (member.is_defeated) continue;
       if (resolvedActions > 0) log.splice(logStart, 0, '————');
       resolvedActions += 1;
+      if (controlled) continue;
       const choice = jsonObject(member.pending_action) as unknown as PendingAction;
       if (choice.type === 'escape') { log.push(`➤【${member.name}】选择撤离\n　➥等待队伍共同脱离。`); continue; }
       if (choice.type === 'item') {
@@ -1376,6 +1386,7 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
       const monsterTarget = targets.find(item => Number(item.id) === turn.id)!; if (monsterTarget.is_defeated) continue;
       if (resolvedActions > 0) log.splice(logStart, 0, '————');
       resolvedActions += 1;
+      if (controlled || monsterTarget.is_defeated) continue;
       const [threatRows] = await connection.execute<(RowDataPacket & { character_id: number; threat: number })[]>('SELECT character_id,threat FROM combat_threat WHERE session_id=? AND spawn_id=? FOR UPDATE', [session.combat_id, monsterTarget.id]); const victim = threatTarget(members, new Map(threatRows.map(row => [Number(row.character_id), Number(row.threat)]))); if (!victim) continue;
       const sequence = stringList(monsterTarget.skill_sequence); const cooldowns = jsonObject(monsterTarget.cooldowns);
       let skill: (RowDataPacket & { id: number; code: string; name: string; category: 'physical' | 'magic'; element: string; power: number; mana_cost: number; cooldown_turns: number }) | undefined;

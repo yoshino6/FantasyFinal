@@ -1,5 +1,5 @@
 import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
-import { claimMail, deleteMail, mailDetail, playerMails } from '../game/mail.service';
+import { claimAllMails, claimMail, deleteMail, mailDetail, playerMails } from '../game/mail.service';
 import { messageFormat } from '../game/message';
 
 const oneLine = (text: string, length = 42) => {
@@ -13,7 +13,8 @@ const formatDate = (value: Date) => {
 const pager = (page: number, total: number, keyword = '', decorative = false) => Format.createButtonGroup().addRow()
   .addButton('上一页', `/邮件页 ${Math.max(1, page - 1)}${keyword ? ` ${keyword}` : ''}`, { type: 'command', autoEnter: true, style: !decorative && page > 1 ? 'blue' : undefined })
   .addButton('搜索', '/邮件搜索 ', { type: 'command', autoEnter: false, style: decorative ? undefined : 'blue' })
-  .addButton('下一页', `/邮件页 ${Math.min(total, page + 1)}${keyword ? ` ${keyword}` : ''}`, { type: 'command', autoEnter: true, style: !decorative && page < total ? 'blue' : undefined });
+  .addButton('下一页', `/邮件页 ${Math.min(total, page + 1)}${keyword ? ` ${keyword}` : ''}`, { type: 'command', autoEnter: true, style: !decorative && page < total ? 'blue' : undefined })
+  .addRow().addButton('一键领取', '/一键领取邮件', { type: 'command', autoEnter: true, style: decorative ? undefined : 'blue' });
 
 const mailListFormat = async (qqUserId: string, page = 1, keyword = '') => {
   const data = await playerMails(qqUserId, page, keyword); const markdown = Format.createMarkdown().addTitle('我的邮件').addNewline().addNewline();
@@ -49,4 +50,5 @@ export const mailPageHandler = async () => { const [event] = useEvent(); const [
 export const mailSearchHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await message.send({ format: await mailListFormat(event.current.UserId, 1, String(route.param('keyword'))) }); } catch (error) { await message.send({ format: messageFormat('搜索失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const mailDetailHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await message.send({ format: await mailDetailFormat(event.current.UserId, Number(route.param('id'))) }); } catch (error) { await message.send({ format: messageFormat('查看失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const mailClaimHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const result = await claimMail(event.current.UserId, Number(route.param('id'))); await message.send({ format: messageFormat('附件已领取', result.items.map(item => `获得【${item.name}】×${item.quantity}`).join('\n')) }); await message.send({ format: await mailDetailFormat(event.current.UserId, Number(route.param('id'))) }); } catch (error) { await message.send({ format: messageFormat('领取失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const mailClaimAllHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await claimAllMails(event.current.UserId); const obtained = result.items.map(item => `获得【${item.name}】×${item.quantity}`).join('\n'); await message.send({ format: messageFormat('附件已一键领取', `已领取 ${result.mailCount} 封邮件附件。\n${obtained}`) }); await message.send({ format: await mailListFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('领取失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const mailDeleteHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await deleteMail(event.current.UserId, Number(route.param('id'))); await message.send({ format: messageFormat('邮件已删除', '该邮件已从邮箱移除。') }); await message.send({ format: await mailListFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('删除失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
