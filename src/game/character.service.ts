@@ -37,13 +37,14 @@ const jsonRecord = (value: unknown): Record<string, unknown> => {
 };
 
 const withEquipmentStats = async (connection: Pool | PoolConnection, characterId: number, base: DerivedStats): Promise<DerivedStats> => {
-  const [rows] = await connection.execute<(RowDataPacket & { effect_json: unknown })[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json
+  const [rows] = await connection.execute<(RowDataPacket & { effect_json: unknown; quality: number })[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json,COALESCE(ii.quality,100) AS quality
     FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
     LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
     WHERE pe.character_id=?`, [characterId]);
-  const effects = rows.map(row => jsonRecord(row.effect_json));
-  const flat = (key: string) => effects.reduce((total, effect) => total + Number(effect[key] ?? 0), 0);
-  const multiplier = (key: string) => effects.reduce((total, effect) => total * (1 + Number(effect[key] ?? 0) / 100), 1);
+  const [foodRows] = await connection.execute<(RowDataPacket & { buff_json: unknown })[]>('SELECT buff_json FROM player_food_buffs WHERE character_id=? AND expires_at>NOW()', [characterId]);
+  const effects = [...rows.map(row => ({ effect: jsonRecord(row.effect_json), scale: .6 + Math.max(0, Math.min(100, Number(row.quality))) * .004 })), ...foodRows.map(row => ({ effect: jsonRecord(row.buff_json), scale: 1 }))];
+  const flat = (key: string) => effects.reduce((total, entry) => total + Number(entry.effect[key] ?? 0) * entry.scale, 0);
+  const multiplier = (key: string) => effects.reduce((total, entry) => total * (1 + Number(entry.effect[key] ?? 0) * entry.scale / 100), 1);
   const stat = (value: number, rawKey: string, percentKey: string) => Math.max(0, Math.floor((value + flat(rawKey)) * multiplier(percentKey)));
   return {
     hpMax: stat(base.hpMax, 'hpMax', 'hpPct'), mpMax: stat(base.mpMax, 'mpMax', 'mpPct'),
@@ -59,6 +60,7 @@ const withEquipmentStats = async (connection: Pool | PoolConnection, characterId
 export const recalculateCharacterStats = async (connection: Pool | PoolConnection, characterId: number) => {
   const [rows] = await connection.execute<(RowDataPacket & Record<string, unknown>)[]>('SELECT * FROM characters WHERE id=? FOR UPDATE', [characterId]);
   const character = rows[0]; if (!character) return;
+  await connection.execute('DELETE FROM player_food_buffs WHERE character_id=? AND expires_at<=NOW()', [characterId]);
   const stats = await withEquipmentStats(connection, characterId, calculateDerivedStats(finalAttributes(character)));
   await connection.execute('UPDATE characters SET hp_max=?,mp_max=?,current_hp=LEAST(current_hp,?),current_mp=LEAST(current_mp,?),physical_attack=?,magic_attack=?,physical_defense=?,magic_defense=?,accuracy=?,evasion=?,crit_rate_bp=?,crit_damage_bp=?,crit_resist_bp=?,crit_damage_reduction_bp=?,tenacity=?,speed=? WHERE id=?', [stats.hpMax, stats.mpMax, stats.hpMax, stats.mpMax, stats.physicalAttack, stats.magicAttack, stats.physicalDefense, stats.magicDefense, stats.accuracy, stats.evasion, stats.critRateBp, stats.critDamageBp, stats.critResistBp, stats.critDamageReductionBp, stats.tenacity, stats.speed, characterId]);
 };

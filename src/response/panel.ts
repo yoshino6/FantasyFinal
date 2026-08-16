@@ -16,8 +16,9 @@ export const currentLocationText = (character: LocationCharacter) => areaText(ch
 export const movedLocationText = (character: LocationCharacter) => areaText(character, '移动至');
 
 export const outsidePanel = (title: string, location: string, speed: number, range: number, x: number, y: number, description: string, points: NearbyPoint[], resting = false, landmarks: MapLandmark[] = []) => {
-  const markdown = Format.createMarkdown().addTitle(title)
-    .addText(`\n\n${location}\n\n${description}\n\n${resting ? '状态：休息中（每秒恢复 1% 生命与魔力）\n' : ''}移动速度：${speed}\n感知范围：${range}`);
+  const markdown = Format.createMarkdown().addTitle(title).addNewline().addNewline()
+    .addText(location).addNewline().addNewline().addBlockquote(description).addNewline().addNewline()
+    .addText(`${resting ? '状态：休息中（每秒恢复 1% 生命与魔力）\n' : ''}移动速度：${speed}\n感知范围：${range}`);
   if (landmarks.length) {
     markdown.addNewline().addNewline().addText('地图标识：').addNewline();
     for (const landmark of landmarks) {

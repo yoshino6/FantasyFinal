@@ -544,6 +544,8 @@ const moveToPosition = async (connection: PoolConnection, qqUserId: string, x: n
   }
   const [npcs] = await connection.execute<(RowDataPacket & { code: string; name: string; description: string })[]>('SELECT code,name,description FROM map_npcs WHERE region_id=? AND pos_x=? AND pos_y=? AND pos_z=? LIMIT 1', [region.id, x, y, character.pos_z]);
   if (npcs[0]) return { character: moved, kind: 'npc' as const, npc: npcs[0], text: npcs[0].description };
+  const [objects] = await connection.execute<(RowDataPacket & { description: string })[]>('SELECT description FROM map_special_objects WHERE region_id=? AND pos_x=? AND pos_y=? AND pos_z=? LIMIT 1', [region.id, x, y, character.pos_z]);
+  if (objects[0]) return { character: moved, kind: 'event' as const, text: objects[0].description };
   if (region.code === 'dark_forest' && Number(character.level) >= 5) {
     const [story] = await connection.execute<(RowDataPacket & { status: string })[]>('SELECT status FROM player_story_progress WHERE character_id=? AND story_code=\'forest_guide\' FOR UPDATE', [character.id]);
     if (!story[0]) {
@@ -567,20 +569,38 @@ export const moveTo = async (qqUserId: string, x: number, y: number) => {
   const carry = await inventory(qqUserId);
   return withTransaction(async connection => {
     const character = await characterFor(qqUserId); const distance = Math.abs(x - Number(character.pos_x)) + Math.abs(y - Number(character.pos_y));
-    const unlocked = await hasRegionMap(connection, Number(character.id), character.region_name);
-    if (!unlocked || distance <= carry.movementSpeed) return moveToPosition(connection, qqUserId, x, y, true, carry.movementSpeed);
+    const [regions] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>('SELECT id,name FROM map_regions WHERE ? BETWEEN min_x AND max_x AND ? BETWEEN min_y AND max_y AND ? BETWEEN min_z AND max_z ORDER BY danger_level DESC LIMIT 1', [x, y, character.pos_z]); const region = regions[0];
+    if (!region) throw new Error('前面的区域，以后再来探索吧！');
+    const sameRegion = Number(region.id) === Number(character.current_region_id);
+    const currentMapUnlocked = await hasRegionMap(connection, Number(character.id), character.region_name);
+    const targetMapUnlocked = await hasRegionMap(connection, Number(character.id), region.name);
+    if (!sameRegion && !targetMapUnlocked) throw new Error('尚未解锁目标区域地图，无法前往。');
+    if (sameRegion && (!currentMapUnlocked || distance <= carry.movementSpeed)) return moveToPosition(connection, qqUserId, x, y, true, carry.movementSpeed);
     ensureActionAvailable(character);
     const [combat] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM combat_members cm JOIN combat_sessions cs ON cs.id=cm.session_id WHERE cm.character_id=? AND cs.state=\'active\' LIMIT 1 FOR UPDATE', [character.id]);
     if (combat[0]) throw new Error('战斗尚未结束，无法移动。');
     const [encounters] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM monster_spawns WHERE region_id=? AND pos_x=? AND pos_y=? AND pos_z=? AND defeated_at IS NULL LIMIT 1 FOR UPDATE', [character.current_region_id, character.pos_x, character.pos_y, character.pos_z]);
     if (encounters[0]) throw new Error('当前格子存在敌对生物，请先选择战斗、交涉或躲避。');
     const [existing] = await connection.execute<(RowDataPacket & { activity_type: 'move' | 'hunt' })[]>('SELECT activity_type FROM player_travels WHERE character_id=? FOR UPDATE', [character.id]); if (existing[0]) throw new Error(existing[0].activity_type === 'hunt' ? '你正在寻怪，请等待完成或取消寻怪。' : '你正在前往目标地点，请等待抵达或取消移动。');
-    const [regions] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>('SELECT id,name FROM map_regions WHERE ? BETWEEN min_x AND max_x AND ? BETWEEN min_y AND max_y AND ? BETWEEN min_z AND max_z ORDER BY danger_level DESC LIMIT 1', [x, y, character.pos_z]); const region = regions[0];
-    if (!region || Number(region.id) !== Number(character.current_region_id)) throw new Error('当前只能在已解锁地图的同一区域内远距离前往。');
-    const seconds = Math.ceil(distance / carry.movementSpeed);
+    const seconds = Math.max(1, Math.ceil(distance / carry.movementSpeed));
     await connection.execute("INSERT INTO player_travels (character_id,region_id,target_x,target_y,target_z,activity_type,arrival_at) VALUES (?,?,?,?,?,'move',DATE_ADD(NOW(),INTERVAL ? SECOND))", [character.id, region.id, x, y, character.pos_z, seconds]);
     return { kind: 'travel' as const, regionName: region.name, x, y, seconds, remaining: seconds };
   });
+};
+export const moveToMap = async (qqUserId: string, mapCode: string) => {
+  const pool = await getPool();
+  const character = await characterFor(qqUserId);
+  const [rows] = await pool.execute<(RowDataPacket & { code: string; name: string; min_x: number | null; max_x: number | null; min_y: number | null; max_y: number | null })[]>(`SELECT i.code,r.name,r.min_x,r.max_x,r.min_y,r.max_y
+    FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id
+    LEFT JOIN map_regions r ON r.code=JSON_UNQUOTE(JSON_EXTRACT(i.effect_json, '$.map'))
+    WHERE pi.character_id=? AND pi.quantity>0 AND i.item_category='地图' AND i.code=? LIMIT 1`, [character.id, mapCode]);
+  const map = rows[0];
+  if (!map) throw new Error('尚未拥有该地图。');
+  if (map.min_x === null || map.max_x === null || map.min_y === null || map.max_y === null) throw new Error('该地图区域暂未开放。');
+  if (map.name === character.region_name) throw new Error(`你已经位于${map.name}。`);
+  const x = Math.min(Number(map.max_x), Math.max(Number(map.min_x), Number(character.pos_x)));
+  const y = Math.min(Number(map.max_y), Math.max(Number(map.min_y), Number(character.pos_y)));
+  return moveTo(qqUserId, x, y);
 };
 export const huntMonster = async (qqUserId: string) => withTransaction(async connection => {
   const character = await characterFor(qqUserId); ensureActionAvailable(character);
@@ -718,7 +738,9 @@ const combatTargets = async (connection: PoolConnection, sessionId: string, reve
 };
 
 export const chooseTarget = async (qqUserId: string, spawnId: number, ambush = false) => withTransaction(async connection => {
-  const character = await characterFor(qqUserId); const members = await partyCombatants(connection, character);
+  let character = await characterFor(qqUserId); let members = await partyCombatants(connection, character);
+  for (const member of members) await recalculateCharacterStats(connection, Number(member.id));
+  members = await partyCombatants(connection, character); character = members.find(member => Number(member.id) === Number(character.id)) ?? character;
   ensureActionAvailable(character); if (members.some(member => member.activity_status === 'resting')) throw new Error('队伍中有人正在休息，无法进入战斗。');
   const [existing] = await connection.execute<RowDataPacket[]>(`SELECT cs.id FROM combat_sessions cs JOIN combat_members cm ON cm.session_id=cs.id WHERE cm.character_id IN (${members.map(() => '?').join(',')}) AND cs.state='active' LIMIT 1 FOR UPDATE`, members.map(member => member.id));
   if (existing[0]) throw new Error('队伍正在战斗中，请先结束当前战斗。');
