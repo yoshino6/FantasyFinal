@@ -46,7 +46,7 @@ const monsterCombatStats = (monster: MonsterAttributes & { level: number; traits
   const scaled = (value: number) => Math.floor(value * statMultiplier);
   return {
     hpMax: boosted(stats.hpMax, 'hpPct') * (boss ? 4 : 1), mpMax: boosted(stats.mpMax, 'mpPct'), physicalAttack: boosted(stats.physicalAttack, 'physicalAttackPct'), magicAttack: boosted(stats.magicAttack, 'magicAttackPct'),
-    physicalDefense: boosted(stats.physicalDefense, 'physicalDefensePct'), magicDefense: boosted(stats.magicDefense, 'magicDefensePct'), accuracy: boosted(stats.accuracy, 'accuracyPct') * (boss ? 2 : 1), evasion: boosted(stats.evasion, 'evasionPct'),
+    physicalDefense: boosted(stats.physicalDefense, 'physicalDefensePct'), magicDefense: boosted(stats.magicDefense, 'magicDefensePct'), accuracy: boosted(stats.accuracy, 'accuracyPct'), evasion: boosted(stats.evasion, 'evasionPct'),
     crit: boosted(stats.critRateBp, 'critRatePct'), critResist: boosted(stats.critResistBp, 'critResistPct'), critDamage: boosted(stats.critDamageBp, 'critDamagePct'), critReduction: boosted(stats.critDamageReductionBp, 'critReductionPct'), speed: boosted(stats.speed, 'speedPct'), perception: scaled(values.perception)
   };
 };
@@ -845,11 +845,34 @@ const negotiationFailureOpening = async (qqUserId: string, spawnId: number) => {
     const members = await combatMembers(connection, session.combat_id); const targets = await combatTargets(connection, session.combat_id, false);
     const attacker = targets[0]; const victim = attacker && threatTarget(members, new Map(members.map(member => [Number(member.id), 1])));
     if (!attacker || !victim) return { started, log: '交涉失败，敌人露出敌意。' };
-    const monster = monsterCombatStats(attacker); const strike = resolveStrike(monster.physicalAttack, Number(victim.physical_defense), monster.accuracy, Number(victim.evasion), monster.crit, Number(victim.crit_resist_bp), monster.critDamage, Number(victim.crit_damage_reduction_bp));
-    const oldHp = Number(victim.current_hp); victim.current_hp = Math.max(0, oldHp - strike.damage); if (!victim.current_hp) victim.is_defeated = 1;
+    const [templateRows] = await connection.execute<(RowDataPacket & { code: string })[]>('SELECT code FROM monster_templates WHERE id=?', [Number(attacker.template_id ?? 0)]);
+    const isWolfKing = templateRows[0]?.code === 'shadow_wolf_king';
+    const sequence = isWolfKing ? ['wolfking_summon_shadow_wolf'] : stringList(attacker.skill_sequence);
+    const cooldowns = jsonObject(attacker.cooldowns);
+    let skill: (RowDataPacket & { id: number; code: string; name: string; category: string; element: string; power: number; mana_cost: number; cooldown_turns: number }) | undefined;
+    if (sequence.length) {
+      const placeholders = sequence.map(() => '?').join(',');
+      const [skillRows] = await connection.execute<(RowDataPacket & { id: number; code: string; name: string; category: string; element: string; power: number; mana_cost: number; cooldown_turns: number })[]>(`SELECT id,code,name,category,element,power,mana_cost,cooldown_turns FROM skill_definitions WHERE code IN (${placeholders})`, sequence);
+      const readySkills = skillRows.filter(candidate => Number(attacker.current_mp) >= Number(candidate.mana_cost) && Number(cooldowns[candidate.code] ?? 0) <= 0);
+      skill = isWolfKing ? readySkills.find(candidate => candidate.code === 'wolfking_summon_shadow_wolf') : readySkills.length ? readySkills[random(0, readySkills.length - 1)] : undefined;
+    }
+    const actionLog: string[] = [];
+    if (skill?.code === 'wolfking_summon_shadow_wolf') {
+      attacker.current_mp -= Number(skill.mana_cost); cooldowns[skill.code] = Number(skill.cooldown_turns); attacker.cooldowns = cooldowns;
+      const count = await summonShadowWolves(connection, session.combat_id, attacker, members);
+      await connection.execute('UPDATE combat_targets SET current_mp=?,cooldowns=? WHERE session_id=? AND spawn_id=?', [attacker.current_mp, JSON.stringify(cooldowns), session.combat_id, attacker.id]);
+      await connection.execute('UPDATE combat_sessions SET turn_no=turn_no+1 WHERE id=?', [session.combat_id]);
+      return { started, log: `交涉失败！全队错失第一回合行动。\n【${attacker.name}】释放技能「${skill.name}」\n➥影幕翻涌，${count}只影狼加入了战斗。` };
+    }
+    if (skill) { attacker.current_mp -= Number(skill.mana_cost); cooldowns[skill.code] = Number(skill.cooldown_turns); attacker.cooldowns = cooldowns; }
+    const monster = monsterCombatStats(attacker); const attack = skill?.category === 'magic' ? monster.magicAttack : monster.physicalAttack; const kind = skill?.category === 'magic' ? '魔法' : '物理'; const multiplier = Number(skill?.power ?? 100) / 100;
+    const strike = resolveStrike(attack * multiplier, kind === '魔法' ? Number(victim.magic_defense) : Number(victim.physical_defense), monster.accuracy, Number(victim.evasion), monster.crit, Number(victim.crit_resist_bp), monster.critDamage, Number(victim.crit_damage_reduction_bp));
+    const oldHp = Number(victim.current_hp); if (strike.hit) { victim.current_hp = Math.max(0, oldHp - strike.damage); if (!victim.current_hp) victim.is_defeated = 1; if (skill) await applySkillEffects(connection, session.combat_id, Number(skill.id), attacker, 'target', victim, 'member', 'on_hit', actionLog); }
     await connection.execute('UPDATE combat_members SET current_hp=?,is_defeated=? WHERE session_id=? AND character_id=?', [victim.current_hp, victim.is_defeated ? 1 : 0, session.combat_id, victim.id]);
+    await connection.execute('UPDATE combat_targets SET current_mp=?,cooldowns=? WHERE session_id=? AND spawn_id=?', [attacker.current_mp, JSON.stringify(cooldowns), session.combat_id, attacker.id]);
     await connection.execute('UPDATE combat_sessions SET turn_no=turn_no+1 WHERE id=?', [session.combat_id]);
-    const result = !strike.hit ? `【${attacker.name}】抢先发动攻击，但【${victim.name}】闪避了。` : `【${attacker.name}】抢先发动攻击\n➥对【${victim.name}】造成 ${strike.damage} 点物理伤害(${oldHp}→${victim.current_hp})`;
+    const actionText = skill ? `释放技能「${skill.name}」` : '普通攻击';
+    const result = !strike.hit ? `【${attacker.name}】${actionText}\n➥【${victim.name}】闪避了攻击。` : `【${attacker.name}】${actionText}\n➥对【${victim.name}】造成 ${strike.damage} 点${kind}伤害(${oldHp}→${victim.current_hp})${actionLog.length ? `\n${actionLog.join('\n')}` : ''}`;
     return { started, log: `交涉失败！全队错失第一回合行动。\n${result}` };
   });
 };
@@ -1486,7 +1509,11 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
         const readySkills = skillRows.filter(candidate => Number(monsterTarget.current_mp) >= Number(candidate.mana_cost) && Number(cooldowns[candidate.code] ?? 0) <= 0);
         skill = readySkills.length ? readySkills[random(0, readySkills.length - 1)] : undefined;
         if (isWolfKing) {
-          const wolfAlive = targets.some(target => Number(target.id) !== Number(monsterTarget.id) && !target.is_defeated && target.name === '影狼');
+          const [wolfRows] = await connection.execute<RowDataPacket[]>(`SELECT 1 FROM combat_targets ct
+            JOIN monster_spawns s ON s.id=ct.spawn_id
+            JOIN monster_templates t ON t.id=s.template_id
+            WHERE ct.session_id=? AND ct.is_defeated=0 AND s.defeated_at IS NULL AND t.code='shadow_wolf' LIMIT 1`, [session.combat_id]);
+          const wolfAlive = Boolean(wolfRows[0]);
           const lowest = [...members].filter(member => !member.is_defeated).sort((a, b) => Number(a.current_hp) / Number(a.hp_max) - Number(b.current_hp) / Number(b.hp_max))[0];
           const choose = (code: string) => readySkills.find(candidate => candidate.code === code);
           if (Number(monsterTarget.current_hp) / Math.max(1, Number(monsterTarget.hp_max)) < .1) { skill = choose('wolfking_fang_devour'); if (lowest) victim = lowest; }
@@ -1494,8 +1521,8 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
           else if (lowest && Number(lowest.current_hp) / Math.max(1, Number(lowest.hp_max)) < .25) { skill = choose('wolfking_fang_devour'); victim = lowest; }
           else if (!wolfAlive) { skill = choose('wolfking_summon_shadow_wolf'); if (cooldowns.wolfking_rotation === undefined) cooldowns.wolfking_rotation = 1; }
           else {
-            const rotation = ['wolfking_summon_shadow_wolf', 'wolfking_trample', 'wolfking_rending_pounce', 'wolfking_bite']; const index = Number(cooldowns.wolfking_rotation ?? 0) % rotation.length;
-            skill = choose(rotation[index]) ?? skill; cooldowns.wolfking_rotation = index + 1;
+            const rotation = ['wolfking_trample', 'wolfking_rending_pounce', 'wolfking_bite']; const index = Math.max(0, Number(cooldowns.wolfking_rotation ?? 1) - 1) % rotation.length;
+            skill = choose(rotation[index]) ?? skill; cooldowns.wolfking_rotation = index + 2 > rotation.length ? 1 : index + 2;
           }
         }
       }
@@ -1516,15 +1543,20 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
       const strike = resolveStrike(monsterAttack * multiplier * (1 + curse / 400), victimDefense * (1 - curse / 400), monster.accuracy * (1 + curse / 100), Number(victim.evasion) * (1 - imbalance / 100), monster.crit + (bite ? 500 : 0), Number(victim.crit_resist_bp), monster.critDamage, Number(victim.crit_damage_reduction_bp), bite || fang);
       const identifiedMonster = Boolean(appraisalForTarget(appraisal, Number(monsterTarget.level)));
       log.push(`➤【${targetName(monsterTarget)}】${skill ? `释放技能「${identifiedMonster ? skill.name : '???'}」` : '普通攻击'}`);
+      if (pounce) log.push('$连击$连续发动三次攻击。');
+      if (fang) log.push('$利齿$本次攻击必定暴击。');
       if (bite) { log.push('　#必中#该攻击必定命中'); log.push('　#獠牙#该攻击暴击+25%'); }
       if (!strike.hit) { log.push(`　➥【${victim.name}】闪避了攻击`); continue; }
       const barrier = effectValue('member', Number(victim.id), 'barrier'); const guard = effectValue('member', Number(victim.id), 'shield_guard'); const elemental = elementalMultiplier(monsterTarget.element_mastery_json, victim.element_resistance_json, String(skill?.element ?? '')); const damage = Math.max(1, Math.floor(strike.damage * elemental * (1 - Math.min(80, barrier) / 100) * (1 - Math.min(90, guard) / 100)));
       const affected = skill?.code === 'wolfking_trample' ? members.filter(member => !member.is_defeated) : [victim]; const hitCount = pounce ? 3 : 1;
-      for (const affectedVictim of affected) for (let index = 0; index < hitCount; index += 1) { const oldHp = Number(affectedVictim.current_hp); const dealt = pounce ? Math.max(monster.physicalAttack, damage) : damage; affectedVictim.current_hp = Math.max(0, oldHp - dealt); if (!affectedVictim.current_hp) affectedVictim.is_defeated = 1; log.push(`　➥${strike.crit || fang ? '[暴击!]' : ''}对【${affectedVictim.name}】造成 ${dealt} 点${skill?.category === 'magic' ? '魔法' : '物理'}伤害(${oldHp}→${affectedVictim.current_hp})`); if (skill) await applySkillEffects(connection, session.combat_id, Number(skill.id), monsterTarget, 'target', affectedVictim, 'member', 'on_hit', log); if (affectedVictim.is_defeated) break; }
+      for (const affectedVictim of affected) for (let index = 0; index < hitCount; index += 1) { const oldHp = Number(affectedVictim.current_hp); const dealt = damage; affectedVictim.current_hp = Math.max(0, oldHp - dealt); if (!affectedVictim.current_hp) affectedVictim.is_defeated = 1; log.push(`　➥${strike.crit || fang ? '[暴击!]' : ''}对【${affectedVictim.name}】造成 ${dealt} 点${skill?.category === 'magic' ? '魔法' : '物理'}伤害(${oldHp}→${affectedVictim.current_hp})`); if (skill) await applySkillEffects(connection, session.combat_id, Number(skill.id), monsterTarget, 'target', affectedVictim, 'member', 'on_hit', log); if (affectedVictim.is_defeated) break; }
     }
   }
   for (const target of targets) {
-    const cooldowns = jsonObject(target.cooldowns); for (const [code, turns] of Object.entries(cooldowns)) cooldowns[code] = Math.max(0, Number(turns) - 1);
+    const cooldowns = jsonObject(target.cooldowns); for (const [code, turns] of Object.entries(cooldowns)) {
+      if (code === 'wolfking_rotation' || code === 'wolfking_shadow_curse_used') continue;
+      cooldowns[code] = Math.max(0, Number(turns) - 1);
+    }
     await connection.execute('UPDATE monster_spawns SET current_hp=?,defeated_at=IF(?,NOW(),defeated_at) WHERE id=?', [target.current_hp, target.is_defeated ? 1 : 0, target.id]);
     await connection.execute('UPDATE combat_targets SET current_mp=?,cooldowns=?,is_defeated=? WHERE session_id=? AND spawn_id=?', [target.current_mp, JSON.stringify(cooldowns), target.is_defeated ? 1 : 0, session.combat_id, target.id]);
   }

@@ -630,7 +630,7 @@ export const initializeSchema = async (pool: Pool) => {
   await pool.query(`INSERT INTO skill_definitions (code,name,category,damage_type,skill_kind,element,range_type,mana_cost,cooldown_turns,power,learn_cost,upgrade_cost,max_level,power_per_level,description) VALUES
     ('wolfking_summon_shadow_wolf','召唤·影狼','utility','无','召唤','无','全体',80,0,0,99,99,1,0,'呼唤两只10级影狼加入战斗；新加入的影狼下回合才能行动。'),
     ('wolfking_trample','践踏','physical','打击','打击','无','近战',55,1,90,99,99,1,0,'以沉重步伐震击所有敌人，令其失衡。'),
-    ('wolfking_rending_pounce','连扑','physical','斩击','斩击','无','近战',70,1,75,99,99,1,0,'对目标发动三次连续扑杀，每次伤害不低于自身物攻。'),
+    ('wolfking_rending_pounce','连扑','physical','斩击','斩击','无','近战',70,1,75,99,99,1,0,'对目标发动三次连续扑杀。'),
     ('wolfking_bite','撕咬','physical','斩击','斩击','无','近战',65,1,125,99,99,1,0,'凶狠撕咬目标，使其流血。'),
     ('wolfking_shadow_curse','影咒','utility','无','强化','无','自身',90,4,0,99,99,1,0,'恢复已损失生命的一半，并在短时间内强化自身。'),
     ('wolfking_fang_devour','齿噬','physical','斩击','斩击','无','近战',60,0,125,99,99,1,0,'利齿必定造成暴击，并使目标陷入脆弱。')
