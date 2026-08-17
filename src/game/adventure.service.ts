@@ -1540,12 +1540,12 @@ export const combatAction = async (qqUserId: string, action: PendingAction['type
       const multiplier = Number(skill?.power ?? 100) / 100; const monster = monsterCombatStats(monsterTarget); const bite = skill?.code === 'bite';
       const monsterAttack = skill?.category === 'magic' ? monster.magicAttack : monster.physicalAttack; const victimModifiers = await modifiersFor(connection, Number(victim.id)); const victimDefense = (skill?.category === 'magic' ? Number(victim.magic_defense) * (1 + victimModifiers.magicDefensePct / 100) : Number(victim.physical_defense) * (1 + victimModifiers.physicalDefensePct / 100));
       const curse = effectValue('target', Number(monsterTarget.id), 'shadow_curse'); const imbalance = effectValue('member', Number(victim.id), 'imbalance'); const fang = skill?.code === 'wolfking_fang_devour'; const pounce = skill?.code === 'wolfking_rending_pounce';
-      const strike = resolveStrike(monsterAttack * multiplier * (1 + curse / 400), victimDefense * (1 - curse / 400), monster.accuracy * (1 + curse / 100), Number(victim.evasion) * (1 - imbalance / 100), monster.crit + (bite ? 500 : 0), Number(victim.crit_resist_bp), monster.critDamage, Number(victim.crit_damage_reduction_bp), bite || fang);
+      const strike = resolveStrike(monsterAttack * multiplier * (1 + curse / 400), victimDefense * (1 - curse / 400), monster.accuracy * (1 + curse / 100), Number(victim.evasion) * (1 - imbalance / 100), monster.crit + (bite ? 500 : 0), Number(victim.crit_resist_bp), monster.critDamage, Number(victim.crit_damage_reduction_bp), fang);
       const identifiedMonster = Boolean(appraisalForTarget(appraisal, Number(monsterTarget.level)));
       log.push(`➤【${targetName(monsterTarget)}】${skill ? `释放技能「${identifiedMonster ? skill.name : '???'}」` : '普通攻击'}`);
       if (pounce) log.push('$连击$连续发动三次攻击。');
       if (fang) log.push('$利齿$本次攻击必定暴击。');
-      if (bite) { log.push('　#必中#该攻击必定命中'); log.push('　#獠牙#该攻击暴击+25%'); }
+      if (bite) log.push('　#獠牙#该攻击暴击+25%');
       if (!strike.hit) { log.push(`　➥【${victim.name}】闪避了攻击`); continue; }
       const barrier = effectValue('member', Number(victim.id), 'barrier'); const guard = effectValue('member', Number(victim.id), 'shield_guard'); const elemental = elementalMultiplier(monsterTarget.element_mastery_json, victim.element_resistance_json, String(skill?.element ?? '')); const damage = Math.max(1, Math.floor(strike.damage * elemental * (1 - Math.min(80, barrier) / 100) * (1 - Math.min(90, guard) / 100)));
       const affected = skill?.code === 'wolfking_trample' ? members.filter(member => !member.is_defeated) : [victim]; const hitCount = pounce ? 3 : 1;
