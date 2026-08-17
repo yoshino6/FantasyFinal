@@ -3,6 +3,7 @@ import expose from './expose';
 import koaRouter from 'koa-router';
 import { getPool } from './database/pool';
 import { spawnMonsters } from './game/adventure.service';
+import { refreshBounties } from './game/bounty.service';
 import { setCron } from 'alemonjs';
 import { installGroupReplyMention } from './middleware/group-reply-mention';
 
@@ -51,6 +52,10 @@ appGroup.use({ path: '领取邮件', schema: { usage: '/领取邮件 <邮件编�
 appGroup.use('一键领取邮件', () => import('./response/mail').then(module => ({ default: module.mailClaimAllHandler })))
 appGroup.use({ path: '删除邮件', schema: { usage: '/删除邮件 <邮件编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/mail').then(module => ({ default: module.mailDeleteHandler })))
 appGroup.use('管理', () => import('./response/admin'))
+appGroup.use('BOSS管理', () => import('./response/admin').then(module => ({ default: module.bossManagementHandler })))
+appGroup.use({ path: 'BOSS刷新', schema: { usage: '/BOSS刷新 <Boss代号>', args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/admin').then(module => ({ default: module.bossSpawnHandler })))
+appGroup.use({ path: 'BOSS消灭', schema: { usage: '/BOSS消灭 <Boss代号>', args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/admin').then(module => ({ default: module.bossDefeatHandler })))
+appGroup.use({ path: 'BOSS上赏', schema: { usage: '/BOSS上赏 <Boss代号>', args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/admin').then(module => ({ default: module.bossBountyHandler })))
 appGroup.use({ path: '管理员登录', schema: { usage: '/管理员登录 <密码>', args: [{ name: 'password', rules: [{ required: true }] }] } }, () => import('./response/admin').then(module => ({ default: module.ownerLoginHandler })))
 appGroup.use('给予权限', () => import('./response/admin').then(module => ({ default: module.grantAdministratorHandler })))
 appGroup.use('撤销权限', () => import('./response/admin').then(module => ({ default: module.revokeAdministratorHandler })))
@@ -199,8 +204,8 @@ export default defineChildren({
   onReady() {
     logger.info('本地测试启动');
     void getPool()
-      .then(async () => { await spawnMonsters(); logger.info('游戏数据库、初始地图与怪物群已就绪'); })
+      .then(async () => { await spawnMonsters(false); logger.info('游戏数据库、初始地图与怪物群已就绪'); })
       .catch(error => logger.error({ err: error }, '游戏数据库初始化失败'));
-    setCron('0 * * * *', () => void spawnMonsters().catch(error => logger.error({ err: error }, '整点刷怪失败')));
+    setCron('0 * * * *', () => void getPool().then(async pool => { await refreshBounties(pool); await spawnMonsters(); }).catch(error => logger.error({ err: error }, '整点 Boss/悬赏刷新失败')));
   }
 });

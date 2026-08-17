@@ -2,7 +2,7 @@ import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 
 type Connection = Pool | PoolConnection;
-type BountyRow = RowDataPacket & { id: number; title: string; target_name: string; required_count: number; copper_reward: number; source_spawn_id: number | null; progress: number | null; status: 'accepted' | 'completed' | 'claimed' | null };
+type BountyRow = RowDataPacket & { id: number; title: string; target_name: string; required_count: number; copper_reward: number; source_spawn_id: number | null; region_name: string | null; pos_x: number | null; pos_y: number | null; pos_z: number | null; progress: number | null; status: 'accepted' | 'completed' | 'claimed' | null };
 type CharacterRow = RowDataPacket & { id: number; adventurer_registered: number };
 
 const seeds = [
@@ -39,23 +39,41 @@ export const refreshBounties = async (connection: Connection) => {
     FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id
     WHERE s.defeated_at IS NULL AND JSON_CONTAINS(s.traits_json,JSON_OBJECT('code','riot'))
     ON DUPLICATE KEY UPDATE title=VALUES(title),source_spawn_id=VALUES(source_spawn_id),copper_reward=VALUES(copper_reward),is_active=1,expires_at=VALUES(expires_at)`);
+  await connection.execute(`INSERT INTO bounty_notices (refresh_key,title,target_template_id,source_spawn_id,required_count,copper_reward,is_active,expires_at)
+    SELECT CONCAT('boss-',s.id),CONCAT('紧急：讨伐',t.name),s.template_id,s.id,1,300+COALESCE(s.level,t.level)*60,1,DATE_ADD(NOW(),INTERVAL 1 HOUR)
+    FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id
+    WHERE t.monster_class='boss' AND s.defeated_at IS NULL AND s.spawned_at < DATE_FORMAT(NOW(),'%Y-%m-%d %H:00:00')
+    ON DUPLICATE KEY UPDATE title=VALUES(title),source_spawn_id=VALUES(source_spawn_id),copper_reward=VALUES(copper_reward),is_active=1,expires_at=VALUES(expires_at)`);
+};
+
+export const postBossBounty = async (bossCode: string) => {
+  const pool = await getPool();
+  const [result] = await pool.execute<any>(`INSERT INTO bounty_notices (refresh_key,title,target_template_id,source_spawn_id,required_count,copper_reward,is_active,expires_at)
+    SELECT CONCAT('boss-',s.id),CONCAT('紧急：讨伐',t.name),s.template_id,s.id,1,300+COALESCE(s.level,t.level)*60,1,DATE_ADD(NOW(),INTERVAL 1 HOUR)
+    FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id
+    WHERE t.code=? AND t.monster_class='boss' AND s.defeated_at IS NULL
+    ON DUPLICATE KEY UPDATE title=VALUES(title),source_spawn_id=VALUES(source_spawn_id),copper_reward=VALUES(copper_reward),is_active=1,expires_at=VALUES(expires_at)`, [bossCode]);
+  if (!Number(result.affectedRows)) throw new Error('当前 Boss 未刷新，无法上悬赏板。');
+  const [rows] = await pool.execute<(RowDataPacket & { id: number; title: string })[]>(`SELECT b.id,b.title FROM bounty_notices b JOIN monster_templates t ON t.id=b.target_template_id
+    WHERE t.code=? AND b.is_active=1 AND b.expires_at>NOW() ORDER BY b.id DESC LIMIT 1`, [bossCode]);
+  return rows[0];
 };
 
 export const bountyBoard = async (qqUserId: string) => {
   const pool = await getPool(); const character = await characterFor(pool, qqUserId); await refreshBounties(pool);
-  const [rows] = await pool.execute<BountyRow[]>(`SELECT b.id,b.title,t.name AS target_name,b.required_count,b.copper_reward,b.source_spawn_id,pb.progress,pb.status
-    FROM bounty_notices b JOIN monster_templates t ON t.id=b.target_template_id LEFT JOIN player_bounties pb ON pb.bounty_id=b.id AND pb.character_id=?
+  const [rows] = await pool.execute<BountyRow[]>(`SELECT b.id,b.title,t.name AS target_name,b.required_count,b.copper_reward,b.source_spawn_id,r.name AS region_name,s.pos_x,s.pos_y,s.pos_z,pb.progress,pb.status
+    FROM bounty_notices b JOIN monster_templates t ON t.id=b.target_template_id LEFT JOIN monster_spawns s ON s.id=b.source_spawn_id LEFT JOIN map_regions r ON r.id=s.region_id LEFT JOIN player_bounties pb ON pb.bounty_id=b.id AND pb.character_id=?
     WHERE b.is_active=1 AND b.expires_at>NOW() ORDER BY b.id`, [character.id]);
   const [activeRows] = await pool.execute<(RowDataPacket & { total: number })[]>('SELECT COUNT(*) AS total FROM player_bounties WHERE character_id=? AND status IN (\'accepted\',\'completed\')', [character.id]);
-  return { bounties: rows.map(row => ({ id: Number(row.id), title: row.title, targetName: row.target_name, requiredCount: Number(row.required_count), copperReward: Number(row.copper_reward), sourceSpawnId: row.source_spawn_id === null ? undefined : Number(row.source_spawn_id), progress: row.progress === null ? 0 : Number(row.progress), status: row.status })), activeCount: Number(activeRows[0]?.total ?? 0) };
+  return { bounties: rows.map(row => ({ id: Number(row.id), title: row.title, targetName: row.target_name, requiredCount: Number(row.required_count), copperReward: Number(row.copper_reward), sourceSpawnId: row.source_spawn_id === null ? undefined : Number(row.source_spawn_id), location: row.region_name === null ? undefined : { regionName: row.region_name, x: Number(row.pos_x), y: Number(row.pos_y), z: Number(row.pos_z) }, progress: row.progress === null ? 0 : Number(row.progress), status: row.status })), activeCount: Number(activeRows[0]?.total ?? 0) };
 };
 
 export const playerBounties = async (qqUserId: string) => {
   const pool = await getPool(); const character = await characterFor(pool, qqUserId);
-  const [rows] = await pool.execute<BountyRow[]>(`SELECT b.id,b.title,t.name AS target_name,b.required_count,b.copper_reward,b.source_spawn_id,pb.progress,pb.status
-    FROM player_bounties pb JOIN bounty_notices b ON b.id=pb.bounty_id JOIN monster_templates t ON t.id=b.target_template_id
+  const [rows] = await pool.execute<BountyRow[]>(`SELECT b.id,b.title,t.name AS target_name,b.required_count,b.copper_reward,b.source_spawn_id,r.name AS region_name,s.pos_x,s.pos_y,s.pos_z,pb.progress,pb.status
+    FROM player_bounties pb JOIN bounty_notices b ON b.id=pb.bounty_id JOIN monster_templates t ON t.id=b.target_template_id LEFT JOIN monster_spawns s ON s.id=b.source_spawn_id LEFT JOIN map_regions r ON r.id=s.region_id
     WHERE pb.character_id=? AND pb.status IN ('accepted','completed') ORDER BY pb.accepted_at,b.id`, [character.id]);
-  return rows.map(row => ({ id: Number(row.id), title: row.title, targetName: row.target_name, requiredCount: Number(row.required_count), copperReward: Number(row.copper_reward), sourceSpawnId: row.source_spawn_id === null ? undefined : Number(row.source_spawn_id), progress: Number(row.progress), status: row.status! }));
+  return rows.map(row => ({ id: Number(row.id), title: row.title, targetName: row.target_name, requiredCount: Number(row.required_count), copperReward: Number(row.copper_reward), sourceSpawnId: row.source_spawn_id === null ? undefined : Number(row.source_spawn_id), location: row.region_name === null ? undefined : { regionName: row.region_name, x: Number(row.pos_x), y: Number(row.pos_y), z: Number(row.pos_z) }, progress: Number(row.progress), status: row.status! }));
 };
 
 export const acceptBounty = async (qqUserId: string, bountyId: number) => withTransaction(async connection => {

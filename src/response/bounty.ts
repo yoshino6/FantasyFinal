@@ -7,7 +7,7 @@ import { messageFormat } from '../game/message';
 export const bountyBoardFormat = async (qqUserId: string) => {
   const data = await bountyBoard(qqUserId); const markdown = Format.createMarkdown().addTitle('冒险者公会·悬赏板').addNewline().addNewline().addBlockquote(`今日的羊皮纸整齐钉在木板上。你当前可同时接受三份悬赏：${data.activeCount}/3。`).addNewline().addNewline();
   for (const bounty of data.bounties) {
-    markdown.addText(`【悬赏·${bounty.id}】${bounty.title}\n`).addBlockquote(`讨伐：${bounty.targetName} ×${bounty.requiredCount}\n报酬：铜币 ×${bounty.copperReward}`).addNewline();
+    markdown.addText(`【悬赏·${bounty.id}】${bounty.title}\n`).addBlockquote(`讨伐：${bounty.targetName} ×${bounty.requiredCount}\n报酬：铜币 ×${bounty.copperReward}${bounty.location ? `\n坐标：${bounty.location.regionName} (${bounty.location.x}, ${bounty.location.y}, ${bounty.location.z})` : ''}`).addNewline();
     if (!bounty.status) markdown.addButton('[接受]', { data: `/接取悬赏 ${bounty.id}`, autoEnter: false });
     else if (bounty.status === 'completed') markdown.addButton('[领取悬赏]', { data: `/领取悬赏 ${bounty.id}`, autoEnter: false });
     else markdown.addText(`进度：${bounty.progress}/${bounty.requiredCount}`);
@@ -20,7 +20,7 @@ const requireGuildBoard = (qqUserId: string) => requireNpcAtCurrentPosition(qqUs
 export const bountyBoardHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireGuildBoard(event.current.UserId); await message.send({ format: await bountyBoardFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法查看悬赏板', error instanceof Error ? error.message : '请稍后重试。') }); } };
 const taskCategories = ['主线', '支线', '悬赏', '委托', '其他'] as const;
 type TaskCategory = typeof taskCategories[number];
-type TaskEntry = { category: TaskCategory; title: string; description: string; action?: { label: string; command: string } };
+type TaskEntry = { category: TaskCategory; title: string; description: string; location?: { regionName: string; x: number; y: number; z: number }; action?: { label: string; command: string } };
 const sequence = '①②③④⑤';
 
 const taskButtons = (category: TaskCategory | undefined, page: number, totalPages: number, keyword: string) => {
@@ -39,6 +39,7 @@ export const taskFormat = async (qqUserId: string, category?: TaskCategory, page
   const entries: TaskEntry[] = bounties.map(task => ({
     category: '悬赏', title: `【悬赏·${task.id}】${task.title}`,
     description: `讨伐：${task.targetName} ${task.progress}/${task.requiredCount}\n报酬：铜币 ×${task.copperReward}`,
+    location: task.location,
     action: task.status === 'completed' ? { label: '[领取悬赏]', command: `/领取悬赏 ${task.id}` } : undefined
   }));
   if (smithQuest.status === 'accepted' || smithQuest.status === 'completed') entries.push({
@@ -55,6 +56,7 @@ export const taskFormat = async (qqUserId: string, category?: TaskCategory, page
   if (!items.length) markdown.addText(normalizedKeyword ? '没有找到符合条件的任务。' : category ? `当前没有${category}任务。` : '当前没有已接受的任务。');
   for (const [index, task] of items.entries()) {
     markdown.addText(`${sequence[index]}${task.title}\n`).addBlockquote(task.description).addNewline();
+    if (task.location) markdown.addText('> 坐标：').addButton(`${task.location.regionName} (${task.location.x}, ${task.location.y}, ${task.location.z})`, { data: `/前往 ${task.location.x} ${task.location.y}`, autoEnter: false }).addNewline();
     if (task.action) markdown.addButton(task.action.label, { data: task.action.command, autoEnter: false });
     else markdown.addText('进行中');
     markdown.addNewline().addNewline();
