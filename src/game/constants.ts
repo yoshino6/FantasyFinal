@@ -2,6 +2,21 @@ import type { Allocation, DerivedStats } from './types';
 
 export const SESSION_TTL_MINUTES = 30;
 
+export const realmNames = ['初心', '窥尘', '开化', '明道', '破晓', '通灵', '造化', '掌控', '主宰', '通玄'] as const;
+export const realmNameForStage = (stage: number) => realmNames[Math.max(0, Math.min(realmNames.length - 1, Math.floor(stage) - 1))];
+export const realmLevelCap = (stage: number) => Math.min(100, Math.max(1, Math.floor(stage)) * 10);
+export const realmEnergyDissipationText = '精纯的能量冲入你的体壳，然后向外四溢，消散在了空中。。。';
+
+// 索引表示当前等级；例如 Lv.10 升至 Lv.11 需要 1500 点经验。
+const levelExperienceRequirements = [
+  0,
+  25, 50, 100, 200, 300, 450, 600, 800, 1000, 1500,
+  1500, 1800, 2200, 2600, 3000, 3500, 4000, 4500, 5000, 6000
+] as const;
+
+/** 返回当前等级升至下一等级所需的经验；20 级后的数值待后续境界内容补充。 */
+export const experienceRequiredForLevel = (level: number) => levelExperienceRequirements[Math.max(1, Math.min(20, Math.floor(level)))] ?? 6000;
+
 export const attributeNames: Record<keyof Allocation, string> = {
   constitution: '体质', spirit: '精神', strength: '力量',
   intelligence: '智力', agility: '敏捷', perception: '感知'

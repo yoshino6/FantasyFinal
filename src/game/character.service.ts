@@ -8,7 +8,7 @@ type RegistrationStage = 'story' | 'audience' | 'question' | 'destination' | 'da
 type SessionRow = RowDataPacket & { id: string; player_id: number; stage: RegistrationStage; expires_at: Date };
 type PlayerRow = RowDataPacket & { id: number; status: string };
 type RegionRow = RowDataPacket & { id: number; name: string; min_x: number; max_x: number; min_y: number; max_y: number; min_z: number; max_z: number };
-export type CharacterView = Allocation & DerivedStats & { name: string; gender: string; regionName: string; x: number; y: number; z: number; level: number; experience: number; adventurerRegistered: boolean; giftName: string | null; growth: Growth; currentHp: number; currentMp: number; activityStatus: 'active' | 'resting' | 'unconscious'; elementMastery: Record<string, number>; elementResistance: Record<string, number> };
+export type CharacterView = Allocation & DerivedStats & { name: string; gender: string; regionName: string; x: number; y: number; z: number; level: number; experience: number; realmStage: number; adventurerRegistered: boolean; giftName: string | null; growth: Growth; currentHp: number; currentMp: number; activityStatus: 'active' | 'resting' | 'unconscious'; elementMastery: Record<string, number>; elementResistance: Record<string, number> };
 
 const elements = ['水', '火', '土', '木', '风', '冰', '雷', '光', '暗'] as const;
 const randomBalancedElements = () => {
@@ -160,6 +160,7 @@ export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: 
   );
   const [newCharacters] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM characters WHERE player_id=?', [player.id]);
   const characterId = newCharacters[0].id;
+  await connection.execute('UPDATE characters SET game_id=? WHERE id=?', [10000000 + Number(characterId), characterId]);
   await connection.execute(`INSERT INTO player_inventory (character_id,item_id,quantity)
     SELECT ?, id, 3 FROM item_definitions WHERE code='healing_herb'`, [characterId]);
   await connection.execute(`INSERT INTO player_quick_items (character_id,quick_slot,item_id)
@@ -180,7 +181,7 @@ export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: 
   await connection.execute('UPDATE players SET status = \'active\' WHERE id = ?', [player.id]);
   await connection.execute('DELETE FROM registration_sessions WHERE id = ?', [session.id]);
   await connection.execute('INSERT INTO player_events (player_id, event_type, payload) VALUES (?, \'character.created\', ?)', [player.id, JSON.stringify({ region: region.name, x, y, z, giftCode })]);
-  return { ...allocation, ...stats, growth, name, gender: '未设定', regionName: region.name, x, y, z, level: 1, experience: 0, adventurerRegistered: false, giftName: gifts[giftCode].name, currentHp: stats.hpMax, currentMp: stats.mpMax, activityStatus: 'active', elementMastery, elementResistance };
+  return { ...allocation, ...stats, growth, name, gender: '未设定', regionName: region.name, x, y, z, level: 1, experience: 0, realmStage: 1, adventurerRegistered: false, giftName: gifts[giftCode].name, currentHp: stats.hpMax, currentMp: stats.mpMax, activityStatus: 'active', elementMastery, elementResistance };
 });
 
 export const getCharacter = async (qqUserId: string): Promise<CharacterView | null> => {
@@ -188,7 +189,7 @@ export const getCharacter = async (qqUserId: string): Promise<CharacterView | nu
   const [characterRows] = await pool.execute<(RowDataPacket & { id: number })[]>('SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1', [qqUserId]);
   if (characterRows[0]) await withTransaction(async connection => recalculateCharacterStats(connection, Number(characterRows[0].id)));
   const [rows] = await pool.execute<(RowDataPacket & CharacterView)[]>(
-    `SELECT c.name, c.gender, c.level, c.experience, c.adventurer_registered AS adventurerRegistered, c.constitution, c.spirit, c.strength, c.intelligence, c.agility, c.perception, c.constitution_growth AS constitutionGrowth, c.spirit_growth AS spiritGrowth, c.strength_growth AS strengthGrowth, c.intelligence_growth AS intelligenceGrowth, c.agility_growth AS agilityGrowth, c.perception_growth AS perceptionGrowth, c.hp_max AS hpMax, c.mp_max AS mpMax, c.current_hp AS currentHp, c.current_mp AS currentMp, c.activity_status AS activityStatus, c.physical_attack AS physicalAttack, c.magic_attack AS magicAttack, c.physical_defense AS physicalDefense, c.magic_defense AS magicDefense, c.accuracy, c.evasion, c.crit_rate_bp AS critRateBp, c.crit_damage_bp AS critDamageBp, c.crit_resist_bp AS critResistBp, c.crit_damage_reduction_bp AS critDamageReductionBp, c.tenacity, c.speed, c.element_mastery_json AS elementMastery, c.element_resistance_json AS elementResistance, r.name AS regionName, c.pos_x AS x, c.pos_y AS y, c.pos_z AS z, COALESCE(i.name, b.code) AS giftName FROM characters c JOIN players p ON p.id = c.player_id JOIN map_regions r ON r.id=c.current_region_id LEFT JOIN player_equipment pe ON pe.character_id=c.id AND pe.slot='weapon' LEFT JOIN item_definitions i ON i.id=pe.item_id LEFT JOIN player_blessings b ON b.character_id=c.id WHERE p.qq_user_id = ? LIMIT 1`,
+    `SELECT c.name, c.gender, c.level, c.experience, c.realm_stage AS realmStage, c.adventurer_registered AS adventurerRegistered, c.constitution, c.spirit, c.strength, c.intelligence, c.agility, c.perception, c.constitution_growth AS constitutionGrowth, c.spirit_growth AS spiritGrowth, c.strength_growth AS strengthGrowth, c.intelligence_growth AS intelligenceGrowth, c.agility_growth AS agilityGrowth, c.perception_growth AS perceptionGrowth, c.hp_max AS hpMax, c.mp_max AS mpMax, c.current_hp AS currentHp, c.current_mp AS currentMp, c.activity_status AS activityStatus, c.physical_attack AS physicalAttack, c.magic_attack AS magicAttack, c.physical_defense AS physicalDefense, c.magic_defense AS magicDefense, c.accuracy, c.evasion, c.crit_rate_bp AS critRateBp, c.crit_damage_bp AS critDamageBp, c.crit_resist_bp AS critResistBp, c.crit_damage_reduction_bp AS critDamageReductionBp, c.tenacity, c.speed, c.element_mastery_json AS elementMastery, c.element_resistance_json AS elementResistance, r.name AS regionName, c.pos_x AS x, c.pos_y AS y, c.pos_z AS z, COALESCE(i.name, b.code) AS giftName FROM characters c JOIN players p ON p.id = c.player_id JOIN map_regions r ON r.id=c.current_region_id LEFT JOIN player_equipment pe ON pe.character_id=c.id AND pe.slot='weapon' LEFT JOIN item_definitions i ON i.id=pe.item_id LEFT JOIN player_blessings b ON b.character_id=c.id WHERE p.qq_user_id = ? LIMIT 1`,
     [qqUserId]
   );
   const row = rows[0];

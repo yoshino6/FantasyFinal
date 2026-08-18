@@ -1,5 +1,6 @@
 import { Format, logger, useEvent, useMessage } from 'alemonjs';
 import { getCharacter, type CharacterView } from '../game/character.service';
+import { experienceRequiredForLevel, realmNameForStage } from '../game/constants';
 import { messageFormat } from '../game/message';
 
 const elementOrder = ['水', '火', '木', '土', '风', '冰', '雷', '光', '暗'];
@@ -39,7 +40,7 @@ export default async () => {
     const gender = character.gender === '男' ? '♂' : character.gender === '女' ? '♀' : '?';
     const markdown = Format.createMarkdown().addTitle('角色信息').addText(`\n\n昵称：${character.name} `)
       .addButton('[改名]', { data: '/改名 ', autoEnter: false }).addText(` \n性别：${gender}`)
-      .addButton('[改性]', { data: '/改性 ', autoEnter: false }).addText(`\n等级：Lv.${character.level}\n经验：${character.experience}/${character.level * 100}\n\n`);
+      .addButton('[改性]', { data: '/改性 ', autoEnter: false }).addText(`\n境界：${realmNameForStage(character.realmStage)}\n等级：Lv.${character.level}\n经验：${character.experience}/${experienceRequiredForLevel(character.level)}\n\n`);
     if (!character.adventurerRegistered) markdown.addText('属性暂时隐藏');
     else appendDetails(markdown, character);
     await message.send({ format: Format.create().addMarkdown(markdown) });

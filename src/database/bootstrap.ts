@@ -29,7 +29,7 @@ const schemaStatements = [
   `CREATE TABLE IF NOT EXISTS characters (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, player_id BIGINT UNSIGNED NULL, npc_id BIGINT UNSIGNED NULL, npc_code VARCHAR(64) NULL, name VARCHAR(24) NOT NULL,
     gender VARCHAR(8) NOT NULL DEFAULT '未设定', free_name_change_used TINYINT(1) NOT NULL DEFAULT 0, free_gender_change_used TINYINT(1) NOT NULL DEFAULT 0,
-    level INT UNSIGNED NOT NULL DEFAULT 1, experience BIGINT UNSIGNED NOT NULL DEFAULT 0, skill_points INT UNSIGNED NOT NULL DEFAULT 1, copper_coins BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    level INT UNSIGNED NOT NULL DEFAULT 1, experience BIGINT UNSIGNED NOT NULL DEFAULT 0, realm_stage TINYINT UNSIGNED NOT NULL DEFAULT 1, skill_points INT UNSIGNED NOT NULL DEFAULT 1, copper_coins BIGINT UNSIGNED NOT NULL DEFAULT 0,
     constitution SMALLINT UNSIGNED NOT NULL, spirit SMALLINT UNSIGNED NOT NULL, strength SMALLINT UNSIGNED NOT NULL,
     intelligence SMALLINT UNSIGNED NOT NULL, agility SMALLINT UNSIGNED NOT NULL, perception SMALLINT UNSIGNED NOT NULL,
     constitution_growth DECIMAL(4,1) NOT NULL DEFAULT 0, spirit_growth DECIMAL(4,1) NOT NULL DEFAULT 0, strength_growth DECIMAL(4,1) NOT NULL DEFAULT 0,
@@ -230,6 +230,19 @@ const schemaStatements = [
     character_id BIGINT UNSIGNED NOT NULL, range_level TINYINT UNSIGNED NOT NULL DEFAULT 1, information_level TINYINT UNSIGNED NOT NULL DEFAULT 1,
     PRIMARY KEY (character_id), CONSTRAINT fk_appraisal_progress_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_auto_battle_settings (
+    character_id BIGINT UNSIGNED NOT NULL, enabled TINYINT(1) NOT NULL DEFAULT 0, auto_potion_enabled TINYINT(1) NOT NULL DEFAULT 0,
+    hp_threshold TINYINT UNSIGNED NOT NULL DEFAULT 30, hp_item_id BIGINT UNSIGNED NULL, mp_threshold TINYINT UNSIGNED NOT NULL DEFAULT 30, mp_item_id BIGINT UNSIGNED NULL,
+    PRIMARY KEY (character_id), CONSTRAINT fk_auto_battle_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_auto_battle_actions (
+    character_id BIGINT UNSIGNED NOT NULL, sequence_no TINYINT UNSIGNED NOT NULL, skill_id BIGINT UNSIGNED NULL,
+    PRIMARY KEY (character_id,sequence_no), CONSTRAINT fk_auto_action_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_auto_battle_quick_setup (
+    character_id BIGINT UNSIGNED NOT NULL, next_sequence TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    PRIMARY KEY (character_id), CONSTRAINT fk_auto_quick_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_skill_discoveries (
     character_id BIGINT UNSIGNED NOT NULL, skill_id BIGINT UNSIGNED NOT NULL, discovered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (character_id,skill_id), KEY idx_skill_discovery_order (character_id,discovered_at),
@@ -359,7 +372,7 @@ const schemaStatements = [
     CONSTRAINT fk_combat_effect_definition FOREIGN KEY (effect_id) REFERENCES effect_definitions(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS parties (
-    id CHAR(36) NOT NULL, leader_character_id BIGINT UNSIGNED NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    id CHAR(36) NOT NULL, name VARCHAR(32) NOT NULL DEFAULT '未命名队伍', leader_character_id BIGINT UNSIGNED NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id), UNIQUE KEY uk_party_leader (leader_character_id), CONSTRAINT fk_party_leader FOREIGN KEY (leader_character_id) REFERENCES characters(id)
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS party_members (
@@ -431,6 +444,15 @@ export const initializeSchema = async (pool: Pool) => {
   for (const column of ['skill_points INT UNSIGNED NOT NULL DEFAULT 1']) {
     try { await pool.query(`ALTER TABLE characters ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }
+  try { await pool.query('ALTER TABLE characters ADD COLUMN realm_stage TINYINT UNSIGNED NOT NULL DEFAULT 1 AFTER experience'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  try { await pool.query('ALTER TABLE characters ADD COLUMN game_id BIGINT UNSIGNED NULL AFTER id'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  try { await pool.query('ALTER TABLE characters ADD UNIQUE KEY uk_characters_game_id (game_id)'); } catch (error: any) { if (error?.code !== 'ER_DUP_KEYNAME') throw error; }
+  await pool.query('UPDATE characters SET game_id=10000000+id WHERE player_id IS NOT NULL AND game_id IS NULL');
+  try { await pool.query("ALTER TABLE parties ADD COLUMN name VARCHAR(32) NOT NULL DEFAULT '未命名队伍' AFTER id"); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  await pool.query(`CREATE TABLE IF NOT EXISTS player_auto_battle_settings (character_id BIGINT UNSIGNED NOT NULL, enabled TINYINT(1) NOT NULL DEFAULT 0, auto_potion_enabled TINYINT(1) NOT NULL DEFAULT 0, hp_threshold TINYINT UNSIGNED NOT NULL DEFAULT 30, hp_item_id BIGINT UNSIGNED NULL, mp_threshold TINYINT UNSIGNED NOT NULL DEFAULT 30, mp_item_id BIGINT UNSIGNED NULL, PRIMARY KEY (character_id), CONSTRAINT fk_auto_battle_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE) ENGINE=InnoDB`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS player_auto_battle_actions (character_id BIGINT UNSIGNED NOT NULL, sequence_no TINYINT UNSIGNED NOT NULL, skill_id BIGINT UNSIGNED NULL, PRIMARY KEY (character_id,sequence_no), CONSTRAINT fk_auto_action_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE) ENGINE=InnoDB`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS player_auto_battle_quick_setup (character_id BIGINT UNSIGNED NOT NULL, next_sequence TINYINT UNSIGNED NOT NULL DEFAULT 1, PRIMARY KEY (character_id), CONSTRAINT fk_auto_quick_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE) ENGINE=InnoDB`);
+  await pool.query('UPDATE characters SET realm_stage=GREATEST(realm_stage,LEAST(10,CEILING(level/10)))');
   for (const column of ['learn_cost TINYINT UNSIGNED NOT NULL DEFAULT 1', 'upgrade_cost TINYINT UNSIGNED NOT NULL DEFAULT 1', 'max_level TINYINT UNSIGNED NOT NULL DEFAULT 5', 'power_per_level INT UNSIGNED NOT NULL DEFAULT 15', 'cooldown_reduction_per_level TINYINT UNSIGNED NOT NULL DEFAULT 0']) {
     try { await pool.query(`ALTER TABLE skill_definitions ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }

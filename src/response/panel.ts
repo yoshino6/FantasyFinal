@@ -1,6 +1,7 @@
 import { Format, logger, useEvent, useMessage } from 'alemonjs';
 import { battleStatus, completeTravel, inventory, nearbyPoints, resumeAction, startRest, travelStatus, type MapLandmark, type NearbyPoint } from '../game/adventure.service';
 import { messageFormat, sendWithTextFallback } from '../game/message';
+import { autoBattleConfig } from '../game/auto-battle.service';
 
 const directionText = (point: NearbyPoint, x: number, y: number) => {
   const vertical = point.y > y ? '北' : point.y < y ? '南' : '';
@@ -40,10 +41,10 @@ export const outsidePanel = (title: string, location: string, speed: number, ran
   return Format.create().addMarkdown(markdown);
 };
 
-export const panelButtons = (resting = false) => Format.createButtonGroup()
+export const panelButtons = (resting = false, autoBattleEnabled = false) => Format.createButtonGroup()
     .addRow().addButton('寻怪', '/寻怪', { type: 'command', autoEnter: true }).addButton('上', '/移动 上', { type: 'command', autoEnter: true, style: resting ? undefined : 'blue' }).addButton('地图', '/地图', { type: 'command', autoEnter: true })
     .addRow().addButton('左', '/移动 左', { type: 'command', autoEnter: true, style: resting ? undefined : 'blue' }).addButton(resting ? '行动' : '休息', resting ? '/行动' : '/休息', { type: 'command', autoEnter: true }).addButton('右', '/移动 右', { type: 'command', autoEnter: true, style: resting ? undefined : 'blue' })
-    .addRow().addButton('备用', '', { type: 'command', autoEnter: false }).addButton('下', '/移动 下', { type: 'command', autoEnter: true, style: resting ? undefined : 'blue' }).addButton('备用', '', { type: 'command', autoEnter: false })
+    .addRow().addButton(autoBattleEnabled ? '关闭自动战斗' : '开启自动战斗', autoBattleEnabled ? '/自动战斗 关闭' : '/自动战斗 开启', { type: 'command', autoEnter: true }).addButton('下', '/移动 下', { type: 'command', autoEnter: true, style: resting ? undefined : 'blue' }).addButton('备用', '', { type: 'command', autoEnter: false })
     .addRow().addButton('角色', '/角色', { type: 'command', autoEnter: true }).addButton('装备', '/装备', { type: 'command', autoEnter: true }).addButton('背包', '/背包', { type: 'command', autoEnter: true }).addButton('技能', '/技能列表', { type: 'command', autoEnter: true }).addButton('队伍', '/队伍', { type: 'command', autoEnter: true })
     .addRow().addButton('菜单', '/菜单', { type: 'command', autoEnter: true });
 
@@ -76,13 +77,13 @@ export default async () => {
       await sendWithTextFallback(message, battlePanel(battle), `【战斗面板】\n${battle.members.map(member => `【${member.name}】HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}`).join('\n')}\n${battle.targets.map(target => `敌方 #${target.id} ${target.name} HP ${target.hp}/${target.hpMax}`).join('\n')}\n/攻击｜/技能 1｜/道具 1｜/逃跑`);
     } catch (error) {
       if (!(error instanceof Error) || !error.message.includes('当前不在战斗中')) throw error;
-      const [bag, nearby] = await Promise.all([inventory(event.current.UserId), nearbyPoints(event.current.UserId)]);
+      const [bag, nearby, autoBattle] = await Promise.all([inventory(event.current.UserId), nearbyPoints(event.current.UserId), autoBattleConfig(event.current.UserId)]);
       const targets = nearby.points.length ? `\n\n周边目标\n${nearby.points.map(point => `${point.type === 'NPC' ? '' : `【${point.type}】`}${point.name} · ${directionText(point, Number(nearby.character.pos_x), Number(nearby.character.pos_y))}${point.distance}${bag.movementSpeed >= point.distance ? `：/前往 ${point.x} ${point.y}` : ''}`).join('\n')}` : '\n\n没有发现任何目标。';
       const x = Number(nearby.character.pos_x); const y = Number(nearby.character.pos_y);
       const location = currentLocationText(nearby.character);
       const resting = nearby.character.activity_status !== 'active';
       const mapText = nearby.mapUnlocked ? `\n\n地图标识：\n${nearby.landmarks.map(landmark => landmark.name).join('\n')}` : '';
-      await sendWithTextFallback(message, outsidePanel('操作面板', location, bag.movementSpeed, nearby.range, x, y, nearby.description, nearby.points, resting, nearby.landmarks).addButtonGroup(panelButtons(resting)), `【操作面板】\n${location}\n\n${nearby.description}${mapText}\n\n移动速度：${bag.movementSpeed}\n感知范围：${nearby.range}${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
+      await sendWithTextFallback(message, outsidePanel('操作面板', location, bag.movementSpeed, nearby.range, x, y, nearby.description, nearby.points, resting, nearby.landmarks).addButtonGroup(panelButtons(resting, Boolean(autoBattle.settings.enabled))), `【操作面板】\n${location}\n\n${nearby.description}${mapText}\n\n移动速度：${bag.movementSpeed}\n感知范围：${nearby.range}${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
     }
   } catch (error) {
     logger.error({ err: error, userId: event.current.UserId }, 'open panel failed');
@@ -92,7 +93,8 @@ export default async () => {
 
 const showRestPanel = async (message: any, qqUserId: string, text: string) => {
   const [bag, nearby] = await Promise.all([inventory(qqUserId), nearbyPoints(qqUserId)]); const resting = nearby.character.activity_status !== 'active';
-  const panel = outsidePanel('操作面板', currentLocationText(nearby.character), bag.movementSpeed, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), text, nearby.points, resting, nearby.landmarks).addButtonGroup(panelButtons(resting));
+  const autoBattle = await autoBattleConfig(qqUserId);
+  const panel = outsidePanel('操作面板', currentLocationText(nearby.character), bag.movementSpeed, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), text, nearby.points, resting, nearby.landmarks).addButtonGroup(panelButtons(resting, Boolean(autoBattle.settings.enabled)));
   await sendWithTextFallback(message, panel, `【操作面板】\n${text}`);
 };
 export const restHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await startRest(event.current.UserId); await showRestPanel(message, event.current.UserId, result.message); } catch (error) { await message.send({ format: messageFormat('无法休息', error instanceof Error ? error.message : '请稍后重试。') }); } };
