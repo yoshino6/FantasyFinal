@@ -45,7 +45,7 @@ export default async () => {
         continue;
       }
       const [targets] = await pool.execute<MapTarget[]>(`SELECT code,name,pos_x AS x,pos_y AS y,
-          CASE code WHEN 'guild_counter' THEN 1 WHEN 'pear_guide' THEN 2 WHEN 'blacksmith' THEN 3 ELSE 99 END AS target_order
+          CASE code WHEN 'guild_counter' THEN 1 WHEN 'pear_guide' THEN 2 WHEN 'blacksmith' THEN 3 WHEN 'alchemy_sweetshop' THEN 4 ELSE 99 END AS target_order
         FROM map_npcs WHERE region_id=(SELECT id FROM map_regions WHERE code=?)
         UNION ALL
         SELECT code,name,pos_x AS x,pos_y AS y,100 AS target_order

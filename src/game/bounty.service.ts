@@ -2,7 +2,7 @@ import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 
 type Connection = Pool | PoolConnection;
-type BountyRow = RowDataPacket & { id: number; title: string; target_name: string; required_count: number; copper_reward: number; source_spawn_id: number | null; region_name: string | null; pos_x: number | null; pos_y: number | null; pos_z: number | null; progress: number | null; status: 'accepted' | 'completed' | 'claimed' | null };
+type BountyRow = RowDataPacket & { id: number; title: string; target_name: string; required_count: number; copper_reward: number; source_spawn_id: number | null; region_name: string | null; pos_x: number | null; pos_y: number | null; pos_z: number | null; progress: number | null; status: 'accepted' | 'completed' | 'claimed' | null; is_invalid?: number };
 type CharacterRow = RowDataPacket & { id: number; adventurer_registered: number };
 
 const seeds = [
@@ -70,11 +70,22 @@ export const bountyBoard = async (qqUserId: string) => {
 
 export const playerBounties = async (qqUserId: string) => {
   const pool = await getPool(); const character = await characterFor(pool, qqUserId);
-  const [rows] = await pool.execute<BountyRow[]>(`SELECT b.id,b.title,t.name AS target_name,b.required_count,b.copper_reward,b.source_spawn_id,r.name AS region_name,s.pos_x,s.pos_y,s.pos_z,pb.progress,pb.status
+  const [rows] = await pool.execute<BountyRow[]>(`SELECT b.id,b.title,t.name AS target_name,b.required_count,b.copper_reward,b.source_spawn_id,r.name AS region_name,s.pos_x,s.pos_y,s.pos_z,pb.progress,pb.status,
+      CASE WHEN pb.status='accepted' AND (b.is_active=0 OR b.expires_at<=NOW() OR (b.source_spawn_id IS NOT NULL AND (s.id IS NULL OR s.defeated_at IS NOT NULL))) THEN 1 ELSE 0 END AS is_invalid
     FROM player_bounties pb JOIN bounty_notices b ON b.id=pb.bounty_id JOIN monster_templates t ON t.id=b.target_template_id LEFT JOIN monster_spawns s ON s.id=b.source_spawn_id LEFT JOIN map_regions r ON r.id=s.region_id
     WHERE pb.character_id=? AND pb.status IN ('accepted','completed') ORDER BY pb.accepted_at,b.id`, [character.id]);
-  return rows.map(row => ({ id: Number(row.id), title: row.title, targetName: row.target_name, requiredCount: Number(row.required_count), copperReward: Number(row.copper_reward), sourceSpawnId: row.source_spawn_id === null ? undefined : Number(row.source_spawn_id), location: row.region_name === null ? undefined : { regionName: row.region_name, x: Number(row.pos_x), y: Number(row.pos_y), z: Number(row.pos_z) }, progress: Number(row.progress), status: row.status! }));
+  return rows.map(row => ({ id: Number(row.id), title: row.title, targetName: row.target_name, requiredCount: Number(row.required_count), copperReward: Number(row.copper_reward), sourceSpawnId: row.source_spawn_id === null ? undefined : Number(row.source_spawn_id), location: row.region_name === null ? undefined : { regionName: row.region_name, x: Number(row.pos_x), y: Number(row.pos_y), z: Number(row.pos_z) }, progress: Number(row.progress), status: Number(row.is_invalid) ? 'invalid' as const : row.status! }));
 };
+
+export const clearInvalidBounty = async (qqUserId: string, bountyId: number) => withTransaction(async connection => {
+  const character = await characterFor(connection, qqUserId, true);
+  const [rows] = await connection.execute<(RowDataPacket & { is_invalid: number })[]>(`SELECT CASE WHEN pb.status='accepted' AND (b.is_active=0 OR b.expires_at<=NOW() OR (b.source_spawn_id IS NOT NULL AND (s.id IS NULL OR s.defeated_at IS NOT NULL))) THEN 1 ELSE 0 END AS is_invalid
+    FROM player_bounties pb JOIN bounty_notices b ON b.id=pb.bounty_id LEFT JOIN monster_spawns s ON s.id=b.source_spawn_id
+    WHERE pb.character_id=? AND pb.bounty_id=? FOR UPDATE`, [character.id, bountyId]);
+  if (!rows[0]) throw new Error('没有找到这份悬赏。');
+  if (!Number(rows[0].is_invalid)) throw new Error('这份悬赏仍在进行，无法清除。');
+  await connection.execute('DELETE FROM player_bounties WHERE character_id=? AND bounty_id=?', [character.id, bountyId]);
+});
 
 export const acceptBounty = async (qqUserId: string, bountyId: number) => withTransaction(async connection => {
   const character = await characterFor(connection, qqUserId, true); if (!character.adventurer_registered) throw new Error('完成冒险者注册后才能接受悬赏。');

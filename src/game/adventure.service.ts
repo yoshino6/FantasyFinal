@@ -6,7 +6,7 @@ import { recalculateCharacterStats } from './character.service';
 import { advanceBountyProgress, refreshBounties } from './bounty.service';
 import { attributes, type Allocation } from './types';
 
-type CharacterRow = RowDataPacket & Allocation & { id: number; player_id: number; npc_code: string | null; name: string; level: number; experience: number; realm_stage: number; skill_points: number; hp_max: number; mp_max: number; current_hp: number; current_mp: number; activity_status: 'active' | 'resting' | 'unconscious'; rest_started_at: Date | null; physical_attack: number; magic_attack: number; physical_defense: number; magic_defense: number; accuracy: number; evasion: number; crit_rate_bp: number; crit_damage_bp: number; crit_resist_bp: number; crit_damage_reduction_bp: number; speed: number; perception: number; spirit: number; intelligence: number; element_mastery_json: unknown; element_resistance_json: unknown; adventurer_registered: number; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string };
+type CharacterRow = RowDataPacket & Allocation & Record<`${keyof Allocation}_growth`, number> & { id: number; player_id: number; npc_code: string | null; name: string; level: number; experience: number; realm_stage: number; skill_points: number; hp_max: number; mp_max: number; current_hp: number; current_mp: number; activity_status: 'active' | 'resting' | 'unconscious'; rest_started_at: Date | null; physical_attack: number; magic_attack: number; physical_defense: number; magic_defense: number; accuracy: number; evasion: number; crit_rate_bp: number; crit_damage_bp: number; crit_resist_bp: number; crit_damage_reduction_bp: number; speed: number; perception: number; spirit: number; intelligence: number; element_mastery_json: unknown; element_resistance_json: unknown; adventurer_registered: number; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string };
 type MonsterAttributes = Allocation & Record<`${keyof Allocation}_growth`, number>;
 type MonsterTrait = { code: string; name: string; attributeMultiplier?: number; statMultiplier?: number; hpPct?: number; mpPct?: number; physicalAttackPct?: number; magicAttackPct?: number; physicalDefensePct?: number; magicDefensePct?: number; accuracyPct?: number; evasionPct?: number; speedPct?: number; critRatePct?: number; critDamagePct?: number; critResistPct?: number; critReductionPct?: number; experiencePct?: number; dropPct?: number };
 type SpawnRow = RowDataPacket & MonsterAttributes & { id: number; template_id?: number; name: string; monster_class: string; level: number; current_hp: number; hp_max: number; attack: number; defense: number; speed: number; experience: number; drops_json: unknown; skill_sequence?: unknown; traits_json?: unknown; weakness_json?: unknown; resistance_json?: unknown; element_mastery_json?: unknown; element_resistance_json?: unknown };
@@ -17,7 +17,7 @@ type CombatEffectRow = RowDataPacket & { id: number; target_kind: 'member' | 'ta
 type CombatModifiers = { weaponName?: string; artifact?: 'holy_sword' | 'demon_sword'; physicalAttack: number; magicAttack: number; physicalAttackPct: number; magicAttackPct: number; physicalDefensePct: number; magicDefensePct: number; critRatePct: number; critDamagePct: number; accuracyPct: number; mpPct: number; chantSpeedPct: number; critRateBp: number; ignoreDefensePct: number; lifestealPct: number; magicDamagePct: number; manaCostReduction: number; experienceMultiplier: number; dropBonus: number; manaAffinity: boolean };
 type AppraisalMember = { characterId: number; level: number; rangeLevel: number; informationLevel: number };
 type AppraisalProfile = { learned: boolean; rangeLevel: number; informationLevel: number; members: AppraisalMember[] };
-export type VictorySettlement = { kind: 'victory'; members: { name: string; experience: number; realmLocked?: boolean; levelText?: string; drops: { name: string; quantity: number; itemType: string; codexId: string | null; instanceId?: number }[]; learned: { id: number; name: string }[] }[]; arrivalPending?: boolean };
+export type VictorySettlement = { kind: 'victory'; members: { name: string; experience: number; realmLocked?: boolean; realmCapReached?: boolean; levelText?: string; drops: { name: string; quantity: number; itemType: string; codexId: string | null; instanceId?: number }[]; learned: { id: number; name: string }[] }[]; arrivalPending?: boolean };
 const monsterAttributeColumns = `${attributes.map(attribute => `COALESCE(s.${attribute},t.${attribute}) AS ${attribute},t.${attribute}_growth`).join(',')}`;
 const templateMonsterAttributeColumns = `${attributes.map(attribute => `t.${attribute},t.${attribute}_growth`).join(',')}`;
 const lowMonsterTraits: MonsterTrait[] = [
@@ -68,6 +68,7 @@ const randomItems = <T>(items: T[], count: number) => [...items].sort(() => Math
 const awardRealmExperience = async (connection: PoolConnection, character: Pick<CharacterRow, 'id' | 'level' | 'experience' | 'realm_stage'>, rawExperience: number) => {
   const currentLevel = Number(character.level); const levelCap = realmLevelCap(Number(character.realm_stage ?? 1));
   let level = currentLevel; let experience = Number(character.experience); let remaining = Math.max(0, Math.floor(rawExperience));
+  const wasAtRealmCap = currentLevel >= levelCap && experience >= experienceRequiredForLevel(currentLevel);
   let gainedExperience = 0; let gainedPoints = 0;
 
   // 境界封顶时，允许将当前等级的经验条填满；填满后获得的经验才会消散。
@@ -86,9 +87,11 @@ const awardRealmExperience = async (connection: PoolConnection, character: Pick<
   }
 
   // 本次奖励若仍成功填入经验条，照常显示经验；只有已满后再次获得经验才提示消散。
-  const realmLocked = gainedExperience === 0 && remaining > 0 && level >= levelCap && experience >= experienceRequiredForLevel(level);
+  const atRealmCap = level >= levelCap && experience >= experienceRequiredForLevel(level);
+  const realmCapReached = !wasAtRealmCap && atRealmCap;
+  const realmLocked = gainedExperience === 0 && remaining > 0 && atRealmCap;
   if (gainedExperience > 0 || level !== currentLevel) await connection.execute('UPDATE characters SET level=?,experience=?,skill_points=skill_points+? WHERE id=?', [level, experience, gainedPoints, character.id]);
-  return { experience: gainedExperience, level, gainedPoints, realmLocked };
+  return { experience: gainedExperience, level, gainedPoints, realmLocked, realmCapReached };
 };
 const randomMonsterLevel = (monsterClass: string, defaultLevel: number) => monsterClass === 'normal' ? random(1, 5) : monsterClass === 'elite' && defaultLevel >= 7 ? random(7, 9) : monsterClass === 'large' || monsterClass === 'elite' ? random(4, 9) : defaultLevel;
 const randomMonsterBaseAttributes = (template: MonsterAttributes & { monster_class: string }): Allocation => {
@@ -148,11 +151,14 @@ const dropQuantity = (drop: Record<string, unknown>) => {
   const maximum = Math.max(minimum, Math.floor(Number(drop.max_quantity ?? drop.quantity ?? minimum)));
   return minimum + Math.floor(Math.random() * (maximum - minimum + 1));
 };
-const movementSpeedFrom = (speed: number, level: number) => {
-  const statSpeed = Math.floor(1 + Math.sqrt(Math.max(0, speed - 100) / 30));
-  const levelCap = Math.min(10, 3 + Math.floor(Math.max(0, level - 1) / 10));
-  return Math.max(1, Math.min(10, levelCap, statSpeed));
+const finalAttribute = (character: Pick<CharacterRow, keyof Allocation | `${keyof Allocation}_growth` | 'level'>, attribute: keyof Allocation) => Number(character[attribute]) + Number(character[`${attribute}_growth`]) * Math.max(0, Number(character.level) - 1);
+// 以 0.9 次幂递减：平均角色约为 Lv.1=2、Lv.10=4、Lv.20=6；后期硬上限为 10。
+const explorationScale = (attribute: number, level: number) => {
+  const statValue = 1 + Math.floor(Math.pow(Math.max(1, attribute) / 7, .9));
+  const levelCap = Math.min(10, 2 + Math.floor(Math.max(1, level) / 5));
+  return Math.max(1, Math.min(10, levelCap, statValue));
 };
+const movementSpeedFrom = (agility: number, level: number, speedPenalty: number) => explorationScale(Math.max(1, agility - speedPenalty / 8), level);
 const roundTowardInitialTiming = (initial: number, raw: number) => {
   if (initial <= 0) return raw > 2 ? Math.max(1, Math.floor(raw) - 1) : 0;
   return raw < initial ? Math.ceil(raw) : Math.floor(raw);
@@ -317,7 +323,7 @@ export const inventory = async (qqUserId: string) => {
   const weight = rows.reduce((sum, item) => sum + Number(item.quantity) * Number(item.weight), 0);
   const speedPenalty = Math.floor(weight / 5) * 2;
   const speed = Math.max(1, Number(character.speed) - speedPenalty);
-  return { items: rows, weight, capacity: 30, speed, movementSpeed: movementSpeedFrom(speed, Number(character.level)), speedPenalty };
+  return { items: rows, weight, capacity: 30, speed, movementSpeed: movementSpeedFrom(finalAttribute(character, 'agility'), Number(character.level), speedPenalty), speedPenalty };
 };
 
 export const inventoryView = async (qqUserId: string, category?: '装备' | '道具' | '材料') => {
@@ -325,11 +331,11 @@ export const inventoryView = async (qqUserId: string, category?: '装备' | '道
   await pool.execute(`INSERT IGNORE INTO player_item_codex (character_id,item_id)
     SELECT ?,item_id FROM player_inventory WHERE character_id=? UNION SELECT ?,item_id FROM player_item_instances WHERE character_id=?`, [character.id, character.id, character.id, character.id]);
   const itemType = category === '装备' ? 'equipment' : category === '道具' ? 'consumable' : 'material';
-  const [stacked] = await pool.execute<(RowDataPacket & { codex_id: string; name: string; item_category: string; quantity: number; description: string })[]>('SELECT i.codex_id,i.name,i.item_category,pi.quantity,i.description FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.item_type=? AND i.stackable=1 ORDER BY i.name', [character.id, itemType]);
+  const [stacked] = await pool.execute<(RowDataPacket & { code: string; codex_id: string; name: string; item_category: string; quantity: number; description: string })[]>('SELECT i.code,i.codex_id,i.name,i.item_category,pi.quantity,i.description FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.item_type=? AND i.stackable=1 ORDER BY i.name', [character.id, itemType]);
   const [instances] = await pool.execute<(RowDataPacket & { id: number; definition_codex_id: string; name: string; item_category: string; quality: number; durability: number; durability_max: number; description: string })[]>('SELECT ii.id,i.codex_id AS definition_codex_id,i.name,i.item_category,ii.quality,ii.durability,ii.durability_max,i.description FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.character_id=? AND i.item_type=? ORDER BY ii.acquired_at DESC', [character.id, itemType]);
-  const [recent] = await pool.execute<(RowDataPacket & { codex_id: string; item_type: string; item_category: string; name: string })[]>(`SELECT codex_id,item_type,item_category,name FROM (
-      SELECT i.codex_id,i.item_type,i.item_category,i.name,ii.acquired_at FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.character_id=?
-      UNION ALL SELECT i.codex_id,i.item_type,i.item_category,i.name,pi.acquired_at FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=?
+  const [recent] = await pool.execute<(RowDataPacket & { code: string; codex_id: string; item_type: string; item_category: string; name: string })[]>(`SELECT code,codex_id,item_type,item_category,name FROM (
+      SELECT i.code,i.codex_id,i.item_type,i.item_category,i.name,ii.acquired_at FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.character_id=?
+      UNION ALL SELECT i.code,i.codex_id,i.item_type,i.item_category,i.name,pi.acquired_at FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=?
     ) recent_items ORDER BY acquired_at DESC LIMIT 5`, [character.id, character.id]);
   return { stacked, instances, recent };
 };
@@ -529,15 +535,16 @@ export const explore = async (qqUserId: string) => {
   const canViewMonsterInfo = await hasPassiveSkill(pool, character.id, 'appraisal');
   const spawns = materializeMonsters(spawnRows, false);
   if (!spawns.length) return { character, spawns, text: '四周只有风吹树叶的声音。这里暂时没有敌对生物。' };
-  const negotiation = Math.floor(Number(character.spirit) + Number(character.intelligence) + Number(character.perception) / 2);
-  const text = canViewMonsterInfo ? `你发现 ${spawns.map(s => `#${s.id} ${s.name} Lv.${s.level}`).join('、')}。\n\n感知 ${character.perception}｜负重后速度 ${character.speed}｜交涉值 ${negotiation}\n感知与速度高于敌人时可偷袭；感知较高可尝试躲避；交涉成功率按双方交涉值对抗结算。` : '你察觉到附近有未知的敌对存在，却无法辨明它们的任何信息。';
+  const perception = finalAttribute(character, 'perception');
+  const negotiation = Math.floor(finalAttribute(character, 'spirit') + finalAttribute(character, 'intelligence') + perception / 2);
+  const text = canViewMonsterInfo ? `你发现 ${spawns.map(s => `#${s.id} ${s.name} Lv.${s.level}`).join('、')}。\n\n感知 ${perception.toFixed(1)}｜负重后速度 ${character.speed}｜交涉值 ${negotiation}\n感知与速度高于敌人时可偷袭；感知较高可尝试躲避；交涉成功率按双方交涉值对抗结算。` : '你察觉到附近有未知的敌对存在，却无法辨明它们的任何信息。';
   return { character, spawns, text, canViewMonsterInfo };
 };
 
 export type NearbyPoint = { type: '怪物' | 'NPC' | '地标' | '悬赏'; name: string; x: number; y: number; distance: number };
 export type MapLandmark = { name: string; x: number; y: number };
 
-const perceptionRange = (perception: number) => Math.max(2, Math.floor(perception / 5));
+const perceptionRange = (perception: number, level: number) => explorationScale(perception, level);
 const mapCodeByRegion: Record<string, string | undefined> = {
   '百纳镇': 'map_baina_town',
   '幽暗密林': 'map_dark_forest'
@@ -561,7 +568,7 @@ const grantTownMap = async (connection: PoolConnection, characterId: number) => 
 
 export const nearbyPoints = async (qqUserId: string) => {
   const character = await characterFor(qqUserId);
-  const range = perceptionRange(Number(character.perception));
+  const range = perceptionRange(finalAttribute(character, 'perception'), Number(character.level));
   const pool = await getPool();
   await refreshBounties(pool);
   const bounds = [character.current_region_id, Number(character.pos_x) - range, Number(character.pos_x) + range, Number(character.pos_y) - range, Number(character.pos_y) + range, character.pos_z];
@@ -605,7 +612,7 @@ const moveToPosition = async (connection: PoolConnection, qqUserId: string, x: n
   const [partyRows] = await connection.execute<(RowDataPacket & { leader_character_id: number })[]>('SELECT p.leader_character_id FROM party_members pm JOIN parties p ON p.id=pm.party_id WHERE pm.character_id=?', [character.id]);
   if (partyRows[0] && Number(partyRows[0].leader_character_id) !== character.id) throw new Error('组队状态下仅队长可以移动。');
   const distance = Math.abs(x - Number(character.pos_x)) + Math.abs(y - Number(character.pos_y));
-  if (restrictToPerception && distance > perceptionRange(Number(character.perception))) throw new Error('该位置超出你的感知范围。');
+  if (restrictToPerception && distance > perceptionRange(finalAttribute(character, 'perception'), Number(character.level))) throw new Error('该位置超出你的感知范围。');
   if (speedLimit !== undefined && distance > speedLimit) throw new Error(`当前移动速度为 ${speedLimit}，一次移动距离不能超过移动速度。`);
   const [regions] = await connection.execute<(RowDataPacket & { id: number; code: string; name: string })[]>('SELECT id,code,name FROM map_regions WHERE ? BETWEEN min_x AND max_x AND ? BETWEEN min_y AND max_y AND ? BETWEEN min_z AND max_z ORDER BY danger_level DESC LIMIT 1', [x, y, character.pos_z]);
   const region = regions[0]; if (!region) throw new Error('\n\n前面的区域，以后再来探索吧！');
@@ -1255,39 +1262,22 @@ const finishPartyVictory = async (connection: PoolConnection, sessionId: string,
     await prepareResidualPartyAmbush(connection, sessionId, members, targets);
     await connection.execute(`UPDATE combat_ambushes SET status='resolved' WHERE status='ready' AND ready_spawn_id IN (${targets.map(() => '?').join(',')})`, targets.map(target => target.id));
   }
-  const rewardTargets = targets.filter(target => !isSummonedMonster(target)); const totalExperience = rewardTargets.reduce((sum, target) => sum + Math.floor(Number(target.experience) * (1 + percentBonus(traitList(target.traits_json), 'experiencePct') / 100)), 0); const rewards: VictorySettlement['members'] = [];
-  for (const member of members) {
-    if (member.npc_code) continue;
-    const modifiers = await modifiersFor(connection, Number(member.id)); const experienceGain = await awardRealmExperience(connection, member, totalExperience * modifiers.experienceMultiplier);
+  const rewardTargets = targets.filter(target => !isSummonedMonster(target));
+  const playerMembers = members.filter(member => !member.npc_code);
+  const partySize = Math.min(4, playerMembers.length);
+  const partyExperienceBonus = ({ 1: 0, 2: .10, 3: .20, 4: .35 } as Record<number, number>)[partySize] ?? .35;
+  const partyDropBonus = ({ 1: 0, 2: .60, 3: 1, 4: 1.5 } as Record<number, number>)[partySize] ?? 1.5;
+  const totalExperience = rewardTargets.reduce((sum, target) => sum + Math.floor(Number(target.experience) * (1 + percentBonus(traitList(target.traits_json), 'experiencePct') / 100)), 0);
+  const rewards: VictorySettlement['members'] = [];
+  const rewardByMemberId = new Map<number, VictorySettlement['members'][number]>();
+  const modifiersByMemberId = new Map<number, CombatModifiers>();
+  for (const member of playerMembers) {
+    const modifiers = await modifiersFor(connection, Number(member.id)); modifiersByMemberId.set(Number(member.id), modifiers);
+    const experienceGain = await awardRealmExperience(connection, member, totalExperience * (1 + partyExperienceBonus) * modifiers.experienceMultiplier);
     const experience = experienceGain.experience; const newLevel = experienceGain.level; const gainedPoints = experienceGain.gainedPoints;
     if (gainedPoints) await recalculateCharacterStats(connection, Number(member.id));
     await advanceBountyProgress(connection, Number(member.id), rewardTargets.map(target => ({ spawnId: Number(target.id), templateId: Number(target.template_id) })));
     const drops: VictorySettlement['members'][number]['drops'] = [];
-    for (const target of rewardTargets) for (const rawDrop of jsonArray(target.drops_json)) {
-      const drop = jsonObject(rawDrop); const traitDropBonus = percentBonus(traitList(target.traits_json), 'dropPct') / 100; if (!drop.code || Math.random() > Math.min(1, Number(drop.chance ?? 1) * (1 + traitDropBonus) + modifiers.dropBonus)) continue;
-      const [items] = await connection.execute<(RowDataPacket & { id: number; name: string; item_type: string; codex_id: string | null })[]>('SELECT id,name,item_type,codex_id FROM item_definitions WHERE code=?', [String(drop.code)]); const item = items[0]; if (!item) continue;
-      const quantity = dropQuantity(drop);
-      await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [member.id, item.id]);
-      if (item.item_type === 'equipment') {
-        for (let index = 0; index < quantity; index += 1) {
-          const [result] = await connection.execute<any>('INSERT INTO player_item_instances (character_id,item_id) VALUES (?,?)', [member.id, item.id]);
-          drops.push({ name: item.name, quantity: 1, itemType: item.item_type, codexId: item.codex_id, instanceId: Number(result.insertId) });
-        }
-      } else {
-        await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),acquired_at=NOW()', [member.id, item.id, quantity]);
-        drops.push({ name: item.name, quantity, itemType: item.item_type, codexId: item.codex_id });
-      }
-    }
-    for (const target of rewardTargets.filter(target => traitList(target.traits_json).some(trait => trait.code === 'riot'))) {
-      const [templates] = await connection.execute<(RowDataPacket & { code: string })[]>('SELECT code FROM monster_templates WHERE id=?', [target.template_id]);
-      const specialCode = riotMaterialByMonster[templates[0]?.code ?? ''] ?? 'beast_core';
-      for (const code of Math.random() < .25 ? [specialCode, 'riot_aura'] : [specialCode]) {
-        const [items] = await connection.execute<(RowDataPacket & { id: number; name: string; item_type: string; codex_id: string | null })[]>('SELECT id,name,item_type,codex_id FROM item_definitions WHERE code=?', [code]); const item = items[0]; if (!item) continue;
-        await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [member.id, item.id]);
-        await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,1) ON DUPLICATE KEY UPDATE quantity=quantity+1,acquired_at=NOW()', [member.id, item.id]);
-        drops.push({ name: item.name, quantity: 1, itemType: item.item_type, codexId: item.codex_id });
-      }
-    }
     const learned: VictorySettlement['members'][number]['learned'] = [];
     for (const target of rewardTargets) {
       const [rules] = await connection.execute<(RowDataPacket & { skill_id: number; name: string; chance: number; source_skill_code: string })[]>(`SELECT r.skill_id,s.name,r.chance,r.source_skill_code FROM monster_skill_learn_rules r JOIN skill_definitions s ON s.id=r.skill_id JOIN skill_definitions source ON source.code=r.source_skill_code AND source.category=s.category AND source.damage_type=s.damage_type WHERE r.monster_template_id=?`, [Number(target.template_id)]);
@@ -1297,7 +1287,27 @@ const finishPartyVictory = async (connection: PoolConnection, sessionId: string,
         if (Number(result.affectedRows)) learned.push({ id: Number(rule.skill_id), name: rule.name });
       }
     }
-    rewards.push({ name: member.name, experience, realmLocked: experienceGain.realmLocked, levelText: gainedPoints ? `升级至 Lv.${newLevel}，获得 ${gainedPoints} 技能点` : undefined, drops, learned });
+    const reward = { name: member.name, experience, realmLocked: experienceGain.realmLocked, realmCapReached: experienceGain.realmCapReached, levelText: gainedPoints ? `升级至 Lv.${newLevel}，获得 ${gainedPoints} 技能点` : undefined, drops, learned };
+    rewards.push(reward); rewardByMemberId.set(Number(member.id), reward);
+  }
+  const randomRecipient = () => playerMembers[random(0, playerMembers.length - 1)]!;
+  const grantDrop = async (recipient: CombatMemberRow, code: string, quantity: number) => {
+    const [items] = await connection.execute<(RowDataPacket & { id: number; name: string; item_type: string; codex_id: string | null })[]>('SELECT id,name,item_type,codex_id FROM item_definitions WHERE code=?', [code]); const item = items[0]; const reward = rewardByMemberId.get(Number(recipient.id)); if (!item || !reward) return;
+    await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [recipient.id, item.id]);
+    if (item.item_type === 'equipment') for (let index = 0; index < quantity; index += 1) { const [result] = await connection.execute<any>('INSERT INTO player_item_instances (character_id,item_id) VALUES (?,?)', [recipient.id, item.id]); reward.drops.push({ name: item.name, quantity: 1, itemType: item.item_type, codexId: item.codex_id, instanceId: Number(result.insertId) }); }
+    else { await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),acquired_at=NOW()', [recipient.id, item.id, quantity]); reward.drops.push({ name: item.name, quantity, itemType: item.item_type, codexId: item.codex_id }); }
+  };
+  // 每个掉落条目只掷一次，再随机归属一名真实玩家，避免组队时重复产出。
+  for (const target of rewardTargets) for (const rawDrop of jsonArray(target.drops_json)) {
+    const drop = jsonObject(rawDrop); if (!drop.code || !playerMembers.length) continue;
+    const recipient = randomRecipient(); const modifiers = modifiersByMemberId.get(Number(recipient.id))!; const traitDropBonus = percentBonus(traitList(target.traits_json), 'dropPct') / 100;
+    if (Math.random() > Math.min(1, Number(drop.chance ?? 1) * (1 + traitDropBonus + partyDropBonus) + modifiers.dropBonus)) continue;
+    await grantDrop(recipient, String(drop.code), dropQuantity(drop));
+  }
+  if (playerMembers.length) for (const target of rewardTargets.filter(target => traitList(target.traits_json).some(trait => trait.code === 'riot'))) {
+    const [templates] = await connection.execute<(RowDataPacket & { code: string })[]>('SELECT code FROM monster_templates WHERE id=?', [target.template_id]);
+    const specialCode = riotMaterialByMonster[templates[0]?.code ?? ''] ?? 'beast_core';
+    for (const code of Math.random() < .25 ? [specialCode, 'riot_aura'] : [specialCode]) await grantDrop(randomRecipient(), code, 1);
   }
   const [guideBattle] = await connection.execute<RowDataPacket[]>(`SELECT 1 FROM combat_targets ct JOIN monster_spawns s ON s.id=ct.spawn_id JOIN monster_templates t ON t.id=s.template_id WHERE ct.session_id=? AND t.code='forest_slime' LIMIT 1`, [sessionId]);
   let arrivalPending = false;

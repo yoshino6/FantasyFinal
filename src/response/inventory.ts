@@ -1,5 +1,6 @@
 import { Format, logger, useEvent, useMessage, useRoute } from 'alemonjs';
 import { inventoryView } from '../game/adventure.service';
+import { currentMainQuest } from '../game/main-quest.service';
 import { messageFormat } from '../game/message';
 
 export default async () => {
@@ -7,16 +8,25 @@ export default async () => {
   const requestedCategory = String(route.param('category') ?? '');
   const category = ['装备', '道具', '材料'].includes(requestedCategory) ? requestedCategory as '装备' | '道具' | '材料' : undefined;
   try {
-    const result = await inventoryView(event.current.UserId, category);
+    const [result, mainQuest] = await Promise.all([inventoryView(event.current.UserId, category), currentMainQuest(event.current.UserId)]);
+    const canContemplate = mainQuest.title === '【主线·窥探世间】';
     const markdown = Format.createMarkdown().addTitle('背包');
     if (!category) {
       markdown.addText('\n\n最近获得：\n');
       if (!result.recent.length) markdown.addText('暂无获得记录。');
-      for (const item of result.recent) markdown.addButton(`[${item.item_category}]${item.name}`, { data: `/物品图鉴 ${item.codex_id}`, autoEnter: false }).addNewline();
+      for (const item of result.recent) {
+        markdown.addButton(`[${item.item_category}]${item.name}`, { data: `/物品图鉴 ${item.codex_id}`, autoEnter: false });
+        if (canContemplate && item.code === 'sky_dust') markdown.addText(' ').addButton('[窥探]', { data: '/窥探天空粉尘', autoEnter: false });
+        markdown.addNewline();
+      }
     } else {
       markdown.addText(`\n\n${category}：\n\n`);
       for (const item of result.instances) markdown.addButton(`[${item.item_category}]${item.name}`, { data: `/装备详情 ${item.id}`, autoEnter: false }).addText(`\n品质 ${Number(item.quality).toFixed(2)}%｜耐久 ${item.durability}/${item.durability_max}\n\n`);
-      for (const item of result.stacked) markdown.addButton(`[${item.item_category}]${item.name}`, { data: `/物品图鉴 ${item.codex_id}`, autoEnter: false }).addText(` ×${item.quantity}\n`);
+      for (const item of result.stacked) {
+        markdown.addButton(`[${item.item_category}]${item.name}`, { data: `/物品图鉴 ${item.codex_id}`, autoEnter: false }).addText(` ×${item.quantity}`);
+        if (canContemplate && item.code === 'sky_dust') markdown.addText(' ').addButton('[窥探]', { data: '/窥探天空粉尘', autoEnter: false });
+        markdown.addNewline();
+      }
       if (!result.instances.length && !result.stacked.length) markdown.addText('该分类暂无物品。');
     }
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow()

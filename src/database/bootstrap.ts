@@ -185,6 +185,10 @@ const schemaStatements = [
     character_id BIGINT UNSIGNED NOT NULL, quest_code VARCHAR(64) NOT NULL, status ENUM('accepted','completed','claimed') NOT NULL DEFAULT 'accepted', accepted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at DATETIME NULL, claimed_at DATETIME NULL,
     PRIMARY KEY (character_id,quest_code), CONSTRAINT fk_side_quest_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_main_quest_progress (
+    character_id BIGINT UNSIGNED NOT NULL, quest_code VARCHAR(64) NOT NULL, stage TINYINT UNSIGNED NOT NULL DEFAULT 0, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (character_id,quest_code), CONSTRAINT fk_main_quest_progress_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS bounty_notices (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, refresh_key VARCHAR(32) NOT NULL, title VARCHAR(96) NOT NULL, target_template_id BIGINT UNSIGNED NOT NULL, source_spawn_id BIGINT UNSIGNED NULL,
     required_count SMALLINT UNSIGNED NOT NULL, copper_reward INT UNSIGNED NOT NULL, is_active TINYINT(1) NOT NULL DEFAULT 1,
@@ -452,7 +456,6 @@ export const initializeSchema = async (pool: Pool) => {
   await pool.query(`CREATE TABLE IF NOT EXISTS player_auto_battle_settings (character_id BIGINT UNSIGNED NOT NULL, enabled TINYINT(1) NOT NULL DEFAULT 0, auto_potion_enabled TINYINT(1) NOT NULL DEFAULT 0, hp_threshold TINYINT UNSIGNED NOT NULL DEFAULT 30, hp_item_id BIGINT UNSIGNED NULL, mp_threshold TINYINT UNSIGNED NOT NULL DEFAULT 30, mp_item_id BIGINT UNSIGNED NULL, PRIMARY KEY (character_id), CONSTRAINT fk_auto_battle_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE) ENGINE=InnoDB`);
   await pool.query(`CREATE TABLE IF NOT EXISTS player_auto_battle_actions (character_id BIGINT UNSIGNED NOT NULL, sequence_no TINYINT UNSIGNED NOT NULL, skill_id BIGINT UNSIGNED NULL, PRIMARY KEY (character_id,sequence_no), CONSTRAINT fk_auto_action_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE) ENGINE=InnoDB`);
   await pool.query(`CREATE TABLE IF NOT EXISTS player_auto_battle_quick_setup (character_id BIGINT UNSIGNED NOT NULL, next_sequence TINYINT UNSIGNED NOT NULL DEFAULT 1, PRIMARY KEY (character_id), CONSTRAINT fk_auto_quick_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE) ENGINE=InnoDB`);
-  await pool.query('UPDATE characters SET realm_stage=GREATEST(realm_stage,LEAST(10,CEILING(level/10)))');
   for (const column of ['learn_cost TINYINT UNSIGNED NOT NULL DEFAULT 1', 'upgrade_cost TINYINT UNSIGNED NOT NULL DEFAULT 1', 'max_level TINYINT UNSIGNED NOT NULL DEFAULT 5', 'power_per_level INT UNSIGNED NOT NULL DEFAULT 15', 'cooldown_reduction_per_level TINYINT UNSIGNED NOT NULL DEFAULT 0']) {
     try { await pool.query(`ALTER TABLE skill_definitions ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }
@@ -496,6 +499,8 @@ export const initializeSchema = async (pool: Pool) => {
   );
   await pool.query(`INSERT INTO item_definitions (code, name, description, obtain_source, item_type, item_category, weight, stackable, effect_json) VALUES
     ('healing_herb', '微光草药', '恢复 30 点生命。', '野外采集与探索发现', 'consumable', '药剂', 0.20, 1, JSON_OBJECT('heal', 30)),
+    ('glimmer_potion', '微光药水', '由炼金师提纯制成，恢复 150 点生命。', '晴空糖水屋·炼金师入门', 'consumable', '药剂', 0.25, 1, JSON_OBJECT('heal', 150)),
+    ('sky_dust', '天空粉尘', '源自大陆创始的奇异尘埃，纹络间仿佛映着无垠天穹。', '幽影狼王掉落', 'material', '特殊', 0.01, 1, JSON_OBJECT('worldInsight', true)),
     ('wolf_fang', '幽狼之牙', '可出售的普通材料。', '野外怪物掉落', 'material', '兽材', 0.15, 1, NULL),
     ('beast_meat', '兽肉', '新鲜的野兽肉，可作为烹饪食材。', '幽暗密林怪物掉落', 'material', '兽材', 0.30, 1, NULL),
     ('beast_bone', '兽骨', '坚硬完整的兽骨，常用于制作与加工。', '幽暗密林怪物掉落', 'material', '兽材', 0.25, 1, NULL),
@@ -780,7 +785,7 @@ export const initializeSchema = async (pool: Pool) => {
     ('goblin', '哥布林', 'elite', 4, 10,13,13,16,16,15, 0.8,1.0,0.9,1.2,1.1,1.0, JSON_ARRAY('goblin_slash','goblin_fire','scratch'), 82, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',0.35,'quantity',1),JSON_OBJECT('code','beast_bone','chance',0.70,'quantity',1),JSON_OBJECT('code','beast_hide','chance',0.35,'quantity',1),JSON_OBJECT('code','beast_tendon','chance',0.20,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.25,'quantity',1),JSON_OBJECT('code','goblin_ear','chance',0.50,'quantity',1))),
     ('tree_ent', '树精', 'elite', 7, 24,18,20,22,14,18, 1.3,1.2,1.0,1.3,0.6,1.0, JSON_ARRAY('root_bind','thorn_burst','verdant_bolt'), 180, JSON_ARRAY(JSON_OBJECT('code','magic_branch','chance',1,'quantity',1),JSON_OBJECT('code','living_wood','chance',0.50,'quantity',1))),
     ('forest_slime', '森林史莱姆', 'boss', 8, 37,28,25,31,10,15, 1.6,1.4,1.1,1.3,0.5,0.8, JSON_ARRAY('slime_bash','acid_spray','regenerate_slime'), 260, JSON_ARRAY(JSON_OBJECT('code','healing_herb','chance',1,'min_quantity',6,'max_quantity',10))),
-    ('shadow_wolf_king', '幽影狼王', 'boss', 12, 18,12,34,10,31,30, 1.0,0.7,1.8,0.5,1.7,1.6, JSON_ARRAY('wolfking_summon_shadow_wolf','wolfking_trample','wolfking_rending_pounce','wolfking_bite','wolfking_shadow_curse','wolfking_fang_devour'), 720, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',1,'min_quantity',5,'max_quantity',8),JSON_OBJECT('code','beast_bone','chance',1,'min_quantity',4,'max_quantity',7),JSON_OBJECT('code','beast_hide','chance',0.9,'min_quantity',3,'max_quantity',5),JSON_OBJECT('code','beast_tendon','chance',0.8,'min_quantity',2,'max_quantity',4),JSON_OBJECT('code','beast_core','chance',0.65,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','magic_heartcore','chance',0.75,'quantity',1)))
+    ('shadow_wolf_king', '幽影狼王', 'boss', 12, 18,12,34,10,31,30, 1.0,0.7,1.8,0.5,1.7,1.6, JSON_ARRAY('wolfking_summon_shadow_wolf','wolfking_trample','wolfking_rending_pounce','wolfking_bite','wolfking_shadow_curse','wolfking_fang_devour'), 720, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',1,'min_quantity',5,'max_quantity',8),JSON_OBJECT('code','beast_bone','chance',1,'min_quantity',4,'max_quantity',7),JSON_OBJECT('code','beast_hide','chance',0.9,'min_quantity',3,'max_quantity',5),JSON_OBJECT('code','beast_tendon','chance',0.8,'min_quantity',2,'max_quantity',4),JSON_OBJECT('code','beast_core','chance',0.65,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','magic_heartcore','chance',0.75,'quantity',1),JSON_OBJECT('code','sky_dust','chance',0.40,'quantity',1)))
     ON DUPLICATE KEY UPDATE name=VALUES(name),monster_class=VALUES(monster_class),level=VALUES(level),constitution=VALUES(constitution),spirit=VALUES(spirit),strength=VALUES(strength),intelligence=VALUES(intelligence),agility=VALUES(agility),perception=VALUES(perception),constitution_growth=VALUES(constitution_growth),spirit_growth=VALUES(spirit_growth),strength_growth=VALUES(strength_growth),intelligence_growth=VALUES(intelligence_growth),agility_growth=VALUES(agility_growth),perception_growth=VALUES(perception_growth),skill_sequence=VALUES(skill_sequence),experience=VALUES(experience),drops_json=VALUES(drops_json)`);
   await pool.query(`UPDATE monster_templates SET weakness_json=CASE code WHEN 'ball_rabbit' THEN JSON_ARRAY('刺击') WHEN 'spike_boar' THEN JSON_ARRAY('斩击') WHEN 'vine_snake' THEN JSON_ARRAY('斩击') WHEN 'black_bear' THEN JSON_ARRAY('刺击') WHEN 'mist_wolf' THEN JSON_ARRAY('打击') WHEN 'roll_rabbit' THEN JSON_ARRAY('刺击') WHEN 'tusk_boar' THEN JSON_ARRAY('斩击') WHEN 'vine_python' THEN JSON_ARRAY('斩击') WHEN 'pitch_bear' THEN JSON_ARRAY('刺击') WHEN 'shadow_wolf' THEN JSON_ARRAY('打击') WHEN 'shadow_wolf_king' THEN JSON_ARRAY('打击','光') WHEN 'goblin' THEN JSON_ARRAY('打击') WHEN 'tree_ent' THEN JSON_ARRAY('斩击') WHEN 'forest_slime' THEN JSON_ARRAY('刺击') ELSE weakness_json END, resistance_json=CASE code WHEN 'ball_rabbit' THEN JSON_ARRAY('打击') WHEN 'spike_boar' THEN JSON_ARRAY('刺击') WHEN 'vine_snake' THEN JSON_ARRAY('刺击') WHEN 'black_bear' THEN JSON_ARRAY('打击') WHEN 'mist_wolf' THEN JSON_ARRAY('斩击') WHEN 'roll_rabbit' THEN JSON_ARRAY('打击') WHEN 'tusk_boar' THEN JSON_ARRAY('刺击') WHEN 'vine_python' THEN JSON_ARRAY('刺击') WHEN 'pitch_bear' THEN JSON_ARRAY('打击') WHEN 'shadow_wolf' THEN JSON_ARRAY('斩击') WHEN 'shadow_wolf_king' THEN JSON_ARRAY('斩击','暗') WHEN 'goblin' THEN JSON_ARRAY('刺击') WHEN 'tree_ent' THEN JSON_ARRAY('刺击') WHEN 'forest_slime' THEN JSON_ARRAY('打击') ELSE resistance_json END`);
   await pool.query(`UPDATE monster_templates SET element_mastery_json=CASE code
@@ -866,13 +871,14 @@ export const initializeSchema = async (pool: Pool) => {
     FROM map_regions r JOIN monster_templates t ON t.code IN ('ball_rabbit','spike_boar','vine_snake','black_bear','mist_wolf','roll_rabbit','tusk_boar','vine_python','pitch_bear','shadow_wolf','goblin','tree_ent','shadow_wolf_king')
     WHERE r.code='dark_forest'
     ON DUPLICATE KEY UPDATE spawn_weight=VALUES(spawn_weight)`);
-  await pool.query(`DELETE n FROM map_npcs n JOIN map_regions r ON r.id=n.region_id WHERE r.code='baina_town' AND n.code NOT IN ('pear_guide','guild_counter','blacksmith')`);
+  await pool.query(`DELETE n FROM map_npcs n JOIN map_regions r ON r.id=n.region_id WHERE r.code='baina_town' AND n.code NOT IN ('pear_guide','guild_counter','blacksmith','alchemy_sweetshop')`);
   await pool.query(`INSERT INTO map_npcs (region_id, code, name, description, pos_x, pos_y, pos_z) VALUES
     ((SELECT id FROM map_regions WHERE code='baina_town'), 'pear_guide', '梨子喵（新人引导）', '笑容明快的猫族新手引导员，像是正专程在等你。', -26, -135, 0),
     ((SELECT id FROM map_regions WHERE code='world_tree'), 'tree_keeper', '树守·阿鲁', '守望世界树的沉默老人。', 0, 0, 0),
     ((SELECT id FROM map_regions WHERE code='dark_forest'), 'lost_hunter', '迷途猎人', '在薄雾中寻找归路的年轻猎人。', 12, -48, 0),
     ((SELECT id FROM map_regions WHERE code='baina_town'), 'guild_counter', '冒险者公会', '承接委托、登记冒险者与交换情报的大厅。', -8, -116, 0),
-    ((SELECT id FROM map_regions WHERE code='baina_town'), 'blacksmith', '铁匠铺', '炉火终日不熄，铁锤敲击声从半开的门里传来。', -17, -123, 0)
+    ((SELECT id FROM map_regions WHERE code='baina_town'), 'blacksmith', '铁匠铺', '炉火终日不熄，铁锤敲击声从半开的门里传来。', -17, -123, 0),
+    ((SELECT id FROM map_regions WHERE code='baina_town'), 'alchemy_sweetshop', '晴空糖水屋', '门口挂着晴空色风铃，甜香与清新的草药气息一同飘出。', -12, -127, 0)
     ON DUPLICATE KEY UPDATE name=VALUES(name), description=VALUES(description), pos_x=VALUES(pos_x), pos_y=VALUES(pos_y), pos_z=VALUES(pos_z)`);
   await pool.query(`INSERT INTO map_special_objects (region_id, code, name, description, pos_x, pos_y, pos_z) VALUES
     ((SELECT id FROM map_regions WHERE code='world_tree'), 'world_tree_altar', '世界树祭坛', '被古老根须环抱的石质祭坛。', 0, 0, 0),

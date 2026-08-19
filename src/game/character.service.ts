@@ -60,6 +60,10 @@ const withEquipmentStats = async (connection: Pool | PoolConnection, characterId
 export const recalculateCharacterStats = async (connection: Pool | PoolConnection, characterId: number) => {
   const [rows] = await connection.execute<(RowDataPacket & Record<string, unknown>)[]>('SELECT * FROM characters WHERE id=? FOR UPDATE', [characterId]);
   const character = rows[0]; if (!character) return;
+  // 装备实例始终归角色所有；解除穿戴即可自动回到背包，不会销毁实例。
+  await connection.execute(`DELETE pe FROM player_equipment pe
+    JOIN item_definitions i ON i.id=pe.item_id
+    WHERE pe.character_id=? AND COALESCE(i.required_level,1)>?`, [characterId, Number(character.level)]);
   await connection.execute('DELETE FROM player_food_buffs WHERE character_id=? AND expires_at<=NOW()', [characterId]);
   const stats = await withEquipmentStats(connection, characterId, calculateDerivedStats(finalAttributes(character)));
   await connection.execute('UPDATE characters SET hp_max=?,mp_max=?,current_hp=LEAST(current_hp,?),current_mp=LEAST(current_mp,?),physical_attack=?,magic_attack=?,physical_defense=?,magic_defense=?,accuracy=?,evasion=?,crit_rate_bp=?,crit_damage_bp=?,crit_resist_bp=?,crit_damage_reduction_bp=?,tenacity=?,speed=? WHERE id=?', [stats.hpMax, stats.mpMax, stats.hpMax, stats.mpMax, stats.physicalAttack, stats.magicAttack, stats.physicalDefense, stats.magicDefense, stats.accuracy, stats.evasion, stats.critRateBp, stats.critDamageBp, stats.critResistBp, stats.critDamageReductionBp, stats.tenacity, stats.speed, characterId]);

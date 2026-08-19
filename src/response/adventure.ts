@@ -7,6 +7,7 @@ import { currentLocationText, movedLocationText, outsidePanel, panelButtons } fr
 import pearGuideImage from '../assets/game/story/pear-guide.png';
 import { adventurerProfile, chooseProfession, registerAdventurer } from '../game/character.service';
 import { realmEnergyDissipationText } from '../game/constants';
+import { currentMainQuest } from '../game/main-quest.service';
 
 const pearGuideImagePath = decodeURIComponent(pearGuideImage).replace(/^([a-zA-Z]):(?![\\/])/, '$1:\\');
 const pearGuideImageBuffer = () => readFile(pearGuideImagePath);
@@ -102,6 +103,14 @@ const victoryFormat = (settlement: VictorySettlement) => {
   }
   return Format.create().addMarkdown(markdown);
 };
+const realmBarrierFormat = () => Format.create()
+  .addMarkdown(Format.createMarkdown().addTitle('无形的禁锢').addNewline().addNewline()
+    .addText('一股精纯的能量冲入你的体壳，然后向外四溢，化为了斑驳的光点，消散在了空中。').addNewline().addNewline()
+    .addText('你感觉到身体能量已趋于饱和，无法再吸收更多。').addNewline().addNewline()
+    .addText('主线变更【无形的禁锢】').addNewline()
+    .addText('你决定去找专业的人来请教这件事情。').addNewline()
+    .addText('先去冒险者公会里面问问吧。'))
+  .addButtonGroup(Format.createButtonGroup().addRow().addButton('任务', '/任务', { type: 'command', autoEnter: true, style: 'blue' }));
 const chapterFormat = (stage: number, text: string) => {
   const markdown = Format.createMarkdown().addTitle(`初章·包容之镇（${stage}/5）`).addNewline().addNewline().addText(text);
   const buttons = Format.createButtonGroup().addRow();
@@ -162,6 +171,7 @@ const sendCombatResult = async (message: any, qqUserId: string, result: Awaited<
       ? victoryButtons(settlement.arrivalPending)
       : panelButtons(nearby?.character.activity_status !== 'active').addRow().addButton('技能列表', '/技能列表', { type: 'command', autoEnter: true, style: 'blue' });
     await message.send({ format: format.addButtonGroup(buttons) });
+    if (victory && settlement.members.some(member => member.realmCapReached)) await message.send({ format: realmBarrierFormat() });
     return;
   }
   const battle = await battleStatus(qqUserId);
@@ -226,7 +236,7 @@ const guildChatTopics = [
   '“工会的集结区经常有人寻找同伴。一个可靠的队伍，往往比单纯强大的武器更值得信赖。”'
 ];
 const guildFrontDeskFormat = async (qqUserId: string, text?: string) => {
-  const profile = await adventurerProfile(qqUserId);
+  const [profile, mainQuest] = await Promise.all([adventurerProfile(qqUserId), currentMainQuest(qqUserId)]);
   const introduction = text ?? (profile.adventurer_registered
     ? '莫妮卡站在整洁的前台后，黑色短发利落地贴着耳侧。她微笑着核对账册，目光明亮而专注。\n“欢迎回来，冒险者。无论是委托、晋升还是旅途中的疑问，我都会尽力协助。”'
     : '前台小姐姐莫妮卡站在整洁的柜台后。她有一头干练的黑色短发，笑容阳光，举止从容而专业。\n“您好，欢迎来到百纳镇冒险者公会。我是接待员莫妮卡，很高兴为您服务。”');
@@ -234,6 +244,7 @@ const guildFrontDeskFormat = async (qqUserId: string, text?: string) => {
   const buttons = Format.createButtonGroup().addRow().addButton(profile.adventurer_registered ? '冒险者 晋升' : '冒险者 注册', '/公会注册', { type: 'command', autoEnter: true, style: 'blue' });
   buttons.addButton('职业选择', '/职业选择', { type: 'command', autoEnter: true, style: profile.adventurer_registered ? 'blue' : undefined });
   buttons.addRow().addButton('闲聊', '/前台闲聊', { type: 'command', autoEnter: true, style: 'blue' }).addButton('返回公会大厅', '/建筑进入 guild_counter', { type: 'command', autoEnter: true });
+  if (mainQuest.title === '【主线·无形的禁锢】') buttons.addRow().addButton('关于 无形的禁锢', '/关于无形的禁锢', { type: 'command', autoEnter: true, style: 'blue' });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 const professionSelectFormat = async (qqUserId: string) => {
@@ -264,7 +275,7 @@ const showMoveResult = async (message: any, qqUserId: string, result: any) => {
     return;
   }
   if (result.kind === 'npc') {
-    if (result.npc.code === 'guild_counter' || result.npc.code === 'blacksmith') { await message.send({ format: buildingEncounterFormat(result.npc.name, result.npc.code, movedLocationText(result.character)) }); return; }
+    if (result.npc.code === 'guild_counter' || result.npc.code === 'blacksmith' || result.npc.code === 'alchemy_sweetshop') { await message.send({ format: buildingEncounterFormat(result.npc.name, result.npc.code, movedLocationText(result.character)) }); return; }
     const markdown = Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText(movedLocationText(result.character)).addNewline().addBlockquote(result.text).addNewline().addNewline().addText(result.npc.name);
     const buttons = Format.createButtonGroup().addRow().addButton('对话', `/NPC对话 ${result.npc.code}`, { type: 'command', autoEnter: true, style: 'blue' }).addButton('忽略', `/NPC忽略 ${result.npc.code}`, { type: 'command', autoEnter: true });
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) }); return;
@@ -306,11 +317,17 @@ export const buildingHandler = (action: 'enter' | 'ignore' | 'leave' | 'area') =
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
   try {
     const code = String(route.param('code'));
-    if (code !== 'guild_counter' && code !== 'blacksmith') throw new Error('这座建筑暂未开放。');
+    if (code !== 'guild_counter' && code !== 'blacksmith' && code !== 'alchemy_sweetshop') throw new Error('这座建筑暂未开放。');
     await requireNpcAtCurrentPosition(event.current.UserId, code);
     if (code === 'blacksmith') {
       if (action === 'enter') { const { blacksmithFormat } = await import('./blacksmith'); await message.send({ format: blacksmithFormat() }); return; }
       const panel = await movementPanel(event.current.UserId, action === 'leave' ? '你离开了铁匠铺，炉火与锤声在身后渐远。' : '你暂时没有进入铁匠铺。');
+      const nearby = await nearbyPoints(event.current.UserId);
+      await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return;
+    }
+    if (code === 'alchemy_sweetshop') {
+      if (action === 'enter') { const { alchemistShopFormat } = await import('./alchemist'); await message.send({ format: await alchemistShopFormat(event.current.UserId) }); return; }
+      const panel = await movementPanel(event.current.UserId, action === 'leave' ? '你离开了晴空糖水屋，清甜的草药香仍萦绕在衣袖间。' : '你暂时没有进入晴空糖水屋。');
       const nearby = await nearbyPoints(event.current.UserId);
       await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return;
     }
@@ -324,6 +341,7 @@ export const buildingHandler = (action: 'enter' | 'ignore' | 'leave' | 'area') =
 export const guildRegistrationHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireNpcAtCurrentPosition(event.current.UserId, 'guild_counter'); const registered = await registerAdventurer(event.current.UserId); if (!registered) { await message.send({ format: await guildFrontDeskFormat(event.current.UserId, '莫妮卡轻轻摇头：“您的冒险者身份已经登记在册了。晋升考核将在满足条件后开放。”') }); return; } const markdown = Format.createMarkdown().addTitle('冒险家 注册').addNewline().addNewline().addBlockquote('你将手轻放在水晶球上，顿时散发出一阵耀眼的白光。').addNewline().addBlockquote('莫妮卡将一张通体漆黑卡片靠近球体，光芒汇聚成一道银线注入，卡片逐渐被染成银白。').addNewline().addBlockquote('随后一行行异世界文字在卡面上依次浮现——').addNewline().addNewline().addText('获得【冒险者 卡片】\n你随时可以发送 /卡片 查看。'); await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('返回前台', '/建筑区域 guild_counter 前台', { type: 'command', autoEnter: true, style: 'blue' })) }); } catch (error) { await fail(message, error, '注册失败'); } };
 export const professionHandler = (action: 'select' | 'detail' | 'choose') => async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireNpcAtCurrentPosition(event.current.UserId, 'guild_counter'); if (action === 'select') { await message.send({ format: await professionSelectFormat(event.current.UserId) }); return; } const name = String(route.param('name')); if (action === 'detail') { await message.send({ format: await professionDetailFormat(event.current.UserId, name) }); return; } const code = professionCodeByName[name]; if (!code) throw new Error('未知职业。'); await chooseProfession(event.current.UserId, code); await message.send({ format: await guildFrontDeskFormat(event.current.UserId, `莫妮卡郑重地在档案上盖下印记。“恭喜您成为一名${name}。愿您始终记得最初踏上旅途的理由。”`) }); } catch (error) { await fail(message, error, '职业操作失败'); } };
 export const guildChatHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireNpcAtCurrentPosition(event.current.UserId, 'guild_counter'); const profile = await adventurerProfile(event.current.UserId); const pool = await (await import('../database/pool')).getPool(); await pool.execute('INSERT INTO player_guild_chats (character_id,chat_count) VALUES (?,1) ON DUPLICATE KEY UPDATE chat_count=chat_count+1', [profile.id]); const [rows] = await pool.execute<any[]>('SELECT chat_count FROM player_guild_chats WHERE character_id=?', [profile.id]); const index = (Number(rows[0]?.chat_count ?? 1) - 1) % guildChatTopics.length; await message.send({ format: await guildFrontDeskFormat(event.current.UserId, guildChatTopics[index]) }); } catch (error) { await fail(message, error, '闲聊失败'); } };
+export const guildBarrierHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireNpcAtCurrentPosition(event.current.UserId, 'guild_counter'); const { advanceRealmBarrier } = await import('../game/main-quest.service'); await advanceRealmBarrier(event.current.UserId, 'guild'); const { barrierAdviceFormat } = await import('./alchemist'); await message.send({ format: barrierAdviceFormat(true) }); } catch (error) { await fail(message, error, '无法询问'); } };
 export const adventurerCardHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const profile = await adventurerProfile(event.current.UserId); if (!profile.adventurer_registered) throw new Error('尚未完成冒险者注册。'); const pool = await (await import('../database/pool')).getPool(); const [skills] = await pool.execute<any[]>('SELECT s.name,ps.level FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? ORDER BY ps.learned_at,s.id', [profile.id]); const markdown = Format.createMarkdown().addTitle('冒险者卡片').addNewline().addNewline().addText(`姓名：${profile.name}\n冒险者等级：RANK ${profile.adventurer_rank}\n角色等级：Lv.${profile.level}\n职业：${profile.profession_name ?? '未选择'}\n资历：百纳镇冒险者公会登记在册\n\n精通技能：\n${skills.length ? skills.map((skill: any) => `【${skill.name}】Lv.${skill.level}`).join('\n') : '尚未掌握技能'}`); await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('返回前台', '/建筑区域 guild_counter 前台', { type: 'command', autoEnter: true, style: 'blue' })) }); } catch (error) { await fail(message, error, '无法查看卡片'); } };
 export const pearGuideHandler = async () => { const [message] = useMessage(); try { await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('梨子喵')) }); await message.send({ format: Format.create().addImage(await pearGuideImageBuffer()) }); } catch (error) { await fail(message, error, '无法展示梨子喵'); } };
 export const npcEncounterHandler = (action: 'talk' | 'ignore') => async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const code = String(route.param('code')); await requireNpcAtCurrentPosition(event.current.UserId, code); if (action === 'ignore') { const [bag, nearby] = await Promise.all([inventory(event.current.UserId), nearbyPoints(event.current.UserId)]); const panel = outsidePanel('行动', currentLocationText(nearby.character), bag.movementSpeed, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), '你暂时没有上前搭话，继续留意四周。', nearby.points, nearby.character.activity_status !== 'active', nearby.landmarks); await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return; } const text = await talkToNpc(event.current.UserId, code); const panel = await movementPanel(event.current.UserId, text); const nearby = await nearbyPoints(event.current.UserId); await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); } catch (error) { await fail(message, error, '对话失败'); } };
