@@ -3,7 +3,7 @@ import { getPool, withTransaction } from '../database/pool';
 
 const PAGE_SIZE = 5;
 type CharacterRow = RowDataPacket & { id: number; copper_coins: number };
-type ShopRow = RowDataPacket & { id: number; name: string; item_category: string; description: string; buy_price: number; owned_quantity: number };
+type ShopRow = RowDataPacket & { id: number; codex_id: string; name: string; item_category: string; description: string; buy_price: number; owned_quantity: number };
 type SellRow = RowDataPacket & { id: number; name: string; item_category: string; quantity: number; sell_price: number };
 
 const characterFor = async (connection: PoolConnection | Awaited<ReturnType<typeof getPool>>, qqUserId: string, lock = false) => {
@@ -23,11 +23,11 @@ export const shopCatalog = async (qqUserId: string, page = 1, keyword = '') => {
   const term = `%${keyword.trim()}%`;
   const [countRows] = await pool.execute<(RowDataPacket & { total: number })[]>('SELECT COUNT(*) AS total FROM guild_shop_items si JOIN item_definitions i ON i.id=si.item_id WHERE si.is_active=1 AND i.name LIKE ?', [term]);
   const paging = pageInfo(page, Number(countRows[0]?.total ?? 0));
-  const [rows] = await pool.execute<ShopRow[]>(`SELECT i.id,i.name,i.item_category,i.description,si.buy_price,COALESCE(pi.quantity,0) AS owned_quantity
+  const [rows] = await pool.execute<ShopRow[]>(`SELECT i.id,i.codex_id,i.name,i.item_category,i.description,si.buy_price,COALESCE(pi.quantity,0) AS owned_quantity
     FROM guild_shop_items si JOIN item_definitions i ON i.id=si.item_id
     LEFT JOIN player_inventory pi ON pi.item_id=i.id AND pi.character_id=?
     WHERE si.is_active=1 AND i.name LIKE ? ORDER BY si.item_id LIMIT ? OFFSET ?`, [character.id, term, PAGE_SIZE, (paging.page - 1) * PAGE_SIZE]);
-  return { items: rows.map(row => ({ id: Number(row.id), name: row.name, category: row.item_category, description: row.description, price: Number(row.buy_price), ownedQuantity: Number(row.owned_quantity) })), ...paging, keyword: keyword.trim(), copper: Number(character.copper_coins) };
+  return { items: rows.map(row => ({ id: Number(row.id), codexId: row.codex_id, name: row.name, category: row.item_category, description: row.description, price: Number(row.buy_price), ownedQuantity: Number(row.owned_quantity) })), ...paging, keyword: keyword.trim(), copper: Number(character.copper_coins) };
 };
 
 export const sellCatalog = async (qqUserId: string, page = 1, keyword = '') => {

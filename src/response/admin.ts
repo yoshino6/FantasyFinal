@@ -4,6 +4,7 @@ import { grantAdministrator, loginAsOwner, permissionFor, permissionList, requir
 import { messageFormat } from '../game/message';
 import { adminDefeatBoss, adminSpawnBoss, bossEvents } from '../game/adventure.service';
 import { postBossBounty } from '../game/bounty.service';
+import { auditAllPlayers, auditCharacter, auditInventory, auditPlayerState, auditSkills } from '../game/admin-audit.service';
 
 const commandLink = (markdown: ReturnType<typeof Format.createMarkdown>, title: string, command: string, format: string) => markdown.addText('> ').addButton(title, { data: command, autoEnter: false }).addNewline().addBlockquote(format).addNewline();
 const textButton = (_title: string, command: string) => ({ data: command, autoEnter: false });
@@ -21,6 +22,7 @@ const adminFormat = (role: PermissionRole | null) => {
     markdown.addNewline().addText('邮件发放物品').addNewline();
     commandLink(markdown, '[个人发放]', '管理员命令 邮件发放 个人', '格式：管理员命令 邮件发放 个人');
     commandLink(markdown, '[全服发放]', '管理员命令 邮件发放 全服', '格式：管理员命令 邮件发放 全服');
+    markdown.addNewline().addText('玩家管理').addNewline().addText('> ').addButton('[数据核查]', textButton('玩家数据核查', '玩家数据核查')).addNewline().addBlockquote('核查并修复玩家的角色、背包、技能与状态数据。');
     markdown.addNewline().addText('事件管理').addNewline().addText('> ').addButton('[BOSS管理]', textButton('BOSS管理', 'BOSS管理')).addNewline().addBlockquote('查看地图中 BOSS 事件并操作。');
   }
   return Format.create().addMarkdown(markdown);
@@ -32,8 +34,20 @@ const bossManagementFormat = async () => {
     markdown.addTitle(`【${event.regionName}】`).addNewline().addNewline();
     markdown.addText(`${'①②③④⑤⑥⑦⑧⑨⑩'[index] ?? `${index + 1}.`}${event.bossName}`).addButton('[刷新]', textButton('刷新Boss', `BOSS刷新 ${event.bossCode}`)).addButton('[消灭]', textButton('消灭Boss', `BOSS消灭 ${event.bossCode}`)).addButton('[上赏]', textButton('Boss上赏', `BOSS上赏 ${event.bossCode}`)).addNewline();
     if (event.x === null) markdown.addBlockquote('未刷新').addNewline().addNewline();
-    else markdown.addText('> 当前坐标：').addButton(`(${event.x}, ${event.y}, ${event.z})`, textButton('前往Boss坐标', `前往 ${event.x} ${event.y}`)).addNewline().addNewline();
+    else markdown.addText('> 当前坐标：').addButton(`(${event.x}, ${event.y}, ${event.z})`, textButton('前往Boss坐标', `前往 ${event.x} ${event.y}`)).addNewline().addBlockquote(`当前词条：${event.traits.join('、') || '无'}`).addNewline().addNewline();
   }
+  return Format.create().addMarkdown(markdown);
+};
+
+const playerAuditFormat = () => {
+  const markdown = Format.createMarkdown().addTitle('玩家数据核查').addNewline().addNewline();
+  markdown.addButton('[角色信息核查]', textButton('角色信息核查', '玩家核查 角色 ')).addNewline();
+  markdown.addButton('[背包信息核查]', textButton('背包信息核查', '玩家核查 背包 ')).addNewline();
+  markdown.addButton('[技能信息核查]', textButton('技能信息核查', '玩家核查 技能 ')).addNewline();
+  markdown.addButton('[玩家状态核查]', textButton('玩家状态核查', '玩家核查 状态 ')).addNewline();
+  markdown.addButton('[全部玩家核查]', textButton('全部玩家核查', '全服玩家核查')).addNewline().addNewline();
+  markdown.addBlockquote('点击对应项目后 @ 需要核查的玩家并发送。');
+  markdown.addNewline().addBlockquote('全部玩家核查会依次核查所有已注册角色的角色、背包、技能与状态数据。');
   return Format.create().addMarkdown(markdown);
 };
 
@@ -84,6 +98,24 @@ export const ownerLoginHandler = async () => { const [event] = useEvent(); const
 export const grantAdministratorHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const target = await mentionedUserId(); await grantAdministrator(event.current.UserId, target); await message.send({ format: messageFormat('权限已给予', `已给予 QID：${target} 管理员权限。`) }); } catch (error) { await message.send({ format: messageFormat('权限操作失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const revokeAdministratorHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const target = await mentionedUserId(); await revokeAdministrator(event.current.UserId, target); await message.send({ format: messageFormat('权限已撤销', `已撤销 QID：${target} 的管理员权限。`) }); } catch (error) { await message.send({ format: messageFormat('权限操作失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const permissionListHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireOwner(event.current.UserId); const entries = await permissionList(); const markdown = Format.createMarkdown().addTitle('当前权限列表').addNewline().addNewline(); const sequence = '①②③④⑤⑥⑦⑧⑨⑩'; entries.forEach((entry, index) => markdown.addText(`${sequence[index] ?? `${index + 1}.`}QID：${entry.qqUserId}`).addNewline().addBlockquote(`权限：${entry.role === 'owner' ? '至高' : '管理'}`).addNewline().addBlockquote(`游戏id：${entry.characterId ?? '未注册'}`).addNewline().addBlockquote(entry.name).addNewline().addNewline()); await message.send({ format: Format.create().addMarkdown(markdown) }); } catch (error) { await message.send({ format: messageFormat('查看权限失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+
+export const playerAuditPanelHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: playerAuditFormat() }); } catch (error) { await message.send({ format: messageFormat('数据核查失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const playerAuditHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const target = await mentionedUserId(); const type = String(route.param('type')); const result = type === '角色' ? await auditCharacter(target) : type === '背包' ? await auditInventory(target) : type === '状态' ? await auditPlayerState(target) : await auditSkills(target); await message.send({ format: messageFormat('玩家数据核查', `目标：${result.name}\n${result.fixed}`) }); } catch (error) { await message.send({ format: messageFormat('数据核查失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const allPlayersAuditHandler = async () => {
+  const [event] = useEvent(); const [message] = useMessage();
+  try {
+    await requireAdministrator(event.current.UserId);
+    await message.send({ format: messageFormat('全服玩家数据核查', '正在依次核查所有已注册玩家，请稍候……') });
+    const result = await auditAllPlayers();
+    const failed = result.failed.length
+      ? `\n未完成：${result.failed.length} 名\n${result.failed.slice(0, 5).map(item => `【${item.name}】${item.message}`).join('\n')}${result.failed.length > 5 ? '\n其余异常请查看运行日志。' : ''}`
+      : '\n未发现无法核查的角色。';
+    const details = result.results.length
+      ? `\n\n核查详情：\n${result.results.slice(0, 10).map((item, index) => `${'①②③④⑤⑥⑦⑧⑨⑩'.charAt(index)}【${item.name}】\n${item.fixes.map(fix => `·${fix}`).join('\n')}`).join('\n')}${result.results.length > 10 ? `\n……其余 ${result.results.length - 10} 名玩家已完成核查。` : ''}`
+      : '';
+    await message.send({ format: messageFormat('全服核查结果', `已核查：${result.completed}/${result.total} 名玩家\n发现并修正异常：${result.results.length} 名\n核查项目：角色信息、背包信息、技能信息、玩家状态${failed}${details}`) });
+  } catch (error) { await message.send({ format: messageFormat('全服数据核查失败', error instanceof Error ? error.message : '请稍后重试。') }); }
+};
 
 export const bossManagementHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: await bossManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('BOSS管理失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const bossSpawnHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const result = await adminSpawnBoss(String(route.param('code'))); await message.send({ format: messageFormat('BOSS已刷新', result?.x === null ? '未能找到可用刷新坐标。' : `${result?.bossName ?? 'BOSS'} 已刷新至 (${result?.x}, ${result?.y}, ${result?.z})。`) }); await message.send({ format: await bossManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('BOSS刷新失败', error instanceof Error ? error.message : '请稍后重试。') }); } };

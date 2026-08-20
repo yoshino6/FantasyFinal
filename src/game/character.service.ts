@@ -8,7 +8,7 @@ type RegistrationStage = 'story' | 'audience' | 'question' | 'destination' | 'da
 type SessionRow = RowDataPacket & { id: string; player_id: number; stage: RegistrationStage; expires_at: Date };
 type PlayerRow = RowDataPacket & { id: number; status: string };
 type RegionRow = RowDataPacket & { id: number; name: string; min_x: number; max_x: number; min_y: number; max_y: number; min_z: number; max_z: number };
-export type CharacterView = Allocation & DerivedStats & { name: string; gender: string; regionName: string; x: number; y: number; z: number; level: number; experience: number; realmStage: number; adventurerRegistered: boolean; giftName: string | null; growth: Growth; currentHp: number; currentMp: number; activityStatus: 'active' | 'resting' | 'unconscious'; elementMastery: Record<string, number>; elementResistance: Record<string, number> };
+export type CharacterView = Allocation & DerivedStats & { name: string; gender: string; regionName: string; x: number; y: number; z: number; level: number; experience: number; realmStage: number; adventurerRegistered: boolean; giftName: string | null; growth: Growth; currentHp: number; currentMp: number; activityStatus: 'active' | 'resting' | 'unconscious'; elementMastery: Record<string, number>; elementResistance: Record<string, number>; extraAttributes: { damageBonusPct: number } };
 
 const elements = ['水', '火', '土', '木', '风', '冰', '雷', '光', '暗'] as const;
 const randomBalancedElements = () => {
@@ -55,6 +55,15 @@ const withEquipmentStats = async (connection: Pool | PoolConnection, characterId
     critResistBp: stat(base.critResistBp, 'critResistBp', 'critResistPct'), critDamageReductionBp: stat(base.critDamageReductionBp, 'critDamageReductionBp', 'critDamageReductionPct'),
     tenacity: stat(base.tenacity, 'tenacity', 'tenacityPct'), speed: stat(base.speed, 'speed', 'speedPct')
   };
+};
+
+const equipmentExtraAttributes = async (connection: Pool | PoolConnection, characterId: number) => {
+  const [rows] = await connection.execute<(RowDataPacket & { effect_json: unknown; quality: number })[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json,COALESCE(ii.quality,100) AS quality
+    FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
+    LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
+    WHERE pe.character_id=?`, [characterId]);
+  const damageBonusPct = rows.reduce((total, row) => total + Number(jsonRecord(row.effect_json).damageBonusPct ?? 0) * (.6 + Math.max(0, Math.min(100, Number(row.quality))) * .004), 0);
+  return { damageBonusPct: Math.round(damageBonusPct * 10) / 10 };
 };
 
 export const recalculateCharacterStats = async (connection: Pool | PoolConnection, characterId: number) => {
@@ -185,7 +194,7 @@ export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: 
   await connection.execute('UPDATE players SET status = \'active\' WHERE id = ?', [player.id]);
   await connection.execute('DELETE FROM registration_sessions WHERE id = ?', [session.id]);
   await connection.execute('INSERT INTO player_events (player_id, event_type, payload) VALUES (?, \'character.created\', ?)', [player.id, JSON.stringify({ region: region.name, x, y, z, giftCode })]);
-  return { ...allocation, ...stats, growth, name, gender: '未设定', regionName: region.name, x, y, z, level: 1, experience: 0, realmStage: 1, adventurerRegistered: false, giftName: gifts[giftCode].name, currentHp: stats.hpMax, currentMp: stats.mpMax, activityStatus: 'active', elementMastery, elementResistance };
+  return { ...allocation, ...stats, growth, name, gender: '未设定', regionName: region.name, x, y, z, level: 1, experience: 0, realmStage: 1, adventurerRegistered: false, giftName: gifts[giftCode].name, currentHp: stats.hpMax, currentMp: stats.mpMax, activityStatus: 'active', elementMastery, elementResistance, extraAttributes: { damageBonusPct: 0 } };
 });
 
 export const getCharacter = async (qqUserId: string): Promise<CharacterView | null> => {
@@ -198,11 +207,13 @@ export const getCharacter = async (qqUserId: string): Promise<CharacterView | nu
   );
   const row = rows[0];
   if (!row) return null;
+  const extraAttributes = await equipmentExtraAttributes(pool, Number(characterRows[0].id));
   return {
     ...row,
     ...finalAttributes(row),
     elementMastery: typeof row.elementMastery === 'string' ? JSON.parse(row.elementMastery) : row.elementMastery ?? {},
     elementResistance: typeof row.elementResistance === 'string' ? JSON.parse(row.elementResistance) : row.elementResistance ?? {},
+    extraAttributes,
     growth: Object.fromEntries(attributes.map(key => [key, Number(row[`${key}Growth` as keyof typeof row])])) as Growth
   };
 };

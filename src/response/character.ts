@@ -22,6 +22,8 @@ const appendDetails = (markdown: ReturnType<typeof Format.createMarkdown>, chara
   .addBlockquote(`暴击 ${Math.round(character.critRateBp)}｜暴伤 ${Math.round(character.critDamageBp)}`).addNewline()
   .addBlockquote(`暴免 ${Math.round(character.critDamageReductionBp)}｜暴抗 ${Math.round(character.critResistBp)}`).addNewline()
   .addBlockquote(`韧性 ${Math.round(character.tenacity)}｜速度 ${Math.round(character.speed)}`).addNewline().addNewline()
+  .addText('额外属性').addNewline()
+  .addBlockquote(`伤害增加 ${numberText(character.extraAttributes.damageBonusPct)}%`).addNewline().addNewline()
   .addText('元素精通').addNewline()
   .addBlockquote(elementText(character, 'elementMastery', 0, 5)).addNewline()
   .addBlockquote(elementText(character, 'elementMastery', 5, 9)).addNewline().addNewline()

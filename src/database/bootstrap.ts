@@ -1,5 +1,34 @@
 import type { Pool } from 'mysql2/promise';
 
+type BlacksmithStock = { code: string; name: string; category: string; weaponType: string | null; level: number; price: number; effect: Record<string, number | undefined> };
+type AlchemistStock = { code: string; name: string; category: '回复' | '特殊'; price: number; description: string; effect: Record<string, number | boolean> };
+const alchemistShopStock: AlchemistStock[] = [
+  { code: 'glimmer_potion', name: '微光药水', category: '回复', price: 6, description: '恢复 150 点生命与 150 点魔力。', effect: { heal: 150, restoreMp: 150 } },
+  { code: 'novice_hp_potion_small', name: '新手生命药水（小）', category: '回复', price: 10, description: '恢复 400 点生命。', effect: { heal: 400 } },
+  { code: 'novice_mp_potion_small', name: '新手魔力药水（小）', category: '回复', price: 10, description: '恢复 400 点魔力。', effect: { restoreMp: 400 } },
+  { code: 'novice_hp_potion_medium', name: '新手生命药水（中）', category: '回复', price: 16, description: '恢复 600 点生命。', effect: { heal: 600 } },
+  { code: 'novice_mp_potion_medium', name: '新手魔力药水（中）', category: '回复', price: 16, description: '恢复 600 点魔力。', effect: { restoreMp: 600 } },
+  { code: 'novice_hp_potion_large', name: '新手生命药水（大）', category: '回复', price: 30, description: '恢复 1000 点生命。', effect: { heal: 1000 } },
+  { code: 'novice_mp_potion_large', name: '新手魔力药水（大）', category: '回复', price: 30, description: '恢复 1000 点魔力。', effect: { restoreMp: 1000 } },
+  { code: 'minor_experience_elixir', name: '经验秘药（小）', category: '特殊', price: 100, description: '接下来 10 场战斗经验获取提高 25%；战败时免疫经验惩罚。', effect: { experienceBonusPct: 25, battleCount: 10, defeatPenaltyImmune: true } },
+  { code: 'minor_luck_elixir', name: '幸运秘药（小）', category: '特殊', price: 200, description: '接下来 10 场战斗中，所在队伍的打怪掉率提高 25%。', effect: { partyDropBonusPct: 25, battleCount: 10 } }
+];
+const blacksmithShopStock: BlacksmithStock[] = [5, 10, 15, 20].flatMap(level => {
+  const price = ({ 5: 200, 10: 400, 15: 1000, 20: 2000 } as Record<number, number>)[level];
+  const prefix = ({ 5: '新手', 10: '硬木', 15: '黑铁', 20: '精钢' } as Record<number, string>)[level];
+  return [
+    { code: `shop_longsword_${level}`, name: `${prefix}长剑`, category: '武器', weaponType: '长剑', level, price, effect: { physicalAttack: level * 4 } },
+    { code: `shop_staff_${level}`, name: `${prefix}法杖`, category: '武器', weaponType: '法杖', level, price, effect: { magicAttack: level * 4 } },
+    { code: `shop_dagger_${level}`, name: `${prefix}匕首`, category: '武器', weaponType: '匕首', level, price, effect: { physicalAttack: level * 2, magicAttack: level * 2, accuracy: level * 2 } },
+    { code: `shop_fistblade_${level}`, name: `${prefix}拳刃`, category: '武器', weaponType: '拳刃', level, price, effect: { physicalAttack: level * 3, critRateBp: level * 3 } },
+    { code: `shop_shoulder_${level}`, name: `${prefix}护肩`, category: '头肩', weaponType: null, level, price, effect: { physicalDefense: level * 3, magicDefense: level * 2 } },
+    { code: `shop_upper_${level}`, name: `${prefix}胸甲`, category: '上装', weaponType: null, level, price, effect: { physicalDefense: level * 4, hpMax: level * 4 } },
+    { code: `shop_waist_${level}`, name: `${prefix}腰带`, category: '腰部', weaponType: null, level, price, effect: { hpMax: level * 4, magicDefense: level * 2 } },
+    { code: `shop_lower_${level}`, name: `${prefix}护腿`, category: '下装', weaponType: null, level, price, effect: { physicalDefense: level * 3, magicDefense: level * 3 } },
+    { code: `shop_feet_${level}`, name: `${prefix}长靴`, category: '脚部', weaponType: null, level, price, effect: { evasion: level * 2, speed: level } }
+  ];
+});
+
 const schemaStatements = [
   `CREATE TABLE IF NOT EXISTS players (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, qq_user_id VARCHAR(32) NOT NULL, qq_nickname VARCHAR(128) NULL,
@@ -143,6 +172,16 @@ const schemaStatements = [
     PRIMARY KEY (item_id), KEY idx_guild_shop_active (is_active,item_id),
     CONSTRAINT fk_guild_shop_item FOREIGN KEY (item_id) REFERENCES item_definitions(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS blacksmith_shop_items (
+    item_id BIGINT UNSIGNED NOT NULL, buy_price INT UNSIGNED NOT NULL, sell_price INT UNSIGNED NOT NULL DEFAULT 0, is_active TINYINT(1) NOT NULL DEFAULT 1,
+    PRIMARY KEY (item_id), KEY idx_blacksmith_shop_active (is_active,item_id),
+    CONSTRAINT fk_blacksmith_shop_item FOREIGN KEY (item_id) REFERENCES item_definitions(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS alchemist_shop_items (
+    item_id BIGINT UNSIGNED NOT NULL, shop_category VARCHAR(16) NOT NULL DEFAULT '回复', buy_price INT UNSIGNED NOT NULL, sell_price INT UNSIGNED NOT NULL DEFAULT 0, is_active TINYINT(1) NOT NULL DEFAULT 1,
+    PRIMARY KEY (item_id), KEY idx_alchemist_shop_active (is_active,shop_category,item_id),
+    CONSTRAINT fk_alchemist_shop_item FOREIGN KEY (item_id) REFERENCES item_definitions(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS guild_restaurant_menu (
     item_id BIGINT UNSIGNED NOT NULL, price INT UNSIGNED NOT NULL DEFAULT 0, processing_fee INT UNSIGNED NOT NULL DEFAULT 0, ingredients_json JSON NOT NULL, buff_json JSON NOT NULL, duration_minutes SMALLINT UNSIGNED NOT NULL DEFAULT 30, is_active TINYINT(1) NOT NULL DEFAULT 1,
     PRIMARY KEY (item_id), KEY idx_guild_restaurant_active (is_active,item_id),
@@ -177,6 +216,25 @@ const schemaStatements = [
     PRIMARY KEY (character_id,item_id), CONSTRAINT fk_forge_material_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
     CONSTRAINT fk_forge_material_item FOREIGN KEY (item_id) REFERENCES item_definitions(id)
   ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_alchemy_sessions (
+    character_id BIGINT UNSIGNED NOT NULL, purification_item_id BIGINT UNSIGNED NULL, purification_quantity INT UNSIGNED NOT NULL DEFAULT 0,
+    main_item_id BIGINT UNSIGNED NULL, auxiliary_item_id BIGINT UNSIGNED NULL, reagent_item_id BIGINT UNSIGNED NULL,
+    PRIMARY KEY (character_id), CONSTRAINT fk_alchemy_session_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
+    CONSTRAINT fk_alchemy_purification_item FOREIGN KEY (purification_item_id) REFERENCES item_definitions(id),
+    CONSTRAINT fk_alchemy_main_item FOREIGN KEY (main_item_id) REFERENCES item_definitions(id),
+    CONSTRAINT fk_alchemy_auxiliary_item FOREIGN KEY (auxiliary_item_id) REFERENCES item_definitions(id),
+    CONSTRAINT fk_alchemy_reagent_item FOREIGN KEY (reagent_item_id) REFERENCES item_definitions(id)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_alchemy_formulas (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, character_id BIGINT UNSIGNED NOT NULL, name VARCHAR(64) NOT NULL,
+    main_item_id BIGINT UNSIGNED NOT NULL, auxiliary_item_id BIGINT UNSIGNED NULL, reagent_item_id BIGINT UNSIGNED NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id), KEY idx_alchemy_formula_character_created (character_id,created_at),
+    CONSTRAINT fk_alchemy_formula_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
+    CONSTRAINT fk_alchemy_formula_main FOREIGN KEY (main_item_id) REFERENCES item_definitions(id),
+    CONSTRAINT fk_alchemy_formula_auxiliary FOREIGN KEY (auxiliary_item_id) REFERENCES item_definitions(id),
+    CONSTRAINT fk_alchemy_formula_reagent FOREIGN KEY (reagent_item_id) REFERENCES item_definitions(id)
+  ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_secondary_professions (
     character_id BIGINT UNSIGNED NOT NULL, profession_code VARCHAR(32) NOT NULL, level SMALLINT UNSIGNED NOT NULL DEFAULT 1, proficiency BIGINT UNSIGNED NOT NULL DEFAULT 0,
     PRIMARY KEY (character_id), CONSTRAINT fk_secondary_profession_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
@@ -188,6 +246,12 @@ const schemaStatements = [
   , `CREATE TABLE IF NOT EXISTS player_main_quest_progress (
     character_id BIGINT UNSIGNED NOT NULL, quest_code VARCHAR(64) NOT NULL, stage TINYINT UNSIGNED NOT NULL DEFAULT 0, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (character_id,quest_code), CONSTRAINT fk_main_quest_progress_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_npc_affinity (
+    character_id BIGINT UNSIGNED NOT NULL, npc_code VARCHAR(64) NOT NULL, affinity INT UNSIGNED NOT NULL DEFAULT 0, daily_date DATE NOT NULL, daily_interactions TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    daily_chat_count TINYINT UNSIGNED NOT NULL DEFAULT 0, daily_buy_count TINYINT UNSIGNED NOT NULL DEFAULT 0, daily_sell_count TINYINT UNSIGNED NOT NULL DEFAULT 0, daily_craft_count TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (character_id,npc_code), KEY idx_npc_affinity_npc (npc_code,affinity), CONSTRAINT fk_npc_affinity_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS bounty_notices (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, refresh_key VARCHAR(32) NOT NULL, title VARCHAR(96) NOT NULL, target_template_id BIGINT UNSIGNED NOT NULL, source_spawn_id BIGINT UNSIGNED NULL,
@@ -242,6 +306,10 @@ const schemaStatements = [
   , `CREATE TABLE IF NOT EXISTS player_auto_battle_actions (
     character_id BIGINT UNSIGNED NOT NULL, sequence_no TINYINT UNSIGNED NOT NULL, skill_id BIGINT UNSIGNED NULL,
     PRIMARY KEY (character_id,sequence_no), CONSTRAINT fk_auto_action_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_battle_buffs (
+    character_id BIGINT UNSIGNED NOT NULL, buff_code VARCHAR(64) NOT NULL, remaining_battles TINYINT UNSIGNED NOT NULL,
+    PRIMARY KEY (character_id,buff_code), CONSTRAINT fk_battle_buff_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_auto_battle_quick_setup (
     character_id BIGINT UNSIGNED NOT NULL, next_sequence TINYINT UNSIGNED NOT NULL DEFAULT 1,
@@ -304,7 +372,7 @@ const schemaStatements = [
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS map_npcs (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, region_id BIGINT UNSIGNED NOT NULL, code VARCHAR(64) NOT NULL, name VARCHAR(64) NOT NULL,
-    description TEXT NOT NULL, pos_x INT NULL, pos_y INT NULL, pos_z INT NULL,
+    description TEXT NOT NULL, interaction_kind ENUM('npc','building') NOT NULL DEFAULT 'npc', pos_x INT NULL, pos_y INT NULL, pos_z INT NULL,
     PRIMARY KEY (id), UNIQUE KEY uk_map_npc_code (region_id, code),
     CONSTRAINT fk_map_npc_region FOREIGN KEY (region_id) REFERENCES map_regions(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
@@ -462,6 +530,9 @@ export const initializeSchema = async (pool: Pool) => {
   try { await pool.query('ALTER TABLE skill_definitions ADD COLUMN passive_effect_json JSON NULL'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   await pool.query("ALTER TABLE skill_definitions MODIFY COLUMN category ENUM('physical','magic','utility','passive','special') NOT NULL");
   try { await pool.query('ALTER TABLE player_skills ADD COLUMN learned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  for (const column of ['daily_chat_count TINYINT UNSIGNED NOT NULL DEFAULT 0', 'daily_buy_count TINYINT UNSIGNED NOT NULL DEFAULT 0', 'daily_sell_count TINYINT UNSIGNED NOT NULL DEFAULT 0', 'daily_craft_count TINYINT UNSIGNED NOT NULL DEFAULT 0']) {
+    try { await pool.query(`ALTER TABLE player_npc_affinity ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  }
   try { await pool.query('ALTER TABLE skill_definitions ADD UNIQUE KEY uk_skill_codex_id (codex_id)'); } catch (error: any) { if (error?.code !== 'ER_DUP_KEYNAME') throw error; }
   for (const column of ['weakness_json JSON NULL', 'resistance_json JSON NULL']) {
     try { await pool.query(`ALTER TABLE monster_templates ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
@@ -479,15 +550,33 @@ export const initializeSchema = async (pool: Pool) => {
   await pool.query(`UPDATE characters c JOIN players p ON p.id=c.player_id SET c.player_id=NULL,c.npc_id=CASE p.qq_user_id WHEN 'npc_forest_warrior' THEN 900000001 WHEN 'npc_forest_mage' THEN 900000002 WHEN 'npc_forest_priest' THEN 900000003 END,c.npc_code=p.qq_user_id WHERE p.qq_user_id IN ('npc_forest_warrior','npc_forest_mage','npc_forest_priest')`);
   await pool.query(`DELETE FROM players WHERE qq_user_id IN ('npc_forest_warrior','npc_forest_mage','npc_forest_priest')`);
   await pool.query(`UPDATE item_definitions SET item_category=CASE code WHEN 'holy_sword_shirulu' THEN '武器' WHEN 'demon_sword_aphia' THEN '武器' WHEN 'healing_herb' THEN '药剂' WHEN 'wolf_fang' THEN '兽材' ELSE item_category END, stackable=CASE WHEN item_type='equipment' THEN 0 ELSE 1 END`);
+  try { await pool.query("ALTER TABLE map_npcs ADD COLUMN interaction_kind ENUM('npc','building') NOT NULL DEFAULT 'npc' AFTER description"); }
+  catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   await pool.query(`UPDATE item_definitions SET is_tradeable=0 WHERE item_category IN ('地图','特殊','任务','剧情') OR code='adventurer_card'`);
   await pool.query(`UPDATE item_definitions SET weapon_type=CASE code WHEN 'holy_sword_shirulu' THEN '长剑' WHEN 'demon_sword_aphia' THEN '长剑' ELSE weapon_type END`);
   await pool.query(`UPDATE item_definitions SET codex_id=CONCAT(CASE WHEN item_type='equipment' THEN CASE item_category WHEN '武器' THEN '11' WHEN '副手' THEN '12' WHEN '头部' THEN '13' WHEN '上装' THEN '14' WHEN '腰部' THEN '15' WHEN '下装' THEN '16' WHEN '脚部' THEN '17' WHEN '项链' THEN '18' WHEN '手镯' THEN '19' WHEN '戒指' THEN '10' ELSE '19' END WHEN item_type='consumable' THEN CASE item_category WHEN '药剂' THEN '21' WHEN '食物' THEN '22' ELSE '23' END WHEN item_type='material' THEN CASE item_category WHEN '食材' THEN '31' WHEN '草药' THEN '32' ELSE '39' END ELSE '99' END, LPAD(id,5,'0')) WHERE codex_id IS NULL`);
   await pool.query(`INSERT INTO profession_definitions (code,name,description,growth_json,skill_codes_json) VALUES
-    ('warrior','战士','以长剑与盾牌守住前线的职业。',JSON_OBJECT('constitution',2,'strength',2),JSON_ARRAY('longsword_mastery','shield_mastery')),
-    ('mage','法师','以法杖与法书编织术式的职业。',JSON_OBJECT('spirit',2,'intelligence',2),JSON_ARRAY('staff_mastery','spellbook_mastery')),
-    ('rogue','盗贼','以匕首与拳刃撕开破绽的职业。',JSON_OBJECT('agility',2,'perception',2),JSON_ARRAY('dagger_mastery','fistblade_mastery')),
-    ('priest','牧师','以法书与法球守望同伴的职业。',JSON_OBJECT('constitution',2,'spirit',2),JSON_ARRAY('spellbook_mastery','orb_mastery'))
+    ('warrior','战士','以长剑与盾牌守住前线的职业。',JSON_OBJECT('constitution',1.2,'strength',1.2),JSON_ARRAY('longsword_mastery','shield_mastery')),
+    ('mage','法师','以法杖与法书编织术式的职业。',JSON_OBJECT('spirit',1.2,'intelligence',1.2),JSON_ARRAY('staff_mastery','spellbook_mastery')),
+    ('rogue','盗贼','以匕首与拳刃撕开破绽的职业。',JSON_OBJECT('agility',1.2,'perception',1.2),JSON_ARRAY('dagger_mastery','fistblade_mastery')),
+    ('priest','牧师','以法书与法球守望同伴的职业。',JSON_OBJECT('constitution',1.2,'spirit',1.2),JSON_ARRAY('spellbook_mastery','orb_mastery'))
     ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),growth_json=VALUES(growth_json),skill_codes_json=VALUES(skill_codes_json)`);
+  // 旧版本已转职角色曾写入 +2 成长；此迁移只执行一次，将既有加成同步为 +1.2。
+  await pool.query('CREATE TABLE IF NOT EXISTS game_data_migrations (code VARCHAR(64) NOT NULL PRIMARY KEY, applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB');
+  const [growthMigration] = await pool.query('INSERT IGNORE INTO game_data_migrations (code) VALUES (\'profession_growth_2_to_1_2\')') as unknown as [{ affectedRows: number }];
+  if (Number(growthMigration.affectedRows) > 0) {
+    await pool.query(`UPDATE characters SET
+      constitution_growth=constitution_growth-IF(profession_code IN ('warrior','priest'),0.8,0),
+      spirit_growth=spirit_growth-IF(profession_code IN ('mage','priest'),0.8,0),
+      strength_growth=strength_growth-IF(profession_code='warrior',0.8,0),
+      intelligence_growth=intelligence_growth-IF(profession_code='mage',0.8,0),
+      agility_growth=agility_growth-IF(profession_code='rogue',0.8,0),
+      perception_growth=perception_growth-IF(profession_code='rogue',0.8,0)
+      WHERE profession_code IN ('warrior','mage','rogue','priest')`);
+    const { recalculateCharacterStats } = await import('../game/character.service');
+    const [characters] = await pool.query('SELECT id FROM characters WHERE profession_code IN (\'warrior\',\'mage\',\'rogue\',\'priest\')') as unknown as [[{ id: number }]];
+    for (const character of characters) await recalculateCharacterStats(pool, Number(character.id));
+  }
   try { await pool.query('ALTER TABLE item_definitions ADD UNIQUE KEY uk_item_codex_id (codex_id)'); } catch (error: any) { if (error?.code !== 'ER_DUP_KEYNAME') throw error; }
   await pool.execute(
     `INSERT INTO map_regions (code, name, description, min_x, max_x, min_y, max_y, min_z, max_z, is_spawn_enabled, danger_level)
@@ -501,6 +590,8 @@ export const initializeSchema = async (pool: Pool) => {
     ('healing_herb', '微光草药', '恢复 30 点生命。', '野外采集与探索发现', 'consumable', '药剂', 0.20, 1, JSON_OBJECT('heal', 30)),
     ('glimmer_potion', '微光药水', '由炼金师提纯制成，恢复 150 点生命。', '晴空糖水屋·炼金师入门', 'consumable', '药剂', 0.25, 1, JSON_OBJECT('heal', 150)),
     ('sky_dust', '天空粉尘', '源自大陆创始的奇异尘埃，纹络间仿佛映着无垠天穹。', '幽影狼王掉落', 'material', '特殊', 0.01, 1, JSON_OBJECT('worldInsight', true)),
+    ('xiaobei_gift', '小北的赠礼', '漠北亲手打磨的小巧护符，边缘还残留着炉火的温度。', '副职业·锻造师转职', 'consumable', '特殊', 0.01, 1, JSON_OBJECT('npcGift','xiaobei')),
+    ('qinger_gift', '晴儿的赠礼', '晴儿调配的澄澈小瓶，散发着让人安定的草木香。', '副职业·炼金师转职', 'consumable', '特殊', 0.01, 1, JSON_OBJECT('npcGift','qinger')),
     ('wolf_fang', '幽狼之牙', '可出售的普通材料。', '野外怪物掉落', 'material', '兽材', 0.15, 1, NULL),
     ('beast_meat', '兽肉', '新鲜的野兽肉，可作为烹饪食材。', '幽暗密林怪物掉落', 'material', '兽材', 0.30, 1, NULL),
     ('beast_bone', '兽骨', '坚硬完整的兽骨，常用于制作与加工。', '幽暗密林怪物掉落', 'material', '兽材', 0.25, 1, NULL),
@@ -512,6 +603,18 @@ export const initializeSchema = async (pool: Pool) => {
     ('magic_scale', '魔力鳞片', '带有自然魔力的蛇类鳞片。', '蛇类怪物掉落', 'material', '兽材', 0.05, 1, NULL),
     ('magic_claw', '魔力利爪', '由熊类巨爪凝成的锋利素材。', '熊类怪物掉落', 'material', '兽材', 0.10, 1, NULL),
     ('magic_heartcore', '魔力心核', '狼类魔力在心脏处凝聚而成的核心。', '狼类怪物掉落', 'material', '兽材', 0.08, 1, NULL),
+    ('refined_beast_bone', '兽骨（精）', '经炼金提纯的致密兽骨，适合作为高品质锻造素材。', '炼金师提纯', 'material', '精兽材', 0.12, 1, NULL),
+    ('refined_beast_hide', '兽皮（精）', '经炼金提纯的柔韧兽皮，蕴含更稳定的护持力量。', '炼金师提纯', 'material', '精兽材', 0.10, 1, NULL),
+    ('refined_beast_tendon', '兽筋（精）', '经炼金提纯的坚韧兽筋，能将力量传递得更加流畅。', '炼金师提纯', 'material', '精兽材', 0.06, 1, NULL),
+    ('refined_beast_core', '兽核（精）', '经炼金提纯的兽核，内部魔力更为纯净。', '炼金师提纯', 'material', '精兽材', 0.05, 1, NULL),
+    ('refined_magic_wool', '魔力绒毛（精）', '提纯后的魔力绒毛，轻盈而富有灵性。', '炼金师提纯', 'material', '精兽材', 0.03, 1, NULL),
+    ('refined_magic_tusk', '魔力獠牙（精）', '提纯后的魔力獠牙，锋芒与野性被完整保留。', '炼金师提纯', 'material', '精兽材', 0.05, 1, NULL),
+    ('refined_magic_scale', '魔力鳞片（精）', '提纯后的魔力鳞片，表面流转着稳定的术式纹路。', '炼金师提纯', 'material', '精兽材', 0.03, 1, NULL),
+    ('refined_magic_claw', '魔力利爪（精）', '提纯后的魔力利爪，锐利且蕴含强烈战意。', '炼金师提纯', 'material', '精兽材', 0.05, 1, NULL),
+    ('refined_magic_heartcore', '魔力心核（精）', '提纯后的魔力心核，搏动间仍有幽影般的魔力回响。', '炼金师提纯', 'material', '精兽材', 0.04, 1, NULL),
+    ('blood_residue', '血肉残渣', '兽肉在炼金反应后留下的基础血肉粒子，可作为后续炼金的主材。', '炼金师炼金', 'material', '炼材', 0.10, 1, NULL),
+    ('herbal_extract', '草木萃取液', '草药经温和反应析出的基础萃取液。', '炼金师炼金', 'material', '炼材', 0.10, 1, NULL),
+    ('mana_dust', '魔力粉尘', '兽核在反应中散逸后凝结的细小魔力颗粒。', '炼金师炼金', 'material', '炼材', 0.05, 1, NULL),
     ('magic_branch', '魔力枝叶', '树精枝梢上凝结的魔力叶片，仍散发着柔和的木属性气息。', '幽暗密林树精掉落', 'material', '锻材', 0.12, 1, NULL),
     ('goblin_ear', '哥布林耳', '哥布林身上留下的辨识素材。', '哥布林掉落', 'material', '兽材', 0.03, 1, NULL),
     ('riot_aura', '暴动的气息', '从暴动怪物身上剥离的躁动气息，隐约散发着危险的魔力。', '暴动怪物额外掉落', 'material', '兽材', 0.05, 1, NULL),
@@ -537,10 +640,26 @@ export const initializeSchema = async (pool: Pool) => {
     ,('map_dark_forest_deep', '地图·幽暗密林深处', '标有幽暗密林深处的险路与古老遗迹的详尽地图。', '百纳镇冒险者公会商店', 'consumable', '地图', 0.01, 1, JSON_OBJECT('map','dark_forest_deep'))
     ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description), obtain_source = VALUES(obtain_source), item_category = VALUES(item_category), stackable = VALUES(stackable), effect_json = VALUES(effect_json)`);
   await pool.query(`UPDATE item_definitions SET is_tradeable=0 WHERE code IN ('copper_coin','silver_coin','gold_coin')`);
+  for (const item of blacksmithShopStock) {
+    await pool.execute(`INSERT INTO item_definitions (code,name,description,obtain_source,item_type,item_category,weapon_type,rarity,required_level,weight,stackable,effect_json)
+      VALUES (?,?,?,?,? ,?,?,?,?,?,0,?)
+      ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),item_category=VALUES(item_category),weapon_type=VALUES(weapon_type),rarity=VALUES(rarity),required_level=VALUES(required_level),stackable=0,effect_json=VALUES(effect_json)`, [item.code, item.name, `小北铁匠铺出售的普通白板装备，适合 Lv.${item.level} 的冒险者使用。`, '百纳镇·铁匠铺', 'equipment', item.category, item.weaponType, '普通', item.level, 2, JSON.stringify(item.effect)]);
+    await pool.execute(`INSERT INTO blacksmith_shop_items (item_id,buy_price,sell_price,is_active)
+      SELECT id,?,?,1 FROM item_definitions WHERE code=?
+      ON DUPLICATE KEY UPDATE buy_price=VALUES(buy_price),sell_price=VALUES(sell_price),is_active=1`, [item.price, Math.floor(item.price / 2), item.code]);
+  }
+  for (const item of alchemistShopStock) {
+    await pool.execute(`INSERT INTO item_definitions (code,name,description,obtain_source,item_type,item_category,weight,stackable,effect_json)
+      VALUES (?,?,?,?,?,?,?,1,?)
+      ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),obtain_source=VALUES(obtain_source),item_type=VALUES(item_type),item_category=VALUES(item_category),stackable=1,effect_json=VALUES(effect_json)`, [item.code, item.name, item.description, '百纳镇·晴空糖水屋', 'consumable', '药剂', .2, JSON.stringify(item.effect)]);
+    await pool.execute(`INSERT INTO alchemist_shop_items (item_id,shop_category,buy_price,sell_price,is_active)
+      SELECT id,?,?,?,1 FROM item_definitions WHERE code=?
+      ON DUPLICATE KEY UPDATE shop_category=VALUES(shop_category),buy_price=VALUES(buy_price),sell_price=VALUES(sell_price),is_active=1`, [item.category, item.price, Math.floor(item.price / 2), item.code]);
+  }
   await pool.query(`UPDATE item_definitions SET rarity=CASE code WHEN 'holy_sword_shirulu' THEN '神器' WHEN 'demon_sword_aphia' THEN '神器' ELSE rarity END,required_level=CASE code WHEN 'holy_sword_shirulu' THEN 1 WHEN 'demon_sword_aphia' THEN 1 ELSE required_level END`);
   await pool.query(`INSERT INTO blacksmith_refinement_materials (item_id,min_gain,max_gain)
-    SELECT id,CASE code WHEN 'living_wood' THEN 1 WHEN 'refined_iron' THEN 2 WHEN 'star_copper' THEN 2 WHEN 'moon_silver' THEN 3 WHEN 'sun_gold' THEN 4 END,CASE code WHEN 'living_wood' THEN 5 WHEN 'refined_iron' THEN 5 WHEN 'star_copper' THEN 6 WHEN 'moon_silver' THEN 7 WHEN 'sun_gold' THEN 10 END
-    FROM item_definitions WHERE code IN ('living_wood','refined_iron','star_copper','moon_silver','sun_gold')
+    SELECT id,CASE WHEN code='living_wood' THEN 1 WHEN code='refined_iron' THEN 2 WHEN code='star_copper' THEN 2 WHEN code='moon_silver' THEN 3 WHEN code='sun_gold' THEN 4 WHEN code='refined_beast_bone' THEN 3 WHEN code='refined_beast_hide' THEN 3 WHEN code='refined_beast_tendon' THEN 3 WHEN code='refined_beast_core' THEN 4 WHEN code LIKE 'refined_magic_%' THEN 5 END,CASE WHEN code='living_wood' THEN 5 WHEN code='refined_iron' THEN 5 WHEN code='star_copper' THEN 6 WHEN code='moon_silver' THEN 7 WHEN code='sun_gold' THEN 10 WHEN code='refined_beast_bone' THEN 8 WHEN code='refined_beast_hide' THEN 8 WHEN code='refined_beast_tendon' THEN 8 WHEN code='refined_beast_core' THEN 9 WHEN code LIKE 'refined_magic_%' THEN 11 END
+    FROM item_definitions WHERE code IN ('living_wood','refined_iron','star_copper','moon_silver','sun_gold','refined_beast_bone','refined_beast_hide','refined_beast_tendon','refined_beast_core','refined_magic_wool','refined_magic_tusk','refined_magic_scale','refined_magic_claw','refined_magic_heartcore')
     ON DUPLICATE KEY UPDATE min_gain=VALUES(min_gain),max_gain=VALUES(max_gain)`);
   await pool.query(`INSERT INTO blacksmith_fusion_material_effects (item_id,effect_json,description)
     SELECT id,CASE code
@@ -553,14 +672,23 @@ export const initializeSchema = async (pool: Pool) => {
       WHEN 'magic_scale' THEN JSON_OBJECT('magicDefensePct',3)
       WHEN 'magic_claw' THEN JSON_OBJECT('critRatePct',3)
       WHEN 'magic_heartcore' THEN JSON_OBJECT('accuracyPct',3)
-      WHEN 'riot_aura' THEN JSON_OBJECT('magicDamagePct',3)
+      WHEN 'refined_beast_bone' THEN JSON_OBJECT('physicalAttackPct',4)
+      WHEN 'refined_beast_hide' THEN JSON_OBJECT('physicalDefensePct',4,'magicDefensePct',4)
+      WHEN 'refined_beast_tendon' THEN JSON_OBJECT('speedPct',4)
+      WHEN 'refined_beast_core' THEN JSON_OBJECT('magicAttackPct',4)
+      WHEN 'refined_magic_wool' THEN JSON_OBJECT('evasionPct',6)
+      WHEN 'refined_magic_tusk' THEN JSON_OBJECT('physicalAttackPct',6)
+      WHEN 'refined_magic_scale' THEN JSON_OBJECT('magicDefensePct',6)
+      WHEN 'refined_magic_claw' THEN JSON_OBJECT('critRatePct',6)
+      WHEN 'refined_magic_heartcore' THEN JSON_OBJECT('accuracyPct',6)
+      WHEN 'riot_aura' THEN JSON_OBJECT('damageBonusPct',3)
       WHEN 'living_wood' THEN JSON_OBJECT('hpPct',2)
       WHEN 'refined_iron' THEN JSON_OBJECT('physicalDefensePct',3)
       WHEN 'star_copper' THEN JSON_OBJECT('accuracyPct',3)
       WHEN 'moon_silver' THEN JSON_OBJECT('mpPct',3)
       WHEN 'sun_gold' THEN JSON_OBJECT('physicalAttackPct',2,'magicAttackPct',2) END,
-      CASE code WHEN 'beast_bone' THEN '物攻+2%' WHEN 'beast_hide' THEN '物防+2%' WHEN 'beast_tendon' THEN '速度+2%' WHEN 'beast_core' THEN '魔攻+2%' WHEN 'magic_wool' THEN '闪避+3%' WHEN 'magic_tusk' THEN '物攻+3%' WHEN 'magic_scale' THEN '魔防+3%' WHEN 'magic_claw' THEN '暴击+3%' WHEN 'magic_heartcore' THEN '命中+3%' WHEN 'riot_aura' THEN '伤害提高3%' WHEN 'living_wood' THEN '生命上限+2%' WHEN 'refined_iron' THEN '物防+3%' WHEN 'star_copper' THEN '命中+3%' WHEN 'moon_silver' THEN '魔力上限+3%' WHEN 'sun_gold' THEN '双攻+2%' END
-    FROM item_definitions WHERE code IN ('beast_bone','beast_hide','beast_tendon','beast_core','magic_wool','magic_tusk','magic_scale','magic_claw','magic_heartcore','riot_aura','living_wood','refined_iron','star_copper','moon_silver','sun_gold')
+      CASE code WHEN 'beast_bone' THEN '物攻+2%' WHEN 'beast_hide' THEN '物防+2%' WHEN 'beast_tendon' THEN '速度+2%' WHEN 'beast_core' THEN '魔攻+2%' WHEN 'magic_wool' THEN '闪避+3%' WHEN 'magic_tusk' THEN '物攻+3%' WHEN 'magic_scale' THEN '魔防+3%' WHEN 'magic_claw' THEN '暴击+3%' WHEN 'magic_heartcore' THEN '命中+3%' WHEN 'refined_beast_bone' THEN '物攻+4%' WHEN 'refined_beast_hide' THEN '双防+4%' WHEN 'refined_beast_tendon' THEN '速度+4%' WHEN 'refined_beast_core' THEN '魔攻+4%' WHEN 'refined_magic_wool' THEN '闪避+6%' WHEN 'refined_magic_tusk' THEN '物攻+6%' WHEN 'refined_magic_scale' THEN '魔防+6%' WHEN 'refined_magic_claw' THEN '暴击+6%' WHEN 'refined_magic_heartcore' THEN '命中+6%' WHEN 'riot_aura' THEN '伤害增加3%' WHEN 'living_wood' THEN '生命上限+2%' WHEN 'refined_iron' THEN '物防+3%' WHEN 'star_copper' THEN '命中+3%' WHEN 'moon_silver' THEN '魔力上限+3%' WHEN 'sun_gold' THEN '双攻+2%' END
+    FROM item_definitions WHERE code IN ('beast_bone','beast_hide','beast_tendon','beast_core','magic_wool','magic_tusk','magic_scale','magic_claw','magic_heartcore','refined_beast_bone','refined_beast_hide','refined_beast_tendon','refined_beast_core','refined_magic_wool','refined_magic_tusk','refined_magic_scale','refined_magic_claw','refined_magic_heartcore','riot_aura','living_wood','refined_iron','star_copper','moon_silver','sun_gold')
     ON DUPLICATE KEY UPDATE effect_json=VALUES(effect_json),description=VALUES(description)`);
   await pool.query(`INSERT INTO guild_shop_items (item_id,buy_price,sell_price)
     SELECT id,CASE code WHEN 'map_dark_forest' THEN 100 WHEN 'map_dark_forest_deep' THEN 1000 END,0
@@ -594,23 +722,23 @@ export const initializeSchema = async (pool: Pool) => {
     ('frost_bind', '冰缚术', 'magic', 80, 3, 115, '冰霜束缚敌人，降低速度。'),
     ('bloodletting', '割裂', 'physical', 70, 2, 145, '造成伤口，持续流血。'),
     ('hop', '跃击', 'physical', 0, 0, 100, '球兔的快速撞击。'),
-    ('charge', '冲撞', 'physical', 55, 1, 135, '刺猪的蓄力冲撞。'),
-    ('bite', '撕咬', 'physical', 0, 0, 125, '野兽的凶猛撕咬。'),
+    ('charge', '冲撞', 'physical', 55, 1, 135, '发动冲撞后进入冲刺状态，短时间内提升自身速度。'),
+    ('bite', '撕咬', 'physical', 30, 2, 125, '野兽撕裂目标，造成持续流血。'),
     ('howl', '震慑咆哮', 'magic', 0, 1, 70, '以咆哮扰乱敌人。'),
-    ('jump_strike', '跃步重击', 'physical', 50, 1, 135, '将球兔的跃击改良为适合人类施展的重击。'),
-    ('bite_slash', '咬合斩', 'physical', 55, 1, 145, '将猛兽撕咬的发力方式融入剑技，斩开目标。'),
-    ('war_cry', '震荡战吼', 'magic', 60, 2, 95, '以经过控制的战吼震荡敌人的精神。'),
+    ('jump_strike', '跃步重击', 'physical', 50, 1, 135, '重击目标；基础有 50% 概率使其眩晕 1 回合，实际概率受等级差与韧性影响。'),
+    ('bite_slash', '咬合斩', 'physical', 55, 1, 145, '将猛兽撕咬的发力方式融入剑技，命中后削弱目标物防。'),
+    ('war_cry', '震荡战吼', 'utility', 90, 3, 0, '发出战吼，提升全队的物理与魔法攻击。'),
     ('scratch', '爪击', 'physical', 0, 0, 90, '野兽以利爪快速挥击。'),
     ('shell_bash', '壳撞', 'physical', 0, 1, 110, '以坚硬外壳发起沉重撞击。'),
     ('spore_dart', '孢子弹', 'magic', 0, 1, 90, '射出会附着在目标身上的微弱孢子。'),
     ('sonic_screech', '尖啸', 'magic', 0, 1, 75, '刺耳的声浪让目标短暂迟缓。'),
     ('thorn_shot', '棘刺射击', 'physical', 0, 1, 105, '射出带有倒刺的硬棘。'),
-    ('mist_pounce', '雾袭', 'physical', 0, 1, 115, '借助薄雾发动扑杀。'),
+    ('mist_pounce', '雾袭', 'physical', 35, 2, 115, '借助薄雾发动扑杀，并让下一次出招更具威力。'),
     ('shell_breaker', '碎壳击', 'physical', 60, 2, 125, '借鉴壳撞发力的沉重打击。'),
     ('spore_bolt', '孢子飞矢', 'magic', 65, 2, 120, '将孢子压缩为可控的木属性飞矢。'),
     ('echo_shock', '回音震击', 'magic', 65, 2, 110, '以回荡的声波扰乱目标行动。'),
     ('thorn_stab', '棘刺突击', 'physical', 60, 2, 130, '模仿棘刺射击的贯穿发力。'),
-    ('mist_step_slash', '雾步斩', 'physical', 65, 2, 135, '借助身法在薄雾中突进斩击。'),
+    ('mist_step_slash', '雾步斩', 'physical', 65, 2, 135, '借助身法在薄雾中突进斩击，并使下一次出招伤害提高。'),
     ('constrict', '缠束', 'physical', 6, 2, 110, '以身躯束缚并挤压目标。'),
     ('maul', '重爪', 'physical', 8, 2, 135, '以沉重利爪撕开目标。'),
     ('goblin_slash', '哥布林斩', 'physical', 5, 1, 115, '粗陋却迅速的短刃斩击。'),
@@ -619,9 +747,9 @@ export const initializeSchema = async (pool: Pool) => {
     ('thorn_burst', '荆棘爆射', 'physical', 22, 2, 145, '树精将硬化荆棘骤然射出，留下难以愈合的伤口。'),
     ('verdant_bolt', '苍翠魔弹', 'magic', 36, 2, 155, '汇聚浓郁木属性魔力，发射沉重的苍翠光弹。'),
     ('vine_hex', '藤咒', 'magic', 8, 1, 92, '藤蛇将微弱的自然魔力缠向目标，使其短暂迟缓。'),
-    ('moonbolt', '雾月弹', 'magic', 9, 1, 96, '幽狼凝聚雾中的暗色魔力，射出一枚微弱的月影弹。'),
-    ('vine_bolt', '藤蔓弹', 'magic', 50, 2, 122, '将藤蛇的藤咒改良为适合人类施展的木属性魔法。'),
-    ('moonlight_bolt', '月影弹', 'magic', 55, 2, 126, '将幽狼的雾月弹改良为可控的暗属性魔法。'),
+    ('moonbolt', '雾月弹', 'magic', 45, 2, 96, '幽狼凝聚雾中的暗色魔力，令下一次出招必定暴击。'),
+    ('vine_bolt', '藤蔓弹', 'magic', 50, 2, 122, '将藤蛇的藤咒改良为适合人类施展的木属性魔法，命中后束缚目标。'),
+    ('moonlight_bolt', '月影弹', 'magic', 55, 2, 126, '将幽狼的雾月弹改良为可控的暗属性魔法，使下一次出招必定暴击。'),
     ('slime_bash', '胶质重压', 'physical', 35, 1, 145, '将厚重胶质收束后猛然砸下。'),
     ('acid_spray', '酸液喷吐', 'magic', 45, 2, 125, '喷出腐蚀性的酸液，削弱目标防御。'),
     ('regenerate_slime', '胶质再生', 'magic', 55, 3, 80, '汲取林间水汽，缓慢修复自身。'),
@@ -637,7 +765,8 @@ export const initializeSchema = async (pool: Pool) => {
     ('appraisal', '鉴识', 'passive', 0, 0, 0, '学会后可识别怪物词条，并解锁怪物属性查看。'),
     ('growth_blessing', '成长祝福', 'passive', 0, 0, 0, '所有获得的经验值翻倍。'),
     ('mana_affinity', '魔力亲和', 'passive', 0, 0, 0, '技能魔力消耗降低 30%。'),
-    ('lucky_favor', '幸运眷顾', 'passive', 0, 0, 0, '战利品掉落概率提高 20%。')
+    ('lucky_favor', '幸运眷顾', 'passive', 0, 0, 0, '战利品掉落概率提高 20%。'),
+    ('craftsmanship', '匠心', 'passive', 0, 0, 0, '随副职业等级发挥不同效果：锻造师降低耐久损耗，炼金师提高药品效果。')
     ON DUPLICATE KEY UPDATE name=VALUES(name),mana_cost=VALUES(mana_cost),cooldown_turns=VALUES(cooldown_turns),power=VALUES(power),description=VALUES(description)`);
   await pool.query(`INSERT INTO skill_definitions (code,name,category,damage_type,skill_kind,element,range_type,mana_cost,cooldown_turns,power,learn_cost,max_level,description) VALUES
     ('sword_shield_mastery','剑盾精通','passive','无','精通','无','自身',0,0,0,99,1,'装备长剑时攻击提高8%，装备盾牌时防御提高8%。'),
@@ -664,6 +793,7 @@ export const initializeSchema = async (pool: Pool) => {
     ON DUPLICATE KEY UPDATE name=VALUES(name),category=VALUES(category),damage_type=VALUES(damage_type),skill_kind=VALUES(skill_kind),element=VALUES(element),range_type=VALUES(range_type),mana_cost=VALUES(mana_cost),cooldown_turns=VALUES(cooldown_turns),power=VALUES(power),description=VALUES(description)`);
   await pool.query(`UPDATE skill_definitions SET skill_kind=CASE category WHEN 'physical' THEN CASE damage_type WHEN '斩击' THEN '斩击' WHEN '刺击' THEN '刺击' ELSE '打击' END WHEN 'magic' THEN CASE WHEN damage_type IN ('水','火','土','木','风','冰','雷','光','暗') THEN '元素' WHEN damage_type='奥术' THEN '能量' ELSE '灵异' END WHEN 'utility' THEN '辅助' WHEN 'passive' THEN '被动' ELSE skill_kind END, element=CASE WHEN category='magic' AND damage_type IN ('水','火','土','木','风','冰','雷','光','暗') THEN damage_type ELSE '无' END, range_type=CASE WHEN category='physical' THEN '近战' WHEN category='magic' THEN '远程' WHEN category='utility' THEN '全体' WHEN category='passive' THEN '自身' ELSE range_type END`);
   await pool.query(`UPDATE skill_definitions SET category='magic',damage_type=CASE code WHEN 'vine_hex' THEN '木' WHEN 'vine_bolt' THEN '木' WHEN 'moonbolt' THEN '暗' WHEN 'moonlight_bolt' THEN '暗' END,skill_kind='元素',element=CASE code WHEN 'vine_hex' THEN '木' WHEN 'vine_bolt' THEN '木' WHEN 'moonbolt' THEN '暗' WHEN 'moonlight_bolt' THEN '暗' END,range_type='远程',learn_cost=CASE WHEN code IN ('vine_bolt','moonlight_bolt') THEN 1 ELSE 99 END,upgrade_cost=CASE WHEN code IN ('vine_bolt','moonlight_bolt') THEN 1 ELSE 99 END,max_level=CASE WHEN code IN ('vine_hex','moonbolt') THEN 1 ELSE 5 END,power_per_level=CASE WHEN code IN ('vine_hex','moonbolt') THEN 0 ELSE 15 END WHERE code IN ('vine_hex','vine_bolt','moonbolt','moonlight_bolt')`);
+  await pool.query(`UPDATE skill_definitions SET category='utility',damage_type='无',skill_kind='辅助',element='无',range_type='全体',mana_cost=90,cooldown_turns=3,power=0,description='发出战吼，提升全队的物理与魔法攻击。' WHERE code='war_cry'`);
   await pool.query(`UPDATE skill_definitions SET category=CASE code WHEN 'thorn_burst' THEN 'physical' ELSE 'magic' END,
     damage_type=CASE code WHEN 'thorn_burst' THEN '刺击' ELSE '木' END,
     skill_kind=CASE code WHEN 'thorn_burst' THEN '刺击' ELSE '元素' END,
@@ -677,7 +807,8 @@ export const initializeSchema = async (pool: Pool) => {
     ('spellbook_mastery','法书精通','passive','无','精通','无','自身',0,0,0,99,99,10,0,'装备法书类武器时吟唱速度提高14%至70%，副手装备时可减免衰减。',JSON_OBJECT('weaponType','法书','chantSpeedPct',14)),
     ('orb_mastery','法球精通','passive','无','精通','无','自身',0,0,0,99,99,10,0,'装备法球类武器时魔力上限提高14%至70%，副手装备时可减免衰减。',JSON_OBJECT('weaponType','法球','mpPct',14)),
     ('dagger_mastery','匕首精通','passive','无','精通','无','自身',0,0,0,99,99,10,0,'装备匕首类武器时双攻提高4%至20%，副手装备时可减免衰减。',JSON_OBJECT('weaponType','匕首','physicalAttackPct',4,'magicAttackPct',4)),
-    ('fistblade_mastery','拳刃精通','passive','无','精通','无','自身',0,0,0,99,99,10,0,'装备拳刃类武器时暴击、暴伤提高5%至25%，副手装备时可减免衰减。',JSON_OBJECT('weaponType','拳刃','critRatePct',5,'critDamagePct',5))
+    ('fistblade_mastery','拳刃精通','passive','无','精通','无','自身',0,0,0,99,99,10,0,'装备拳刃类武器时暴击、暴伤提高5%至25%，副手装备时可减免衰减。',JSON_OBJECT('weaponType','拳刃','critRatePct',5,'critDamagePct',5)),
+    ('craftsmanship','匠心','passive','无','技艺','无','自身',0,0,0,5,99,1,0,'随副职业等级发挥不同效果：锻造师降低耐久损耗，炼金师提高药品效果。',JSON_OBJECT('secondaryProfessionScaling','craftsmanship'))
     ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),max_level=VALUES(max_level),passive_effect_json=VALUES(passive_effect_json)`);
   await pool.query(`DELETE ps FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE s.code IN ('sword_shield_mastery','warrior_counter','warrior_taunt_player','shield_bash_player','arcane_mastery','fire_lance','frost_barrier','shadow_step','backstab','smoke_screen','holy_prayer','healing_light','blessing_hymn')`);
   await pool.query(`INSERT IGNORE INTO player_skills (character_id,skill_id)
@@ -691,6 +822,9 @@ export const initializeSchema = async (pool: Pool) => {
   await pool.query(`UPDATE characters SET element_mastery_json=COALESCE(element_mastery_json,JSON_OBJECT('水',0,'火',0,'土',0,'木',0,'风',0,'冰',0,'雷',0,'光',0,'暗',0)),element_resistance_json=COALESCE(element_resistance_json,JSON_OBJECT('水',0,'火',0,'土',0,'木',0,'风',0,'冰',0,'雷',0,'光',0,'暗',0))`);
   await pool.query(`UPDATE monster_templates SET element_mastery_json=COALESCE(element_mastery_json,JSON_OBJECT('水',0,'火',0,'土',0,'木',0,'风',0,'冰',0,'雷',0,'光',0,'暗',0)),element_resistance_json=COALESCE(element_resistance_json,JSON_OBJECT('水',0,'火',0,'土',0,'木',0,'风',0,'冰',0,'雷',0,'光',0,'暗',0))`);
   await pool.query(`UPDATE skill_definitions SET learn_cost=CASE code WHEN 'heavy_strike' THEN 1 WHEN 'armor_break' THEN 1 WHEN 'arcane_bolt' THEN 1 WHEN 'bloodletting' THEN 1 WHEN 'jump_strike' THEN 1 WHEN 'bite_slash' THEN 1 WHEN 'charge' THEN 1 WHEN 'shell_breaker' THEN 1 WHEN 'thorn_stab' THEN 1 WHEN 'mist_step_slash' THEN 1 WHEN 'vine_bolt' THEN 2 WHEN 'moonlight_bolt' THEN 2 WHEN 'spore_bolt' THEN 2 WHEN 'echo_shock' THEN 2 WHEN 'war_cry' THEN 2 WHEN 'toxic_edge' THEN 2 WHEN 'fireball' THEN 2 WHEN 'frost_bind' THEN 2 WHEN 'purifying_light' THEN 3 ELSE 99 END, upgrade_cost=CASE code WHEN 'heavy_strike' THEN 1 WHEN 'armor_break' THEN 1 WHEN 'arcane_bolt' THEN 1 WHEN 'bloodletting' THEN 1 WHEN 'jump_strike' THEN 1 WHEN 'bite_slash' THEN 1 WHEN 'charge' THEN 1 WHEN 'shell_breaker' THEN 1 WHEN 'thorn_stab' THEN 1 WHEN 'mist_step_slash' THEN 1 WHEN 'vine_bolt' THEN 2 WHEN 'moonlight_bolt' THEN 2 WHEN 'spore_bolt' THEN 2 WHEN 'echo_shock' THEN 2 WHEN 'war_cry' THEN 2 WHEN 'toxic_edge' THEN 2 WHEN 'fireball' THEN 2 WHEN 'frost_bind' THEN 2 WHEN 'purifying_light' THEN 3 ELSE 99 END, max_level=CASE WHEN code IN ('hop','bite','howl','scratch','shell_bash','spore_dart','sonic_screech','thorn_shot','mist_pounce','constrict','maul','goblin_slash','goblin_fire') THEN 1 ELSE 5 END, power_per_level=CASE WHEN code IN ('hop','bite','howl','scratch','shell_bash','spore_dart','sonic_screech','thorn_shot','mist_pounce','constrict','maul','goblin_slash','goblin_fire') THEN 0 ELSE 15 END, cooldown_reduction_per_level=CASE WHEN code IN ('heavy_strike','armor_break','fireball','toxic_edge','purifying_light','frost_bind','bloodletting','jump_strike','bite_slash','charge','war_cry','shell_breaker','spore_bolt','echo_shock','thorn_stab','mist_step_slash') THEN 1 ELSE 0 END`);
+  // 人类可学习的前期主动技能，以基础冷却区分威力；效果强度仍由 skill_effects 单独决定。
+  await pool.query(`UPDATE skill_definitions SET power=CASE cooldown_turns WHEN 1 THEN 110 WHEN 2 THEN 125 WHEN 3 THEN 140 ELSE power END
+    WHERE code IN ('heavy_strike','armor_break','arcane_bolt','bloodletting','jump_strike','bite_slash','charge','shell_breaker','thorn_stab','mist_step_slash','vine_bolt','moonlight_bolt','spore_bolt','echo_shock','toxic_edge','fireball','frost_bind','purifying_light')`);
   await pool.query(`UPDATE skill_definitions SET category='passive',learn_cost=CASE WHEN code='appraisal' THEN 1 ELSE 99 END,upgrade_cost=99,max_level=1,power_per_level=0,passive_effect_json=CASE code
     WHEN 'appraisal' THEN JSON_OBJECT('revealMonsterTraits',true,'unlockMonsterDetail',true)
     WHEN 'growth_blessing' THEN JSON_OBJECT('experienceMultiplier',2)
@@ -723,7 +857,16 @@ export const initializeSchema = async (pool: Pool) => {
     ('imbalance','失衡','stat_modifier',20,3,1,1,0,'命中与闪避降低。'),
     ('shadow_curse','影咒','stat_modifier',100,3,1,1,0,'狼王的命中、闪避、双攻与双防强化。')
     ,('shield_guard','盾击守势','stat_modifier',50,1,1,1,0,'下次出手前受到的伤害降低50%。')
+    ,('sprint','冲刺','stat_modifier',20,2,1,1,0,'自身速度提高。')
+    ,('armor_shatter','碎甲','stat_modifier',5,2,1,1,0,'降低目标物理防御。')
+    ,('bind','束缚','stat_modifier',5,2,1,1,0,'降低目标速度与闪避。')
+    ,('rending','撕裂','damage_over_time',3,3,1,1,0,'每回合损失最大生命值3%。')
+    ,('mist_veil','雾隐','stat_modifier',20,0,1,1,0,'下一次出招伤害提高。')
+    ,('shadow_pierce','影刺','stat_modifier',1,0,1,1,0,'下一次出招必定暴击。')
+    ,('battle_cry','战吼','stat_modifier',10,2,1,1,0,'物理攻击与魔法攻击提高。')
     ON DUPLICATE KEY UPDATE name=VALUES(name),default_value=VALUES(default_value),default_duration=VALUES(default_duration),max_level=VALUES(max_level),max_stacks=VALUES(max_stacks),stackable=VALUES(stackable),description=VALUES(description)`);
+  await pool.query(`DELETE se FROM skill_effects se JOIN skill_definitions s ON s.id=se.skill_id
+    WHERE s.code IN ('bite','jump_strike','charge','bite_slash','mist_pounce','mist_step_slash','moonbolt','moonlight_bolt','war_cry','vine_bolt')`);
   await pool.query(`INSERT INTO skill_effects (skill_id,effect_id,effect_level,value_override,duration_override,target_scope,trigger_timing) VALUES
     ((SELECT id FROM skill_definitions WHERE code='armor_break'),(SELECT id FROM effect_definitions WHERE code='vulnerability'),1,NULL,NULL,'enemy','on_hit'),
     ((SELECT id FROM skill_definitions WHERE code='fireball'),(SELECT id FROM effect_definitions WHERE code='burn'),1,NULL,NULL,'enemy','on_hit'),
@@ -732,20 +875,20 @@ export const initializeSchema = async (pool: Pool) => {
     ((SELECT id FROM skill_definitions WHERE code='frost_bind'),(SELECT id FROM effect_definitions WHERE code='slow'),1,NULL,NULL,'enemy','on_hit'),
     ((SELECT id FROM skill_definitions WHERE code='bloodletting'),(SELECT id FROM effect_definitions WHERE code='bleeding'),1,NULL,NULL,'enemy','on_hit'),
     ((SELECT id FROM skill_definitions WHERE code='hop'),(SELECT id FROM effect_definitions WHERE code='slow'),1,4,1,'enemy','on_hit'),
-    ((SELECT id FROM skill_definitions WHERE code='jump_strike'),(SELECT id FROM effect_definitions WHERE code='slow'),1,4,1,'enemy','on_hit'),
-    ((SELECT id FROM skill_definitions WHERE code='charge'),(SELECT id FROM effect_definitions WHERE code='vulnerability'),1,5,1,'enemy','on_hit'),
-    ((SELECT id FROM skill_definitions WHERE code='bite'),(SELECT id FROM effect_definitions WHERE code='bleeding'),1,1,1,'enemy','on_hit'),
-    ((SELECT id FROM skill_definitions WHERE code='bite_slash'),(SELECT id FROM effect_definitions WHERE code='bleeding'),1,1,1,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='jump_strike'),(SELECT id FROM effect_definitions WHERE code='stun'),1,50,1,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='charge'),(SELECT id FROM effect_definitions WHERE code='sprint'),1,20,2,'self','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='bite'),(SELECT id FROM effect_definitions WHERE code='rending'),1,3,3,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='bite_slash'),(SELECT id FROM effect_definitions WHERE code='armor_shatter'),1,5,2,'enemy','on_hit'),
     ((SELECT id FROM skill_definitions WHERE code='howl'),(SELECT id FROM effect_definitions WHERE code='slow'),1,5,1,'enemy','on_hit'),
-    ((SELECT id FROM skill_definitions WHERE code='war_cry'),(SELECT id FROM effect_definitions WHERE code='slow'),1,5,1,'enemy','on_hit'),
     ((SELECT id FROM skill_definitions WHERE code='scratch'),(SELECT id FROM effect_definitions WHERE code='bleeding'),1,1,1,'enemy','on_hit'),
-    ((SELECT id FROM skill_definitions WHERE code='mist_pounce'),(SELECT id FROM effect_definitions WHERE code='bleeding'),1,1,1,'enemy','on_hit'),
-    ((SELECT id FROM skill_definitions WHERE code='mist_step_slash'),(SELECT id FROM effect_definitions WHERE code='slow'),1,4,1,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='mist_pounce'),(SELECT id FROM effect_definitions WHERE code='mist_veil'),1,20,0,'self','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='mist_step_slash'),(SELECT id FROM effect_definitions WHERE code='mist_veil'),1,20,0,'self','on_cast'),
     ((SELECT id FROM skill_definitions WHERE code='maul'),(SELECT id FROM effect_definitions WHERE code='vulnerability'),1,5,1,'enemy','on_hit'),
     ((SELECT id FROM skill_definitions WHERE code='vine_hex'),(SELECT id FROM effect_definitions WHERE code='slow'),1,5,1,'enemy','on_hit'),
-    ((SELECT id FROM skill_definitions WHERE code='vine_bolt'),(SELECT id FROM effect_definitions WHERE code='slow'),1,6,1,'enemy','on_hit'),
-    ((SELECT id FROM skill_definitions WHERE code='moonbolt'),(SELECT id FROM effect_definitions WHERE code='vulnerability'),1,5,1,'enemy','on_hit'),
-    ((SELECT id FROM skill_definitions WHERE code='moonlight_bolt'),(SELECT id FROM effect_definitions WHERE code='vulnerability'),1,6,1,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='vine_bolt'),(SELECT id FROM effect_definitions WHERE code='bind'),1,5,2,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='moonbolt'),(SELECT id FROM effect_definitions WHERE code='shadow_pierce'),1,1,0,'self','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='moonlight_bolt'),(SELECT id FROM effect_definitions WHERE code='shadow_pierce'),1,1,0,'self','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='war_cry'),(SELECT id FROM effect_definitions WHERE code='battle_cry'),1,10,2,'ally','on_cast'),
     ((SELECT id FROM skill_definitions WHERE code='spore_dart'),(SELECT id FROM effect_definitions WHERE code='vulnerability'),1,8,1,'enemy','on_hit'),
     ((SELECT id FROM skill_definitions WHERE code='sonic_screech'),(SELECT id FROM effect_definitions WHERE code='slow'),1,8,1,'enemy','on_hit'),
     ((SELECT id FROM skill_definitions WHERE code='thorn_shot'),(SELECT id FROM effect_definitions WHERE code='bleeding'),1,1,1,'enemy','on_hit'),
@@ -811,19 +954,19 @@ export const initializeSchema = async (pool: Pool) => {
     ELSE element_resistance_json END`);
   await pool.query(`DELETE r FROM monster_skill_learn_rules r JOIN monster_templates t ON t.id=r.monster_template_id WHERE t.code IN ('ball_rabbit','spike_boar','vine_snake','black_bear','mist_wolf','roll_rabbit','tusk_boar','vine_python','pitch_bear','shadow_wolf','goblin')`);
   await pool.query(`INSERT INTO monster_skill_learn_rules (monster_template_id,source_skill_code,skill_id,chance) VALUES
-    ((SELECT id FROM monster_templates WHERE code='ball_rabbit'),'hop',(SELECT id FROM skill_definitions WHERE code='jump_strike'),0.50000),
-    ((SELECT id FROM monster_templates WHERE code='spike_boar'),'charge',(SELECT id FROM skill_definitions WHERE code='charge'),0.50000),
-    ((SELECT id FROM monster_templates WHERE code='vine_snake'),'bite',(SELECT id FROM skill_definitions WHERE code='bite_slash'),0.50000),
-    ((SELECT id FROM monster_templates WHERE code='vine_snake'),'vine_hex',(SELECT id FROM skill_definitions WHERE code='vine_bolt'),0.50000),
-    ((SELECT id FROM monster_templates WHERE code='vine_python'),'bite',(SELECT id FROM skill_definitions WHERE code='bite_slash'),0.50000),
-    ((SELECT id FROM monster_templates WHERE code='vine_python'),'vine_hex',(SELECT id FROM skill_definitions WHERE code='vine_bolt'),0.50000),
-    ((SELECT id FROM monster_templates WHERE code='mist_wolf'),'mist_pounce',(SELECT id FROM skill_definitions WHERE code='mist_step_slash'),0.50000),
-    ((SELECT id FROM monster_templates WHERE code='mist_wolf'),'moonbolt',(SELECT id FROM skill_definitions WHERE code='moonlight_bolt'),0.50000),
-    ((SELECT id FROM monster_templates WHERE code='roll_rabbit'),'hop',(SELECT id FROM skill_definitions WHERE code='jump_strike'),0.50000),
-    ((SELECT id FROM monster_templates WHERE code='tusk_boar'),'charge',(SELECT id FROM skill_definitions WHERE code='charge'),0.50000),
-    ((SELECT id FROM monster_templates WHERE code='shadow_wolf'),'mist_pounce',(SELECT id FROM skill_definitions WHERE code='mist_step_slash'),0.50000),
-    ((SELECT id FROM monster_templates WHERE code='shadow_wolf'),'moonbolt',(SELECT id FROM skill_definitions WHERE code='moonlight_bolt'),0.50000),
-    ((SELECT id FROM monster_templates WHERE code='pitch_bear'),'howl',(SELECT id FROM skill_definitions WHERE code='war_cry'),0.50000)`);
+    ((SELECT id FROM monster_templates WHERE code='ball_rabbit'),'hop',(SELECT id FROM skill_definitions WHERE code='jump_strike'),0.20000),
+    ((SELECT id FROM monster_templates WHERE code='roll_rabbit'),'hop',(SELECT id FROM skill_definitions WHERE code='jump_strike'),0.20000),
+    ((SELECT id FROM monster_templates WHERE code='spike_boar'),'charge',(SELECT id FROM skill_definitions WHERE code='charge'),0.40000),
+    ((SELECT id FROM monster_templates WHERE code='tusk_boar'),'charge',(SELECT id FROM skill_definitions WHERE code='charge'),0.40000),
+    ((SELECT id FROM monster_templates WHERE code='vine_snake'),'bite',(SELECT id FROM skill_definitions WHERE code='bite_slash'),0.20000),
+    ((SELECT id FROM monster_templates WHERE code='vine_python'),'bite',(SELECT id FROM skill_definitions WHERE code='bite_slash'),0.20000),
+    ((SELECT id FROM monster_templates WHERE code='vine_snake'),'vine_hex',(SELECT id FROM skill_definitions WHERE code='vine_bolt'),0.20000),
+    ((SELECT id FROM monster_templates WHERE code='vine_python'),'vine_hex',(SELECT id FROM skill_definitions WHERE code='vine_bolt'),0.20000),
+    ((SELECT id FROM monster_templates WHERE code='mist_wolf'),'mist_pounce',(SELECT id FROM skill_definitions WHERE code='mist_step_slash'),0.10000),
+    ((SELECT id FROM monster_templates WHERE code='shadow_wolf'),'mist_pounce',(SELECT id FROM skill_definitions WHERE code='mist_step_slash'),0.10000),
+    ((SELECT id FROM monster_templates WHERE code='mist_wolf'),'moonbolt',(SELECT id FROM skill_definitions WHERE code='moonlight_bolt'),0.10000),
+    ((SELECT id FROM monster_templates WHERE code='shadow_wolf'),'moonbolt',(SELECT id FROM skill_definitions WHERE code='moonlight_bolt'),0.10000),
+    ((SELECT id FROM monster_templates WHERE code='pitch_bear'),'howl',(SELECT id FROM skill_definitions WHERE code='war_cry'),0.05000)`);
   await pool.query(`INSERT IGNORE INTO monster_encounter_texts (monster_template_id, description) VALUES
     ((SELECT id FROM monster_templates WHERE code='ball_rabbit'), '落叶轻轻颤动，一只球兔从灌木后探出圆滚滚的脑袋，红色的眼睛正盯着你。'),
     ((SELECT id FROM monster_templates WHERE code='ball_rabbit'), '草丛里传来急促的蹦跳声，球兔挡在了你的去路上。'),
@@ -872,14 +1015,14 @@ export const initializeSchema = async (pool: Pool) => {
     WHERE r.code='dark_forest'
     ON DUPLICATE KEY UPDATE spawn_weight=VALUES(spawn_weight)`);
   await pool.query(`DELETE n FROM map_npcs n JOIN map_regions r ON r.id=n.region_id WHERE r.code='baina_town' AND n.code NOT IN ('pear_guide','guild_counter','blacksmith','alchemy_sweetshop')`);
-  await pool.query(`INSERT INTO map_npcs (region_id, code, name, description, pos_x, pos_y, pos_z) VALUES
-    ((SELECT id FROM map_regions WHERE code='baina_town'), 'pear_guide', '梨子喵（新人引导）', '笑容明快的猫族新手引导员，像是正专程在等你。', -26, -135, 0),
-    ((SELECT id FROM map_regions WHERE code='world_tree'), 'tree_keeper', '树守·阿鲁', '守望世界树的沉默老人。', 0, 0, 0),
-    ((SELECT id FROM map_regions WHERE code='dark_forest'), 'lost_hunter', '迷途猎人', '在薄雾中寻找归路的年轻猎人。', 12, -48, 0),
-    ((SELECT id FROM map_regions WHERE code='baina_town'), 'guild_counter', '冒险者公会', '承接委托、登记冒险者与交换情报的大厅。', -8, -116, 0),
-    ((SELECT id FROM map_regions WHERE code='baina_town'), 'blacksmith', '铁匠铺', '炉火终日不熄，铁锤敲击声从半开的门里传来。', -17, -123, 0),
-    ((SELECT id FROM map_regions WHERE code='baina_town'), 'alchemy_sweetshop', '晴空糖水屋', '门口挂着晴空色风铃，甜香与清新的草药气息一同飘出。', -12, -127, 0)
-    ON DUPLICATE KEY UPDATE name=VALUES(name), description=VALUES(description), pos_x=VALUES(pos_x), pos_y=VALUES(pos_y), pos_z=VALUES(pos_z)`);
+  await pool.query(`INSERT INTO map_npcs (region_id, code, name, description, interaction_kind, pos_x, pos_y, pos_z) VALUES
+    ((SELECT id FROM map_regions WHERE code='baina_town'), 'pear_guide', '梨子喵（新人引导）', '笑容明快的猫族新手引导员，像是正专程在等你。', 'npc', -26, -135, 0),
+    ((SELECT id FROM map_regions WHERE code='world_tree'), 'tree_keeper', '树守·阿鲁', '守望世界树的沉默老人。', 'npc', 0, 0, 0),
+    ((SELECT id FROM map_regions WHERE code='dark_forest'), 'lost_hunter', '迷途猎人', '在薄雾中寻找归路的年轻猎人。', 'npc', 12, -48, 0),
+    ((SELECT id FROM map_regions WHERE code='baina_town'), 'guild_counter', '冒险者公会', '承接委托、登记冒险者与交换情报的大厅。', 'building', -8, -116, 0),
+    ((SELECT id FROM map_regions WHERE code='baina_town'), 'blacksmith', '铁匠铺', '炉火终日不熄。年轻的店主漠北正站在铁砧前，铁锤敲击声从半开的门里传来。', 'building', -17, -123, 0),
+    ((SELECT id FROM map_regions WHERE code='baina_town'), 'alchemy_sweetshop', '晴空糖水屋', '门口挂着晴空色风铃，甜香与清新的草药气息一同飘出。', 'building', -12, -127, 0)
+    ON DUPLICATE KEY UPDATE name=VALUES(name), description=VALUES(description), interaction_kind=VALUES(interaction_kind), pos_x=VALUES(pos_x), pos_y=VALUES(pos_y), pos_z=VALUES(pos_z)`);
   await pool.query(`INSERT INTO map_special_objects (region_id, code, name, description, pos_x, pos_y, pos_z) VALUES
     ((SELECT id FROM map_regions WHERE code='world_tree'), 'world_tree_altar', '世界树祭坛', '被古老根须环抱的石质祭坛。', 0, 0, 0),
     ((SELECT id FROM map_regions WHERE code='baina_town'), 'dark_forest_entrance', '幽暗密林入口', '向北望去，丛丛的密林浓郁成一抹幽绿', -25, -111, 0),

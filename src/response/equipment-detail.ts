@@ -7,11 +7,11 @@ const equipmentSections = (effectJson: unknown, quality: number) => {
   const scale = .6 + Math.max(0, Math.min(100, quality)) * .004;
   const labels: Record<string, string> = {
     hpMax: '生命', mpMax: '魔力', physicalAttack: '物理攻击', magicAttack: '魔法攻击', physicalDefense: '物理防御', magicDefense: '魔法防御', accuracy: '命中', evasion: '闪避', speed: '速度', critRateBp: '暴击', physicalAttackPct: '物理攻击',
-    magicAttackPct: '魔法攻击', critRatePct: '暴击', critDamagePct: '暴伤', accuracyPct: '命中', mpPct: '魔力'
+    magicAttackPct: '魔法攻击', critRatePct: '暴击', critDamagePct: '暴伤', accuracyPct: '命中', mpPct: '魔力', damageBonusPct: '伤害增加'
   };
   const attributes = Object.entries(effect)
     .filter(([key, value]) => labels[key] && Number(value))
-    .map(([key, value]) => `${labels[key]} +${key.endsWith('Pct') ? `${(Number(value) * scale).toFixed(1)}%` : Math.floor(Number(value) * scale)}`);
+    .map(([key, value]) => { const actual = key.endsWith('Pct') ? `${(Number(value) * scale).toFixed(1)}%` : String(Math.floor(Number(value) * scale)); return `${labels[key]} ${Number(value) >= 0 ? '+' : ''}${actual}`; });
   const effectLabels: Record<string, string> = {
     ignoreDefensePct: '无视目标物理防御', lifestealPct: '造成伤害后恢复生命', magicDamagePct: '魔法伤害提高', manaCostReduction: '技能魔力消耗降低'
   };

@@ -12,9 +12,9 @@ const equipmentSections = (effectJson: unknown) => {
   const effect = jsonObject(effectJson);
   const attributeLabels: Record<string, string> = {
     physicalAttack: '物理攻击', magicAttack: '魔法攻击', critRateBp: '暴击', physicalAttackPct: '物理攻击', magicAttackPct: '魔法攻击',
-    physicalDefensePct: '物理防御', magicDefensePct: '魔法防御', critRatePct: '暴击', critDamagePct: '暴伤', accuracyPct: '命中', mpPct: '魔力', hpPct: '生命'
+    physicalDefensePct: '物理防御', magicDefensePct: '魔法防御', critRatePct: '暴击', critDamagePct: '暴伤', accuracyPct: '命中', mpPct: '魔力', hpPct: '生命', damageBonusPct: '伤害增加'
   };
-  const attributes = Object.entries(effect).filter(([key, value]) => attributeLabels[key] && Number(value)).map(([key, value]) => `${attributeLabels[key]} +${key.endsWith('Pct') ? `${Number(value)}%` : Number(value)}`);
+  const attributes = Object.entries(effect).filter(([key, value]) => attributeLabels[key] && Number(value)).map(([key, value]) => `${attributeLabels[key]} ${Number(value) >= 0 ? '+' : ''}${key.endsWith('Pct') ? `${Number(value)}%` : Number(value)}`);
   const effectLabels: Record<string, string> = { ignoreDefensePct: '无视目标物理防御', lifestealPct: '造成伤害后恢复生命', magicDamagePct: '魔法伤害提高', manaCostReduction: '技能魔力消耗降低' };
   const effects = Object.entries(effect).filter(([key, value]) => effectLabels[key] && Number(value)).map(([key, value]) => `${effectLabels[key]} ${key === 'manaCostReduction' ? value : `${value}%`}`);
   if (effect.artifact === 'holy_sword') effects.unshift('普攻与斩击技能恒为物理伤害。', '普攻或斩击技能暴击时，给予目标1层[破甲剑痕]。', '$破甲剑痕$目标物理防御降低16%，持续3回合，可叠加。');

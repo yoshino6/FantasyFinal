@@ -110,3 +110,28 @@ export const nextAutoBattleAction = async (qqUserId: string) => {
   const selected = actions[(Math.max(1, Number(settings[0].turn_no)) - 1) % actions.length];
   return selected.skill_id === null ? { type: 'attack' as const } : { type: 'skill' as const, skillId: Number(selected.skill_id) };
 };
+
+/**
+ * 读取当前战斗内所有已开启自动战斗、且尚未确认本回合行动的玩家。
+ * 队伍回合由外层逐一提交这些动作；未开启自动的队员不会出现在结果中，
+ * 因而仍会保留给其手动操作。
+ */
+export const pendingPartyAutoBattleActions = async (qqUserId: string) => {
+  const characterId = await characterIdFor(qqUserId); const pool = await getPool();
+  const [members] = await pool.execute<(RowDataPacket & { character_id: number; qq_user_id: string; turn_no: number })[]>(`SELECT cm.character_id,p.qq_user_id,cs.turn_no
+    FROM combat_members mine
+    JOIN combat_sessions cs ON cs.id=mine.session_id AND cs.state='active'
+    JOIN combat_members cm ON cm.session_id=cs.id
+    JOIN characters c ON c.id=cm.character_id
+    JOIN players p ON p.id=c.player_id
+    JOIN player_auto_battle_settings settings ON settings.character_id=cm.character_id AND settings.enabled=1
+    WHERE mine.character_id=? AND cm.is_defeated=0 AND cm.pending_action IS NULL
+    ORDER BY cm.character_id`, [characterId]);
+  const actions = await Promise.all(members.map(async member => {
+    const [configured] = await pool.execute<(RowDataPacket & { skill_id: number | null })[]>('SELECT skill_id FROM player_auto_battle_actions WHERE character_id=? ORDER BY sequence_no', [member.character_id]);
+    if (!configured.length) return { qqUserId: member.qq_user_id, action: { type: 'attack' as const } };
+    const selected = configured[(Math.max(1, Number(member.turn_no)) - 1) % configured.length];
+    return { qqUserId: member.qq_user_id, action: selected.skill_id === null ? { type: 'attack' as const } : { type: 'skill' as const, skillId: Number(selected.skill_id) } };
+  }));
+  return actions;
+};

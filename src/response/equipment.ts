@@ -52,5 +52,11 @@ export const equipHandler = async () => {
   try {
     const slot = String(route.param('slot')); const item = await equip(event.current.UserId, slot, Number(route.param('id')));
     await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('装备成功').addNewline().addNewline().addText(`已装备【${slotNames[slot]}】${item.name} #${item.id}。`)).addButtonGroup(Format.createButtonGroup().addRow().addButton('我的装备', '/装备', { type: 'command', autoEnter: true, style: 'blue' })) });
-  } catch (error) { await message.send({ format: messageFormat('装备失败', error instanceof Error ? error.message : '请稍后重试。') }); }
+  } catch (error) {
+    if (error instanceof Error && error.message === 'eternal_artifact_limit') {
+      await message.send({ format: messageFormat('警告', '你的能力暂不支持装备更多的永恒神器。') });
+      return;
+    }
+    await message.send({ format: messageFormat('装备失败', error instanceof Error ? error.message : '请稍后重试。') });
+  }
 };

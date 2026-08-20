@@ -43,6 +43,42 @@ const weaponsFor = async (connection: PoolConnection | Awaited<ReturnType<typeof
 };
 export const blacksmithWeapons = async (qqUserId: string) => weaponsFor(await getPool(), await characterIdFor(await getPool(), qqUserId));
 export const blacksmithProgress = async (qqUserId: string) => { const pool = await getPool(); return blacksmithProgressFor(pool, await characterIdFor(pool, qqUserId)); };
+export const craftsmanshipEffect = async (qqUserId: string) => {
+  const pool = await getPool(); const characterId = await characterIdFor(pool, qqUserId);
+  const [rows] = await pool.execute<(RowDataPacket & { profession: string | null; level: number | null; learned: number })[]>(`SELECT c.secondary_profession_code AS profession,sp.level,
+    EXISTS(SELECT 1 FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=c.id AND s.code='craftsmanship') AS learned
+    FROM characters c LEFT JOIN player_secondary_professions sp ON sp.character_id=c.id AND sp.profession_code=c.secondary_profession_code
+    WHERE c.id=? LIMIT 1`, [characterId]);
+  const row = rows[0];
+  if (!row || !Boolean(row.learned)) return null;
+  const level = Math.min(5, Math.max(1, Number(row.level ?? 1)));
+  const percent = level * 10;
+  if (row.profession === 'blacksmith') return { profession: '锻造师', level, percent, kind: 'durability' as const, text: `[锻造师Lv.${level}]你打造的装备耐久度损耗降低${percent}%` };
+  if (row.profession === 'alchemist') return { profession: '炼金师', level, percent, kind: 'potion' as const, text: `[炼金师Lv.${level}]你产出的药品实际效果提升${percent}%` };
+  return { profession: null, level: 0, percent: 0, kind: 'inactive' as const, text: '尚未拥有可令【匠心】生效的副职业。' };
+};
+/** 药剂制作完成时使用此系数；炼金功能开放后可直接复用。 */
+export const craftsmanshipPotionMultiplier = (effect: Awaited<ReturnType<typeof craftsmanshipEffect>>) => effect?.kind === 'potion' ? 1 + effect.percent / 100 : 1;
+/** 装备耐久结算时使用此系数；最低保留 0 损耗，避免出现负耐久。 */
+export const craftsmanshipDurabilityLoss = (loss: number, effect: Awaited<ReturnType<typeof craftsmanshipEffect>>) => Math.max(0, Math.ceil(Math.max(0, loss) * (effect?.kind === 'durability' ? 1 - effect.percent / 100 : 1)));
+export const xiaobeiCraftsmanshipStatus = async (qqUserId: string) => {
+  const pool = await getPool(); const characterId = await characterIdFor(pool, qqUserId);
+  const [rows] = await pool.execute<(RowDataPacket & { affinity: number; learned: number })[]>(`SELECT COALESCE(a.affinity,0) AS affinity,EXISTS(SELECT 1 FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND s.code='craftsmanship') AS learned FROM characters c LEFT JOIN player_npc_affinity a ON a.character_id=c.id AND a.npc_code='blacksmith' WHERE c.id=?`, [characterId, characterId]);
+  return { affinity: Number(rows[0]?.affinity ?? 0), learned: Boolean(rows[0]?.learned) };
+};
+export const learnXiaobeiCraftsmanship = async (qqUserId: string) => withTransaction(async connection => {
+  const characterId = await characterIdFor(connection, qqUserId, true);
+  const [characters] = await connection.execute<(RowDataPacket & { skill_points: number; affinity: number })[]>(`SELECT c.skill_points,COALESCE(a.affinity,0) AS affinity FROM characters c LEFT JOIN player_npc_affinity a ON a.character_id=c.id AND a.npc_code='blacksmith' WHERE c.id=? FOR UPDATE`, [characterId]);
+  const character = characters[0]; if (!character || Number(character.affinity) < 200) throw new Error('与小北的好感尚未达到「意气相投」。');
+  const [skills] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>('SELECT id,name FROM skill_definitions WHERE code=\'craftsmanship\' LIMIT 1 FOR UPDATE');
+  const skill = skills[0]; if (!skill) throw new Error('技能「匠心」尚未初始化，请重启机器人后重试。');
+  const [known] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_skills WHERE character_id=? AND skill_id=? FOR UPDATE', [characterId, skill.id]);
+  if (known[0]) throw new Error('你已经学会技能「匠心」。');
+  if (Number(character.skill_points) < 5) throw new Error('技能点不足，学习「匠心」需要 5 点。');
+  await connection.execute('UPDATE characters SET skill_points=skill_points-5 WHERE id=?', [characterId]);
+  await connection.execute('INSERT INTO player_skills (character_id,skill_id) VALUES (?,?)', [characterId, skill.id]);
+  return { name: skill.name, cost: 5 };
+});
 export const refinementMaterials = async (qqUserId: string) => {
   const pool = await getPool(); const characterId = await characterIdFor(pool, qqUserId);
   const [rows] = await pool.execute<MaterialRow[]>(`SELECT i.id,i.name,i.item_category,pi.quantity,rm.min_gain,rm.max_gain FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id JOIN blacksmith_refinement_materials rm ON rm.item_id=i.id WHERE pi.character_id=? AND pi.quantity>0 ORDER BY i.id`, [characterId]);
@@ -89,10 +125,10 @@ export const fuseWeapon = async (qqUserId: string, instanceId: number, materialI
   const [weapons] = await connection.execute<(WeaponRow & { effect_json: unknown; item_id: number })[]>(`SELECT ii.id,ii.item_id,i.name,ii.quality,i.rarity,i.required_level,COALESCE(ii.effect_json,i.effect_json) AS effect_json,(SELECT COUNT(*) FROM equipment_fusions ef WHERE ef.instance_id=ii.id) AS fusion_count FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.id=? AND ii.character_id=? AND i.item_type='equipment' AND i.item_category='武器' FOR UPDATE`, [instanceId, characterId]);
   const weapon = weapons[0]; if (!weapon) throw new Error('请选择自己背包中的武器。');
   const limit = fusionLimit(weapon); if (Number(weapon.fusion_count) >= limit) throw new Error(`该武器的熔铸次数已用尽（${weapon.fusion_count}/${limit}）。`);
-  const [materials] = await connection.execute<MaterialRow[]>(`SELECT i.id,i.name,i.item_category,pi.quantity,fe.effect_json,fe.description FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id LEFT JOIN blacksmith_fusion_material_effects fe ON fe.item_id=i.id WHERE pi.character_id=? AND i.id=? AND i.item_type='material' AND i.item_category<>'货币' FOR UPDATE`, [characterId, materialId]);
+  const [materials] = await connection.execute<(MaterialRow & { code: string })[]>(`SELECT i.id,i.code,i.name,i.item_category,pi.quantity,fe.effect_json,fe.description FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id LEFT JOIN blacksmith_fusion_material_effects fe ON fe.item_id=i.id WHERE pi.character_id=? AND i.id=? AND i.item_type='material' AND i.item_category<>'货币' FOR UPDATE`, [characterId, materialId]);
   const material = materials[0]; if (!material || Number(material.quantity) < 1) throw new Error('请选择背包中的熔铸材料。');
   const success = Math.min(100, 70 + profession.bonus);
-  const added = Object.keys(jsonRecord(material.effect_json)).length ? jsonRecord(material.effect_json) : fallbackFusion(material.item_category);
+  const added = material.code.startsWith('refined_') ? forgeMaterialEffect(material.code) : Object.keys(jsonRecord(material.effect_json)).length ? jsonRecord(material.effect_json) : fallbackFusion(material.item_category);
   await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=?', [characterId, materialId]);
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [characterId, materialId]);
   if (Math.random() * 100 >= success) {
@@ -108,7 +144,7 @@ export const fuseWeapon = async (qqUserId: string, instanceId: number, materialI
   return { name: weapon.name, material: material.name, effect: added, count: Number(weapon.fusion_count) + 1, limit, failed: false, success, progress };
 });
 
-const forgeContribution = (code: string) => ({ living_wood: 15, refined_iron: 25, star_copper: 35, moon_silver: 45, sun_gold: 60, beast_meat: 3, beast_bone: 7, beast_hide: 7, beast_tendon: 8, beast_core: 12, magic_wool: 15, magic_tusk: 18, magic_scale: 18, magic_claw: 18, magic_heartcore: 20, riot_aura: 30 }[code] ?? 5);
+const forgeContribution = (code: string) => ({ living_wood: 15, refined_iron: 25, star_copper: 35, moon_silver: 45, sun_gold: 60, beast_meat: 3, beast_bone: 7, beast_hide: 7, beast_tendon: 8, beast_core: 12, magic_wool: 15, magic_tusk: 18, magic_scale: 18, magic_claw: 18, magic_heartcore: 20, refined_beast_bone: 32, refined_beast_hide: 32, refined_beast_tendon: 34, refined_beast_core: 38, refined_magic_wool: 46, refined_magic_tusk: 48, refined_magic_scale: 48, refined_magic_claw: 50, refined_magic_heartcore: 52, riot_aura: 30 }[code] ?? 5);
 const forgeRequirements = (category: string, level: number) => {
   if (category !== '武器') return [{ code: level <= 10 ? 'living_wood' : level <= 20 ? 'refined_iron' : level <= 30 ? 'star_copper' : level <= 40 ? 'moon_silver' : 'sun_gold', quantity: level }];
   return ({
@@ -121,20 +157,30 @@ const forgeRequirements = (category: string, level: number) => {
 };
 const forgeMaterialNames: Record<string, string> = { living_wood: '活木', refined_iron: '精铁', star_copper: '星铜', moon_silver: '月银', sun_gold: '曜金' };
 const random = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
-const minimumAuxiliaryCount = (level: number) => Math.max(1, Math.ceil(level / 5));
 const forgeCategories = new Set(['武器', '头肩', '上装', '腰部', '下装', '脚部']);
 const weaponTypes = new Set(['长剑', '法杖', '匕首', '拳刃']); const armorTypes = new Set(['布甲', '皮甲', '轻甲', '重甲', '板甲']);
-const forgeRarity = (auxiliaryScore: number, auxiliaryCount: number) => {
+const forgeRarity = (auxiliaryScore: number, auxiliaryCount: number, hasRefinedMaterial = false) => {
+  if (!auxiliaryCount) return '普通';
+  if (hasRefinedMaterial) {
+    const weights: Array<[string, number]> = [['精良', 28], ['稀有', 56], ['传说', 16]];
+    let roll = Math.random() * weights.reduce((sum, [, weight]) => sum + weight, 0);
+    return weights.find(([, weight]) => (roll -= weight) <= 0)?.[0] ?? '精良';
+  }
   const average = auxiliaryScore / Math.max(1, auxiliaryCount);
   const weights: Array<[string, number]> = [['普通', Math.max(1, 65 - average * 2)], ['优秀', 25 + average], ['精良', Math.max(0, average * 2 - 10)], ['稀有', Math.max(0, average * 1.5 - 25)], ['传说', Math.max(0, average * .8 - 16)], ['史诗', Math.max(0, average * .4 - 10)]];
   let roll = Math.random() * weights.reduce((sum, [, weight]) => sum + weight, 0);
   return weights.find(([, weight]) => (roll -= weight) <= 0)?.[0] ?? '普通';
 };
 const rarityScale: Record<string, number> = { '普通': .75, '优秀': .9, '精良': 1, '稀有': 1.15, '传说': 1.35, '史诗': 1.6, '神器': 1.9 };
-const capForgeEffect = (effect: Record<string, number>, level: number, rarity: string) => {
+const forgeEffectCaps = (level: number, rarity: string) => {
   const scale = rarityScale[rarity] ?? 1;
-  const caps: Record<string, number> = { hpMax: level * 24 * scale, mpMax: level * 20 * scale, physicalAttack: level * 8 * scale, magicAttack: level * 8 * scale, physicalDefense: level * 9 * scale, magicDefense: level * 9 * scale, accuracy: level * 8 * scale, evasion: level * 8 * scale, speed: level * 4 * scale, critRateBp: level * 10 * scale };
-  for (const [key, value] of Object.entries(effect)) if (caps[key]) effect[key] = Math.round(Math.min(caps[key], Math.max(0, Number(value) * scale)));
+  return { hpMax: level * 24 * scale, mpMax: level * 20 * scale, physicalAttack: level * 8 * scale, magicAttack: level * 8 * scale, physicalDefense: level * 9 * scale, magicDefense: level * 9 * scale, accuracy: level * 8 * scale, evasion: level * 8 * scale, speed: level * 4 * scale, critRateBp: level * 10 * scale, damageBonusPct: 20 } as Record<string, number>;
+};
+const capForgeEffect = (effect: Record<string, number>, level: number, rarity: string) => {
+  const caps = forgeEffectCaps(level, rarity);
+  for (const [key, value] of Object.entries(effect)) if (caps[key]) effect[key] = key === 'damageBonusPct'
+    ? Math.round(Math.min(caps[key], Math.max(0, Number(value))) * 10) / 10
+    : Math.round(Math.max(-caps[key], Math.min(caps[key], Number(value))));
   return effect;
 };
 const baseForgeEffect = (category: string, subtype: string, level: number): Record<string, number> => {
@@ -145,11 +191,50 @@ const baseForgeEffect = (category: string, subtype: string, level: number): Reco
     if (subtype === '拳刃') return { physicalAttack: random(value * 2, value * 4), magicAttack: random(value, value * 2), critRateBp: random(value * 2, value * 4) };
     return { physicalAttack: random(value * 3, value * 5), physicalDefense: random(value, value * 2) };
   }
-  const armor = subtype === '布甲' ? { magicDefense: 4, mpMax: 6 } : subtype === '皮甲' ? { physicalDefense: 3, evasion: 3 } : subtype === '轻甲' ? { physicalDefense: 4, magicDefense: 3, speed: 1 } : subtype === '重甲' ? { physicalDefense: 6, magicDefense: 3, hpMax: 5 } : { physicalDefense: 8, magicDefense: 4, hpMax: 7 };
-  return Object.fromEntries(Object.entries(armor).map(([key, amount]) => [key, random(value * amount, value * amount + value * 2)]));
+  // 护甲本体属性：越重防御越高，机动属性越低；辅材仍可用于弥补或强化这些倾向。
+  const armor = subtype === '布甲'
+    ? { physicalDefense: 2, magicDefense: 2, accuracy: 4, evasion: 4, speed: 2 }
+    : subtype === '皮甲'
+      ? { physicalDefense: 3, magicDefense: 3, accuracy: 2, speed: 1 }
+      : subtype === '轻甲'
+        ? { physicalDefense: 5, magicDefense: 5 }
+        : subtype === '重甲'
+          ? { physicalDefense: 7, magicDefense: 7, evasion: -1, speed: -1 }
+          : { physicalDefense: 9, magicDefense: 9, accuracy: -2, evasion: -3, speed: -2 };
+  return Object.fromEntries(Object.entries(armor).map(([key, amount]) => [key, amount >= 0
+    ? random(value * amount, value * amount + value * 2)
+    : -random(value * Math.abs(amount), value * Math.abs(amount) + value)]));
 };
-const forgeMaterialEffect = (code: string): Record<string, number> => ({ beast_bone: { physicalAttack: random(1, 3) }, beast_hide: { physicalDefense: random(1, 3), magicDefense: random(1, 3) }, beast_tendon: { speed: random(1, 2) }, beast_core: { magicAttack: random(1, 3) }, magic_wool: { evasion: random(2, 5) }, magic_tusk: { physicalAttack: random(2, 5) }, magic_scale: { magicDefense: random(2, 5) }, magic_claw: { critRateBp: random(10, 30) }, magic_heartcore: { accuracy: random(2, 5) }, living_wood: { hpMax: random(2, 5) }, refined_iron: { physicalDefense: random(3, 6) }, star_copper: { accuracy: random(3, 6) }, moon_silver: { mpMax: random(5, 10) }, sun_gold: { physicalAttack: random(1, 3), magicAttack: random(1, 3) }, riot_aura: { magicAttack: random(2, 5) } }[code] ?? { hpMax: 1 }) as Record<string, number>;
+function forgeMaterialEffect(code: string): Record<string, number> {
+  const refinedSmall = (flat: Record<string, number>, percent: string) => Math.random() < .15 ? { ...flat, [percent]: Math.round((.1 + Math.random() * .9) * 10) / 10 } : flat;
+  const refinedSpecial = (flat: Record<string, number>, percent: string) => Math.random() < .25 ? { ...flat, [percent]: Math.round((1 + Math.random()) * 10) / 10 } : flat;
+  const effects: Record<string, Record<string, number>> = { beast_bone: { physicalAttack: random(1, 3) }, beast_hide: { physicalDefense: random(1, 3), magicDefense: random(1, 3) }, beast_tendon: { speed: random(1, 2) }, beast_core: { magicAttack: random(1, 3) }, magic_wool: { evasion: random(2, 5) }, magic_tusk: { physicalAttack: random(2, 5) }, magic_scale: { magicDefense: random(2, 5) }, magic_claw: { critRateBp: random(10, 30) }, magic_heartcore: { accuracy: random(2, 5) }, living_wood: { hpMax: random(2, 5) }, refined_iron: { physicalDefense: random(3, 6) }, star_copper: { accuracy: random(3, 6) }, moon_silver: { mpMax: random(5, 10) }, sun_gold: { physicalAttack: random(1, 3), magicAttack: random(1, 3) }, riot_aura: { damageBonusPct: random(3, 5) } };
+  if (code === 'refined_beast_bone') return refinedSmall({ physicalAttack: random(5, 9) }, 'physicalAttackPct');
+  if (code === 'refined_beast_hide') return refinedSmall({ physicalDefense: random(5, 9), magicDefense: random(5, 9) }, 'physicalDefensePct');
+  if (code === 'refined_beast_tendon') return refinedSmall({ speed: random(3, 6) }, 'speedPct');
+  if (code === 'refined_beast_core') return refinedSmall({ magicAttack: random(5, 9) }, 'magicAttackPct');
+  if (code === 'refined_magic_wool') return refinedSpecial({ evasion: random(8, 14) }, 'evasionPct');
+  if (code === 'refined_magic_tusk') return refinedSpecial({ physicalAttack: random(8, 14) }, 'physicalAttackPct');
+  if (code === 'refined_magic_scale') return refinedSpecial({ magicDefense: random(8, 14) }, 'magicDefensePct');
+  if (code === 'refined_magic_claw') return refinedSpecial({ critRateBp: random(50, 100) }, 'critRatePct');
+  if (code === 'refined_magic_heartcore') return refinedSpecial({ accuracy: random(8, 14) }, 'accuracyPct');
+  return effects[code] ?? { hpMax: 1 };
+}
 const mergeEffect = (base: Record<string, number>, incoming: Record<string, number>) => { for (const [key, value] of Object.entries(incoming)) base[key] = Math.round((Number(base[key] ?? 0) + Number(value)) * 100) / 100; return base; };
+const mergeDiminishingForgeEffect = (base: Record<string, number>, original: Record<string, number>, incoming: Record<string, number>, level: number, rarity: string) => {
+  const caps = forgeEffectCaps(level, rarity);
+  for (const [key, value] of Object.entries(incoming)) {
+    const cap = caps[key];
+    if (!cap) { mergeEffect(base, { [key]: Number(value) }); continue; }
+    const current = Number(base[key] ?? 0);
+    const originalValue = Number(original[key] ?? 0);
+    const bonusCap = Math.max(.1, cap - originalValue);
+    const accumulatedBonus = Math.max(0, current - originalValue);
+    const gain = Number(value) * Math.pow(Math.max(0, 1 - accumulatedBonus / Math.max(.1, bonusCap)), 2);
+    base[key] = Math.round(Math.max(-cap, Math.min(cap, current + gain)) * 10) / 10;
+  }
+  return base;
+};
 const forgeName = (subtype: string, level: number, effect: Record<string, number>) => {
   const affixes: Array<[string, string]> = [['physicalAttack', '锋利'], ['magicAttack', '灵辉'], ['physicalDefense', '坚固'], ['magicDefense', '秘护'], ['hpMax', '生机'], ['mpMax', '澄明'], ['accuracy', '精准'], ['evasion', '轻盈'], ['speed', '迅捷'], ['critRateBp', '致命']];
   const affix = [...affixes].sort(([left], [right]) => Number(effect[right] ?? 0) - Number(effect[left] ?? 0))[0]?.[1] ?? '匠制';
@@ -165,7 +250,7 @@ export const forgeState = async (qqUserId: string) => {
   const requirements = level && sessions[0]?.equipment_category ? forgeRequirements(sessions[0].equipment_category, level) : [];
   const requiredCodes = new Set(requirements.map(item => item.code));
   const selected = materials.filter(item => !requiredCodes.has(item.code) && Number((item as any).selected_quantity) > 0).map(item => ({ id: Number(item.id), name: item.name, quantity: Number((item as any).selected_quantity), contribution: forgeContribution(item.code) }));
-  return { category: sessions[0]?.equipment_category ?? null, subtype: sessions[0]?.subtype ?? null, level, source: sessions[0]?.entry_source ?? 'blacksmith' as ForgeEntrySource, materials: materials.map(item => ({ id: Number(item.id), name: item.name, code: item.code, category: item.item_category, quantity: Number(item.quantity), selected: requiredCodes.has(item.code) ? 0 : Number((item as any).selected_quantity ?? 0), contribution: forgeContribution(item.code) })), selected, requirements, minimumAuxiliary: level ? minimumAuxiliaryCount(level) : 0, success: Math.min(100, selected.reduce((sum, item) => sum + item.quantity * item.contribution, 0) + progress.bonus), progress };
+  return { category: sessions[0]?.equipment_category ?? null, subtype: sessions[0]?.subtype ?? null, level, source: sessions[0]?.entry_source ?? 'blacksmith' as ForgeEntrySource, materials: materials.map(item => ({ id: Number(item.id), name: item.name, code: item.code, category: item.item_category, quantity: Number(item.quantity), selected: requiredCodes.has(item.code) ? 0 : Number((item as any).selected_quantity ?? 0), contribution: forgeContribution(item.code) })), selected, requirements, minimumAuxiliary: 0, success: 100, progress };
 };
 export const resetForgeSession = async (qqUserId: string, source: ForgeEntrySource = 'blacksmith') => withTransaction(async connection => { const characterId = await characterIdFor(connection, qqUserId, true); await connection.execute('DELETE FROM player_forge_materials WHERE character_id=?', [characterId]); await connection.execute('DELETE FROM player_forge_sessions WHERE character_id=?', [characterId]); await connection.execute('INSERT INTO player_forge_sessions (character_id,entry_source) VALUES (?,?)', [characterId, source]); });
 export const selectForgeCategory = async (qqUserId: string, category: string) => withTransaction(async connection => { if (!forgeCategories.has(category)) throw new Error('该装备部位暂不支持打造。'); const characterId = await characterIdFor(connection, qqUserId, true); await connection.execute('INSERT INTO player_forge_sessions (character_id,equipment_category,subtype,target_level) VALUES (?,?,NULL,NULL) ON DUPLICATE KEY UPDATE equipment_category=VALUES(equipment_category),subtype=NULL,target_level=NULL', [characterId, category]); await connection.execute('DELETE FROM player_forge_materials WHERE character_id=?', [characterId]); return category; });
@@ -175,24 +260,23 @@ export const addForgeMaterial = async (qqUserId: string, itemId: number, quantit
 export const removeForgeMaterial = async (qqUserId: string, itemId: number) => withTransaction(async connection => { const characterId = await characterIdFor(connection, qqUserId, true); const [rows] = await connection.execute<(RowDataPacket & { quantity: number })[]>('SELECT quantity FROM player_forge_materials WHERE character_id=? AND item_id=? FOR UPDATE', [characterId, itemId]); if (!rows[0] || Number(rows[0].quantity) < 1) throw new Error('该材料尚未放入。'); await connection.execute('UPDATE player_forge_materials SET quantity=quantity-1 WHERE character_id=? AND item_id=?', [characterId, itemId]); await connection.execute('DELETE FROM player_forge_materials WHERE character_id=? AND item_id=? AND quantity<=0', [characterId, itemId]); });
 export const setForgeMaterial = async (qqUserId: string, itemId: number, quantity: number) => withTransaction(async connection => { if (!Number.isInteger(quantity) || quantity < 0) throw new Error('材料数量必须是非负整数。'); const characterId = await characterIdFor(connection, qqUserId, true); const [items] = await connection.execute<(MaterialRow & { code: string })[]>(`SELECT i.id,i.code,i.name,i.item_category,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.id=? AND pi.quantity>0 AND i.item_type='material' AND i.item_category<>'货币' FOR UPDATE`, [characterId, itemId]); const item = items[0]; if (!item) throw new Error('请选择背包中的材料。'); if (quantity > Number(item.quantity)) throw new Error(`材料数量不足，最多可放入 ${item.quantity} 份。`); if (!quantity) { await connection.execute('DELETE FROM player_forge_materials WHERE character_id=? AND item_id=?', [characterId, itemId]); return; } await connection.execute('INSERT INTO player_forge_materials (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=VALUES(quantity)', [characterId, itemId, quantity]); });
 export const clearForgeMaterial = async (qqUserId: string, itemId: number) => withTransaction(async connection => { const characterId = await characterIdFor(connection, qqUserId, true); await connection.execute('DELETE FROM player_forge_materials WHERE character_id=? AND item_id=?', [characterId, itemId]); });
-export const craftForgeEquipment = async (qqUserId: string, confirmed = false) => withTransaction(async connection => {
+export const craftForgeEquipment = async (qqUserId: string, _confirmed = false) => withTransaction(async connection => {
   const characterId = await characterIdFor(connection, qqUserId, true); const [sessions] = await connection.execute<(RowDataPacket & { equipment_category: string; subtype: string; target_level: number })[]>('SELECT equipment_category,subtype,target_level FROM player_forge_sessions WHERE character_id=? FOR UPDATE', [characterId]); const session = sessions[0]; if (!session?.equipment_category || !session.subtype || !session.target_level) throw new Error('请完成打造目标选择。');
   const requirements = forgeRequirements(session.equipment_category, Number(session.target_level)); const requiredCodes = requirements.map(item => item.code);
   const [auxiliary] = await connection.execute<(MaterialRow & { code: string; selected_quantity: number })[]>(`SELECT i.id,i.code,i.name,i.item_category,pi.quantity,fm.quantity AS selected_quantity FROM player_forge_materials fm JOIN player_inventory pi ON pi.character_id=fm.character_id AND pi.item_id=fm.item_id JOIN item_definitions i ON i.id=fm.item_id WHERE fm.character_id=?${requiredCodes.length ? ` AND i.code NOT IN (${requiredCodes.map(() => '?').join(',')})` : ''} FOR UPDATE`, [characterId, ...requiredCodes]);
   const [requiredInventory] = await connection.execute<(MaterialRow & { code: string; selected_quantity: number })[]>(`SELECT i.id,i.code,i.name,i.item_category,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=?${requiredCodes.length ? ` AND i.code IN (${requiredCodes.map(() => '?').join(',')})` : ''} FOR UPDATE`, [characterId, ...requiredCodes]);
   const requiredByCode = new Map(requiredInventory.map(item => [item.code, item]));
   const missingRequirement = requirements.find(item => Number(requiredByCode.get(item.code)?.quantity ?? 0) < item.quantity); if (missingRequirement) throw new Error(`必备材料不足：${forgeMaterialNames[missingRequirement.code] ?? missingRequirement.code} 还需要 ${missingRequirement.quantity - Number(requiredByCode.get(missingRequirement.code)?.quantity ?? 0)} 份。`);
-  const auxiliaryCount = auxiliary.reduce((sum, item) => sum + Number(item.selected_quantity), 0); const requiredAuxiliary = minimumAuxiliaryCount(Number(session.target_level)); if (auxiliaryCount < requiredAuxiliary) throw new Error(`辅材不足：该等级装备至少需要放入 ${requiredAuxiliary} 份辅材。`);
+  const auxiliaryCount = auxiliary.reduce((sum, item) => sum + Number(item.selected_quantity), 0);
   const materials = [...auxiliary, ...requirements.map(requirement => ({ ...requiredByCode.get(requirement.code)!, selected_quantity: requirement.quantity }))]; const shortage = materials.find(item => Number(item.quantity) < Number(item.selected_quantity)); if (shortage) throw new Error(`材料不足：${shortage.name}。`);
-  const profession = await blacksmithProgressFor(connection, characterId, true); const score = auxiliary.reduce((sum, item) => sum + forgeContribution(item.code) * Number(item.selected_quantity), 0); const success = Math.min(100, score + profession.bonus); if (success < 100 && !confirmed) return { needsConfirm: true as const, success, score };
+  const score = auxiliary.reduce((sum, item) => sum + forgeContribution(item.code) * Number(item.selected_quantity), 0); const success = 100;
   const [coins] = await connection.execute<(RowDataPacket & { copper_coins: number })[]>('SELECT copper_coins FROM characters WHERE id=? FOR UPDATE', [characterId]); if (Number(coins[0]?.copper_coins ?? 0) < 60) throw new Error('铜币不足，打造手续费需要 60 铜币。');
   for (const material of materials) await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [material.selected_quantity, characterId, material.id]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND quantity<=0', [characterId]); await connection.execute('UPDATE characters SET copper_coins=copper_coins-60 WHERE id=?', [characterId]); await connection.execute('DELETE FROM player_forge_materials WHERE character_id=?', [characterId]);
-  if (Math.random() * 100 >= success) { const progress = await addBlacksmithProficiency(connection, characterId); return { needsConfirm: false as const, success, failed: true as const, progress }; }
-  const rarity = forgeRarity(score, auxiliaryCount); const effect = baseForgeEffect(session.equipment_category, session.subtype, Number(session.target_level)); for (const material of materials) for (let i = 0; i < Number(material.selected_quantity); i++) mergeEffect(effect, forgeMaterialEffect(material.code)); capForgeEffect(effect, Number(session.target_level), rarity); const name = forgeName(session.subtype, Number(session.target_level), effect); const code = `crafted_${characterId}_${Date.now()}_${Math.floor(Math.random() * 100000)}`; const quality = Math.min(100, Math.max(0, Math.round((15 + score * .35 + random(-8, 8)) * 100) / 100));
+  const rarity = forgeRarity(score, auxiliaryCount, auxiliary.some(material => material.code.startsWith('refined_'))); const effect = baseForgeEffect(session.equipment_category, session.subtype, Number(session.target_level)); const originalEffect = { ...effect }; for (const material of auxiliary) for (let i = 0; i < Number(material.selected_quantity); i++) mergeDiminishingForgeEffect(effect, originalEffect, forgeMaterialEffect(material.code), Number(session.target_level), rarity); capForgeEffect(effect, Number(session.target_level), rarity); const name = forgeName(session.subtype, Number(session.target_level), effect); const code = `crafted_${characterId}_${Date.now()}_${Math.floor(Math.random() * 100000)}`; const quality = Math.min(100, Math.max(0, Math.round((15 + score * .35 + random(-8, 8)) * 100) / 100));
   const [definition] = await connection.execute<any>('INSERT INTO item_definitions (code,name,description,obtain_source,item_type,item_category,weapon_type,rarity,required_level,weight,stackable,effect_json) VALUES (?,?,?,?,?,?,?,?,?,?,0,?)', [code, name, `由铁匠铺打造的 Lv.${session.target_level}${session.subtype}。`, '百纳镇铁匠铺打造', 'equipment', session.equipment_category, session.equipment_category === '武器' ? session.subtype : null, rarity, session.target_level, 2, JSON.stringify(effect)]); const [instance] = await connection.execute<any>('INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max,effect_json) VALUES (?,?,?,100,100,?)', [characterId, definition.insertId, quality, JSON.stringify(effect)]); await connection.execute('DELETE FROM player_forge_sessions WHERE character_id=?', [characterId]);
   const progress = await addBlacksmithProficiency(connection, characterId);
   return { needsConfirm: false as const, failed: false as const, name, rarity, quality, effect, instanceId: Number(instance.insertId), success, progress };
 });
 export const blacksmithQuest = async (qqUserId: string) => { const pool = await getPool(); const characterId = await characterIdFor(pool, qqUserId); const [rows] = await pool.execute<(RowDataPacket & { status: string; secondary_profession_code: string | null })[]>('SELECT q.status,c.secondary_profession_code FROM characters c LEFT JOIN player_side_quests q ON q.character_id=c.id AND q.quest_code=\'blacksmith_apprentice\' WHERE c.id=?', [characterId]); const row = rows[0]; const [items] = await pool.execute<(RowDataPacket & { code: string; quantity: number })[]>('SELECT i.code,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.code IN (\'living_wood\',\'beast_core\')', [characterId]); const owned = new Map(items.map(item => [item.code, Number(item.quantity)])); const completed = row?.status === 'accepted' && (owned.get('living_wood') ?? 0) >= 1 && (owned.get('beast_core') ?? 0) >= 1; if (completed) await pool.execute('UPDATE player_side_quests SET status=\'completed\',completed_at=NOW() WHERE character_id=? AND quest_code=\'blacksmith_apprentice\'', [characterId]); return { status: completed ? 'completed' : row?.secondary_profession_code === 'blacksmith' ? 'claimed' : row?.status ?? 'none', wood: owned.get('living_wood') ?? 0, core: owned.get('beast_core') ?? 0 }; };
-export const acceptBlacksmithQuest = async (qqUserId: string) => withTransaction(async connection => { const characterId = await characterIdFor(connection, qqUserId, true); const [professionRows] = await connection.execute<(RowDataPacket & { secondary_profession_code: string | null })[]>('SELECT secondary_profession_code FROM characters WHERE id=? FOR UPDATE', [characterId]); if (professionRows[0]?.secondary_profession_code && professionRows[0].secondary_profession_code !== 'blacksmith') throw new Error('你已经拥有其他副职业，无法再选择锻造师。'); await connection.execute('INSERT INTO player_side_quests (character_id,quest_code) VALUES (?,\'blacksmith_apprentice\') ON DUPLICATE KEY UPDATE status=IF(status=\'claimed\',status,\'accepted\')', [characterId]); return true; });
-export const claimBlacksmithQuest = async (qqUserId: string) => withTransaction(async connection => { const characterId = await characterIdFor(connection, qqUserId, true); const status = await blacksmithQuest(qqUserId); if (status.status !== 'completed') throw new Error('任务尚未完成。'); const [wood] = await connection.execute<(RowDataPacket & { item_id: number })[]>('SELECT pi.item_id FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.code=\'living_wood\' FOR UPDATE', [characterId]); const [core] = await connection.execute<(RowDataPacket & { item_id: number })[]>('SELECT pi.item_id FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.code=\'beast_core\' FOR UPDATE', [characterId]); if (!wood[0] || !core[0]) throw new Error('任务材料已不在背包中。'); await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id IN (?,?)', [characterId, wood[0].item_id, core[0].item_id]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND quantity<=0', [characterId]); await connection.execute('UPDATE player_side_quests SET status=\'claimed\',claimed_at=NOW() WHERE character_id=? AND quest_code=\'blacksmith_apprentice\'', [characterId]); await connection.execute('UPDATE characters SET secondary_profession_code=\'blacksmith\' WHERE id=?', [characterId]); await connection.execute('INSERT IGNORE INTO player_secondary_professions (character_id,profession_code,level,proficiency) VALUES (?,\'blacksmith\',1,0)', [characterId]); return { name: '锻造师' }; });
+export const acceptBlacksmithQuest = async (qqUserId: string) => withTransaction(async connection => { const characterId = await characterIdFor(connection, qqUserId, true); const [professionRows] = await connection.execute<(RowDataPacket & { secondary_profession_code: string | null; level: number })[]>('SELECT secondary_profession_code,level FROM characters WHERE id=? FOR UPDATE', [characterId]); if (Number(professionRows[0]?.level ?? 0) < 10) throw new Error('secondary_profession_level_required'); if (professionRows[0]?.secondary_profession_code && professionRows[0].secondary_profession_code !== 'blacksmith') throw new Error('你已经拥有其他副职业，无法再选择锻造师。'); await connection.execute('INSERT INTO player_side_quests (character_id,quest_code) VALUES (?,\'blacksmith_apprentice\') ON DUPLICATE KEY UPDATE status=IF(status=\'claimed\',status,\'accepted\')', [characterId]); return true; });
+export const claimBlacksmithQuest = async (qqUserId: string) => withTransaction(async connection => { const characterId = await characterIdFor(connection, qqUserId, true); const status = await blacksmithQuest(qqUserId); if (status.status !== 'completed') throw new Error('任务尚未完成。'); const [wood] = await connection.execute<(RowDataPacket & { item_id: number })[]>('SELECT pi.item_id FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.code=\'living_wood\' FOR UPDATE', [characterId]); const [core] = await connection.execute<(RowDataPacket & { item_id: number })[]>('SELECT pi.item_id FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.code=\'beast_core\' FOR UPDATE', [characterId]); if (!wood[0] || !core[0]) throw new Error('任务材料已不在背包中。'); const [gift] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM item_definitions WHERE code=\'xiaobei_gift\' LIMIT 1', []); if (!gift[0]) throw new Error('小北的赠礼尚未配置，请重启机器人以初始化物品数据。'); const [character] = await connection.execute<(RowDataPacket & { name: string })[]>('SELECT name FROM characters WHERE id=?', [characterId]); await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id IN (?,?)', [characterId, wood[0].item_id, core[0].item_id]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND quantity<=0', [characterId]); await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,1) ON DUPLICATE KEY UPDATE quantity=quantity+1', [characterId, gift[0].id]); await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [characterId, gift[0].id]); await connection.execute('UPDATE player_side_quests SET status=\'claimed\',claimed_at=NOW() WHERE character_id=? AND quest_code=\'blacksmith_apprentice\'', [characterId]); await connection.execute('UPDATE characters SET secondary_profession_code=\'blacksmith\' WHERE id=?', [characterId]); await connection.execute('INSERT IGNORE INTO player_secondary_professions (character_id,profession_code,level,proficiency) VALUES (?,\'blacksmith\',1,0)', [characterId]); return { name: '锻造师', characterName: character[0]?.name ?? '冒险者', giftName: '小北的赠礼' }; });

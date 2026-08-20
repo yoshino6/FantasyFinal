@@ -1,5 +1,5 @@
 import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
-import { requireNpcAtCurrentPosition } from '../game/adventure.service';
+import { addNpcAffinity, requireNpcAtCurrentPosition } from '../game/adventure.service';
 import { enjoyRestaurantMeal, foodBuffText, restaurantMenu } from '../game/guild-restaurant.service';
 import { messageFormat } from '../game/message';
 
@@ -12,8 +12,14 @@ const pageButtons = (page: number, totalPages: number, keyword = '') => Format.c
 const durationText = (seconds: number) => `${Math.floor(seconds / 60)}分${seconds % 60}秒`;
 const ingredientText = (ingredients: { category: string; name: string; quantity: number; owned: number }[]) => ingredients.map(item => `【${item.category}】${item.name}×${item.quantity}（持有${item.owned}）`).join('、') || '无需素材';
 
-export const restaurantFormat = (text = '开放式厨房飘来炖肉、烤面包与香草的暖香。归来的冒险者围坐长桌交换见闻，掌勺的半身人厨师正把热腾腾的餐盘递给下一位客人。') => {
-  const markdown = Format.createMarkdown().addTitle('百纳镇·冒险者公会·餐厅').addNewline().addNewline().addBlockquote(text);
+export const restaurantFormat = (text?: string) => {
+  const hour = new Date().getHours();
+  const scene = text ?? (hour < 11
+    ? '厨房里飘出新烤面包与热粥的香气。早到的冒险者围着长桌规划路线，掌勺的半身人厨师将早餐逐份端上。'
+    : hour < 18
+      ? '开放式厨房飘来炖肉、烤面包与香草的暖香。归来的冒险者围坐长桌交换见闻，掌勺的半身人厨师正把热腾腾的餐盘递给下一位客人。'
+      : '夜间的餐厅比白日更热闹些。热汤、烤肉与笑声填满长桌，辛苦归来的冒险者在此交换收获与明日的计划。');
+  const markdown = Format.createMarkdown().addTitle('百纳镇·冒险者公会·餐厅').addNewline().addNewline().addBlockquote(scene);
   return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow()
     .addButton('查看菜单', '/餐厅菜单', { type: 'command', autoEnter: true, style: 'blue' })
     .addButton('返回公会大厅', '/建筑进入 guild_counter', { type: 'command', autoEnter: true }));
@@ -34,4 +40,4 @@ const requireRestaurant = (qqUserId: string) => requireNpcAtCurrentPosition(qqUs
 export default async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireRestaurant(event.current.UserId); await message.send({ format: restaurantFormat() }); } catch (error) { await message.send({ format: messageFormat('无法进入餐厅', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const restaurantMenuHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireRestaurant(event.current.UserId); await message.send({ format: await menuFormat(event.current.UserId, Number(route.param('page') ?? 1), String(route.param('keyword') ?? '')) }); } catch (error) { await message.send({ format: messageFormat('餐厅暂不可用', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const restaurantSearchHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireRestaurant(event.current.UserId); await message.send({ format: await menuFormat(event.current.UserId, 1, String(route.param('keyword'))) }); } catch (error) { await message.send({ format: messageFormat('搜索失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
-export const enjoyMealHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireRestaurant(event.current.UserId); const result = await enjoyRestaurantMeal(event.current.UserId, Number(route.param('id'))); const replaced = result.replaced ? `\n原有「${result.replaced}」餐食增益已替换。` : ''; await message.send({ format: messageFormat('用餐完成', `享用了【${result.name}】\n消耗素材：${result.ingredients.map(item => `${item.name}×${item.quantity}`).join('、')}\n加工费：铜币×${result.processingFee}\n获得增益：${foodBuffText(result.buff)}\n持续时间：${result.durationMinutes}分钟${replaced}`) }); await message.send({ format: await menuFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法制作', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const enjoyMealHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireRestaurant(event.current.UserId); const result = await enjoyRestaurantMeal(event.current.UserId, Number(route.param('id'))); await addNpcAffinity(event.current.UserId, 'guild_counter', 'buy'); const replaced = result.replaced ? `\n原有「${result.replaced}」餐食增益已替换。` : ''; await message.send({ format: messageFormat('用餐完成', `享用了【${result.name}】\n消耗素材：${result.ingredients.map(item => `${item.name}×${item.quantity}`).join('、')}\n加工费：铜币×${result.processingFee}\n获得增益：${foodBuffText(result.buff)}\n持续时间：${result.durationMinutes}分钟${replaced}`) }); await message.send({ format: await menuFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法制作', error instanceof Error ? error.message : '请稍后重试。') }); } };
