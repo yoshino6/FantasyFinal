@@ -1,9 +1,9 @@
 qq-bot:
   app_id: "102057736"
   secret: "qWCtaI0jSCwhSE0naOC1qgXOG81uoidY"
-  sandbox: false
-  markdownToText: false
   hideUnsupported: 1
+  markdownToText: false
+  sandbox: false
 mysql:
   host: 127.0.0.1
   port: 3306
@@ -16,4 +16,4 @@ redis:
   user: root
   db: 6
 
-login: 'qq-bot'
+login: "qq-bot"

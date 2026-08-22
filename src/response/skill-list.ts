@@ -37,29 +37,32 @@ const skillListFormat = async (qqUserId: string, view: '已学习' | '未学习'
   const entries = (view === '已学习' ? data.skills : data.discoveries).filter(skill => !normalizedKeyword || skill.name.includes(normalizedKeyword));
   const totalPages = Math.max(1, Math.ceil(entries.length / 10)); const currentPage = Math.min(Math.max(1, page), totalPages); const displayed = entries.slice((currentPage - 1) * 10, currentPage * 10);
   if (view === '已学习') {
-    markdown.addText('快捷技能：\n');
+    markdown.addText('快捷技能：').addNewline();
     const shortcuts = data.skills.filter(skill => skill.quick_slot).sort((a, b) => Number(a.quick_slot) - Number(b.quick_slot));
     if (!shortcuts.length) markdown.addBlockquote('暂无').addNewline();
     else for (const skill of shortcuts) markdown.addBlockquote(`技能${'①②③④'.charAt(Number(skill.quick_slot) - 1)} ${skill.name}`).addNewline();
-    markdown.addText(`剩余技能点：${data.skillPoints}\n`);
+    markdown.addNewline().addText(`剩余技能点：${data.skillPoints}`).addNewline().addNewline().addText('已学技能：').addNewline();
     if (!displayed.length) markdown.addBlockquote(normalizedKeyword ? '没有找到符合条件的技能。' : '尚未学习技能。').addNewline();
     for (const skill of displayed) {
       markdown.addBlockquote(`【${skill.name}】Lv.${skill.level} `).addButton('[详情]', { data: `/技能详情 ${skill.id}`, autoEnter: false });
       if (skill.category === 'passive') markdown.addText(' [被动]');
       else markdown.addText(' ').addButton(skill.quick_slot ? '[取消快捷]' : '[快捷]', { data: `/技能快捷 ${skill.id}`, autoEnter: false });
-      markdown.addText('\n');
+      markdown.addNewline();
     }
   } else {
-    markdown.addText(`剩余技能点：${data.skillPoints}\n`);
+    markdown.addText(`剩余技能点：${data.skillPoints}`).addNewline().addNewline().addText('未学技能：').addNewline();
     if (!displayed.length) markdown.addBlockquote(normalizedKeyword ? '没有找到符合条件的技能。' : '尚无可学习的技能。').addNewline();
-    for (const skill of displayed) markdown.addBlockquote(`【${skill.name}】SP:${skill.learn_cost} `).addButton('[详情]', { data: `/技能详情 ${skill.id}`, autoEnter: false }).addText(' ').addButton('[学习]', { data: `/学习技能 ${skill.id}`, autoEnter: false }).addText('\n');
+    for (const skill of displayed) markdown.addBlockquote(`【${skill.name}】SP:${skill.learn_cost} `).addButton('[详情]', { data: `/技能详情 ${skill.id}`, autoEnter: false }).addText(' ').addButton('[学习]', { data: `/学习技能 ${skill.id}`, autoEnter: false }).addNewline();
   }
-  markdown.addText(`当前第（${currentPage}/${totalPages}）页`);
+  markdown.addNewline().addNewline().addText(`当前第（${currentPage}/${totalPages}）页`);
   const command = (target: number) => `/技能分页 ${view} ${target}${normalizedKeyword ? ` ${normalizedKeyword}` : ''}`;
   const buttons = Format.createButtonGroup().addRow()
     .addButton('上一页', command(Math.max(1, currentPage - 1)), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined })
     .addButton('搜索', `/技能搜索 ${view} `, { type: 'command', autoEnter: false, style: 'blue' })
-    .addButton('下一页', command(Math.min(totalPages, currentPage + 1)), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined });
+    .addButton('下一页', command(Math.min(totalPages, currentPage + 1)), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined })
+    .addRow()
+    .addButton('已学习', '/技能列表 已学习', { type: 'command', autoEnter: true, style: view === '已学习' ? 'blue' : undefined })
+    .addButton('未学习', '/技能列表 未学习', { type: 'command', autoEnter: true, style: view === '未学习' ? 'blue' : undefined });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 

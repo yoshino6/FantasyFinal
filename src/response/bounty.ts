@@ -1,7 +1,9 @@
 import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
-import { acceptBounty, bountyBoard, claimBounty, clearInvalidBounty, playerBounties } from '../game/bounty.service';
+import { abandonBounty, abandonSecondaryQuest, acceptBounty, bountyBoard, claimBounty, clearInvalidBounty, playerBounties } from '../game/bounty.service';
 import { blacksmithQuest } from '../game/blacksmith.service';
 import { alchemistQuest } from '../game/alchemist.service';
+import { deconstructorQuest } from '../game/deconstructor.service';
+import { omniscientQuest } from '../game/omniscient.service';
 import { currentMainQuest } from '../game/main-quest.service';
 import { requireNpcAtCurrentPosition } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
@@ -22,7 +24,7 @@ const requireGuildBoard = (qqUserId: string) => requireNpcAtCurrentPosition(qqUs
 export const bountyBoardHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireGuildBoard(event.current.UserId); await message.send({ format: await bountyBoardFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法查看悬赏板', error instanceof Error ? error.message : '请稍后重试。') }); } };
 const taskCategories = ['主线', '支线', '悬赏', '委托', '其他'] as const;
 type TaskCategory = typeof taskCategories[number];
-type TaskEntry = { category: TaskCategory; title: string; description: string; location?: { regionName: string; x: number; y: number; z: number }; action?: { label: string; command: string } };
+type TaskEntry = { category: TaskCategory; title: string; description: string; location?: { regionName: string; x: number; y: number; z: number }; action?: { label: string; command: string }; abandonCommand?: string };
 const sequence = '①②③④⑤';
 
 const taskButtons = (category: TaskCategory | undefined, page: number, totalPages: number, keyword: string) => {
@@ -37,20 +39,33 @@ const taskButtons = (category: TaskCategory | undefined, page: number, totalPage
 };
 
 export const taskFormat = async (qqUserId: string, category?: TaskCategory, page = 1, keyword = '') => {
-  const [mainQuest, bounties, smithQuest, alchemyQuest] = await Promise.all([currentMainQuest(qqUserId), playerBounties(qqUserId), blacksmithQuest(qqUserId), alchemistQuest(qqUserId)]);
+  const [mainQuest, bounties, smithQuest, alchemyQuest, deconstructQuest, omniscientQuestProgress] = await Promise.all([currentMainQuest(qqUserId), playerBounties(qqUserId), blacksmithQuest(qqUserId), alchemistQuest(qqUserId), deconstructorQuest(qqUserId), omniscientQuest(qqUserId)]);
   const entries: TaskEntry[] = [{ category: '主线', ...mainQuest }, ...bounties.map(task => ({
-    category: '悬赏', title: `【悬赏·${task.id}】${task.title}`,
+    category: '悬赏' as const, title: `【悬赏·${task.id}】${task.title}`,
     description: task.status === 'invalid' ? '已失效：悬赏目标已被其他冒险者完成，或该悬赏已经过期。' : `讨伐：${task.targetName} ${task.progress}/${task.requiredCount}\n报酬：铜币 ×${task.copperReward}`,
     location: task.status === 'invalid' ? undefined : task.location,
-    action: task.status === 'invalid' ? { label: '[清除]', command: `/清除悬赏 ${task.id}` } : task.status === 'completed' ? { label: '[领取悬赏]', command: `/领取悬赏 ${task.id}` } : undefined
+    action: task.status === 'invalid' ? { label: '[清除]', command: `/清除悬赏 ${task.id}` } : task.status === 'completed' ? { label: '[领取悬赏]', command: `/领取悬赏 ${task.id}` } : undefined,
+    abandonCommand: `/放弃悬赏 ${task.id}`
   }))];
   if (smithQuest.status === 'accepted' || smithQuest.status === 'completed') entries.push({
     category: '支线', title: '【副职业·锻造师入门】', description: `收集活木：${smithQuest.wood}/1\n收集兽核：${smithQuest.core}/1`,
-    action: smithQuest.status === 'completed' ? { label: '[前往提交 铁匠铺(-17,-123)]', command: '/前往 -17 -123' } : undefined
+    action: smithQuest.status === 'completed' ? { label: '[前往提交 铁匠铺(-17,-123)]', command: '/前往 -17 -123' } : undefined,
+    abandonCommand: '/放弃副职业任务 blacksmith_apprentice'
   });
   if (alchemyQuest.status === 'accepted' || alchemyQuest.status === 'completed') entries.push({
     category: '支线', title: '【副职业·炼金师入门】', description: `收集微光草药：${alchemyQuest.herbs}/3`,
-    action: alchemyQuest.status === 'completed' ? { label: '[前往提交 晴空糖水屋(-12,-127)]', command: '/前往 -12 -127' } : undefined
+    action: alchemyQuest.status === 'completed' ? { label: '[前往提交 糖水屋(-12,-127)]', command: '/前往 -12 -127' } : undefined,
+    abandonCommand: '/放弃副职业任务 alchemist_apprentice'
+  });
+  if (deconstructQuest.status === 'accepted' || deconstructQuest.status === 'completed') entries.push({
+    category: '支线', title: '【副职业·解构师入门】', description: `收集兽核：${deconstructQuest.cores}/1`,
+    action: deconstructQuest.status === 'completed' ? { label: '[前往提交 异工坊(4,-121)]', command: '/前往 4 -121' } : undefined,
+    abandonCommand: '/放弃副职业任务 deconstructor_apprentice'
+  });
+  if (omniscientQuestProgress.status === 'accepted' || omniscientQuestProgress.status === 'completed') entries.push({
+    category: '支线', title: '【副职业·全知者入门】', description: `挑战并观察森林史莱姆：${omniscientQuestProgress.slimeObserved ? '已完成' : '未完成'}\n挑战并观察幽影狼王：${omniscientQuestProgress.wolfKingObserved ? '已完成' : '未完成'}`,
+    action: omniscientQuestProgress.status === 'completed' ? { label: '[前往提交 百味书屋(12,-116)]', command: '/前往 12 -116' } : undefined,
+    abandonCommand: '/放弃副职业任务 omniscient_apprentice'
   });
   const normalizedKeyword = keyword.trim();
   const filtered = entries.filter(task => (!category || task.category === category) && (!normalizedKeyword || `${task.title}\n${task.description}`.includes(normalizedKeyword)));
@@ -61,10 +76,12 @@ export const taskFormat = async (qqUserId: string, category?: TaskCategory, page
   if (category || normalizedKeyword) markdown.addText(`${category ? `分类：${category}` : '分类：全部'}${normalizedKeyword ? `｜搜索：${normalizedKeyword}` : ''}\n\n`);
   if (!items.length) markdown.addText(normalizedKeyword ? '没有找到符合条件的任务。' : category ? `当前没有${category}任务。` : '当前没有已接受的任务。');
   for (const [index, task] of items.entries()) {
-    markdown.addText(`${sequence[index]}${task.title}\n`).addBlockquote(task.description).addNewline();
+    markdown.addText(`${sequence[index]}${task.title}`);
+    if (task.abandonCommand) markdown.addText(' ').addButton('[放弃]', { data: task.abandonCommand, autoEnter: false });
+    markdown.addNewline().addBlockquote(task.description).addNewline();
     if (task.location) markdown.addText('> 坐标：').addButton(`${task.location.regionName} (${task.location.x}, ${task.location.y}, ${task.location.z})`, { data: `/前往 ${task.location.x} ${task.location.y}`, autoEnter: false }).addNewline();
     if (task.action) markdown.addButton(task.action.label, { data: task.action.command, autoEnter: false });
-    else markdown.addText('进行中');
+    else if (!task.abandonCommand) markdown.addText('进行中');
     markdown.addNewline().addNewline();
   }
   markdown.addText(`当前第(${currentPage}/${totalPages})页`);
@@ -72,10 +89,21 @@ export const taskFormat = async (qqUserId: string, category?: TaskCategory, page
 };
 
 const parseCategory = (value: string) => taskCategories.includes(value as TaskCategory) ? value as TaskCategory : undefined;
+const taskAbandonedFormat = (title: string, pickupLocation: string) => Format.create()
+  .addMarkdown(Format.createMarkdown().addTitle('任务放弃').addNewline().addNewline().addText(`你放弃了【${title}】\n可以前往${pickupLocation}重新接取任务`))
+  .addButtonGroup(Format.createButtonGroup().addRow().addButton('任务', '/任务', { type: 'command', autoEnter: true }));
+const secondaryQuestPickup: Record<'blacksmith_apprentice' | 'alchemist_apprentice' | 'deconstructor_apprentice' | 'omniscient_apprentice', { title: string; location: string }> = {
+  blacksmith_apprentice: { title: '副职业·锻造师入门', location: '百纳镇·铁匠铺（-17, -123）' },
+  alchemist_apprentice: { title: '副职业·炼金师入门', location: '百纳镇·糖水屋（-12, -127）' },
+  deconstructor_apprentice: { title: '副职业·解构师入门', location: '百纳镇·异工坊（4, -121）' },
+  omniscient_apprentice: { title: '副职业·全知者入门', location: '百纳镇·百味书屋（12, -116）' }
+};
 export const taskHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await message.send({ format: await taskFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法查看任务栏', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const taskCategoryHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const category = parseCategory(String(route.param('category'))); if (!category) throw new Error('不存在该任务分类。'); await message.send({ format: await taskFormat(event.current.UserId, category) }); } catch (error) { await message.send({ format: messageFormat('无法查看任务栏', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const taskPageHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const requested = String(route.param('category') ?? '全部'); const category = requested === '全部' ? undefined : parseCategory(requested); if (requested !== '全部' && !category) throw new Error('不存在该任务分类。'); await message.send({ format: await taskFormat(event.current.UserId, category, Number(route.param('page')), String(route.param('keyword') ?? '')) }); } catch (error) { await message.send({ format: messageFormat('无法查看任务栏', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const taskSearchHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await message.send({ format: await taskFormat(event.current.UserId, undefined, 1, String(route.param('keyword'))) }); } catch (error) { await message.send({ format: messageFormat('搜索失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const clearInvalidBountyHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await clearInvalidBounty(event.current.UserId, Number(route.param('id'))); await message.send({ format: await taskFormat(event.current.UserId, '悬赏') }); } catch (error) { await message.send({ format: messageFormat('清除失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const abandonBountyHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const result = await abandonBounty(event.current.UserId, Number(route.param('id'))); await message.send({ format: taskAbandonedFormat(result.title, '百纳镇·冒险者公会悬赏板') }); } catch (error) { await message.send({ format: messageFormat('放弃失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const abandonSecondaryQuestHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const code = String(route.param('code')) as keyof typeof secondaryQuestPickup; await abandonSecondaryQuest(event.current.UserId, code); const quest = secondaryQuestPickup[code]; await message.send({ format: taskAbandonedFormat(quest.title, quest.location) }); } catch (error) { await message.send({ format: messageFormat('放弃失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const acceptBountyHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireGuildBoard(event.current.UserId); const result = await acceptBounty(event.current.UserId, Number(route.param('id'))); await message.send({ format: messageFormat('接受悬赏', `已接受「${result.title}」，任务已加入任务栏。`) }); await message.send({ format: await bountyBoardFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('接受失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const claimBountyHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireGuildBoard(event.current.UserId); const result = await claimBounty(event.current.UserId, Number(route.param('id'))); await message.send({ format: messageFormat('悬赏结算', `已完成「${result.title}」\n获得铜币 ×${result.copper}`) }); await message.send({ format: await bountyBoardFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('领取失败', error instanceof Error ? error.message : '请稍后重试。') }); } };

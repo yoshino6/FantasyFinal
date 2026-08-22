@@ -103,8 +103,13 @@ export const setAutoPotionItem = async (qqUserId: string, kind: 'hp' | 'mp', ite
 /** 当前回合自动战斗的出招；无配置、冷却或蓝量异常由调用方回退至普攻。 */
 export const nextAutoBattleAction = async (qqUserId: string) => {
   const characterId = await characterIdFor(qqUserId); await ensureSettings(characterId); const pool = await getPool();
-  const [settings] = await pool.execute<(RowDataPacket & { enabled: number; turn_no: number })[]>('SELECT s.enabled,cs.turn_no FROM player_auto_battle_settings s JOIN combat_members cm ON cm.character_id=s.character_id JOIN combat_sessions cs ON cs.id=cm.session_id AND cs.state=\'active\' WHERE s.character_id=? LIMIT 1', [characterId]);
-  if (!settings[0] || !settings[0].enabled) return null;
+  const [settings] = await pool.execute<(RowDataPacket & { enabled: number; turn_no: number })[]>(`SELECT s.enabled,cs.turn_no
+    FROM player_auto_battle_settings s JOIN combat_members cm ON cm.character_id=s.character_id JOIN combat_sessions cs ON cs.id=cm.session_id AND cs.state='active' WHERE s.character_id=? LIMIT 1`, [characterId]);
+  const [storyBattle] = await pool.execute<RowDataPacket[]>(`SELECT 1 FROM combat_members cm JOIN combat_sessions cs ON cs.id=cm.session_id AND cs.state='active'
+    JOIN combat_targets ct ON ct.session_id=cs.id JOIN monster_spawns s ON s.id=ct.spawn_id JOIN monster_templates t ON t.id=s.template_id
+    JOIN player_story_progress sp ON sp.character_id=cm.character_id AND sp.story_code='forest_guide' AND sp.status IN ('joined','declined')
+    WHERE cm.character_id=? AND t.code='forest_slime' LIMIT 1`, [characterId]);
+  if (!settings[0] || !settings[0].enabled || storyBattle[0]) return null;
   const [actions] = await pool.execute<(RowDataPacket & { skill_id: number | null })[]>('SELECT skill_id FROM player_auto_battle_actions WHERE character_id=? ORDER BY sequence_no', [characterId]);
   if (!actions.length) return { type: 'attack' as const };
   const selected = actions[(Math.max(1, Number(settings[0].turn_no)) - 1) % actions.length];
@@ -126,6 +131,9 @@ export const pendingPartyAutoBattleActions = async (qqUserId: string) => {
     JOIN players p ON p.id=c.player_id
     JOIN player_auto_battle_settings settings ON settings.character_id=cm.character_id AND settings.enabled=1
     WHERE mine.character_id=? AND cm.is_defeated=0 AND cm.pending_action IS NULL
+      AND NOT EXISTS(SELECT 1 FROM combat_targets ct JOIN monster_spawns s ON s.id=ct.spawn_id JOIN monster_templates t ON t.id=s.template_id
+        WHERE ct.session_id=cs.id AND t.code='forest_slime'
+          AND EXISTS(SELECT 1 FROM player_story_progress story WHERE story.character_id=mine.character_id AND story.story_code='forest_guide' AND story.status IN ('joined','declined')))
     ORDER BY cm.character_id`, [characterId]);
   const actions = await Promise.all(members.map(async member => {
     const [configured] = await pool.execute<(RowDataPacket & { skill_id: number | null })[]>('SELECT skill_id FROM player_auto_battle_actions WHERE character_id=? ORDER BY sequence_no', [member.character_id]);

@@ -64,18 +64,45 @@ export const dangerFormat = () => Format.create()
   .addMarkdown(Format.createMarkdown().addTitle('序章·异界的危险（5/6）').addText(dangerText))
   .addButtonGroup(Format.createButtonGroup().addRow().addButton('接受恩赐', '/注册 继续', { type: 'command', autoEnter: true, style: 'blue' }));
 
-export const giftText = (category: GiftCategory = 'artifact') => Object.entries(gifts)
-  .filter(([, gift]) => gift.category === category)
-  .map(([code, gift]) => `【${gift.name}】${gift.summary}\n/选择恩赐 ${code}`).join('\n\n');
-export const giftFormat = (category: GiftCategory = 'artifact') => {
+const giftTypeLabels: Record<string, string> = {
+  holy_sword_shirulu: '长剑', demon_sword_aphia: '长剑', saint_staff_istaria: '法杖', death_dagger_azra: '匕首',
+  godfist_chronos: '拳刃', oracle_grimoire_sophia: '法书', prayer_orb_lumia: '法球', immortal_shield_auges: '副手',
+  star_crown_selene: '头肩', sky_robe_asteia: '上装', wind_girdle_hermes: '腰部', time_greaves_chronos: '下装',
+  gale_boots_sif: '脚部', oath_necklace_norn: '项链', fate_bracelet_clotho: '手镯', eternal_ring_aurora: '戒指'
+};
+
+const circledNumber = (index: number) => '①②③④⑤⑥⑦⑧⑨⑩'.charAt(index) || `${index + 1}.`;
+const giftEntries = (category: GiftCategory, keyword = '') => Object.entries(gifts)
+  .filter(([, gift]) => gift.category === category && (!keyword || gift.name.includes(keyword) || gift.summary.includes(keyword)));
+
+export const giftText = (category: GiftCategory = 'artifact', page = 1, keyword = '') => {
+  const entries = giftEntries(category, keyword); const totalPages = Math.max(1, Math.ceil(entries.length / 10));
+  const currentPage = Math.min(Math.max(1, page), totalPages);
+  const displayed = entries.slice((currentPage - 1) * 10, currentPage * 10);
+  return displayed.map(([code, gift], index) => `${circledNumber(index)}【${gift.name}】${giftTypeLabels[code] ?? '神技'}\n${gift.summary}\n/选择恩赐 ${code}`).join('\n\n')
+    + `\n\n当前第（${currentPage}/${totalPages}）页`;
+};
+
+export const giftFormat = (category: GiftCategory = 'artifact', page = 1, keyword = '') => {
   const categoryName = category === 'artifact' ? '神器' : '神技';
+  const entries = giftEntries(category, keyword); const totalPages = Math.max(1, Math.ceil(entries.length / 10));
+  const currentPage = Math.min(Math.max(1, page), totalPages);
+  const displayed = entries.slice((currentPage - 1) * 10, currentPage * 10);
   const markdown = Format.createMarkdown()
     .addTitle('序章·选择恩赐（6/6）')
     .addText(`\n\n女神说：“你可以带走一件神器，或一种神技。\n来看看吧。”\n当前分类：${categoryName}。点击蓝色名称来选择。\n\n`);
-  for (const [code, gift] of Object.entries(gifts).filter(([, gift]) => gift.category === category)) {
-    markdown.addButton(`【${gift.name}】`, { data: `/选择恩赐 ${code}`, autoEnter: false }).addText(` ${gift.summary}\n\n`);
+  if (!displayed.length) markdown.addBlockquote(keyword ? '没有找到匹配的恩赐。' : '此分类暂未配置恩赐。').addNewline();
+  for (const [index, [code, gift]] of displayed.entries()) {
+    markdown.addText(`${circledNumber(index)}`).addButton(`【${gift.name}】`, { data: `/选择恩赐 ${code}`, autoEnter: false })
+      .addText(`${giftTypeLabels[code] ?? '神技'}\n`).addBlockquote(gift.summary).addNewline().addNewline();
   }
+  markdown.addText(`当前第（${currentPage}/${totalPages}）页`);
+  const command = (target: number) => `/恩赐分页 ${categoryName} ${target}${keyword ? ` ${keyword}` : ''}`;
   return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow()
+    .addButton('上一页', command(Math.max(1, currentPage - 1)), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined })
+    .addButton('搜索', `/恩赐搜索 ${categoryName} `, { type: 'command', autoEnter: false, style: 'blue' })
+    .addButton('下一页', command(Math.min(totalPages, currentPage + 1)), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined })
+    .addRow()
     .addButton('神器', '/恩赐列表 神器', { type: 'command', autoEnter: true, style: category === 'artifact' ? 'blue' : undefined })
-    .addButton('神技', '/恩赐列表 能力', { type: 'command', autoEnter: true, style: category === 'ability' ? 'blue' : undefined }));
+    .addButton('神技', '/恩赐列表 神技', { type: 'command', autoEnter: true, style: category === 'ability' ? 'blue' : undefined }));
 };

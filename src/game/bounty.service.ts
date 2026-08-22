@@ -87,6 +87,22 @@ export const clearInvalidBounty = async (qqUserId: string, bountyId: number) => 
   await connection.execute('DELETE FROM player_bounties WHERE character_id=? AND bounty_id=?', [character.id, bountyId]);
 });
 
+export const abandonBounty = async (qqUserId: string, bountyId: number) => withTransaction(async connection => {
+  const character = await characterFor(connection, qqUserId, true);
+  const [rows] = await connection.execute<(RowDataPacket & { title: string })[]>(`SELECT b.title FROM player_bounties pb JOIN bounty_notices b ON b.id=pb.bounty_id
+    WHERE pb.character_id=? AND pb.bounty_id=? AND pb.status IN ('accepted','completed') FOR UPDATE`, [character.id, bountyId]);
+  const bounty = rows[0];
+  if (!bounty) throw new Error('没有找到可放弃的悬赏。');
+  await connection.execute("DELETE FROM player_bounties WHERE character_id=? AND bounty_id=?", [character.id, bountyId]);
+  return { title: bounty.title };
+});
+
+export const abandonSecondaryQuest = async (qqUserId: string, questCode: 'blacksmith_apprentice' | 'alchemist_apprentice' | 'deconstructor_apprentice' | 'omniscient_apprentice') => withTransaction(async connection => {
+  const character = await characterFor(connection, qqUserId, true);
+  const [result] = await connection.execute<any>("DELETE FROM player_side_quests WHERE character_id=? AND quest_code=? AND status IN ('accepted','completed')", [character.id, questCode]);
+  if (!Number(result.affectedRows)) throw new Error('没有找到可放弃的支线任务。');
+});
+
 export const acceptBounty = async (qqUserId: string, bountyId: number) => withTransaction(async connection => {
   const character = await characterFor(connection, qqUserId, true); if (!character.adventurer_registered) throw new Error('完成冒险者注册后才能接受悬赏。');
   await refreshBounties(connection);

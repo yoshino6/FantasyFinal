@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
-import { SESSION_TTL_MINUTES, calculateDerivedStats, gifts, isGiftCode } from './constants';
+import { SESSION_TTL_MINUTES, artifactGiftSlots, calculateDerivedStats, gifts, isGiftCode } from './constants';
 import { attributes, type Allocation, type DerivedStats, type Growth } from './types';
+import { recordSkillPointChange } from './skill-point-ledger.service';
 
 type RegistrationStage = 'story' | 'audience' | 'question' | 'destination' | 'danger' | 'choice';
 type SessionRow = RowDataPacket & { id: string; player_id: number; stage: RegistrationStage; expires_at: Date };
@@ -173,6 +174,7 @@ export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: 
   );
   const [newCharacters] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM characters WHERE player_id=?', [player.id]);
   const characterId = newCharacters[0].id;
+  await recordSkillPointChange(connection, Number(characterId), 1, 'initial_grant', null, '角色创建时获得的初始技能点');
   await connection.execute('UPDATE characters SET game_id=? WHERE id=?', [10000000 + Number(characterId), characterId]);
   await connection.execute(`INSERT INTO player_inventory (character_id,item_id,quantity)
     SELECT ?, id, 3 FROM item_definitions WHERE code='healing_herb'`, [characterId]);
@@ -180,12 +182,13 @@ export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: 
     SELECT ?, 1, id FROM item_definitions WHERE code='healing_herb'`, [characterId]);
   await connection.execute(`INSERT INTO player_skill_discoveries (character_id,skill_id)
     SELECT ?,id FROM skill_definitions WHERE code='appraisal'`, [characterId]);
-  if (giftCode === 'holy_sword_shirulu' || giftCode === 'demon_sword_aphia') {
+  if (gifts[giftCode].category === 'artifact') {
     const itemCode = giftCode;
     await connection.execute('INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max) SELECT ?,id,100,100,100 FROM item_definitions WHERE code=?', [characterId, itemCode]);
     await connection.execute(`INSERT INTO player_equipment (character_id,slot,item_id,instance_id)
-      SELECT ?, 'weapon', ii.item_id, ii.id FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
-      WHERE ii.character_id=? AND i.code=? ORDER BY ii.id DESC LIMIT 1`, [characterId, characterId, itemCode]);
+      SELECT ?, ?, ii.item_id, ii.id FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
+      WHERE ii.character_id=? AND i.code=? ORDER BY ii.id DESC LIMIT 1`, [characterId, artifactGiftSlots[giftCode as keyof typeof artifactGiftSlots], characterId, itemCode]);
+    await recalculateCharacterStats(connection, characterId);
   } else {
     await connection.execute('INSERT INTO player_blessings (character_id,code) VALUES (?,?)', [characterId, giftCode]);
     await connection.execute(`INSERT INTO player_skills (character_id,skill_id)
@@ -202,7 +205,7 @@ export const getCharacter = async (qqUserId: string): Promise<CharacterView | nu
   const [characterRows] = await pool.execute<(RowDataPacket & { id: number })[]>('SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1', [qqUserId]);
   if (characterRows[0]) await withTransaction(async connection => recalculateCharacterStats(connection, Number(characterRows[0].id)));
   const [rows] = await pool.execute<(RowDataPacket & CharacterView)[]>(
-    `SELECT c.name, c.gender, c.level, c.experience, c.realm_stage AS realmStage, c.adventurer_registered AS adventurerRegistered, c.constitution, c.spirit, c.strength, c.intelligence, c.agility, c.perception, c.constitution_growth AS constitutionGrowth, c.spirit_growth AS spiritGrowth, c.strength_growth AS strengthGrowth, c.intelligence_growth AS intelligenceGrowth, c.agility_growth AS agilityGrowth, c.perception_growth AS perceptionGrowth, c.hp_max AS hpMax, c.mp_max AS mpMax, c.current_hp AS currentHp, c.current_mp AS currentMp, c.activity_status AS activityStatus, c.physical_attack AS physicalAttack, c.magic_attack AS magicAttack, c.physical_defense AS physicalDefense, c.magic_defense AS magicDefense, c.accuracy, c.evasion, c.crit_rate_bp AS critRateBp, c.crit_damage_bp AS critDamageBp, c.crit_resist_bp AS critResistBp, c.crit_damage_reduction_bp AS critDamageReductionBp, c.tenacity, c.speed, c.element_mastery_json AS elementMastery, c.element_resistance_json AS elementResistance, r.name AS regionName, c.pos_x AS x, c.pos_y AS y, c.pos_z AS z, COALESCE(i.name, b.code) AS giftName FROM characters c JOIN players p ON p.id = c.player_id JOIN map_regions r ON r.id=c.current_region_id LEFT JOIN player_equipment pe ON pe.character_id=c.id AND pe.slot='weapon' LEFT JOIN item_definitions i ON i.id=pe.item_id LEFT JOIN player_blessings b ON b.character_id=c.id WHERE p.qq_user_id = ? LIMIT 1`,
+    `SELECT c.name, c.gender, c.level, c.experience, c.realm_stage AS realmStage, c.adventurer_registered AS adventurerRegistered, c.constitution, c.spirit, c.strength, c.intelligence, c.agility, c.perception, c.constitution_growth AS constitutionGrowth, c.spirit_growth AS spiritGrowth, c.strength_growth AS strengthGrowth, c.intelligence_growth AS intelligenceGrowth, c.agility_growth AS agilityGrowth, c.perception_growth AS perceptionGrowth, c.hp_max AS hpMax, c.mp_max AS mpMax, c.current_hp AS currentHp, c.current_mp AS currentMp, c.activity_status AS activityStatus, c.physical_attack AS physicalAttack, c.magic_attack AS magicAttack, c.physical_defense AS physicalDefense, c.magic_defense AS magicDefense, c.accuracy, c.evasion, c.crit_rate_bp AS critRateBp, c.crit_damage_bp AS critDamageBp, c.crit_resist_bp AS critResistBp, c.crit_damage_reduction_bp AS critDamageReductionBp, c.tenacity, c.speed, c.element_mastery_json AS elementMastery, c.element_resistance_json AS elementResistance, r.name AS regionName, c.pos_x AS x, c.pos_y AS y, c.pos_z AS z, COALESCE((SELECT ai.name FROM player_equipment ape JOIN item_definitions ai ON ai.id=ape.item_id WHERE ape.character_id=c.id AND ai.rarity='神器' LIMIT 1), b.code) AS giftName FROM characters c JOIN players p ON p.id = c.player_id JOIN map_regions r ON r.id=c.current_region_id LEFT JOIN player_blessings b ON b.character_id=c.id WHERE p.qq_user_id = ? LIMIT 1`,
     [qqUserId]
   );
   const row = rows[0];

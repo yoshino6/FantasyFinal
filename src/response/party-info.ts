@@ -9,7 +9,7 @@ const partyFormat = async (qqUserId: string) => {
     .addRow().addButton('队伍列表', '/队伍列表', { type: 'command', autoEnter: true }));
   const leader = party.leader!; const leaderLine = `【${leader.name}】id：${leader.gameId}`; const markdown = Format.createMarkdown().addTitle('我的队伍').addNewline().addNewline().addText(`队伍名：${party.name} `);
   if (party.ownId === party.leaderId) markdown.addButton('[修改]', { data: '/修改队伍名 ', autoEnter: false });
-  markdown.addText('\n队长：\n').addBlockquote(leaderLine).addButton('[查看信息]', { data: `/队伍成员信息 ${leader.gameId}`, autoEnter: false }).addNewline().addText('队员：\n');
+  markdown.addText('\n队长：\n').addBlockquote(leaderLine).addButton('[查看信息]', { data: `/队伍成员信息 ${leader.gameId}`, autoEnter: false }).addNewline().addNewline().addText('队员：').addNewline();
   if (!party.members.length) markdown.addBlockquote('暂无其他队员。').addNewline();
   for (const member of party.members) { markdown.addBlockquote(`【${member.name}】id：${member.gameId}`).addButton('[查看信息]', { data: `/队伍成员信息 ${member.gameId}`, autoEnter: false }); if (party.ownId === party.leaderId) markdown.addButton('[委任队长]', { data: `/委任队长 ${member.gameId}`, autoEnter: false }); markdown.addNewline(); }
   buttons.addRow().addButton('退出队伍', '/退出队伍', { type: 'command', autoEnter: true }).addButton('加入队伍', '/组队 加入 ', { type: 'command', autoEnter: false });

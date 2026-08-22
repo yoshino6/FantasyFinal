@@ -9,7 +9,7 @@ type CodexEntry = { id: number; name: string; category: string; detailId: string
 type Character = RowDataPacket & { id: number; level: number };
 
 const categories: Record<CodexKind, CodexCategory[]> = {
-  装备: [{ label: '全部', value: '全部' }, { label: '武器', value: '武器' }, { label: '头肩', value: '头肩' }, { label: '上装', value: '上装' }, { label: '腰部', value: '腰部' }, { label: '下装', value: '下装' }, { label: '脚部', value: '脚部' }, { label: '项链', value: '项链' }, { label: '手镯', value: '手镯' }, { label: '戒指', value: '戒指' }],
+  装备: [{ label: '全部', value: '全部' }, { label: '武器', value: '武器' }, { label: '头肩', value: '头肩' }, { label: '上装', value: '上装' }, { label: '腰部', value: '腰部' }, { label: '下装', value: '下装' }, { label: '脚部', value: '脚部' }, { label: '项链', value: '项链' }, { label: '手镯', value: '手镯' }, { label: '戒指', value: '戒指' }, { label: '异械', value: '异械' }],
   道具: [{ label: '全部', value: '全部' }, { label: '药剂', value: '药剂' }, { label: '食物', value: '食物' }, { label: '特殊', value: '特殊' }],
   材料: [{ label: '全部', value: '全部' }, { label: '食材', value: '食材' }, { label: '草药', value: '草药' }, { label: '兽材', value: '兽材' }, { label: '锻材', value: '锻材' }, { label: '特殊', value: '特殊' }],
   怪物: [{ label: '全部', value: '全部' }, { label: '普通', value: '普通' }, { label: '大型', value: '大型' }, { label: '精英', value: '精英' }, { label: '首领', value: '首领' }],
@@ -17,7 +17,7 @@ const categories: Record<CodexKind, CodexCategory[]> = {
 };
 
 const categoryExpression = (kind: CodexKind) => {
-  if (kind === '装备') return "CASE WHEN i.item_category='副手' THEN '武器' WHEN i.item_category='头部' THEN '头肩' ELSE i.item_category END";
+  if (kind === '装备') return "CASE WHEN i.item_category='副手' THEN '武器' WHEN i.item_category IN ('头部','眼部') THEN '头肩' ELSE i.item_category END";
   if (kind === '道具' || kind === '材料') return 'i.item_category';
   if (kind === '怪物') return "CASE t.monster_class WHEN 'normal' THEN '普通' WHEN 'large' THEN '大型' WHEN 'elite' THEN '精英' WHEN 'boss' THEN '首领' ELSE '特殊' END";
   return "CASE s.category WHEN 'physical' THEN '物理' WHEN 'magic' THEN '魔法' WHEN 'utility' THEN '辅助' WHEN 'passive' THEN '被动' ELSE '特殊' END";

@@ -1,15 +1,12 @@
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { recalculateCharacterStats } from './character.service';
+import { ensureSkillPointLedger, skillPointLedgerSummary } from './skill-point-ledger.service';
 
 const characterIdFor = async (connection: PoolConnection, qqUserId: string) => {
   const [rows] = await connection.execute<(RowDataPacket & { id: number; name: string; level: number; skill_points: number })[]>('SELECT c.id,c.name,c.level,c.skill_points FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE', [qqUserId]);
   if (!rows[0]) throw new Error('该用户尚未注册角色。'); return rows[0];
 };
-const activeCost = (level: number) => Math.floor(Math.max(1, level) / 10) + 1;
-const masteryCost = (level: number) => Math.max(1, level) * 2;
-const levelCost = (level: number) => Array.from({ length: Math.max(0, level - 1) }, (_, index) => activeCost(index + 1)).reduce((sum, value) => sum + value, 0);
-const masteryCodes = new Set(['longsword_mastery', 'shield_mastery', 'staff_mastery', 'spellbook_mastery', 'orb_mastery', 'dagger_mastery', 'fistblade_mastery']);
 
 export const auditCharacter = async (qqUserId: string) => withTransaction(async connection => {
   const character = await characterIdFor(connection, qqUserId);
@@ -26,9 +23,24 @@ export const auditInventory = async (qqUserId: string) => withTransaction(async 
   const character = await characterIdFor(connection, qqUserId);
   const [removed] = await connection.execute<any>('DELETE pi FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND (pi.quantity<=0 OR (i.stackable=0 AND pi.quantity>1))', [character.id]);
   const [quickRemoved] = await connection.execute<any>('DELETE qi FROM player_quick_items qi LEFT JOIN player_inventory pi ON pi.character_id=qi.character_id AND pi.item_id=qi.item_id WHERE qi.character_id=? AND pi.item_id IS NULL', [character.id]);
-  const removedCount = Number(removed.affectedRows); const quickRemovedCount = Number(quickRemoved.affectedRows);
-  const changed = Boolean(removedCount || quickRemovedCount);
-  return { name: character.name, changed, fixed: changed ? `已清除 ${removedCount} 条异常背包记录、${quickRemovedCount} 条失效快捷道具。` : '背包记录正常，未发现需要修正的数据。' };
+  const [artifacts] = await connection.execute<(RowDataPacket & { slot: string; item_id: number; instance_id: number | null })[]>(`SELECT pe.slot,pe.item_id,pe.instance_id FROM player_equipment pe
+    JOIN item_definitions i ON i.id=pe.item_id
+    WHERE pe.character_id=? AND i.rarity='神器'
+    ORDER BY FIELD(pe.slot,'weapon','offhand','shoulder','upper','waist','lower','feet','necklace','bracelet','ring') FOR UPDATE`, [character.id]);
+  const excessArtifacts = artifacts.slice(1);
+  for (const artifact of excessArtifacts) {
+    if (artifact.instance_id === null) {
+      await connection.execute('INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max) VALUES (?,?,100,100,100)', [character.id, artifact.item_id]);
+    }
+  }
+  if (excessArtifacts.length) {
+    const slots = excessArtifacts.map(() => '?').join(',');
+    await connection.execute(`DELETE FROM player_equipment WHERE character_id=? AND slot IN (${slots})`, [character.id, ...excessArtifacts.map(artifact => artifact.slot)]);
+    await recalculateCharacterStats(connection, Number(character.id));
+  }
+  const removedCount = Number(removed.affectedRows); const quickRemovedCount = Number(quickRemoved.affectedRows); const artifactCount = excessArtifacts.length;
+  const changed = Boolean(removedCount || quickRemovedCount || artifactCount);
+  return { name: character.name, changed, fixed: changed ? `已清除 ${removedCount} 条异常背包记录、${quickRemovedCount} 条失效快捷道具${artifactCount ? `，并卸下 ${artifactCount} 件超额神器至背包` : ''}。` : '背包与装备记录正常，未发现需要修正的数据。' };
 });
 
 export const auditPlayerState = async (qqUserId: string) => withTransaction(async connection => {
@@ -68,58 +80,27 @@ export const auditPlayerState = async (qqUserId: string) => withTransaction(asyn
 
 export const auditSkills = async (qqUserId: string) => withTransaction(async connection => {
   const character = await characterIdFor(connection, qqUserId);
-  type SkillAuditRow = RowDataPacket & { skill_id: number; code: string; level: number; max_level: number; learn_cost: number; learned_at: Date };
-  const readSkills = async () => (await connection.execute<SkillAuditRow[]>('SELECT ps.skill_id,s.code,ps.level,s.max_level,s.learn_cost,ps.learned_at FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? ORDER BY ps.learned_at,ps.skill_id FOR UPDATE', [character.id]))[0];
-  let skills = await readSkills(); let changed = false;
+  const migrated = await ensureSkillPointLedger(connection, character.id, Number(character.skill_points));
+  type SkillAuditRow = RowDataPacket & { skill_id: number; level: number; max_level: number };
+  const [skills] = await connection.execute<SkillAuditRow[]>('SELECT ps.skill_id,ps.level,s.max_level FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? FOR UPDATE', [character.id]);
+  let changed = migrated;
   for (const skill of skills) {
     const level = Math.min(Math.max(1, Number(skill.level)), Number(skill.max_level));
     if (level !== Number(skill.level)) { await connection.execute('UPDATE player_skills SET level=? WHERE character_id=? AND skill_id=?', [level, character.id, skill.skill_id]); changed = true; }
   }
-  await connection.execute('UPDATE player_skill_specializations SET level=LEAST(GREATEST(level,1),CASE WHEN specialization=\'overcharge\' AND skill_id IN (SELECT id FROM skill_definitions WHERE code IN (\'longsword_mastery\',\'shield_mastery\',\'staff_mastery\',\'spellbook_mastery\',\'orb_mastery\',\'dagger_mastery\',\'fistblade_mastery\')) THEN 5 WHEN specialization=\'instant\' AND skill_id IN (SELECT id FROM skill_definitions WHERE code IN (\'longsword_mastery\',\'shield_mastery\',\'staff_mastery\',\'spellbook_mastery\',\'orb_mastery\',\'dagger_mastery\',\'fistblade_mastery\')) THEN 6 ELSE 100 END) WHERE character_id=?', [character.id]);
-  skills = await readSkills();
-  let [specials] = await connection.execute<(RowDataPacket & { skill_id: number; specialization: string; level: number })[]>('SELECT skill_id,specialization,level FROM player_skill_specializations WHERE character_id=?', [character.id]);
-  const [appraisals] = await connection.execute<(RowDataPacket & { range_level: number; information_level: number })[]>('SELECT range_level,information_level FROM player_appraisal_progress WHERE character_id=? FOR UPDATE', [character.id]);
-  if (appraisals[0]) await connection.execute('UPDATE player_appraisal_progress SET range_level=LEAST(GREATEST(range_level,1),10),information_level=LEAST(GREATEST(information_level,1),4) WHERE character_id=?', [character.id]);
-  const skillSpend = (rows: SkillAuditRow[], specializationRows: (RowDataPacket & { skill_id: number; specialization: string; level: number })[]) => rows.reduce((total, skill) => {
-    if (masteryCodes.has(skill.code)) return total;
-    if (skill.code === 'appraisal') { const app = appraisals[0]; return total + Number(skill.learn_cost) + (app ? Array.from({ length: Math.max(0, Math.min(10, Number(app.range_level)) - 1) }, (_, index) => index + 1).reduce((sum, cost) => sum + cost, 0) + Array.from({ length: Math.max(0, Math.min(4, Number(app.information_level)) - 1) }, (_, index) => index + 2).reduce((sum, cost) => sum + cost, 0) : 0); }
-    return total + Number(skill.learn_cost) + levelCost(Math.min(Number(skill.level), Number(skill.max_level)));
-  }, 0) + specializationRows.reduce((total, row) => { const skill = rows.find(item => Number(item.skill_id) === Number(row.skill_id)); return skill && masteryCodes.has(skill.code) ? total + Array.from({ length: Math.max(0, Number(row.level) - 1) }, (_, index) => masteryCost(index + 1)).reduce((sum, cost) => sum + cost, 0) : total; }, 0);
-  const budget = Number(character.level);
-  // 若已学习的付费技能本身超出等级可用点数，移除最后学到的超额技能；只重置等级无法解决这种异常，因而会反复触发核查。
-  const paidSkills = () => skills.filter(skill => !masteryCodes.has(skill.code));
-  let learnedCost = paidSkills().reduce((sum, skill) => sum + Number(skill.learn_cost), 0);
-  let removedSkills = 0;
-  while (learnedCost > budget && paidSkills().length) {
-    const invalid = paidSkills().at(-1)!;
-    await connection.execute('DELETE FROM player_skill_specializations WHERE character_id=? AND skill_id=?', [character.id, invalid.skill_id]);
-    await connection.execute('DELETE FROM player_skills WHERE character_id=? AND skill_id=?', [character.id, invalid.skill_id]);
-    if (invalid.code === 'appraisal') await connection.execute('DELETE FROM player_appraisal_progress WHERE character_id=?', [character.id]);
-    skills = skills.filter(skill => Number(skill.skill_id) !== Number(invalid.skill_id));
-    learnedCost -= Number(invalid.learn_cost); removedSkills += 1; changed = true;
-  }
-  const spend = skillSpend(skills, specials.filter(row => skills.some(skill => Number(skill.skill_id) === Number(row.skill_id))));
-  const resetUpgrades = spend > budget;
-  if (resetUpgrades) {
-    await connection.execute('UPDATE player_skills SET level=1,quick_slot=NULL WHERE character_id=?', [character.id]);
-    await connection.execute('UPDATE player_skill_specializations SET level=1 WHERE character_id=?', [character.id]);
-    await connection.execute('UPDATE player_appraisal_progress SET range_level=1,information_level=1 WHERE character_id=?', [character.id]);
-    changed = true;
-  }
-  if (resetUpgrades) {
-    skills = await readSkills();
-    [specials] = await connection.execute<(RowDataPacket & { skill_id: number; specialization: string; level: number })[]>('SELECT skill_id,specialization,level FROM player_skill_specializations WHERE character_id=?', [character.id]);
-  }
-  const expectedPoints = Math.max(0, budget - (resetUpgrades ? skills.filter(skill => !masteryCodes.has(skill.code)).reduce((sum, skill) => sum + Number(skill.learn_cost), 0) : spend));
-  const pointMismatch = Number(character.skill_points) !== expectedPoints;
-  if (pointMismatch) { await connection.execute('UPDATE characters SET skill_points=? WHERE id=?', [expectedPoints, character.id]); changed = true; }
-  const fixed = resetUpgrades
-    ? `发现技能点异常（已消耗 ${spend}／应得 ${budget}），已重置异常的技能等级与专精，并校正剩余技能点为 ${expectedPoints}。${removedSkills ? `已移除 ${removedSkills} 个超额学习技能。` : ''}`
-    : removedSkills
-      ? `已移除 ${removedSkills} 个超额学习技能，并校正剩余技能点为 ${expectedPoints}。`
-    : pointMismatch
-      ? `技能点记录异常，已按 Lv.${character.level} 的应得技能点校正为 ${expectedPoints}。`
-      : `技能数据正常，当前剩余技能点为 ${expectedPoints}。`;
+  const [specializationFix] = await connection.execute<any>('UPDATE player_skill_specializations SET level=LEAST(GREATEST(level,1),CASE WHEN specialization=\'overcharge\' AND skill_id IN (SELECT id FROM skill_definitions WHERE code IN (\'longsword_mastery\',\'shield_mastery\',\'staff_mastery\',\'spellbook_mastery\',\'orb_mastery\',\'dagger_mastery\',\'fistblade_mastery\')) THEN 5 WHEN specialization=\'instant\' AND skill_id IN (SELECT id FROM skill_definitions WHERE code IN (\'longsword_mastery\',\'shield_mastery\',\'staff_mastery\',\'spellbook_mastery\',\'orb_mastery\',\'dagger_mastery\',\'fistblade_mastery\')) THEN 6 ELSE 100 END) WHERE character_id=?', [character.id]);
+  if (Number(specializationFix.affectedRows)) changed = true;
+  const [appraisalFix] = await connection.execute<any>('UPDATE player_appraisal_progress SET range_level=LEAST(GREATEST(range_level,1),10),information_level=LEAST(GREATEST(information_level,1),4) WHERE character_id=?', [character.id]);
+  if (Number(appraisalFix.affectedRows)) changed = true;
+  const summary = await skillPointLedgerSummary(connection, character.id);
+  const pointMismatch = Number(character.skill_points) !== summary.balance;
+  if (pointMismatch) { await connection.execute('UPDATE characters SET skill_points=? WHERE id=?', [Math.max(0, summary.balance), character.id]); changed = true; }
+  const notes = [
+    migrated ? '已为旧存档建立技能点账本起始余额；此前未留存的历史消耗无法精确回溯。' : '',
+    pointMismatch ? `已按技能点账本校正剩余技能点为 ${Math.max(0, summary.balance)}。` : '',
+    `技能点账本：获得 ${summary.earned} 点｜实际消耗 ${summary.spent} 点｜当前 ${Math.max(0, summary.balance)} 点。`
+  ].filter(Boolean);
+  const fixed = notes.join('') || '技能数据正常。';
   return { name: character.name, changed, fixed };
 });
 

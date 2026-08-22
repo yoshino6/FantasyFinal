@@ -58,7 +58,18 @@ const purificationRecipes: Record<string, string> = {
   beast_bone: 'refined_beast_bone', beast_hide: 'refined_beast_hide', beast_tendon: 'refined_beast_tendon', beast_core: 'refined_beast_core',
   magic_wool: 'refined_magic_wool', magic_tusk: 'refined_magic_tusk', magic_scale: 'refined_magic_scale', magic_claw: 'refined_magic_claw', magic_heartcore: 'refined_magic_heartcore'
 };
-const alchemyRecipes: Record<string, string> = { beast_meat: 'blood_residue', healing_herb: 'herbal_extract', beast_core: 'mana_dust' };
+type AlchemyRecipe = { outputCode: string; auxiliaryCode?: string; reagentCode?: string };
+const alchemyRecipes: Record<string, AlchemyRecipe[]> = {
+  beast_meat: [{ outputCode: 'blood_residue' }],
+  healing_herb: [{ outputCode: 'herbal_extract' }],
+  beast_core: [{ outputCode: 'mana_dust' }],
+  blood_residue: [{ outputCode: 'residue_life_potion', auxiliaryCode: 'energy_ember' }],
+  energy_ember: [{ outputCode: 'ember_mana_potion', auxiliaryCode: 'blood_residue' }],
+  magic_unit: [{ outputCode: 'minor_experience_elixir', auxiliaryCode: 'blood_residue' }, { outputCode: 'minor_luck_elixir', auxiliaryCode: 'energy_ember' }]
+};
+const recipeFor = (mainCode: string | null, auxiliaryCode: string | null, reagentCode: string | null) => mainCode
+  ? (alchemyRecipes[mainCode] ?? []).find(recipe => (recipe.auxiliaryCode ?? null) === (auxiliaryCode ?? null) && (recipe.reagentCode ?? null) === (reagentCode ?? null))
+  : undefined;
 const proficiencyRequired = (level: number) => level === 1 ? 10 : level === 2 ? 50 : level === 3 ? 200 : level === 4 ? 1000 : 1000 * Math.pow(5, level - 4);
 const alchemistProgressFor = async (connection: PoolConnection | Awaited<ReturnType<typeof getPool>>, characterId: number, lock = false) => {
   const [characters] = await connection.execute<(RowDataPacket & { secondary_profession_code: string | null })[]>(`SELECT secondary_profession_code FROM characters WHERE id=?${lock ? ' FOR UPDATE' : ''}`, [characterId]);
@@ -116,9 +127,13 @@ export const executePurification = async (qqUserId: string) => withTransaction(a
 });
 
 const alchemyStateFor = async (connection: PoolConnection | Awaited<ReturnType<typeof getPool>>, characterId: number) => {
-  const [rows] = await connection.execute<(RowDataPacket & { main_id: number | null; auxiliary_id: number | null; reagent_id: number | null; main_name: string | null; auxiliary_name: string | null; reagent_name: string | null; main_code: string | null })[]>(`SELECT s.main_item_id AS main_id,s.auxiliary_item_id AS auxiliary_id,s.reagent_item_id AS reagent_id,m.name AS main_name,a.name AS auxiliary_name,r.name AS reagent_name,m.code AS main_code FROM player_alchemy_sessions s LEFT JOIN item_definitions m ON m.id=s.main_item_id LEFT JOIN item_definitions a ON a.id=s.auxiliary_item_id LEFT JOIN item_definitions r ON r.id=s.reagent_item_id WHERE s.character_id=?`, [characterId]); return rows[0] ?? { main_id: null, auxiliary_id: null, reagent_id: null, main_name: null, auxiliary_name: null, reagent_name: null, main_code: null };
+  const [rows] = await connection.execute<(RowDataPacket & { main_id: number | null; auxiliary_id: number | null; reagent_id: number | null; main_name: string | null; auxiliary_name: string | null; reagent_name: string | null; main_code: string | null; auxiliary_code: string | null; reagent_code: string | null })[]>(`SELECT s.main_item_id AS main_id,s.auxiliary_item_id AS auxiliary_id,s.reagent_item_id AS reagent_id,m.name AS main_name,a.name AS auxiliary_name,r.name AS reagent_name,m.code AS main_code,a.code AS auxiliary_code,r.code AS reagent_code FROM player_alchemy_sessions s LEFT JOIN item_definitions m ON m.id=s.main_item_id LEFT JOIN item_definitions a ON a.id=s.auxiliary_item_id LEFT JOIN item_definitions r ON r.id=s.reagent_item_id WHERE s.character_id=?`, [characterId]); return rows[0] ?? { main_id: null, auxiliary_id: null, reagent_id: null, main_name: null, auxiliary_name: null, reagent_name: null, main_code: null, auxiliary_code: null, reagent_code: null };
 };
-export const alchemyState = async (qqUserId: string) => { const pool = await getPool(); const characterId = await characterIdFor(pool, qqUserId); const progress = await alchemistProgressFor(pool, characterId); const state = await alchemyStateFor(pool, characterId); return { progress, mainId: state.main_id, mainName: state.main_name, auxiliaryId: state.auxiliary_id, auxiliaryName: state.auxiliary_name, reagentId: state.reagent_id, reagentName: state.reagent_name, outputName: state.main_code ? ({ beast_meat: '血肉残渣', healing_herb: '草木萃取液', beast_core: '魔力粉尘' }[state.main_code] ?? '未知炼金产物') : null }; };
+export const alchemyState = async (qqUserId: string) => {
+  const pool = await getPool(); const characterId = await characterIdFor(pool, qqUserId); const progress = await alchemistProgressFor(pool, characterId); const state = await alchemyStateFor(pool, characterId); const recipe = recipeFor(state.main_code, state.auxiliary_code, state.reagent_code);
+  const [outputs] = recipe ? await pool.execute<(RowDataPacket & { name: string })[]>('SELECT name FROM item_definitions WHERE code=? LIMIT 1', [recipe.outputCode]) : [[] as any];
+  return { progress, mainId: state.main_id, mainName: state.main_name, auxiliaryId: state.auxiliary_id, auxiliaryName: state.auxiliary_name, reagentId: state.reagent_id, reagentName: state.reagent_name, outputName: outputs[0]?.name ?? null };
+};
 export const selectAlchemyMaterial = async (qqUserId: string, role: 'main' | 'auxiliary' | 'reagent', itemKey: string) => withTransaction(async connection => {
   const characterId = await characterIdFor(connection, qqUserId, true); await alchemistProgressFor(connection, characterId, true); const itemId = Number(itemKey);
   const [items] = await connection.execute<AlchemyItemRow[]>(`SELECT i.id,i.code,i.name,i.item_category,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type='material' AND ${Number.isInteger(itemId) && itemId > 0 ? 'i.id=?' : 'i.name=?'} LIMIT 1 FOR UPDATE`, [characterId, Number.isInteger(itemId) && itemId > 0 ? itemId : itemKey]);
@@ -178,11 +193,11 @@ export const deleteAlchemyFormula = async (qqUserId: string, formulaId: number) 
   const [result] = await connection.execute<any>('DELETE FROM player_alchemy_formulas WHERE id=? AND character_id=?', [formulaId, characterId]); if (!result.affectedRows) throw new Error('未找到该快捷配方。');
 });
 export const executeAlchemy = async (qqUserId: string) => withTransaction(async connection => {
-  const characterId = await characterIdFor(connection, qqUserId, true); const progress = await alchemistProgressFor(connection, characterId, true); const state = await alchemyStateFor(connection, characterId); if (!state.main_id || !state.main_code || !alchemyRecipes[state.main_code]) throw new Error('请选择可用的主材。');
+  const characterId = await characterIdFor(connection, qqUserId, true); const progress = await alchemistProgressFor(connection, characterId, true); const state = await alchemyStateFor(connection, characterId); const recipe = recipeFor(state.main_code, state.auxiliary_code, state.reagent_code); if (!state.main_id || !recipe) throw new Error('当前主材、辅材与反应剂无法形成稳定配方。');
   const ids = [state.main_id, state.auxiliary_id, state.reagent_id].filter((id): id is number => id !== null); const demands = new Map<number, number>(); ids.forEach(id => demands.set(id, (demands.get(id) ?? 0) + 1)); const marks = [...demands.keys()].map(() => '?').join(',');
   const [items] = await connection.execute<AlchemyItemRow[]>(`SELECT i.id,i.code,i.name,i.item_category,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.id IN (${marks}) FOR UPDATE`, [characterId, ...demands.keys()]);
   if ([...demands.entries()].some(([id, quantity]) => Number(items.find(item => Number(item.id) === id)?.quantity ?? 0) < quantity)) throw new Error('放入的材料数量不足。');
-  const outputCode = alchemyRecipes[state.main_code]; const [outputs] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>('SELECT id,name FROM item_definitions WHERE code=? LIMIT 1 FOR UPDATE', [outputCode]); if (!outputs[0]) throw new Error('炼金产物尚未初始化，请重启机器人。');
+  const outputCode = recipe.outputCode; const [outputs] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>('SELECT id,name FROM item_definitions WHERE code=? LIMIT 1 FOR UPDATE', [outputCode]); if (!outputs[0]) throw new Error('炼金产物尚未初始化，请重启机器人。');
   const reagentBonus = state.reagent_id ? 10 : 0; const success = Math.min(95, 70 + progress.bonus + reagentBonus); const succeeded = Math.random() * 100 < success;
   for (const [id, quantity] of demands) await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [quantity, characterId, id]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND quantity<=0', [characterId]);
   if (succeeded) { await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,1) ON DUPLICATE KEY UPDATE quantity=quantity+1', [characterId, outputs[0].id]); await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [characterId, outputs[0].id]); }

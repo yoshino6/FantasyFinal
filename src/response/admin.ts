@@ -5,6 +5,7 @@ import { messageFormat } from '../game/message';
 import { adminDefeatBoss, adminSpawnBoss, bossEvents } from '../game/adventure.service';
 import { postBossBounty } from '../game/bounty.service';
 import { auditAllPlayers, auditCharacter, auditInventory, auditPlayerState, auditSkills } from '../game/admin-audit.service';
+import { dungeonEvents } from '../game/dungeon.service';
 
 const commandLink = (markdown: ReturnType<typeof Format.createMarkdown>, title: string, command: string, format: string) => markdown.addText('> ').addButton(title, { data: command, autoEnter: false }).addNewline().addBlockquote(format).addNewline();
 const textButton = (_title: string, command: string) => ({ data: command, autoEnter: false });
@@ -23,18 +24,43 @@ const adminFormat = (role: PermissionRole | null) => {
     commandLink(markdown, '[个人发放]', '管理员命令 邮件发放 个人', '格式：管理员命令 邮件发放 个人');
     commandLink(markdown, '[全服发放]', '管理员命令 邮件发放 全服', '格式：管理员命令 邮件发放 全服');
     markdown.addNewline().addText('玩家管理').addNewline().addText('> ').addButton('[数据核查]', textButton('玩家数据核查', '玩家数据核查')).addNewline().addBlockquote('核查并修复玩家的角色、背包、技能与状态数据。');
-    markdown.addNewline().addText('事件管理').addNewline().addText('> ').addButton('[BOSS管理]', textButton('BOSS管理', 'BOSS管理')).addNewline().addBlockquote('查看地图中 BOSS 事件并操作。');
+    markdown.addNewline().addText('事件管理').addNewline().addNewline();
+    markdown.addText('> ').addButton('[BOSS管理]', textButton('BOSS管理', 'BOSS管理')).addNewline().addBlockquote('查看地图中 BOSS 事件并操作。').addNewline();
+    markdown.addText('> ').addButton('[迷宫管理]', textButton('迷宫管理', '迷宫管理')).addNewline().addBlockquote('查看当前地下迷宫入口、探索状态与最终 Boss。');
   }
   return Format.create().addMarkdown(markdown);
 };
 
 const bossManagementFormat = async () => {
   const events = await bossEvents(); const markdown = Format.createMarkdown();
+  const groups = new Map<string, typeof events>();
+  for (const event of events) {
+    const group = groups.get(event.regionCode) ?? [];
+    group.push(event); groups.set(event.regionCode, group);
+  }
+  for (const group of groups.values()) {
+    markdown.addTitle(`【${group[0].regionName}】`).addNewline().addNewline();
+    for (const [index, event] of group.entries()) {
+      markdown.addText(`${'①②③④⑤⑥⑦⑧⑨⑩'[index] ?? `${index + 1}.`}${event.bossName}`).addButton('[刷新]', textButton('刷新Boss', `BOSS刷新 ${event.bossCode}`)).addButton('[消灭]', textButton('消灭Boss', `BOSS消灭 ${event.bossCode}`)).addButton('[上赏]', textButton('Boss上赏', `BOSS上赏 ${event.bossCode}`)).addNewline();
+      if (event.x === null) markdown.addBlockquote('未刷新').addNewline().addNewline();
+      else markdown.addText('> 当前坐标：').addButton(`(${event.x}, ${event.y}, ${event.z})`, textButton('前往Boss坐标', `前往 ${event.x} ${event.y}`)).addNewline().addBlockquote(`当前词条：${event.traits.join('、') || '无'}`).addNewline().addNewline();
+    }
+  }
+  return Format.create().addMarkdown(markdown);
+};
+
+const dungeonManagementFormat = async () => {
+  const events = await dungeonEvents(); const markdown = Format.createMarkdown().addTitle('迷宫管理').addNewline().addNewline();
+  if (!events.length) markdown.addBlockquote('当前没有正在维持的地下迷宫事件。');
+  const sequence = '①②③④⑤⑥⑦⑧⑨⑩';
   for (const [index, event] of events.entries()) {
-    markdown.addTitle(`【${event.regionName}】`).addNewline().addNewline();
-    markdown.addText(`${'①②③④⑤⑥⑦⑧⑨⑩'[index] ?? `${index + 1}.`}${event.bossName}`).addButton('[刷新]', textButton('刷新Boss', `BOSS刷新 ${event.bossCode}`)).addButton('[消灭]', textButton('消灭Boss', `BOSS消灭 ${event.bossCode}`)).addButton('[上赏]', textButton('Boss上赏', `BOSS上赏 ${event.bossCode}`)).addNewline();
-    if (event.x === null) markdown.addBlockquote('未刷新').addNewline().addNewline();
-    else markdown.addText('> 当前坐标：').addButton(`(${event.x}, ${event.y}, ${event.z})`, textButton('前往Boss坐标', `前往 ${event.x} ${event.y}`)).addNewline().addBlockquote(`当前词条：${event.traits.join('、') || '无'}`).addNewline().addNewline();
+    const state = event.state === 'active' ? '探索中' : '已攻略，等待重构';
+    markdown.addText(`${sequence[index] ?? `${index + 1}.`}地下迷宫 #${event.id}`).addNewline();
+    markdown.addBlockquote(`状态：${state}｜探索者：${event.explorers} 人`).addNewline();
+    markdown.addText('> 入口：').addButton(`幽暗密林（${event.x}, ${event.y}）`, textButton('前往迷宫入口', `前往 ${event.x} ${event.y}`)).addNewline();
+    markdown.addBlockquote(`最终 Boss：${event.bossName}${event.bossDefeated ? '（已击败）' : event.bossHp === null ? '（未生成）' : `｜当前生命 ${event.bossHp}`}`).addNewline();
+    if (event.refreshAt) markdown.addBlockquote(`重构时间：${event.refreshAt.toLocaleString('zh-CN', { hour12: false })}`).addNewline();
+    markdown.addNewline();
   }
   return Format.create().addMarkdown(markdown);
 };
@@ -96,8 +122,8 @@ const showEdit = async (message: any, qqUserId: string, edit?: MailEdit) => mess
 export default async () => { const [event] = useEvent(); const [message] = useMessage(); try { await message.send({ format: adminFormat(await permissionFor(event.current.UserId)) }); } catch (error) { await message.send({ format: messageFormat('管理员面板不可用', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const ownerLoginHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await loginAsOwner(event.current.UserId, String(route.param('password'))); await message.send({ format: messageFormat('管理员登录成功', '你已获得主人权限。') }); await message.send({ format: adminFormat('owner') }); } catch (error) { await message.send({ format: messageFormat('管理员登录失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const grantAdministratorHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const target = await mentionedUserId(); await grantAdministrator(event.current.UserId, target); await message.send({ format: messageFormat('权限已给予', `已给予 QID：${target} 管理员权限。`) }); } catch (error) { await message.send({ format: messageFormat('权限操作失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
-export const revokeAdministratorHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const target = await mentionedUserId(); await revokeAdministrator(event.current.UserId, target); await message.send({ format: messageFormat('权限已撤销', `已撤销 QID：${target} 的管理员权限。`) }); } catch (error) { await message.send({ format: messageFormat('权限操作失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
-export const permissionListHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireOwner(event.current.UserId); const entries = await permissionList(); const markdown = Format.createMarkdown().addTitle('当前权限列表').addNewline().addNewline(); const sequence = '①②③④⑤⑥⑦⑧⑨⑩'; entries.forEach((entry, index) => markdown.addText(`${sequence[index] ?? `${index + 1}.`}QID：${entry.qqUserId}`).addNewline().addBlockquote(`权限：${entry.role === 'owner' ? '至高' : '管理'}`).addNewline().addBlockquote(`游戏id：${entry.characterId ?? '未注册'}`).addNewline().addBlockquote(entry.name).addNewline().addNewline()); await message.send({ format: Format.create().addMarkdown(markdown) }); } catch (error) { await message.send({ format: messageFormat('查看权限失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const revokeAdministratorHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const fromCommand = String(route.param('qq') ?? '').trim(); const target = fromCommand || await mentionedUserId(); await revokeAdministrator(event.current.UserId, target); await message.send({ format: messageFormat('权限已撤销', `已撤销 QID：${target} 的管理员权限。`) }); } catch (error) { await message.send({ format: messageFormat('权限操作失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const permissionListHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireOwner(event.current.UserId); const entries = await permissionList(); const markdown = Format.createMarkdown().addTitle('当前权限列表').addNewline().addNewline(); const sequence = '①②③④⑤⑥⑦⑧⑨⑩'; entries.forEach((entry, index) => { markdown.addText(`${sequence[index] ?? `${index + 1}.`}QID：${entry.qqUserId}`); if (entry.role === 'admin') markdown.addText(' ').addButton('[撤销权限]', textButton('撤销权限', `撤销权限 ${entry.qqUserId}`)); markdown.addNewline().addBlockquote(`权限：${entry.role === 'owner' ? '至高' : '管理'}`).addNewline().addBlockquote(`游戏id：${entry.characterId ?? '未注册'}`).addNewline().addBlockquote(entry.name).addNewline().addNewline(); }); await message.send({ format: Format.create().addMarkdown(markdown) }); } catch (error) { await message.send({ format: messageFormat('查看权限失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 
 export const playerAuditPanelHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: playerAuditFormat() }); } catch (error) { await message.send({ format: messageFormat('数据核查失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const playerAuditHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const target = await mentionedUserId(); const type = String(route.param('type')); const result = type === '角色' ? await auditCharacter(target) : type === '背包' ? await auditInventory(target) : type === '状态' ? await auditPlayerState(target) : await auditSkills(target); await message.send({ format: messageFormat('玩家数据核查', `目标：${result.name}\n${result.fixed}`) }); } catch (error) { await message.send({ format: messageFormat('数据核查失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
@@ -118,6 +144,7 @@ export const allPlayersAuditHandler = async () => {
 };
 
 export const bossManagementHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: await bossManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('BOSS管理失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const dungeonManagementHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: await dungeonManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('迷宫管理失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const bossSpawnHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const result = await adminSpawnBoss(String(route.param('code'))); await message.send({ format: messageFormat('BOSS已刷新', result?.x === null ? '未能找到可用刷新坐标。' : `${result?.bossName ?? 'BOSS'} 已刷新至 (${result?.x}, ${result?.y}, ${result?.z})。`) }); await message.send({ format: await bossManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('BOSS刷新失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const bossDefeatHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const defeated = await adminDefeatBoss(String(route.param('code'))); await message.send({ format: messageFormat(defeated ? 'BOSS已消灭' : 'BOSS未刷新', defeated ? '当前地图中的该 Boss 已被移除。' : '当前没有可消灭的该 Boss。') }); await message.send({ format: await bossManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('BOSS消灭失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const bossBountyHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const result = await postBossBounty(String(route.param('code'))); await message.send({ format: messageFormat('已上悬赏板', `「${result?.title ?? 'BOSS悬赏'}」已立即同步至冒险者公会悬赏板。`) }); await message.send({ format: await bossManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('上赏失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
