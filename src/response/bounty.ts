@@ -7,6 +7,7 @@ import { omniscientQuest } from '../game/omniscient.service';
 import { currentMainQuest } from '../game/main-quest.service';
 import { requireNpcAtCurrentPosition } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
+import { dungeonSecretProgress, secondaryProfessionGuide } from '../game/dungeon-quest.service';
 
 export const bountyBoardFormat = async (qqUserId: string) => {
   const data = await bountyBoard(qqUserId); const markdown = Format.createMarkdown().addTitle('冒险者公会·悬赏板').addNewline().addNewline().addBlockquote(`今日的羊皮纸整齐钉在木板上。你当前可同时接受三份悬赏：${data.activeCount}/3。`).addNewline().addNewline();
@@ -39,7 +40,7 @@ const taskButtons = (category: TaskCategory | undefined, page: number, totalPage
 };
 
 export const taskFormat = async (qqUserId: string, category?: TaskCategory, page = 1, keyword = '') => {
-  const [mainQuest, bounties, smithQuest, alchemyQuest, deconstructQuest, omniscientQuestProgress] = await Promise.all([currentMainQuest(qqUserId), playerBounties(qqUserId), blacksmithQuest(qqUserId), alchemistQuest(qqUserId), deconstructorQuest(qqUserId), omniscientQuest(qqUserId)]);
+  const [mainQuest, bounties, smithQuest, alchemyQuest, deconstructQuest, omniscientQuestProgress, dungeonSecret, needsSecondaryGuide] = await Promise.all([currentMainQuest(qqUserId), playerBounties(qqUserId), blacksmithQuest(qqUserId), alchemistQuest(qqUserId), deconstructorQuest(qqUserId), omniscientQuest(qqUserId), dungeonSecretProgress(qqUserId), secondaryProfessionGuide(qqUserId)]);
   const entries: TaskEntry[] = [{ category: '主线', ...mainQuest }, ...bounties.map(task => ({
     category: '悬赏' as const, title: `【悬赏·${task.id}】${task.title}`,
     description: task.status === 'invalid' ? '已失效：悬赏目标已被其他冒险者完成，或该悬赏已经过期。' : `讨伐：${task.targetName} ${task.progress}/${task.requiredCount}\n报酬：铜币 ×${task.copperReward}`,
@@ -67,6 +68,21 @@ export const taskFormat = async (qqUserId: string, category?: TaskCategory, page
     action: omniscientQuestProgress.status === 'completed' ? { label: '[前往提交 百味书屋(12,-116)]', command: '/前往 12 -116' } : undefined,
     abandonCommand: '/放弃副职业任务 omniscient_apprentice'
   });
+  if (needsSecondaryGuide) entries.push({
+    category: '支线', title: '【支线·职业之外的道路】', description: '你的冒险经历已足以支撑一门副职业。去百纳镇的各个店铺转转吧：炉火、药香、零件与书页之间，或许有一条适合你的道路。',
+    action: { label: '[前往 百纳镇]', command: '/前往 -8 -116' }
+  });
+  if (dungeonSecret.status === 'accepted' && dungeonSecret.stage > 0 && dungeonSecret.stage < 7) {
+    const details: Record<number, string> = {
+      1: '你在封闭的地下大门前受阻。去冒险者公会问问，那究竟是什么地方。',
+      2: '莫妮卡指引你前往异工坊，寻找穿过封印的办法。',
+      3: '唯薇安提到了破魔传送器。购买一台，或取得图纸后以解构师能力构造它。',
+      4: '破魔传送器已经到手。再次前往已标记的地下大门。',
+      5: '石门前的猎人正等着你。听完他的忠告，再确认是否进入迷宫。',
+      6: '进入地下迷宫第一层，寻找并击败这一层的小头目。'
+    };
+    entries.push({ category: '支线', title: '【支线·地下的秘密】', description: details[dungeonSecret.stage] ?? '继续追查地下迷宫的秘密。', action: dungeonSecret.stage === 1 ? { label: '[前往 冒险者公会(-8,-116)]', command: '/前往 -8 -116' } : dungeonSecret.stage === 2 || dungeonSecret.stage === 3 ? { label: '[前往 异工坊(4,-121)]', command: '/前往 4 -121' } : undefined });
+  }
   const normalizedKeyword = keyword.trim();
   const filtered = entries.filter(task => (!category || task.category === category) && (!normalizedKeyword || `${task.title}\n${task.description}`.includes(normalizedKeyword)));
   const totalPages = Math.max(1, Math.ceil(filtered.length / 5));
@@ -78,7 +94,13 @@ export const taskFormat = async (qqUserId: string, category?: TaskCategory, page
   for (const [index, task] of items.entries()) {
     markdown.addText(`${sequence[index]}${task.title}`);
     if (task.abandonCommand) markdown.addText(' ').addButton('[放弃]', { data: task.abandonCommand, autoEnter: false });
-    markdown.addNewline().addBlockquote(task.description).addNewline();
+    markdown.addNewline();
+    if (task.title === '【主线·初识鉴识】') {
+      for (const line of task.description.split('\n')) {
+        if (line.trim()) markdown.addBlockquote(line).addNewline();
+        else markdown.addNewline();
+      }
+    } else markdown.addBlockquote(task.description).addNewline();
     if (task.location) markdown.addText('> 坐标：').addButton(`${task.location.regionName} (${task.location.x}, ${task.location.y}, ${task.location.z})`, { data: `/前往 ${task.location.x} ${task.location.y}`, autoEnter: false }).addNewline();
     if (task.action) markdown.addButton(task.action.label, { data: task.action.command, autoEnter: false });
     else if (!task.abandonCommand) markdown.addText('进行中');

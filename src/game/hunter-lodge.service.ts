@@ -1,5 +1,6 @@
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
+import { recordPvpLootSale } from './pvp.service';
 
 const PAGE_SIZE = 5;
 type CharacterRow = RowDataPacket & { id: number; copper_coins: number };
@@ -83,6 +84,7 @@ export const sellHunterItem = async (qqUserId: string, itemId: number, quantity 
   const item = rows[0]; if (!item || item.item_type !== 'consumable' || !item.is_tradeable || !Number(item.trade_price)) throw new Error('雷恩只收购可交易的药剂、食物等消耗品。');
   if (Number(item.quantity) < amount) throw new Error(`背包数量不足，当前仅有 ${item.quantity} 个。`);
   const price = Number(item.sell_price) * amount;
+  await recordPvpLootSale(connection, Number(character.id), Number(item.id), amount, price);
   await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [amount, character.id, item.id]);
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, item.id]);
   await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [price, character.id]);

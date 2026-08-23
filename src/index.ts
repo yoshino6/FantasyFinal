@@ -1,15 +1,16 @@
-import { Router, logger, defineChildren } from 'alemonjs';
+import { Router, logger, defineChildren, setCron, setInterval } from 'alemonjs';
 import expose from './expose';
 import koaRouter from 'koa-router';
 import { getPool } from './database/pool';
-import { spawnMonsters } from './game/adventure.service';
+import { settleDueTravels, spawnMonsters } from './game/adventure.service';
 import { refreshBounties } from './game/bounty.service';
 import { refreshShopStocks } from './game/shop-stock.service';
 import { refreshDungeons } from './game/dungeon.service';
-import { setCron } from 'alemonjs';
 import { installGroupReplyMention } from './middleware/group-reply-mention';
 
 installGroupReplyMention();
+
+let settlingDueTravels = false;
 
 const r = new koaRouter({
   prefix: '/api'
@@ -23,6 +24,10 @@ r.get('/ping', (ctx) => {
 const router = Router.create({
   events: ['message.create', 'private.message.create', 'interaction.create', 'private.interaction.create']
 });
+
+// 顶层登记群 group_openid；必须在具体命令处理前执行，私聊触发时才能找到公告目标群。
+router.res({}, () => import('./middleware/remember-group-channel'));
+router.res({}, () => import('./middleware/warrant-passive-notice'));
 
 const appGroup = router.group({ // 精准规则匹配，复杂度 O1，稳定 且 几乎无损耗
   routeText: {
@@ -59,10 +64,17 @@ appGroup.use('一键领取邮件', () => import('./response/mail').then(module =
 appGroup.use({ path: '删除邮件', schema: { usage: '/删除邮件 <邮件编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/mail').then(module => ({ default: module.mailDeleteHandler })))
 appGroup.use('管理', () => import('./response/admin'))
 appGroup.use('玩家数据核查', () => import('./response/admin').then(module => ({ default: module.playerAuditPanelHandler })))
-appGroup.use({ path: '玩家核查', schema: { usage: '/玩家核查 <角色|背包|技能|状态> @玩家', args: [{ name: 'type', rules: [{ required: true, type: 'enum', enum: ['角色', '背包', '技能', '状态'] }] }] } }, () => import('./response/admin').then(module => ({ default: module.playerAuditHandler })))
+appGroup.use('玩家操作', () => import('./response/admin').then(module => ({ default: module.playerOperationPanelHandler })))
+appGroup.use({ path: '玩家核查', schema: { usage: '/玩家核查 <角色|背包|装备|技能|状态> @玩家', args: [{ name: 'type', rules: [{ required: true, type: 'enum', enum: ['角色', '背包', '装备', '技能', '状态'] }] }] } }, () => import('./response/admin').then(module => ({ default: module.playerAuditHandler })))
+appGroup.use('清空背包', () => import('./response/admin').then(module => ({ default: module.clearPlayerBackpackHandler })))
 appGroup.use('全服玩家核查', () => import('./response/admin').then(module => ({ default: module.allPlayersAuditHandler })))
+appGroup.use('管理日志', () => import('./response/admin').then(module => ({ default: module.adminLogHandler })))
+appGroup.use({ path: '管理日志页', schema: { usage: '/管理日志页 <页码> [人员|操作|时间] [筛选值]', args: [{ name: 'page', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'filter', rules: [{ type: 'enum', enum: ['人员', '操作', '时间'] }] }, { name: 'value' }] } }, () => import('./response/admin').then(module => ({ default: module.adminLogPageHandler })))
+appGroup.use({ path: '管理日志搜索', schema: { usage: '/管理日志搜索 <关键词>', args: [{ name: 'keyword', rules: [{ required: true, type: 'rest' }] }] } }, () => import('./response/admin').then(module => ({ default: module.adminLogSearchHandler })))
+appGroup.use({ path: '管理日志筛选', schema: { usage: '/管理日志筛选 <人员|操作|时间> <筛选值>', args: [{ name: 'filter', rules: [{ required: true, type: 'enum', enum: ['人员', '操作', '时间'] }] }, { name: 'value', rules: [{ required: true, type: 'rest' }] }] } }, () => import('./response/admin').then(module => ({ default: module.adminLogFilterHandler })))
 appGroup.use('BOSS管理', () => import('./response/admin').then(module => ({ default: module.bossManagementHandler })))
 appGroup.use('迷宫管理', () => import('./response/admin').then(module => ({ default: module.dungeonManagementHandler })))
+appGroup.use('重建迷宫', () => import('./response/admin').then(module => ({ default: module.rebuildDungeonHandler })))
 appGroup.use('BOSS词条说明', () => import('./response/boss-trait'))
 appGroup.use({ path: 'BOSS刷新', schema: { usage: '/BOSS刷新 <Boss代号>', args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/admin').then(module => ({ default: module.bossSpawnHandler })))
 appGroup.use({ path: 'BOSS消灭', schema: { usage: '/BOSS消灭 <Boss代号>', args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/admin').then(module => ({ default: module.bossDefeatHandler })))
@@ -97,6 +109,7 @@ appGroup.use({ path: '背包分页', schema: { usage: '/背包分页 <装备|道
 appGroup.use({ path: '背包搜索', schema: { usage: '/背包搜索 <装备|道具|材料> <关键词>', args: [{ name: 'category', rules: [{ required: true, type: 'enum', enum: ['装备', '道具', '材料'] }] }, { name: 'keyword', rules: [{ required: true, type: 'rest' }] }] } }, () => import('./response/inventory').then(module => ({ default: module.inventorySearchHandler })))
 appGroup.use({ path: '背包分类', schema: { usage: '/背包分类 <装备|道具|材料> <子分类> [页码] [关键词]', args: [{ name: 'category', rules: [{ required: true, type: 'enum', enum: ['装备', '道具', '材料'] }] }, { name: 'subcategory', rules: [{ required: true }] }, { name: 'page', rules: [{ type: 'number', min: 1 }] }, { name: 'keyword', rules: [{ type: 'rest' }] }] } }, () => import('./response/inventory').then(module => ({ default: module.inventorySubcategoryHandler })))
 appGroup.use({ path: '背包分类搜索', schema: { usage: '/背包分类搜索 <装备|道具|材料> <子分类> <关键词>', args: [{ name: 'category', rules: [{ required: true, type: 'enum', enum: ['装备', '道具', '材料'] }] }, { name: 'subcategory', rules: [{ required: true }] }, { name: 'keyword', rules: [{ required: true, type: 'rest' }] }] } }, () => import('./response/inventory').then(module => ({ default: module.inventorySubcategorySearchHandler })))
+appGroup.use({ path: '丢弃材料', schema: { usage: '/丢弃材料 <物品编号> [数量]', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'quantity', rules: [{ type: 'number', min: 1 }] }] } }, () => import('./response/inventory').then(module => ({ default: module.discardMaterialHandler })))
 appGroup.use('异械', () => import('./response/inventory').then(module => ({ default: module.deviceHandler })))
 appGroup.use({ path: '异械分页', schema: { usage: '/异械分页 <页码> [关键词]', args: [{ name: 'page', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'keyword', rules: [{ type: 'rest' }] }] } }, () => import('./response/inventory').then(module => ({ default: module.devicePageHandler })))
 appGroup.use({ path: '异械搜索', schema: { usage: '/异械搜索 <关键词>', args: [{ name: 'keyword', rules: [{ required: true, type: 'rest' }] }] } }, () => import('./response/inventory').then(module => ({ default: module.deviceSearchHandler })))
@@ -140,30 +153,43 @@ appGroup.use({ path: '移动', schema: { usage: '/移动 <上|下|左|右>', arg
 appGroup.use({ path: '调整移速', schema: { usage: '/调整移速 <单次移动距离>', args: [{ name: 'step', rules: [{ required: true, type: 'number', min: 1, max: 10 }] }] } }, () => import('./response/adventure').then(module => ({ default: module.adjustMovementHandler })))
 appGroup.use('休息', () => import('./response/panel').then(module => ({ default: module.restHandler })))
 appGroup.use('行动', () => import('./response/panel').then(module => ({ default: module.resumeActionHandler })))
-appGroup.use({ path: '自动战斗', schema: { usage: '/自动战斗 <开启|关闭|配置>', args: [{ name: 'action', rules: [{ type: 'enum', enum: ['开启', '关闭', '配置'] }] }] } }, () => import('./response/auto-battle'))
-appGroup.use({ path: '自动战斗 出招选择', schema: { usage: '/自动战斗 出招选择 <位置> [页码]', args: [{ name: 'sequence', rules: [{ required: true, type: 'number', min: 1, max: 30 }] }, { name: 'page', rules: [{ type: 'number', min: 1 }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.selectActionHandler })))
-appGroup.use({ path: '自动战斗 选择出招', schema: { usage: '/自动战斗 选择出招 <位置> <技能编号，普攻为0>', args: [{ name: 'sequence', rules: [{ required: true, type: 'number', min: 1, max: 30 }] }, { name: 'skill', rules: [{ required: true, type: 'number', min: 0 }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.chooseActionHandler })))
+appGroup.use({ path: '自动战斗', schema: { usage: '/自动战斗 [开启|关闭|PVE|PVP]', args: [{ name: 'action', rules: [{ type: 'enum', enum: ['开启', '关闭', '配置', 'PVE', 'PVP'] }] }, { name: 'mode', rules: [{ type: 'enum', enum: ['PVE', 'PVP'] }] }] } }, () => import('./response/auto-battle'))
+appGroup.use({ path: '自动战斗 出招选择', schema: { usage: '/自动战斗 出招选择 <位置> [页码] [PVP]', args: [{ name: 'sequence', rules: [{ required: true, type: 'number', min: 1, max: 30 }] }, { name: 'page', rules: [{ type: 'number', min: 1 }] }, { name: 'mode', rules: [{ type: 'enum', enum: ['PVP'] }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.selectActionHandler })))
+appGroup.use({ path: '自动战斗 选择出招', schema: { usage: '/自动战斗 选择出招 <位置> <技能编号，普攻为0> [PVP]', args: [{ name: 'sequence', rules: [{ required: true, type: 'number', min: 1, max: 30 }] }, { name: 'skill', rules: [{ required: true, type: 'number', min: 0 }] }, { name: 'mode', rules: [{ type: 'enum', enum: ['PVP'] }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.chooseActionHandler })))
 appGroup.use({ path: '自动战斗 出招搜索', schema: { usage: '/自动战斗 出招搜索 <位置> <关键词>', args: [{ name: 'sequence', rules: [{ required: true, type: 'number', min: 1, max: 30 }] }, { name: 'keyword', rules: [{ required: true, type: 'rest' }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.actionSearchHandler })))
-appGroup.use({ path: '自动战斗 删除', schema: { usage: '/自动战斗 删除 <位置>', args: [{ name: 'sequence', rules: [{ required: true, type: 'number', min: 1, max: 30 }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.deleteActionHandler })))
-appGroup.use('自动战斗 快速配置', () => import('./response/auto-battle').then(module => ({ default: module.quickSetupHandler })))
-appGroup.use({ path: '自动战斗 快速选择', schema: { usage: '/自动战斗 快速选择 <技能编号，普攻为0>', args: [{ name: 'skill', rules: [{ required: true, type: 'number', min: 0 }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.quickChoiceHandler })))
-appGroup.use({ path: '自动战斗 快速选择页', schema: { usage: '/自动战斗 快速选择页 <页码>', args: [{ name: 'page', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.quickPageHandler })))
+appGroup.use({ path: '自动战斗 删除', schema: { usage: '/自动战斗 删除 <位置> [PVP]', args: [{ name: 'sequence', rules: [{ required: true, type: 'number', min: 1, max: 30 }] }, { name: 'mode', rules: [{ type: 'enum', enum: ['PVP'] }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.deleteActionHandler })))
+appGroup.use({ path: '自动战斗 快速配置', schema: { usage: '/自动战斗 快速配置 [PVP]', args: [{ name: 'mode', rules: [{ type: 'enum', enum: ['PVP'] }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.quickSetupHandler })))
+appGroup.use({ path: '自动战斗 快速选择', schema: { usage: '/自动战斗 快速选择 <技能编号，普攻为0> [PVP]', args: [{ name: 'skill', rules: [{ required: true, type: 'number', min: 0 }] }, { name: 'mode', rules: [{ type: 'enum', enum: ['PVP'] }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.quickChoiceHandler })))
+appGroup.use({ path: '自动战斗 快速选择页', schema: { usage: '/自动战斗 快速选择页 <页码> [PVP]', args: [{ name: 'page', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'mode', rules: [{ type: 'enum', enum: ['PVP'] }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.quickPageHandler })))
 appGroup.use({ path: '自动战斗 快速搜索', schema: { usage: '/自动战斗 快速搜索 <关键词>', args: [{ name: 'keyword', rules: [{ required: true, type: 'rest' }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.quickSearchHandler })))
-appGroup.use('自动战斗 完成配置', () => import('./response/auto-battle').then(module => ({ default: module.quickFinishHandler })))
-appGroup.use({ path: '自动战斗 嗑药', schema: { usage: '/自动战斗 嗑药 <开启|关闭>', args: [{ name: 'state', rules: [{ required: true, type: 'enum', enum: ['开启', '关闭'] }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.potionToggleHandler })))
-appGroup.use({ path: '自动战斗 设置门槛', schema: { usage: '/自动战斗 设置门槛 <生命|魔力> [百分比]', args: [{ name: 'kind', rules: [{ required: true, type: 'enum', enum: ['生命', '魔力'] }] }, { name: 'value', rules: [{ type: 'number', min: 1, max: 99 }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.thresholdHandler })))
-appGroup.use({ path: '自动战斗 药剂选择', schema: { usage: '/自动战斗 药剂选择 <生命|魔力> [页码]', args: [{ name: 'kind', rules: [{ required: true, type: 'enum', enum: ['生命', '魔力'] }] }, { name: 'page', rules: [{ type: 'number', min: 1 }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.potionListHandler })))
-appGroup.use({ path: '自动战斗 选择药剂', schema: { usage: '/自动战斗 选择药剂 <生命|魔力> <物品编号>', args: [{ name: 'kind', rules: [{ required: true, type: 'enum', enum: ['生命', '魔力'] }] }, { name: 'item', rules: [{ required: true, type: 'number', min: 0 }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.potionChoiceHandler })))
+appGroup.use({ path: '自动战斗 完成配置', schema: { usage: '/自动战斗 完成配置 [PVP]', args: [{ name: 'mode', rules: [{ type: 'enum', enum: ['PVP'] }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.quickFinishHandler })))
+appGroup.use({ path: '自动战斗 嗑药', schema: { usage: '/自动战斗 嗑药 <开启|关闭> [PVP]', args: [{ name: 'state', rules: [{ required: true, type: 'enum', enum: ['开启', '关闭'] }] }, { name: 'mode', rules: [{ type: 'enum', enum: ['PVP'] }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.potionToggleHandler })))
+appGroup.use({ path: '自动战斗 设置门槛', schema: { usage: '/自动战斗 设置门槛 <生命|魔力> [百分比] [PVP]', args: [{ name: 'kind', rules: [{ required: true, type: 'enum', enum: ['生命', '魔力'] }] }, { name: 'value' }, { name: 'mode', rules: [{ type: 'enum', enum: ['PVP'] }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.thresholdHandler })))
+appGroup.use({ path: '自动战斗 药剂选择', schema: { usage: '/自动战斗 药剂选择 <生命|魔力> [页码] [PVP]', args: [{ name: 'kind', rules: [{ required: true, type: 'enum', enum: ['生命', '魔力'] }] }, { name: 'page' }, { name: 'mode', rules: [{ type: 'enum', enum: ['PVP'] }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.potionListHandler })))
+appGroup.use({ path: '自动战斗 选择药剂', schema: { usage: '/自动战斗 选择药剂 <生命|魔力> <物品编号> [PVP]', args: [{ name: 'kind', rules: [{ required: true, type: 'enum', enum: ['生命', '魔力'] }] }, { name: 'item', rules: [{ required: true, type: 'number', min: 0 }] }, { name: 'mode', rules: [{ type: 'enum', enum: ['PVP'] }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.potionChoiceHandler })))
 appGroup.use({ path: '自动战斗 药剂搜索', schema: { usage: '/自动战斗 药剂搜索 <生命|魔力> <关键词>', args: [{ name: 'kind', rules: [{ required: true, type: 'enum', enum: ['生命', '魔力'] }] }, { name: 'keyword', rules: [{ required: true, type: 'rest' }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.potionSearchHandler })))
 appGroup.use({ path: '前往', schema: { usage: '/前往 <横坐标> <纵坐标>', args: [{ name: 'x', rules: [{ required: true, type: 'number' }] }, { name: 'y', rules: [{ required: true, type: 'number' }] }] } }, () => import('./response/go-to'))
 appGroup.use({ path: '前往地图', schema: { usage: '/前往地图 <地图编号>', args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/adventure').then(module => ({ default: module.goToMapHandler })))
 appGroup.use('寻怪', () => import('./response/adventure').then(module => ({ default: module.huntHandler })))
 appGroup.use({ path: '下迷宫', schema: { usage: '/下迷宫 <入口编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/adventure').then(module => ({ default: module.dungeonEnterHandler })))
+appGroup.use({ path: '地下的秘密', schema: { usage: '/地下的秘密 <入口编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/dungeon-quest').then(module => ({ default: module.dungeonSecretEntranceHandler })))
+appGroup.use('询问地下的秘密', () => import('./response/dungeon-quest').then(module => ({ default: module.dungeonSecretGuildHandler })))
+appGroup.use('异工坊 地下的秘密', () => import('./response/dungeon-quest').then(module => ({ default: module.dungeonSecretWorkshopHandler })))
 appGroup.use('地宫下行', () => import('./response/adventure').then(module => ({ default: module.dungeonDownHandler })))
 appGroup.use('地宫上行', () => import('./response/adventure').then(module => ({ default: module.dungeonUpHandler })))
 appGroup.use('离开迷宫', () => import('./response/adventure').then(module => ({ default: module.dungeonLeaveHandler })))
+appGroup.use('脱离', () => import('./response/adventure').then(module => ({ default: module.dungeonEscapeHandler })))
 appGroup.use({ path: '开启地宫宝箱', schema: { usage: '/开启地宫宝箱 <宝箱编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/adventure').then(module => ({ default: module.dungeonChestHandler })))
 appGroup.use({ path: '地宫攻击', schema: { usage: '/地宫攻击 <玩家游戏ID>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 10000001 }] }] } }, () => import('./response/adventure').then(module => ({ default: module.dungeonPvpHandler })))
+appGroup.use({ path: '玩家攻击', schema: { usage: '/玩家攻击 <玩家游戏ID>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 10000001 }] }] } }, () => import('./response/adventure').then(module => ({ default: module.playerPvpHandler })))
+appGroup.use({ path: '确认攻击', schema: { usage: '/确认攻击 <玩家游戏ID>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 10000001 }] }] } }, () => import('./response/adventure').then(module => ({ default: module.confirmPlayerPvpHandler })))
+appGroup.use('通缉令', () => import('./response/warrant'))
+appGroup.use('通缉', () => import('./response/warrant').then(module => ({ default: module.activeWarrantHandler })))
+appGroup.use({ path: '通缉筛选', schema: { usage: '/通缉筛选 <已暴露|近期露面|无行踪>', args: [{ name: 'filter', rules: [{ required: true, type: 'enum', enum: ['已暴露', '近期露面', '无行踪'] }] }] } }, () => import('./response/warrant').then(module => ({ default: module.filterWarrantHandler })))
+appGroup.use({ path: '失物返还详情', schema: { usage: '/失物返还详情 <编号>', args: [{ name: 'id', rules: [{ required: true }] }] } }, () => import('./response/restitution-detail'))
+appGroup.use({ path: '通缉上赏', schema: { usage: '/通缉上赏 <通缉编号> <铜币|物品> <金额或物品编号> [数量]', args: [{ name: 'warrant', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'kind', rules: [{ required: true, type: 'enum', enum: ['铜币', '物品'] }] }, { name: 'itemOrAmount', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'quantity', rules: [{ type: 'number', min: 1 }] }] } }, () => import('./response/warrant').then(module => ({ default: module.addRewardHandler })))
+appGroup.use({ path: '玩家互动', schema: { usage: '/玩家互动 <玩家游戏ID>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 10000001 }] }] } }, () => import('./response/adventure').then(module => ({ default: module.playerInteractionHandler })))
+appGroup.use({ path: '坐标互动', schema: { usage: '/坐标互动 <玩家|NPC|建筑|资源|入口|地标> <目标编号>', args: [{ name: 'type', rules: [{ required: true, type: 'enum', enum: ['玩家', 'NPC', '建筑', '资源', '入口', '地标'] }] }, { name: 'id', rules: [{ required: true }] }] } }, () => import('./response/adventure').then(module => ({ default: module.coordinateInteractionHandler })))
 appGroup.use('取消移动', () => import('./response/adventure').then(module => ({ default: module.cancelTravelHandler })))
 appGroup.use('取消寻怪', () => import('./response/adventure').then(module => ({ default: module.cancelTravelHandler })))
 appGroup.use('刷新行动', () => import('./response/adventure').then(module => ({ default: module.refreshTravelHandler })))
@@ -216,6 +242,7 @@ appGroup.use('晴儿闲聊', () => import('./response/alchemist').then(module =>
 appGroup.use('异工坊', () => import('./response/deconstructor').then(module => ({ default: module.oddWorkshopHandler })))
 appGroup.use('唯薇安闲聊', () => import('./response/deconstructor').then(module => ({ default: module.oddWorkshopChatHandler })))
 appGroup.use('异工坊购买', () => import('./response/deconstructor').then(module => ({ default: module.oddWorkshopTradeHandler('buy') })))
+appGroup.use({ path: '购买异工坊商品', schema: { usage: '/购买异工坊商品 <破魔传送器|图纸>', args: [{ name: 'code', rules: [{ required: true, type: 'enum', enum: ['demon_breaker_teleporter', 'demon_breaker_teleporter_blueprint'] }] }] } }, () => import('./response/dungeon-quest').then(module => ({ default: module.oddWorkshopPurchaseHandler })))
 appGroup.use('异工坊出售', () => import('./response/deconstructor').then(module => ({ default: module.oddWorkshopTradeHandler('sell') })))
 appGroup.use({ path: '异工坊出售页', schema: { usage: '/异工坊出售页 <页码> [关键词]', args: [{ name: 'page', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'keyword' }] } }, () => import('./response/deconstructor').then(module => ({ default: module.oddWorkshopSellPageHandler })))
 appGroup.use({ path: '异工坊出售搜索', schema: { usage: '/异工坊出售搜索 <关键词>', args: [{ name: 'keyword', rules: [{ required: true }] }] } }, () => import('./response/deconstructor').then(module => ({ default: module.oddWorkshopSellSearchHandler })))
@@ -374,6 +401,14 @@ export default defineChildren({
       // 重启时保留所有现有小怪坐标，只补足缺失数量；整点任务才执行完整数量校正与 Boss 刷新。
       .then(async pool => { await refreshDungeons(pool); await spawnMonsters({ refreshBosses: false, trimExcess: false }); logger.info('游戏数据库、初始地图与怪物群已就绪'); })
       .catch(error => logger.error({ err: error }, '游戏数据库初始化失败'));
+    // 延时前往的最终状态以数据库为准；即使开发热重载或短暂重连让消息计时器丢失，也会自动补结算坐标。
+    setInterval(() => {
+      if (settlingDueTravels) return;
+      settlingDueTravels = true;
+      void settleDueTravels()
+        .catch(error => logger.warn({ err: error }, '到期移动补偿结算失败'))
+        .finally(() => { settlingDueTravels = false; });
+    }, 1000);
     setCron('0 * * * *', () => void getPool().then(async pool => { await refreshShopStocks(pool); await refreshBounties(pool); await refreshDungeons(pool); await spawnMonsters(); }).catch(error => logger.error({ err: error }, '整点刷新失败')));
   }
 });

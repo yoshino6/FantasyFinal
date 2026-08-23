@@ -1,6 +1,6 @@
 import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
 import { addNpcAffinity, grantNpcAffinity, nearbyPoints, requireNpcAtCurrentPosition } from '../game/adventure.service';
-import { acceptBlacksmithQuest, addForgeMaterial, blacksmithProgress, blacksmithQuest, blacksmithWeapons, claimBlacksmithQuest, clearForgeMaterial, craftForgeEquipment, forgeState, fuseWeapon, fusionMaterials, refineWeapon, refinementMaterials, removeForgeMaterial, resetForgeSession, selectForgeCategory, selectForgeLevel, selectForgeSubtype, setForgeMaterial } from '../game/blacksmith.service';
+import { acceptBlacksmithQuest, addForgeMaterial, blacksmithFusionEquipment, blacksmithProgress, blacksmithQuest, blacksmithWeapons, claimBlacksmithQuest, clearForgeMaterial, craftForgeEquipment, forgeState, fuseWeapon, fusionMaterials, refineWeapon, refinementMaterials, removeForgeMaterial, resetForgeSession, selectForgeCategory, selectForgeLevel, selectForgeSubtype, setForgeMaterial } from '../game/blacksmith.service';
 import { messageFormat } from '../game/message';
 
 const requireBlacksmith = async (qqUserId: string) => {
@@ -21,7 +21,8 @@ export const blacksmithButtons = () => Format.createButtonGroup()
 const professionButtons = () => Format.createButtonGroup().addRow().addButton('打造', '/副职业打造装备', { type: 'command', autoEnter: true, style: 'blue' }).addButton('精炼', '/精炼', { type: 'command', autoEnter: true, style: 'blue' }).addButton('熔铸', '/熔铸', { type: 'command', autoEnter: true, style: 'blue' });
 const effectText = (effect: Record<string, unknown>) => {
   const labels: Record<string, string> = { hpMax: '生命', mpMax: '魔力', physicalAttack: '物攻', magicAttack: '魔攻', physicalDefense: '物防', magicDefense: '魔防', accuracy: '命中', evasion: '闪避', speed: '速度', critRateBp: '暴击', hpPct: '生命上限', mpPct: '魔力上限', physicalAttackPct: '物攻', magicAttackPct: '魔攻', physicalDefensePct: '物防', magicDefensePct: '魔防', accuracyPct: '命中', evasionPct: '闪避', speedPct: '速度', critRatePct: '暴击', magicDamagePct: '魔法伤害', damageBonusPct: '伤害增加' };
-  return Object.entries(effect).filter(([key, value]) => labels[key] && Number(value)).map(([key, value]) => { const amount = key.endsWith('Pct') ? `${Number(value).toFixed(1)}%` : String(Math.round(Number(value))); return `${labels[key]}${Number(value) >= 0 ? '+' : ''}${amount}`; }).join('｜') || '随机基础强化';
+  const label = (key: string) => labels[key] ?? (key.startsWith('elementMastery_') ? `${key.slice('elementMastery_'.length)}元素精通` : key.startsWith('elementResistance_') ? `${key.slice('elementResistance_'.length)}元素抗性` : '');
+  return Object.entries(effect).filter(([key, value]) => label(key) && Number(value)).map(([key, value]) => { const amount = key.endsWith('Pct') ? `${Number(value).toFixed(1)}%` : String(Math.round(Number(value))); return `${label(key)}${Number(value) >= 0 ? '+' : ''}${amount}`; }).join('｜') || '随机基础强化';
 };
 const materialNames: Record<string, string> = { living_wood: '活木', meteor_iron: '陨铁', star_copper: '星铜', moon_silver: '月银', sun_gold: '曜金' };
 const materialTendencies: Record<string, string> = { beast_meat: '倾向于生命', beast_bone: '倾向于物攻', beast_hide: '倾向于物防、魔防', beast_tendon: '倾向于速度', beast_core: '倾向于魔攻', magic_wool: '倾向于闪避', magic_tusk: '倾向于物攻', magic_scale: '倾向于魔防', magic_claw: '倾向于暴击', magic_heartcore: '倾向于命中', living_wood: '倾向于生命', meteor_iron: '倾向于物防', star_copper: '倾向于命中', moon_silver: '倾向于魔力', sun_gold: '倾向于双攻', riot_aura: '倾向于伤害增加' };
@@ -52,19 +53,19 @@ const awardBlacksmithCraftAffinity = async (qqUserId: string) => {
   catch (error) { if (error instanceof Error && error.message.includes('已经离开')) return undefined; throw error; }
 };
 const weaponList = async (qqUserId: string, mode: 'refine' | 'fuse') => {
-  const weapons = await blacksmithWeapons(qqUserId); const title = mode === 'refine' ? '精炼' : '熔铸'; const markdown = Format.createMarkdown().addTitle(title).addNewline().addNewline().addBlockquote(mode === 'refine' ? '选择一把武器放上铁砧。品质越高，精炼越困难；每次精炼有 3% 概率大成功。' : '选择一把武器放上熔炉。每 10 级获得 1 次熔铸机会，优秀及以上品质会额外增加机会。').addNewline().addNewline();
-  if (!weapons.length) markdown.addText('背包中没有可操作的武器。');
-  for (const weapon of weapons) markdown.addText(`【武器】${weapon.name} #${weapon.id}\n`).addBlockquote(`品质：${weapon.quality.toFixed(1)}%｜稀有度：${weapon.rarity}｜熔铸：${weapon.fusionCount}/${weapon.fusionLimit}`).addNewline().addButton('[放入]', { data: mode === 'refine' ? `/精炼放入 ${weapon.id}` : `/熔铸放入 ${weapon.id}`, autoEnter: false }).addNewline().addNewline();
+  const weapons = mode === 'refine' ? await blacksmithWeapons(qqUserId) : await blacksmithFusionEquipment(qqUserId); const title = mode === 'refine' ? '精炼' : '熔铸'; const markdown = Format.createMarkdown().addTitle(title).addNewline().addNewline().addBlockquote(mode === 'refine' ? '选择一把武器放上铁砧。品质越高，精炼越困难；每次精炼有 3% 概率大成功。' : '选择一件装备放上熔炉。每 10 级获得 1 次熔铸机会，优秀及以上品质会额外增加机会；元素粉尘会随装备部位转为精通或抗性。').addNewline().addNewline();
+  if (!weapons.length) markdown.addText(`背包中没有可${mode === 'refine' ? '精炼的武器' : '熔铸的装备'}。`);
+  for (const weapon of weapons) markdown.addText(`【${weapon.category}】${weapon.name} #${weapon.id}\n`).addBlockquote(`品质：${weapon.quality.toFixed(1)}%｜稀有度：${weapon.rarity}｜熔铸：${weapon.fusionCount}/${weapon.fusionLimit}`).addNewline().addButton('[放入]', { data: mode === 'refine' ? `/精炼放入 ${weapon.id}` : `/熔铸放入 ${weapon.id}`, autoEnter: false }).addNewline().addNewline();
   return Format.create().addMarkdown(markdown).addButtonGroup(blacksmithButtons());
 };
 const materialList = async (qqUserId: string, mode: 'refine' | 'fuse', instanceId: number, page = 1, keyword = '') => {
-  const weapons = await blacksmithWeapons(qqUserId); const weapon = weapons.find(item => item.id === instanceId); if (!weapon) throw new Error('未找到该武器。');
-  const allMaterials: any[] = mode === 'refine' ? await refinementMaterials(qqUserId) : await fusionMaterials(qqUserId);
+  const weapons = mode === 'refine' ? await blacksmithWeapons(qqUserId) : await blacksmithFusionEquipment(qqUserId); const weapon = weapons.find(item => item.id === instanceId); if (!weapon) throw new Error(`未找到该${mode === 'refine' ? '武器' : '装备'}。`);
+  const allMaterials: any[] = mode === 'refine' ? await refinementMaterials(qqUserId) : await fusionMaterials(qqUserId, weapon.category);
   const materials = allMaterials.filter(material => !keyword || material.name.includes(keyword) || material.category.includes(keyword));
   const totalPages = Math.max(1, Math.ceil(materials.length / 10)); const currentPage = Math.min(Math.max(1, page), totalPages);
   const entries = materials.slice((currentPage - 1) * 10, currentPage * 10);
   const progress = mode === 'fuse' ? await blacksmithProgress(qqUserId) : null;
-  const markdown = Format.createMarkdown().addTitle(mode === 'refine' ? '精炼·选择材料' : '熔铸·选择材料').addNewline().addNewline().addText(`已放入：【武器】${weapon.name}\n`).addBlockquote(`品质：${weapon.quality.toFixed(1)}%｜熔铸：${weapon.fusionCount}/${weapon.fusionLimit}${progress ? `｜成功率：${Math.min(100, 70 + progress.bonus)}%` : ''}`).addNewline().addNewline();
+  const markdown = Format.createMarkdown().addTitle(mode === 'refine' ? '精炼·选择材料' : '熔铸·选择材料').addNewline().addNewline().addText(`已放入：【${weapon.category}】${weapon.name}\n`).addBlockquote(`品质：${weapon.quality.toFixed(1)}%｜熔铸：${weapon.fusionCount}/${weapon.fusionLimit}${progress ? `｜成功率：${Math.min(100, 70 + progress.bonus)}%` : ''}`).addNewline().addNewline();
   if (!entries.length) markdown.addBlockquote(mode === 'refine' ? '没有符合条件的精炼材料。' : '没有符合条件的熔铸材料。').addNewline();
   for (const material of entries) {
     const detail = mode === 'refine' ? `本次提升 ${material.minGain}%～${material.maxGain}%` : effectText(material.effect);
@@ -75,7 +76,7 @@ const materialList = async (qqUserId: string, mode: 'refine' | 'fuse', instanceI
   const pageCommand = (target: number) => `/${prefix}页 ${instanceId} ${target}${keyword ? ` ${keyword}` : ''}`;
   return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup()
     .addRow().addButton('上一页', pageCommand(previous), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined }).addButton('搜索', `/${prefix}搜索 ${instanceId} `, { type: 'command', autoEnter: false, style: 'blue' }).addButton('下一页', pageCommand(next), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined })
-    .addRow().addButton('返回武器列表', mode === 'refine' ? '/精炼' : '/熔铸', { type: 'command', autoEnter: true }));
+    .addRow().addButton(mode === 'refine' ? '返回武器列表' : '返回装备列表', mode === 'refine' ? '/精炼' : '/熔铸', { type: 'command', autoEnter: true }));
 };
 export const refineListHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await message.send({ format: await weaponList(event.current.UserId, 'refine') }); } catch (error) { await message.send({ format: messageFormat('无法精炼', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const refinePutHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await message.send({ format: await materialList(event.current.UserId, 'refine', Number(route.param('id'))) }); } catch (error) { await message.send({ format: messageFormat('无法放入武器', error instanceof Error ? error.message : '请稍后重试。') }); } };
@@ -91,7 +92,7 @@ export const fuseExecuteHandler = async () => { const [event] = useEvent(); cons
 const forgeCommand = (source: 'blacksmith' | 'profession') => source === 'profession' ? '/副职业打造装备' : '/打造装备';
 const forgeReturn = (source: 'blacksmith' | 'profession') => source === 'profession' ? '/副职业' : '/铁匠铺';
 const forgeFormat = async (source: 'blacksmith' | 'profession') => Format.create().addMarkdown(Format.createMarkdown().addTitle('打造装备').addNewline().addNewline().addBlockquote('选择想打造的装备部位。首饰暂不开放打造。').addNewline().addNewline()).addButtonGroup(Format.createButtonGroup().addRow().addButton('武器', '/打造部位 武器', { type: 'command', autoEnter: true, style: 'blue' }).addButton('头肩', '/打造部位 头肩', { type: 'command', autoEnter: true, style: 'blue' }).addButton('上装', '/打造部位 上装', { type: 'command', autoEnter: true, style: 'blue' }).addRow().addButton('腰部', '/打造部位 腰部', { type: 'command', autoEnter: true, style: 'blue' }).addButton('下装', '/打造部位 下装', { type: 'command', autoEnter: true, style: 'blue' }).addButton('脚部', '/打造部位 脚部', { type: 'command', autoEnter: true, style: 'blue' }).addRow().addButton('返回', forgeReturn(source), { type: 'command', autoEnter: true }));
-const forgeSubtypeFormat = async (qqUserId: string) => { const state = await forgeState(qqUserId); if (!state.category) throw new Error('请先选择打造部位。'); const types = state.category === '武器' ? ['长剑', '法杖', '匕首', '拳刃'] : ['布甲', '皮甲', '轻甲', '重甲', '板甲']; const buttons = Format.createButtonGroup().addRow(); for (const type of types) buttons.addButton(type, `/打造类型 ${type}`, { type: 'command', autoEnter: true, style: 'blue' }); buttons.addRow().addButton('返回打造', forgeCommand(state.source), { type: 'command', autoEnter: true }); return Format.create().addMarkdown(Format.createMarkdown().addTitle(`打造·${state.category}`).addNewline().addNewline().addBlockquote(state.category === '武器' ? '请选择武器类型。不同武器会拥有不同的基础属性倾向。' : '布甲：防御极低；给予大量命中、闪避、速度。\n皮甲：防御略低；给予中量命中、速度。\n轻甲：双防中等；中规中矩，无额外惩罚。\n重甲：双防很高；剥夺中量闪避、速度。\n板甲：双防极高；剥夺大量命中、闪避、速度。')).addButtonGroup(buttons); };
+const forgeSubtypeFormat = async (qqUserId: string) => { const state = await forgeState(qqUserId); if (!state.category) throw new Error('请先选择打造部位。'); const types = state.category === '武器' ? ['长剑', '法杖', '法书', '法球', '匕首', '拳刃', '盾牌'] : ['布甲', '皮甲', '轻甲', '重甲', '板甲']; const buttons = Format.createButtonGroup(); for (let index = 0; index < types.length; index += 3) { const row = buttons.addRow(); for (const type of types.slice(index, index + 3)) row.addButton(type, `/打造类型 ${type}`, { type: 'command', autoEnter: true, style: 'blue' }); } buttons.addRow().addButton('返回打造', forgeCommand(state.source), { type: 'command', autoEnter: true }); return Format.create().addMarkdown(Format.createMarkdown().addTitle(`打造·${state.category}`).addNewline().addNewline().addBlockquote(state.category === '武器' ? '请选择武器类型。不同武器会拥有不同的基础属性倾向。盾牌也属于武器，可装备在主手或副手。' : '布甲：防御极低；给予大量命中、闪避、速度。\n皮甲：防御略低；给予中量命中、速度。\n轻甲：双防中等；中规中矩，无额外惩罚。\n重甲：双防很高；剥夺中量闪避、速度。\n板甲：双防极高；剥夺大量命中、闪避、速度。')).addButtonGroup(buttons); };
 const forgeLevelFormat = async (qqUserId: string) => { const state = await forgeState(qqUserId); if (!state.subtype) throw new Error('请先选择装备类型。'); const buttons = Format.createButtonGroup(); for (let base = 5; base <= 50; base += 25) { const row = buttons.addRow(); for (let level = base; level < base + 25 && level <= 50; level += 5) row.addButton(`Lv.${level}`, `/打造等级 ${level}`, { type: 'command', autoEnter: true, style: 'blue' }); } buttons.addRow().addButton('返回类型', forgeCommand(state.source), { type: 'command', autoEnter: true }); return Format.create().addMarkdown(Format.createMarkdown().addTitle(`打造·${state.category}·${state.subtype}`).addNewline().addNewline().addBlockquote('请选择欲打造装备的适应等级。等级越高，基础属性越高。')).addButtonGroup(buttons); };
 const forgeMaterialsFormat = async (qqUserId: string, page = 1, keyword = '') => {
   const state = await forgeState(qqUserId);
@@ -113,7 +114,7 @@ const forgeMaterialsFormat = async (qqUserId: string, page = 1, keyword = '') =>
     markdown.addBlockquote(`${material?.name ?? materialNames[requirement.code] ?? requirement.code}（${owned}/${requirement.quantity}）${owned >= requirement.quantity ? ' 已满足' : ' 不足'}`).addNewline();
   }
   markdown.addNewline().addText('当前放入辅材：').addNewline();
-  markdown.addBlockquote('辅材会提供额外属性；\n装备有额外属性上限，请酌情调整用量。').addNewline();
+  markdown.addBlockquote('辅材只决定副属性的可达上限；\n最终数值按正态分布抽取，并受已有属性衰减影响。\n装备有额外属性上限，请酌情调整用量。').addNewline();
   if (!auxiliary.length) markdown.addBlockquote('无').addNewline();
   for (const material of auxiliary) {
     markdown.addBlockquote(`【${material.category}】${material.name}×${material.selected}(可放入${material.quantity - material.selected})`).addText(' ').addButton('[修改]', { data: `/修改打造材料 ${material.id}`, autoEnter: false }).addText(' ').addButton('[删除]', { data: `/删除打造材料 ${material.id}`, autoEnter: false }).addNewline();
@@ -121,7 +122,8 @@ const forgeMaterialsFormat = async (qqUserId: string, page = 1, keyword = '') =>
   markdown.addNewline().addText('背包材料：').addNewline();
   if (!materials.length) markdown.addBlockquote('没有符合条件的材料。').addNewline();
   for (const [index, material] of materials.entries()) {
-    markdown.addBlockquote(`${'①②③④⑤⑥⑦⑧⑨⑩'.charAt(index)}【${material.category}】${material.name}×${material.quantity}（已放入${material.selected}）｜${materialTendencies[material.code] ?? '倾向于随机基础属性'}`).addText(' ').addButton('[放入]', { data: `/放入打造材料 ${material.id}`, autoEnter: false }).addText(' ').addButton('[取出]', { data: `/取出打造材料 ${material.id}`, autoEnter: false }).addNewline();
+    const tendency = material.code.endsWith('_element_dust') ? `倾向于${state.category === '武器' ? '对应元素精通' : '对应元素抗性'}` : materialTendencies[material.code] ?? '倾向于随机基础属性';
+    markdown.addBlockquote(`${'①②③④⑤⑥⑦⑧⑨⑩'.charAt(index)}【${material.category}】${material.name}×${material.quantity}（已放入${material.selected}）｜${tendency}`).addText(' ').addButton('[放入]', { data: `/放入打造材料 ${material.id}`, autoEnter: false }).addText(' ').addButton('[取出]', { data: `/取出打造材料 ${material.id}`, autoEnter: false }).addNewline();
   }
   markdown.addText(`当前第（${currentPage}/${totalPages}）页`).addNewline();
   const previous = Math.max(1, currentPage - 1); const next = Math.min(totalPages, currentPage + 1); const pageCommand = (target: number) => `/打造材料页 ${target}${keyword ? ` ${keyword}` : ''}`;

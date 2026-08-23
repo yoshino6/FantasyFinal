@@ -1,5 +1,6 @@
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
+import { recordPvpLootSale } from './pvp.service';
 
 const PAGE_SIZE = 5;
 type CharacterRow = RowDataPacket & { id: number; copper_coins: number };
@@ -49,7 +50,7 @@ export const sellBookshopItem = async (qqUserId: string, itemId: number, quantit
   const amount = amountOf(quantity); const character = await characterFor(connection, qqUserId, true);
   const [rows] = await connection.execute<(SellRow & { is_tradeable: number; trade_price: number })[]>(`SELECT i.name,i.item_category,i.is_tradeable,i.trade_price,pi.quantity,CEIL(i.trade_price*1.20) AS price FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.item_id=? FOR UPDATE`, [character.id, itemId]);
   const item = rows[0]; if (!item || !item.is_tradeable || !Number(item.trade_price) || !['书籍', '卷宗', '技能书'].includes(item.item_category)) throw new Error('店主只收购可交易的书籍、卷宗与技能书。'); if (Number(item.quantity) < amount) throw new Error(`背包数量不足，当前仅有 ${item.quantity} 本。`);
-  const price = Number(item.price) * amount; await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [amount, character.id, itemId]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, itemId]); await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [price, character.id]);
+  const price = Number(item.price) * amount; await recordPvpLootSale(connection, Number(character.id), itemId, amount, price); await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [amount, character.id, itemId]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, itemId]); await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [price, character.id]);
   return { name: item.name, quantity: amount, price };
 });
 

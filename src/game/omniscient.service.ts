@@ -62,7 +62,10 @@ export const omniscientProgress = async (qqUserId: string) => {
   await pool.execute("INSERT IGNORE INTO player_secondary_professions (character_id,profession_code,level,proficiency) VALUES (?,'omniscient',1,0)", [character.id]);
   const [rows] = await pool.execute<(RowDataPacket & { level: number; proficiency: number })[]>('SELECT level,proficiency FROM player_secondary_professions WHERE character_id=? AND profession_code=\'omniscient\'', [character.id]);
   const level = Math.max(1, Number(rows[0]?.level ?? 1));
-  return { level, proficiency: Number(rows[0]?.proficiency ?? 0), required: level === 1 ? 10 : level === 2 ? 50 : level === 3 ? 200 : level === 4 ? 1000 : 1000 * Math.pow(5, level - 4), rangeLevel: level * 5, informationLevel: Math.min(4, level) };
+  const informationBonus = Math.min(4, level);
+  const rangeBonus = level + (informationBonus >= 4 ? 1 : 0);
+  const required = level === 1 ? 50 : level === 2 ? 200 : level === 3 ? 1000 : level === 4 ? 5000 : 5000 * Math.pow(5, level - 4);
+  return { level, proficiency: Number(rows[0]?.proficiency ?? 0), required, rangeBonus, informationBonus, dropBonusPct: level * 10 };
 };
 
 const direction = (fromX: number, fromY: number, toX: number, toY: number) => {

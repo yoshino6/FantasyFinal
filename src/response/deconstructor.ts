@@ -4,12 +4,13 @@ import { acceptDeconstructorQuest, claimDeconstructorQuest, constructItem, const
 import { oddWorkshopSellCatalog, sellOddWorkshopItem } from '../game/oddworkshop-shop.service';
 import { messageFormat } from '../game/message';
 import { npcChatDialogue } from '../game/npc-dialogue.service';
+import { dungeonSecretProgress } from '../game/dungeon-quest.service';
 
 const workshopCode = 'oddworkshop';
 const requireWorkshop = (qqUserId: string) => requireNpcAtCurrentPosition(qqUserId, workshopCode);
 
 export const oddWorkshopFormat = async (qqUserId: string, dialogue?: string) => {
-  const nearby = await nearbyPoints(qqUserId);
+  const [nearby, dungeonSecret] = await Promise.all([nearbyPoints(qqUserId), dungeonSecretProgress(qqUserId)]);
   const hour = new Date().getHours();
   const scene = dialogue ?? (hour < 11
     ? '清晨的异工坊已经响起叮叮当当的声音。唯薇安正踩着小凳子，把一盏会自己转向的魔石灯装到架上。'
@@ -23,6 +24,7 @@ export const oddWorkshopFormat = async (qqUserId: string, dialogue?: string) => 
     .addRow().addButton('我要买', '/异工坊购买', { type: 'command', autoEnter: true, style: 'blue' }).addButton('我要卖', '/异工坊出售', { type: 'command', autoEnter: true, style: 'blue' })
     .addRow().addButton('闲聊', '/唯薇安闲聊', { type: 'command', autoEnter: true, style: 'blue' }).addButton('关于 解构师', '/关于解构师', { type: 'command', autoEnter: true, style: 'blue' })
     .addRow().addButton('离开', `/建筑离开 ${workshopCode}`, { type: 'command', autoEnter: true });
+  if (dungeonSecret.stage === 2) buttons.addRow().addButton('关于 地下的秘密', '/异工坊 地下的秘密', { type: 'command', autoEnter: true, style: 'blue' });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 
@@ -51,10 +53,7 @@ export const oddWorkshopTradeHandler = (action: 'buy' | 'sell') => async () => {
   try {
     await requireWorkshop(event.current.UserId);
     if (action === 'sell') { await message.send({ format: await oddWorkshopSellFormat(event.current.UserId) }); return; }
-    const text = action === 'buy'
-      ? '唯薇安把几件还在冒烟的小玩意往桌下一塞，吐了吐舌头。“货架还在整理！等解构技术稳定一点，我再把好东西摆出来。”'
-      : '';
-    await message.send({ format: await oddWorkshopFormat(event.current.UserId, text) });
+    if (action === 'buy') { const { oddWorkshopBuyFormat } = await import('./dungeon-quest'); await message.send({ format: await oddWorkshopBuyFormat(event.current.UserId) }); return; }
   } catch (error) { await message.send({ format: messageFormat(action === 'buy' ? '无法购买' : '无法出售', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
 

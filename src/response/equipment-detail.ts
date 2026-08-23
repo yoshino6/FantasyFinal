@@ -21,16 +21,23 @@ const artifactEffects: Record<string, string[]> = {
   eternal_ring: ['每回合恢复3%最大魔力。']
 };
 
-const equipmentSections = (effectJson: unknown, quality: number) => {
+const equipmentSections = (effectJson: unknown, quality: number, primaryJson: unknown) => {
   const effect = (typeof effectJson === 'string' ? JSON.parse(effectJson) : effectJson ?? {}) as Record<string, unknown>;
+  const primaryKeys = (() => {
+    try {
+      const raw = typeof primaryJson === 'string' ? JSON.parse(primaryJson) : primaryJson;
+      return Array.isArray(raw) ? new Set(raw.filter(key => typeof key === 'string')) : new Set<string>();
+    } catch { return new Set<string>(); }
+  })();
   const scale = .6 + Math.max(0, Math.min(100, quality)) * .004;
   const labels: Record<string, string> = {
-    hpMax: '生命', mpMax: '魔力', physicalAttack: '物理攻击', magicAttack: '魔法攻击', physicalDefense: '物理防御', magicDefense: '魔法防御', accuracy: '命中', evasion: '闪避', speed: '速度', critRateBp: '暴击', physicalAttackPct: '物理攻击',
-    magicAttackPct: '魔法攻击', physicalDefensePct: '物理防御', magicDefensePct: '魔法防御', critRatePct: '暴击', critDamagePct: '暴伤', accuracyPct: '命中', evasionPct: '闪避', speedPct: '速度', mpPct: '魔力', hpPct: '生命', tenacityPct: '韧性'
+    hpMax: '生命', mpMax: '魔力', physicalAttack: '物攻', magicAttack: '魔攻', physicalDefense: '物防', magicDefense: '魔防', accuracy: '命中', evasion: '闪避', speed: '速度', critRateBp: '暴击', physicalAttackPct: '物攻',
+    magicAttackPct: '魔攻', physicalDefensePct: '物防', magicDefensePct: '魔防', critRatePct: '暴击', critDamagePct: '暴伤', accuracyPct: '命中', evasionPct: '闪避', speedPct: '速度', mpPct: '魔力', hpPct: '生命', tenacityPct: '韧性'
   };
+  const attributeLabel = (key: string) => labels[key] ?? (key.startsWith('elementMastery_') ? `${key.slice('elementMastery_'.length)}元素精通` : key.startsWith('elementResistance_') ? `${key.slice('elementResistance_'.length)}元素抗性` : '');
   const attributes = Object.entries(effect)
-    .filter(([key, value]) => labels[key] && Number(value))
-    .map(([key, value]) => { const actual = key.endsWith('Pct') ? `${(Number(value) * scale).toFixed(1)}%` : String(Math.floor(Number(value) * scale)); return `${labels[key]} ${Number(value) >= 0 ? '+' : ''}${actual}`; });
+    .filter(([key, value]) => attributeLabel(key) && Number(value))
+    .map(([key, value]) => { const actual = key.endsWith('Pct') ? `${(Number(value) * scale).toFixed(1)}%` : key.startsWith('element') ? (Number(value) * scale).toFixed(1) : String(Math.floor(Number(value) * scale)); const kind = primaryKeys.size ? (primaryKeys.has(key) ? '(主)' : '(副)') : ''; return `${attributeLabel(key)} ${Number(value) >= 0 ? '+' : ''}${actual}${kind}`; });
   const effectLabels: Record<string, string> = {
     ignoreDefensePct: '无视目标物理防御', lifestealPct: '造成伤害后恢复生命', magicDamagePct: '魔法伤害提高', manaCostReduction: '技能魔力消耗降低', damageBonusPct: '造成伤害提高', minimumHitRatePct: '攻击命中率最低',
     actualHitRatePct: '实际命中率', physicalActualHitRatePct: '物理攻击实际命中率', physicalSkillDamagePct: '物理技能威力提高', magicSkillDamagePct: '魔法技能增伤', magicChantBonus: '魔法技能吟咏增加', physicalCriticalFinalDamagePct: '物理攻击暴击时最终伤害降低'
@@ -50,7 +57,7 @@ export default async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
   try {
     const item = await equipmentDetail(event.current.UserId, Number(route.param('id')));
-    const sections = equipmentSections(item.effect_json, Number(item.quality));
+    const sections = equipmentSections(item.effect_json, Number(item.quality), item.forge_primary_json);
     const markdown = Format.createMarkdown()
       .addTitle('装备详情')
       .addNewline()

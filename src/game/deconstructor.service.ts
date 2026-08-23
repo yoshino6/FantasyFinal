@@ -65,7 +65,7 @@ type DeconstructionCategory = '装备' | '道具' | '材料';
 type ConstructionIngredient = { code: string; quantity: number };
 export const constructionCategories = ['基材', '构件', '异械'] as const;
 export type ConstructionCategory = (typeof constructionCategories)[number];
-type ConstructionRecipe = { code: string; name: string; description: string; ingredients: ConstructionIngredient[]; successRate: number; outputType: 'material' | 'equipment'; itemCategory: string; constructionCategory: ConstructionCategory; blueprintCode?: string; effect?: Record<string, unknown> };
+type ConstructionRecipe = { code: string; name: string; description: string; ingredients: ConstructionIngredient[]; successRate: number; outputType: 'material' | 'equipment' | 'consumable'; itemCategory: string; constructionCategory: ConstructionCategory; blueprintCode?: string; effect?: Record<string, unknown> };
 
 // 基材负责稳定不同元素粒子；构件由基材拼装；异械则以构件完成最终功能。
 const constructionRecipes: ConstructionRecipe[] = [
@@ -90,6 +90,7 @@ const constructionRecipes: ConstructionRecipe[] = [
   { code: 'muscle_pacer', name: '肌肉起搏器', description: '脉冲会刺激肌肉在出手时爆发更强力量，但过度校正也可能让动作失去细微的准度。', ingredients: [{ code: 'kinetic_frame', quantity: 1 }, { code: 'pulse_regulator', quantity: 1 }, { code: 'force_feedback_ring', quantity: 1 }, { code: 'mana_power_source', quantity: 1 }], successRate: 20, outputType: 'equipment', itemCategory: '异械', constructionCategory: '异械', blueprintCode: 'muscle_pacer_blueprint', effect: { actualHitRatePct: -6, physicalSkillDamagePct: 6 } },
   { code: 'critical_glove', name: '刻薄手套', description: '手套会强行锁定最锐利的攻击节奏，代价是每次爆发都难以维持完整的后续力道。', ingredients: [{ code: 'finger_actuator', quantity: 2 }, { code: 'palm_weave', quantity: 2 }, { code: 'force_feedback_ring', quantity: 1 }, { code: 'pressure_buckle', quantity: 1 }], successRate: 20, outputType: 'equipment', itemCategory: '异械', constructionCategory: '异械', blueprintCode: 'critical_glove_blueprint', effect: { forceCrit: true, criticalFinalDamagePct: -50 } },
   { code: 'mana_accumulator', name: '魔力积蓄仪', description: '它会将魔力压入更深的回路中，施术前的准备感变得明显，但成型后的术式也更加危险。', ingredients: [{ code: 'mana_power_source', quantity: 2 }, { code: 'pulse_regulator', quantity: 2 }, { code: 'interference_shell', quantity: 1 }], successRate: 20, outputType: 'equipment', itemCategory: '异械', constructionCategory: '异械', blueprintCode: 'mana_accumulator_blueprint', effect: { magicChantBonus: 1, magicSkillDamagePct: 60 } }
+  , { code: 'demon_breaker_teleporter', name: '破魔传送器', description: '可撕开旧式结界缝隙的便携装置。它的回路十分复杂，唯有持有图纸才能稳定完成构造。', ingredients: [{ code: 'mana_power_source', quantity: 2 }, { code: 'calibration_module', quantity: 2 }, { code: 'shadow_filament', quantity: 3 }, { code: 'luminous_lens', quantity: 2 }], successRate: 20, outputType: 'consumable', itemCategory: '特殊', constructionCategory: '异械', blueprintCode: 'demon_breaker_teleporter_blueprint' }
 ];
 const constructionRecipeByCode = new Map(constructionRecipes.map(recipe => [recipe.code, recipe]));
 const constructionSuccessRate = (recipe: ConstructionRecipe, level: number, blueprintOwned = false) => recipe.constructionCategory === '异械'
@@ -195,6 +196,10 @@ export const constructItem = async (qqUserId: string, recipeCode: string) => wit
   }
   await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,1) ON DUPLICATE KEY UPDATE quantity=quantity+1', [characterId, output.id]);
   await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [characterId, output.id]);
+  if (recipe.code === 'demon_breaker_teleporter') {
+    const { completeDungeonSecretPurchase } = await import('./dungeon-quest.service');
+    await completeDungeonSecretPurchase(connection, characterId);
+  }
   return { success: true as const, recipe, successRate, outputName: output.name, progress: next };
 });
 

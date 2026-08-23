@@ -1,6 +1,7 @@
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { verifyOwnerPassword } from '../config/admin';
 import { getPool, withTransaction } from '../database/pool';
+import { recordAdminOperation } from './admin-log.service';
 
 export type PermissionRole = 'owner' | 'admin';
 type Connection = PoolConnection | Awaited<ReturnType<typeof getPool>>;
@@ -28,6 +29,7 @@ export const loginAsOwner = async (qqUserId: string, password: string) => withTr
   if (!verifyOwnerPassword(password)) throw new Error('主人密码不正确。');
   await connection.execute(`INSERT INTO game_permissions (qq_user_id,role,granted_by) VALUES (?,'owner',?)
     ON DUPLICATE KEY UPDATE role='owner',granted_by=VALUES(granted_by),updated_at=NOW()`, [qqUserId, qqUserId]);
+  await recordAdminOperation(qqUserId, '管理员登录', '登录为主人权限', qqUserId, connection);
 });
 
 export const grantAdministrator = async (ownerQqUserId: string, targetQqUserId: string) => withTransaction(async connection => {
@@ -36,6 +38,7 @@ export const grantAdministrator = async (ownerQqUserId: string, targetQqUserId: 
   if (current === 'owner') throw new Error('该用户已是主人，不能降为管理员。');
   await connection.execute(`INSERT INTO game_permissions (qq_user_id,role,granted_by) VALUES (?,'admin',?)
     ON DUPLICATE KEY UPDATE role='admin',granted_by=VALUES(granted_by),updated_at=NOW()`, [targetQqUserId, ownerQqUserId]);
+  await recordAdminOperation(ownerQqUserId, '权限给予', `给予 ${targetQqUserId} 管理员权限`, targetQqUserId, connection);
 });
 
 export const revokeAdministrator = async (ownerQqUserId: string, targetQqUserId: string) => withTransaction(async connection => {
@@ -44,6 +47,7 @@ export const revokeAdministrator = async (ownerQqUserId: string, targetQqUserId:
   if (!current) throw new Error('该用户当前没有管理权限。');
   if (current === 'owner') throw new Error('不能撤销主人的权限。');
   await connection.execute("DELETE FROM game_permissions WHERE qq_user_id=? AND role='admin'", [targetQqUserId]);
+  await recordAdminOperation(ownerQqUserId, '权限撤销', `撤销 ${targetQqUserId} 的管理员权限`, targetQqUserId, connection);
 });
 
 export const permissionList = async () => {

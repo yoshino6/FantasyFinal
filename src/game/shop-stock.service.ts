@@ -34,4 +34,7 @@ export const refreshShopStocks = async (pool: Pool) => {
   await pool.query(`UPDATE bookshop_items bs
     SET bs.stock_capacity=99,bs.stock_quantity=99
     WHERE bs.is_active=1`);
+  await pool.query(`UPDATE oddworkshop_items
+    SET stock_capacity=99,stock_quantity=99
+    WHERE is_active=1`);
 };

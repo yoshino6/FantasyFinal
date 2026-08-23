@@ -2,6 +2,42 @@ import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { recalculateCharacterStats } from './character.service';
 import { ensureSkillPointLedger, skillPointLedgerSummary } from './skill-point-ledger.service';
+import { forgePrimaryKeys } from './blacksmith.service';
+
+const jsonRecord = (value: unknown): Record<string, unknown> => {
+  if (!value) return {};
+  if (typeof value === 'object') return value as Record<string, unknown>;
+  try { return JSON.parse(String(value)) as Record<string, unknown>; } catch { return {}; }
+};
+const rarityScale: Record<string, number> = { '普通': .75, '优秀': .9, '精良': 1, '稀有': 1.15, '传说': 1.35, '史诗': 1.6, '神器': 1.9 };
+const forgedCaps = (level: number, rarity: string) => {
+  const scale = rarityScale[rarity] ?? 1; const percent = 20 * scale;
+  return {
+    hpMax: level * 24 * scale, mpMax: level * 20 * scale, physicalAttack: level * 8 * scale, magicAttack: level * 8 * scale,
+    physicalDefense: level * 9 * scale, magicDefense: level * 9 * scale, accuracy: level * 8 * scale, evasion: level * 8 * scale,
+    speed: level * 4 * scale, critRateBp: level * 10 * scale, damageBonusPct: 20,
+    hpPct: percent, mpPct: percent, physicalAttackPct: percent, magicAttackPct: percent, physicalDefensePct: percent, magicDefensePct: percent,
+    accuracyPct: percent, evasionPct: percent, speedPct: percent, critRatePct: percent, critDamagePct: percent, tenacityPct: percent,
+    ...Object.fromEntries(['水', '火', '土', '木', '风', '冰', '雷', '光', '暗'].flatMap(element => [[`elementMastery_${element}`, level * 2 * scale], [`elementResistance_${element}`, level * 2 * scale]]))
+  } as Record<string, number>;
+};
+const jsonStringArray = (value: unknown): string[] => {
+  const raw = typeof value === 'string' ? (() => { try { return JSON.parse(value); } catch { return []; } })() : value;
+  return Array.isArray(raw) ? raw.filter(item => typeof item === 'string') : [];
+};
+const invalidForgedEquipment = (category: string, subtype: string | null, level: number, rarity: string, effectJson: unknown, primaryJson: unknown) => {
+  const effect = jsonRecord(effectJson);
+  const expectedMain = forgePrimaryKeys(category, subtype);
+  const markedMain = jsonStringArray(primaryJson);
+  const main = markedMain.length ? markedMain : expectedMain;
+  if (markedMain.length && (markedMain.length !== expectedMain.length || markedMain.some(key => !expectedMain.includes(key)))) return true;
+  if (!main.every(key => Number(effect[key] ?? 0) > 0)) return true;
+  const secondary = Object.entries(effect).filter(([key, value]) => !main.includes(key) && typeof value === 'number' && Number(value) !== 0);
+  const allowedSecondary = ({ '普通': 1, '优秀': 2, '精良': 3, '稀有': 4, '传说': 5, '史诗': 5, '神器': 5 }[rarity] ?? 1);
+  if (secondary.length > allowedSecondary) return true;
+  const caps = forgedCaps(level, rarity);
+  return Object.entries(effect).some(([key, value]) => caps[key] !== undefined && Math.abs(Number(value)) > caps[key] + .1);
+};
 
 const characterIdFor = async (connection: PoolConnection, qqUserId: string) => {
   const [rows] = await connection.execute<(RowDataPacket & { id: number; name: string; level: number; skill_points: number })[]>('SELECT c.id,c.name,c.level,c.skill_points FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE', [qqUserId]);
@@ -38,9 +74,30 @@ export const auditInventory = async (qqUserId: string) => withTransaction(async 
     await connection.execute(`DELETE FROM player_equipment WHERE character_id=? AND slot IN (${slots})`, [character.id, ...excessArtifacts.map(artifact => artifact.slot)]);
     await recalculateCharacterStats(connection, Number(character.id));
   }
-  const removedCount = Number(removed.affectedRows); const quickRemovedCount = Number(quickRemoved.affectedRows); const artifactCount = excessArtifacts.length;
-  const changed = Boolean(removedCount || quickRemovedCount || artifactCount);
-  return { name: character.name, changed, fixed: changed ? `已清除 ${removedCount} 条异常背包记录、${quickRemovedCount} 条失效快捷道具${artifactCount ? `，并卸下 ${artifactCount} 件超额神器至背包` : ''}。` : '背包与装备记录正常，未发现需要修正的数据。' };
+  const [forgedRows] = await connection.execute<(RowDataPacket & { id: number; item_category: string; weapon_type: string | null; required_level: number; rarity: string; effect_json: unknown; forge_primary_json: unknown })[]>(`SELECT ii.id,i.item_category,i.weapon_type,i.required_level,i.rarity,COALESCE(ii.effect_json,i.effect_json) AS effect_json,ii.forge_primary_json
+    FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
+    WHERE ii.character_id=? AND i.code LIKE 'crafted\\_%' FOR UPDATE`, [character.id]);
+  const invalidInstances = forgedRows.filter(item => invalidForgedEquipment(item.item_category, item.weapon_type, Number(item.required_level), item.rarity, item.effect_json, item.forge_primary_json)).map(item => Number(item.id));
+  if (invalidInstances.length) {
+    await connection.execute(`DELETE FROM player_equipment WHERE character_id=? AND instance_id IN (${invalidInstances.map(() => '?').join(',')})`, [character.id, ...invalidInstances]);
+    await recalculateCharacterStats(connection, Number(character.id));
+  }
+  const removedCount = Number(removed.affectedRows); const quickRemovedCount = Number(quickRemoved.affectedRows); const artifactCount = excessArtifacts.length; const forgedCount = invalidInstances.length;
+  const changed = Boolean(removedCount || quickRemovedCount || artifactCount || forgedCount);
+  return { name: character.name, changed, fixed: changed ? `已清除 ${removedCount} 条异常背包记录、${quickRemovedCount} 条失效快捷道具${artifactCount ? `，并卸下 ${artifactCount} 件超额神器至背包` : ''}${forgedCount ? `，并卸下 ${forgedCount} 件不符合打造主属性或品质词条数量限制的装备至背包` : ''}。` : '背包与装备记录正常，未发现需要修正的数据。' };
+});
+
+/** 管理员定向清空背包：已装备实例保留，其余堆叠物品、装备和异械一并移除。 */
+export const clearPlayerBackpack = async (qqUserId: string) => withTransaction(async connection => {
+  const character = await characterIdFor(connection, qqUserId);
+  const [stacked] = await connection.execute<any>('DELETE FROM player_inventory WHERE character_id=?', [character.id]);
+  await connection.execute('DELETE FROM player_quick_items WHERE character_id=?', [character.id]);
+  await connection.execute('DELETE FROM player_forge_materials WHERE character_id=?', [character.id]);
+  await connection.execute('DELETE FROM player_alchemy_sessions WHERE character_id=?', [character.id]);
+  const [instances] = await connection.execute<any>(`DELETE ii FROM player_item_instances ii
+    LEFT JOIN player_equipment pe ON pe.character_id=ii.character_id AND (pe.instance_id=ii.id OR (pe.instance_id IS NULL AND pe.item_id=ii.item_id))
+    WHERE ii.character_id=? AND pe.character_id IS NULL`, [character.id]);
+  return { name: character.name, stacked: Number(stacked.affectedRows), instances: Number(instances.affectedRows) };
 });
 
 export const auditPlayerState = async (qqUserId: string) => withTransaction(async connection => {
@@ -72,9 +129,10 @@ export const auditPlayerState = async (qqUserId: string) => withTransaction(asyn
   } else if (sessions.some(session => !Number(session.live_members))) {
     await connection.execute('UPDATE characters SET current_hp=1,activity_status=\'resting\',rest_started_at=NOW() WHERE id=?', [character.id]);
   }
-  const [travel] = await connection.execute<any>('DELETE FROM player_travels WHERE character_id=? AND arrival_at<=NOW()', [character.id]);
+  // 到期移动必须交给移动结算逻辑执行：直接删除会让角色永远停在原地。
+  const [travel] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_travels WHERE character_id=? AND arrival_at<=NOW(6) LIMIT 1 FOR UPDATE', [character.id]);
   const [activity] = await connection.execute<any>('UPDATE characters SET activity_status=\'active\',rest_started_at=NULL WHERE id=? AND activity_status IN (\'resting\',\'unconscious\') AND current_hp>=hp_max AND current_mp>=mp_max', [character.id]);
-  const fixes = [repairedCombat ? `已结束 ${repairedCombat} 场失效战斗` : '', repairedStory ? '已修正异常剧情战斗，下一步可发送“继续剧情”前往百纳镇' : '', Number(travel.affectedRows) ? '已清除过期移动状态' : '', Number(activity.affectedRows) ? '已解除满生命/魔力的异常休息状态' : ''].filter(Boolean);
+  const fixes = [repairedCombat ? `已结束 ${repairedCombat} 场失效战斗` : '', repairedStory ? '已修正异常剧情战斗，下一步可发送“继续剧情”前往百纳镇' : '', travel[0] ? '发现到期移动，已保留并等待自动结算' : '', Number(activity.affectedRows) ? '已解除满生命/魔力的异常休息状态' : ''].filter(Boolean);
   return { name: character.name, changed: fixes.length > 0, fixed: fixes.length ? `${fixes.join('；')}。` : '玩家状态正常，未发现卡死的战斗、移动或休息状态。' };
 });
 

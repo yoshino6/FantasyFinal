@@ -17,3 +17,4 @@ redis:
   db: 6
 
 login: "qq-bot"
+port: 17117

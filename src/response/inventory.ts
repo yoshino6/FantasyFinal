@@ -4,6 +4,7 @@ import { clearQuickItem, quickItemConfig, setQuickItem, toggleQuickItem } from '
 import { currentMainQuest } from '../game/main-quest.service';
 import { messageFormat } from '../game/message';
 import { activateDevice, activeDeviceList, deactivateDevice } from '../game/device.service';
+import { discardMaterial } from '../game/inventory.service';
 
 type InventoryCategory = '装备' | '道具' | '材料';
 const categories: InventoryCategory[] = ['装备', '道具', '材料'];
@@ -97,6 +98,7 @@ const inventoryFormat = async (qqUserId: string, category?: InventoryCategory, p
       markdown.addButton(`[${item.item_category}]${item.name}`, { data: `/物品图鉴 ${item.codex_id}`, autoEnter: false }).addText(` × ${item.quantity}`);
       if (item.item_category === '技能书') markdown.addText(' ').addButton('[研读]', { data: `/研读技能书 ${item.id}`, autoEnter: false });
       if (canContemplate && item.code === 'sky_dust') markdown.addText(' ').addButton('[窥探]', { data: '/窥探天空粉尘', autoEnter: false });
+      if (category === '材料') markdown.addText(' ').addButton('[丢弃]', { data: `/丢弃材料 ${item.id} `, autoEnter: false });
     }
     markdown.addNewline();
   }
@@ -202,6 +204,15 @@ export const inventorySubcategorySearchHandler = async () => {
     const subcategory = parseSubcategory(category, route.param('subcategory')); if (!subcategory) throw new Error('不存在该子分类。');
     await message.send({ format: await inventoryFormat(event.current.UserId, category, 1, String(route.param('keyword') ?? ''), subcategory) });
   } catch (error) { await message.send({ format: messageFormat('搜索失败', error instanceof Error ? error.message : '请稍后重试。') }); }
+};
+
+export const discardMaterialHandler = async () => {
+  const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
+  try {
+    const result = await discardMaterial(event.current.UserId, Number(route.param('id')), Number(route.param('quantity') ?? 1));
+    await message.send({ format: messageFormat('丢弃成功', `已丢弃【${result.name}】×${result.quantity}\n剩余：${result.remaining}`) });
+    await message.send({ format: await inventoryFormat(event.current.UserId, '材料') });
+  } catch (error) { await message.send({ format: messageFormat('无法丢弃', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
 
 export const deviceHandler = async () => {

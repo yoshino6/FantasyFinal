@@ -4,6 +4,7 @@ import { inventory } from '../game/adventure.service';
 import { getPool } from '../database/pool';
 import { messageFormat } from '../game/message';
 import type { RowDataPacket } from 'mysql2/promise';
+import { markedDungeonEntrances } from '../game/dungeon-quest.service';
 
 type OwnedMap = RowDataPacket & { code: string; name: string; description: string; region_code: string | null; region_name: string | null };
 type MapTarget = RowDataPacket & { code: string; name: string; x: number; y: number; target_order: number };
@@ -51,13 +52,18 @@ export default async () => {
         SELECT code,name,pos_x AS x,pos_y AS y,100 AS target_order
         FROM map_special_objects WHERE region_id=(SELECT id FROM map_regions WHERE code=?)
         ORDER BY target_order,name`, [map.region_code, map.region_code]);
-      if (!targets.length) {
+      if (!targets.length && map.region_code !== 'dark_forest') {
         markdown.addText('> ').addButton(map.description, { data: '/面板', autoEnter: false }).addNewline().addNewline();
         continue;
       }
       for (const target of targets) {
         const seconds = estimateSeconds(x, y, target, bag.movementSpeed);
         markdown.addText('> ').addButton(target.name, { data: `/前往 ${target.x} ${target.y}`, autoEnter: false }).addText(`（${target.x}, ${target.y}）[预计${seconds}s]`).addNewline();
+      }
+      const entrances = await markedDungeonEntrances(event.current.UserId, map.region_code);
+      for (const entrance of entrances) {
+        const seconds = Math.max(1, Math.ceil((Math.abs(entrance.x - x) + Math.abs(entrance.y - y)) / bag.movementSpeed));
+        markdown.addText('> ').addButton(entrance.name, { data: `/前往 ${entrance.x} ${entrance.y}`, autoEnter: false }).addText(`（${entrance.x}, ${entrance.y}）[预计${seconds}s]`).addNewline();
       }
       markdown.addNewline();
     }

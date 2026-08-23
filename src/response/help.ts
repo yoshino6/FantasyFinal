@@ -35,6 +35,8 @@ export default async () => {
     .addButton('/队伍', { data: '/队伍', autoEnter: false }).addText(' 查看我的队伍与成员信息\n')
     .addButton('/组队 创建', { data: '/组队 创建', autoEnter: false }).addText(' 创建最多四人的队伍\n')
     .addButton('/队伍列表', { data: '/队伍列表', autoEnter: false }).addText(' 查看可加入的队伍\n')
+    .addButton('/通缉', { data: '/通缉', autoEnter: false }).addText(' 查看已进入被通缉城镇、行踪暴露的红名\n')
+    .addButton('/通缉令', { data: '/通缉令', autoEnter: false }).addText(' 查看全部通缉令与逮捕赏金\n')
     .addButton('/邮件', { data: '/邮件', autoEnter: false }).addText(' 查看邮件与领取附件\n')
     .addSubtitle('城镇服务')
     .addButton('/悬赏板', { data: '/悬赏板', autoEnter: false }).addText(' 查看并接取怪物悬赏\n')

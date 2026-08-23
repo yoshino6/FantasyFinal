@@ -99,10 +99,11 @@ export const claimOmniscientQuestHandler = async () => {
 };
 
 export const omniscientProfessionFormat = async (qqUserId: string) => {
-  const progress = await omniscientProgress(qqUserId); const filled = Math.round(Math.max(0, Math.min(1, progress.proficiency / progress.required)) * 10);
+  const progress = await omniscientProgress(qqUserId); const filled = Math.floor(Math.max(0, Math.min(1, progress.proficiency / progress.required)) * 10);
   const markdown = Format.createMarkdown().addTitle('副职业·全知者').addNewline().addNewline().addText(`等级：Lv.${progress.level}\n熟练度：${progress.proficiency}/${progress.required}\n${'■'.repeat(filled)}${'□'.repeat(10 - filled)}`).addNewline().addNewline()
-    .addBlockquote(`明鉴：慧眼 Lv.${progress.rangeLevel}（可鉴识至自身等级 +${progress.rangeLevel * 3}）｜识珠 Lv.${progress.informationLevel}`).addNewline()
-    .addBlockquote('队伍掉率+50%（唯一被动）');
+    .addBlockquote(`【鉴识】慧眼 Lv+${progress.rangeBonus}｜识珠 Lv+${progress.informationBonus}`).addNewline()
+    .addBlockquote(`队伍掉率+${progress.dropBonusPct}%（唯一被动）`).addNewline()
+    .addBlockquote('你在地图上能发现更多的踪迹（仅单人或作为队长时生效）');
   return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('明鉴', '/全知者明鉴', { type: 'command', autoEnter: true, style: 'blue' }).addButton('识踪', '/全知者识踪', { type: 'command', autoEnter: true, style: 'blue' }));
 };
 
@@ -111,9 +112,9 @@ export const omniscientInsightHandler = async () => {
   try {
     const progress = await omniscientProgress(event.current.UserId);
     const markdown = Format.createMarkdown().addTitle('全知者·明鉴').addNewline().addNewline()
-      .addBlockquote(`自带鉴识：慧眼 Lv.${progress.rangeLevel}，可鉴识至自身等级 +${progress.rangeLevel * 3}。`).addNewline()
-      .addBlockquote(`识珠 Lv.${progress.informationLevel}，随全知者等级深化可见信息。`).addNewline()
-      .addBlockquote('队伍掉率+50%（唯一被动；同队多名全知者不会叠加）。');
+      .addBlockquote(`【鉴识】慧眼 Lv+${progress.rangeBonus}｜识珠 Lv+${progress.informationBonus}。`).addNewline()
+      .addBlockquote(`队伍掉率+${progress.dropBonusPct}%（唯一被动；同队多名全知者取最高加成）。`).addNewline()
+      .addBlockquote('识踪可让你发现地图中的更多魔力痕迹；单人或担任队长时，迷宫内还会给出路线指引。');
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('识踪', '/全知者识踪', { type: 'command', autoEnter: true, style: 'blue' }).addButton('返回副职业', '/副职业', { type: 'command', autoEnter: true })) });
   } catch (error) { await message.send({ format: messageFormat('明鉴失败', error instanceof Error ? error.message : '请稍后重试。') }); }
 };

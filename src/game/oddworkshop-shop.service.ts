@@ -1,5 +1,6 @@
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
+import { recordPvpLootSale } from './pvp.service';
 
 const PAGE_SIZE = 5;
 type CharacterRow = RowDataPacket & { id: number; copper_coins: number };
@@ -36,6 +37,7 @@ export const sellOddWorkshopItem = async (qqUserId: string, itemId: number, quan
   const item = rows[0]; if (!item) throw new Error('唯薇安只收购粒子、元素尘、基材、构件与异械。');
   if (Number(item.quantity) < amount) throw new Error(`背包数量不足，当前仅有 ${item.quantity} 个。`);
   const price = Number(item.sell_price) * amount;
+  await recordPvpLootSale(connection, Number(character.id), Number(item.id), amount, price);
   await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [amount, character.id, item.id]);
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [amount, character.id, item.id]);
   await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [price, character.id]);

@@ -9,7 +9,7 @@ type RegistrationStage = 'story' | 'audience' | 'question' | 'destination' | 'da
 type SessionRow = RowDataPacket & { id: string; player_id: number; stage: RegistrationStage; expires_at: Date };
 type PlayerRow = RowDataPacket & { id: number; status: string };
 type RegionRow = RowDataPacket & { id: number; name: string; min_x: number; max_x: number; min_y: number; max_y: number; min_z: number; max_z: number };
-export type CharacterView = Allocation & DerivedStats & { name: string; gender: string; regionName: string; x: number; y: number; z: number; level: number; experience: number; realmStage: number; adventurerRegistered: boolean; giftName: string | null; growth: Growth; currentHp: number; currentMp: number; activityStatus: 'active' | 'resting' | 'unconscious'; elementMastery: Record<string, number>; elementResistance: Record<string, number>; extraAttributes: { damageBonusPct: number } };
+export type CharacterView = Allocation & DerivedStats & { name: string; gender: string; regionName: string; x: number; y: number; z: number; level: number; experience: number; realmStage: number; adventurerRegistered: boolean; giftName: string | null; growth: Growth; currentHp: number; currentMp: number; activityStatus: 'active' | 'resting' | 'unconscious' | 'detained'; elementMastery: Record<string, number>; elementResistance: Record<string, number>; extraAttributes: { damageBonusPct: number } };
 
 const elements = ['水', '火', '土', '木', '风', '冰', '雷', '光', '暗'] as const;
 const randomBalancedElements = () => {
@@ -67,6 +67,16 @@ const equipmentExtraAttributes = async (connection: Pool | PoolConnection, chara
   return { damageBonusPct: Math.round(damageBonusPct * 10) / 10 };
 };
 
+const withEquipmentElements = async (connection: Pool | PoolConnection, characterId: number, baseMastery: Record<string, unknown>, baseResistance: Record<string, unknown>) => {
+  const [rows] = await connection.execute<(RowDataPacket & { effect_json: unknown; quality: number })[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json,COALESCE(ii.quality,100) AS quality
+    FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
+    LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
+    WHERE pe.character_id=?`, [characterId]);
+  const bonus = (prefix: 'elementMastery' | 'elementResistance', element: string) => rows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[`${prefix}_${element}`] ?? 0) * (.6 + Math.max(0, Math.min(100, Number(row.quality))) * .004), 0);
+  const value = (base: Record<string, unknown>, prefix: 'elementMastery' | 'elementResistance') => Object.fromEntries(elements.map(element => [element, Math.round((Number(base[element] ?? 0) + bonus(prefix, element)) * 10) / 10]));
+  return { mastery: value(baseMastery, 'elementMastery'), resistance: value(baseResistance, 'elementResistance') };
+};
+
 export const recalculateCharacterStats = async (connection: Pool | PoolConnection, characterId: number) => {
   const [rows] = await connection.execute<(RowDataPacket & Record<string, unknown>)[]>('SELECT * FROM characters WHERE id=? FOR UPDATE', [characterId]);
   const character = rows[0]; if (!character) return;
@@ -76,7 +86,10 @@ export const recalculateCharacterStats = async (connection: Pool | PoolConnectio
     WHERE pe.character_id=? AND COALESCE(i.required_level,1)>?`, [characterId, Number(character.level)]);
   await connection.execute('DELETE FROM player_food_buffs WHERE character_id=? AND expires_at<=NOW()', [characterId]);
   const stats = await withEquipmentStats(connection, characterId, calculateDerivedStats(finalAttributes(character)));
-  await connection.execute('UPDATE characters SET hp_max=?,mp_max=?,current_hp=LEAST(current_hp,?),current_mp=LEAST(current_mp,?),physical_attack=?,magic_attack=?,physical_defense=?,magic_defense=?,accuracy=?,evasion=?,crit_rate_bp=?,crit_damage_bp=?,crit_resist_bp=?,crit_damage_reduction_bp=?,tenacity=?,speed=? WHERE id=?', [stats.hpMax, stats.mpMax, stats.hpMax, stats.mpMax, stats.physicalAttack, stats.magicAttack, stats.physicalDefense, stats.magicDefense, stats.accuracy, stats.evasion, stats.critRateBp, stats.critDamageBp, stats.critResistBp, stats.critDamageReductionBp, stats.tenacity, stats.speed, characterId]);
+  const baseMastery = jsonRecord(character.element_base_mastery_json ?? character.element_mastery_json);
+  const baseResistance = jsonRecord(character.element_base_resistance_json ?? character.element_resistance_json);
+  const elemental = await withEquipmentElements(connection, characterId, baseMastery, baseResistance);
+  await connection.execute('UPDATE characters SET hp_max=?,mp_max=?,current_hp=LEAST(current_hp,?),current_mp=LEAST(current_mp,?),physical_attack=?,magic_attack=?,physical_defense=?,magic_defense=?,accuracy=?,evasion=?,crit_rate_bp=?,crit_damage_bp=?,crit_resist_bp=?,crit_damage_reduction_bp=?,tenacity=?,speed=?,element_mastery_json=?,element_resistance_json=? WHERE id=?', [stats.hpMax, stats.mpMax, stats.hpMax, stats.mpMax, stats.physicalAttack, stats.magicAttack, stats.physicalDefense, stats.magicDefense, stats.accuracy, stats.evasion, stats.critRateBp, stats.critDamageBp, stats.critResistBp, stats.critDamageReductionBp, stats.tenacity, stats.speed, JSON.stringify(elemental.mastery), JSON.stringify(elemental.resistance), characterId]);
 };
 
 const getPlayer = async (connection: PoolConnection, qqUserId: string, nickname?: string): Promise<PlayerRow> => {
@@ -169,8 +182,8 @@ export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: 
   const elementResistance = randomBalancedElements();
   const name = `冒险者${(nickname || qqUserId).slice(-6)}`;
   await connection.execute(
-    'INSERT INTO characters (player_id, name, constitution, spirit, strength, intelligence, agility, perception, constitution_growth, spirit_growth, strength_growth, intelligence_growth, agility_growth, perception_growth, hp_max, mp_max, current_hp, current_mp, physical_attack, magic_attack, physical_defense, magic_defense, accuracy, evasion, crit_rate_bp, crit_damage_bp, crit_resist_bp, crit_damage_reduction_bp, tenacity, speed, element_mastery_json, element_resistance_json, current_region_id, pos_x, pos_y, pos_z) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [player.id, name, ...attributes.map(key => allocation[key]), ...attributes.map(key => growth[key]), stats.hpMax, stats.mpMax, stats.hpMax, stats.mpMax, stats.physicalAttack, stats.magicAttack, stats.physicalDefense, stats.magicDefense, stats.accuracy, stats.evasion, stats.critRateBp, stats.critDamageBp, stats.critResistBp, stats.critDamageReductionBp, stats.tenacity, stats.speed, JSON.stringify(elementMastery), JSON.stringify(elementResistance), region.id, x, y, z]
+    'INSERT INTO characters (player_id, name, constitution, spirit, strength, intelligence, agility, perception, constitution_growth, spirit_growth, strength_growth, intelligence_growth, agility_growth, perception_growth, hp_max, mp_max, current_hp, current_mp, physical_attack, magic_attack, physical_defense, magic_defense, accuracy, evasion, crit_rate_bp, crit_damage_bp, crit_resist_bp, crit_damage_reduction_bp, tenacity, speed, element_mastery_json, element_resistance_json, element_base_mastery_json, element_base_resistance_json, current_region_id, pos_x, pos_y, pos_z) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [player.id, name, ...attributes.map(key => allocation[key]), ...attributes.map(key => growth[key]), stats.hpMax, stats.mpMax, stats.hpMax, stats.mpMax, stats.physicalAttack, stats.magicAttack, stats.physicalDefense, stats.magicDefense, stats.accuracy, stats.evasion, stats.critRateBp, stats.critDamageBp, stats.critResistBp, stats.critDamageReductionBp, stats.tenacity, stats.speed, JSON.stringify(elementMastery), JSON.stringify(elementResistance), JSON.stringify(elementMastery), JSON.stringify(elementResistance), region.id, x, y, z]
   );
   const [newCharacters] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM characters WHERE player_id=?', [player.id]);
   const characterId = newCharacters[0].id;

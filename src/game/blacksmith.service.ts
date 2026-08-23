@@ -3,11 +3,14 @@ import { getPool, withTransaction } from '../database/pool';
 import { recalculateCharacterStats } from './character.service';
 import { recordSkillPointChange } from './skill-point-ledger.service';
 
-type WeaponRow = RowDataPacket & { id: number; name: string; quality: number; rarity: string; required_level: number; fusion_count: number };
+type WeaponRow = RowDataPacket & { id: number; name: string; item_category: string; quality: number; rarity: string; required_level: number; fusion_count: number };
 type MaterialRow = RowDataPacket & { id: number; name: string; item_category: string; quantity: number; min_gain?: number; max_gain?: number; effect_json?: unknown; description?: string };
 type ForgeEntrySource = 'blacksmith' | 'profession';
 type BlacksmithProgressRow = RowDataPacket & { level: number; proficiency: number };
 const rarityBonus: Record<string, number> = { '普通': 0, '优秀': 1, '精良': 2, '稀有': 3, '传说': 4, '史诗': 5, '神器': 6 };
+const combatElements = ['水', '火', '土', '木', '风', '冰', '雷', '光', '暗'];
+// 金元素粉尘来自金属锻材；当前战斗元素体系没有“金”，故归入土系，避免生成无法结算的孤立属性。
+const dustElement: Record<string, string> = { wood_element_dust: '木', metal_element_dust: '土', water_element_dust: '水', ice_element_dust: '冰', dark_element_dust: '暗', fire_element_dust: '火', thunder_element_dust: '雷', light_element_dust: '光' };
 const jsonRecord = (value: unknown): Record<string, unknown> => { if (!value) return {}; if (typeof value !== 'string') return value as Record<string, unknown>; try { return JSON.parse(value) as Record<string, unknown>; } catch { return {}; } };
 const fusionLimit = (weapon: Pick<WeaponRow, 'rarity' | 'required_level'>) => Math.floor(Math.max(0, Number(weapon.required_level)) / 10) + (rarityBonus[weapon.rarity] ?? 0);
 const characterIdFor = async (connection: PoolConnection | Awaited<ReturnType<typeof getPool>>, qqUserId: string, lock = false) => {
@@ -39,10 +42,15 @@ const addBlacksmithProficiency = async (connection: PoolConnection, characterId:
   return { isBlacksmith: true, level, proficiency, required: proficiencyRequired(level), bonus: blacksmithBonus(level) };
 };
 const weaponsFor = async (connection: PoolConnection | Awaited<ReturnType<typeof getPool>>, characterId: number) => {
-  const [rows] = await connection.execute<WeaponRow[]>(`SELECT ii.id,i.name,ii.quality,i.rarity,i.required_level,COUNT(ef.id) AS fusion_count FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id LEFT JOIN equipment_fusions ef ON ef.instance_id=ii.id WHERE ii.character_id=? AND i.item_type='equipment' AND i.item_category='武器' GROUP BY ii.id,i.name,ii.quality,i.rarity,i.required_level ORDER BY ii.acquired_at DESC,ii.id DESC`, [characterId]);
-  return rows.map(row => ({ id: Number(row.id), name: row.name, quality: Number(row.quality), rarity: row.rarity, requiredLevel: Number(row.required_level), fusionCount: Number(row.fusion_count), fusionLimit: fusionLimit(row) }));
+  const [rows] = await connection.execute<WeaponRow[]>(`SELECT ii.id,i.name,i.item_category,ii.quality,i.rarity,i.required_level,COUNT(ef.id) AS fusion_count FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id LEFT JOIN equipment_fusions ef ON ef.instance_id=ii.id WHERE ii.character_id=? AND i.item_type='equipment' AND i.item_category='武器' GROUP BY ii.id,i.name,i.item_category,ii.quality,i.rarity,i.required_level ORDER BY ii.acquired_at DESC,ii.id DESC`, [characterId]);
+  return rows.map(row => ({ id: Number(row.id), name: row.name, category: row.item_category, quality: Number(row.quality), rarity: row.rarity, requiredLevel: Number(row.required_level), fusionCount: Number(row.fusion_count), fusionLimit: fusionLimit(row) }));
 };
 export const blacksmithWeapons = async (qqUserId: string) => weaponsFor(await getPool(), await characterIdFor(await getPool(), qqUserId));
+const fusionEquipmentFor = async (connection: PoolConnection | Awaited<ReturnType<typeof getPool>>, characterId: number) => {
+  const [rows] = await connection.execute<WeaponRow[]>(`SELECT ii.id,i.name,i.item_category,ii.quality,i.rarity,i.required_level,COUNT(ef.id) AS fusion_count FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id LEFT JOIN equipment_fusions ef ON ef.instance_id=ii.id WHERE ii.character_id=? AND i.item_type='equipment' AND i.item_category<>'异械' GROUP BY ii.id,i.name,i.item_category,ii.quality,i.rarity,i.required_level ORDER BY i.item_category,ii.acquired_at DESC,ii.id DESC`, [characterId]);
+  return rows.map(row => ({ id: Number(row.id), name: row.name, category: row.item_category, quality: Number(row.quality), rarity: row.rarity, requiredLevel: Number(row.required_level), fusionCount: Number(row.fusion_count), fusionLimit: fusionLimit(row) }));
+};
+export const blacksmithFusionEquipment = async (qqUserId: string) => { const pool = await getPool(); return fusionEquipmentFor(pool, await characterIdFor(pool, qqUserId)); };
 export const blacksmithProgress = async (qqUserId: string) => { const pool = await getPool(); return blacksmithProgressFor(pool, await characterIdFor(pool, qqUserId)); };
 export const craftsmanshipEffect = async (qqUserId: string) => {
   const pool = await getPool(); const characterId = await characterIdFor(pool, qqUserId);
@@ -86,10 +94,14 @@ export const refinementMaterials = async (qqUserId: string) => {
   const [rows] = await pool.execute<MaterialRow[]>(`SELECT i.id,i.name,i.item_category,pi.quantity,rm.min_gain,rm.max_gain FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id JOIN blacksmith_refinement_materials rm ON rm.item_id=i.id WHERE pi.character_id=? AND pi.quantity>0 ORDER BY i.id`, [characterId]);
   return rows.map(row => ({ id: Number(row.id), name: row.name, category: row.item_category, quantity: Number(row.quantity), minGain: Number(row.min_gain), maxGain: Number(row.max_gain) }));
 };
-export const fusionMaterials = async (qqUserId: string) => {
+const elementalDustEffect = (code: string, equipmentCategory: string) => {
+  const element = dustElement[code];
+  return element ? { [`${equipmentCategory === '武器' ? 'elementMastery' : 'elementResistance'}_${element}`]: 2 } : null;
+};
+export const fusionMaterials = async (qqUserId: string, equipmentCategory = '武器') => {
   const pool = await getPool(); const characterId = await characterIdFor(pool, qqUserId);
-  const [rows] = await pool.execute<MaterialRow[]>(`SELECT i.id,i.name,i.item_category,pi.quantity,fe.effect_json,fe.description FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id LEFT JOIN blacksmith_fusion_material_effects fe ON fe.item_id=i.id WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type='material' AND i.item_category<>'货币' ORDER BY i.item_category,i.name`, [characterId]);
-  return rows.map(row => ({ id: Number(row.id), name: row.name, category: row.item_category, quantity: Number(row.quantity), effect: jsonRecord(row.effect_json), description: row.description ?? '可熔入装备，形成随机的基础强化。' }));
+  const [rows] = await pool.execute<(MaterialRow & { code: string })[]>(`SELECT i.id,i.code,i.name,i.item_category,pi.quantity,fe.effect_json,fe.description FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id LEFT JOIN blacksmith_fusion_material_effects fe ON fe.item_id=i.id WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type='material' AND i.item_category<>'货币' ORDER BY i.item_category,i.name`, [characterId]);
+  return rows.map(row => ({ id: Number(row.id), name: row.name, category: row.item_category, quantity: Number(row.quantity), effect: elementalDustEffect(row.code, equipmentCategory) ?? jsonRecord(row.effect_json), description: row.description ?? '可熔入装备，形成随机的基础强化。' }));
 };
 const refinementGain = (minimum: number, maximum: number, quality: number) => {
   const min = Math.max(1, Math.ceil(minimum)); const max = Math.max(min, Math.floor(maximum));
@@ -124,21 +136,22 @@ const fallbackFusion = (category: string) => category === '草药' ? { hpPct: 1 
 export const fuseWeapon = async (qqUserId: string, instanceId: number, materialId: number) => withTransaction(async connection => {
   const characterId = await characterIdFor(connection, qqUserId, true);
   const profession = await blacksmithProgressFor(connection, characterId, true);
-  const [weapons] = await connection.execute<(WeaponRow & { effect_json: unknown; item_id: number })[]>(`SELECT ii.id,ii.item_id,i.name,ii.quality,i.rarity,i.required_level,COALESCE(ii.effect_json,i.effect_json) AS effect_json,(SELECT COUNT(*) FROM equipment_fusions ef WHERE ef.instance_id=ii.id) AS fusion_count FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.id=? AND ii.character_id=? AND i.item_type='equipment' AND i.item_category='武器' FOR UPDATE`, [instanceId, characterId]);
-  const weapon = weapons[0]; if (!weapon) throw new Error('请选择自己背包中的武器。');
+  const [weapons] = await connection.execute<(WeaponRow & { effect_json: unknown; original_effect_json: unknown; item_id: number })[]>(`SELECT ii.id,ii.item_id,i.name,i.item_category,ii.quality,i.rarity,i.required_level,i.effect_json AS original_effect_json,COALESCE(ii.effect_json,i.effect_json) AS effect_json,(SELECT COUNT(*) FROM equipment_fusions ef WHERE ef.instance_id=ii.id) AS fusion_count FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.id=? AND ii.character_id=? AND i.item_type='equipment' AND i.item_category<>'异械' FOR UPDATE`, [instanceId, characterId]);
+  const weapon = weapons[0]; if (!weapon) throw new Error('请选择自己背包中的装备。');
   const limit = fusionLimit(weapon); if (Number(weapon.fusion_count) >= limit) throw new Error(`该武器的熔铸次数已用尽（${weapon.fusion_count}/${limit}）。`);
   const [materials] = await connection.execute<(MaterialRow & { code: string })[]>(`SELECT i.id,i.code,i.name,i.item_category,pi.quantity,fe.effect_json,fe.description FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id LEFT JOIN blacksmith_fusion_material_effects fe ON fe.item_id=i.id WHERE pi.character_id=? AND i.id=? AND i.item_type='material' AND i.item_category<>'货币' FOR UPDATE`, [characterId, materialId]);
   const material = materials[0]; if (!material || Number(material.quantity) < 1) throw new Error('请选择背包中的熔铸材料。');
   const success = Math.min(100, 70 + profession.bonus);
-  const added = material.code.startsWith('refined_') ? forgeMaterialEffect(material.code) : Object.keys(jsonRecord(material.effect_json)).length ? jsonRecord(material.effect_json) : fallbackFusion(material.item_category);
+  const added = elementalDustEffect(material.code, weapon.item_category) ?? (material.code.startsWith('refined_') ? forgeMaterialEffect(material.code, weapon.item_category) : Object.keys(jsonRecord(material.effect_json)).length ? jsonRecord(material.effect_json) : fallbackFusion(material.item_category));
   await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=?', [characterId, materialId]);
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [characterId, materialId]);
   if (Math.random() * 100 >= success) {
     const progress = await addBlacksmithProficiency(connection, characterId);
     return { name: weapon.name, material: material.name, effect: {}, count: Number(weapon.fusion_count), limit, failed: true, success, progress };
   }
-  const current = jsonRecord(weapon.effect_json); const merged = { ...current };
+  const current = jsonRecord(weapon.effect_json); const original = jsonRecord(weapon.original_effect_json); const merged: Record<string, number> = Object.fromEntries(Object.entries(current).map(([key, value]) => [key, Number(value ?? 0)]));
   for (const [key, value] of Object.entries(added)) merged[key] = Math.round((Number(merged[key] ?? 0) + Number(value)) * 100) / 100;
+  capAdditionalEquipmentEffect(merged, original, Number(weapon.required_level), weapon.rarity);
   await connection.execute('UPDATE player_item_instances SET effect_json=? WHERE id=?', [JSON.stringify(merged), instanceId]);
   await connection.execute('INSERT INTO equipment_fusions (instance_id,material_item_id,effect_json) VALUES (?,?,?)', [instanceId, materialId, JSON.stringify(added)]);
   await recalculateCharacterStats(connection, characterId);
@@ -160,23 +173,29 @@ const forgeRequirements = (category: string, level: number) => {
 const forgeMaterialNames: Record<string, string> = { living_wood: '活木', meteor_iron: '陨铁', star_copper: '星铜', moon_silver: '月银', sun_gold: '曜金' };
 const random = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
 const forgeCategories = new Set(['武器', '头肩', '上装', '腰部', '下装', '脚部']);
-const weaponTypes = new Set(['长剑', '法杖', '匕首', '拳刃']); const armorTypes = new Set(['布甲', '皮甲', '轻甲', '重甲', '板甲']);
+const weaponTypes = new Set(['长剑', '法杖', '法书', '法球', '匕首', '拳刃', '盾牌']); const armorTypes = new Set(['布甲', '皮甲', '轻甲', '重甲', '板甲']);
 const forgeRarity = (auxiliaryScore: number, auxiliaryCount: number, hasRefinedMaterial = false) => {
   if (!auxiliaryCount) return '普通';
-  if (hasRefinedMaterial) {
-    const weights: Array<[string, number]> = [['精良', 28], ['稀有', 56], ['传说', 16]];
-    let roll = Math.random() * weights.reduce((sum, [, weight]) => sum + weight, 0);
-    return weights.find(([, weight]) => (roll -= weight) <= 0)?.[0] ?? '精良';
-  }
+  // 总投入越多、素材越好，高品质权重越高；普通始终保留极小权重，不会被辅材完全排除。
   const average = auxiliaryScore / Math.max(1, auxiliaryCount);
-  const weights: Array<[string, number]> = [['普通', Math.max(1, 65 - average * 2)], ['优秀', 25 + average], ['精良', Math.max(0, average * 2 - 10)], ['稀有', Math.max(0, average * 1.5 - 25)], ['传说', Math.max(0, average * .8 - 16)], ['史诗', Math.max(0, average * .4 - 10)]];
+  const strength = average + Math.sqrt(auxiliaryCount) * 3 + (hasRefinedMaterial ? 16 : 0);
+  const weights: Array<[string, number]> = [['普通', Math.max(1, 75 - strength * 2)], ['优秀', Math.max(4, 22 + strength * .4)], ['精良', Math.max(0, strength * 1.15 - 14)], ['稀有', Math.max(0, strength * .9 - 31)], ['传说', Math.max(0, strength * .55 - 42)], ['史诗', Math.max(0, strength * .22 - 38)]];
   let roll = Math.random() * weights.reduce((sum, [, weight]) => sum + weight, 0);
   return weights.find(([, weight]) => (roll -= weight) <= 0)?.[0] ?? '普通';
 };
 const rarityScale: Record<string, number> = { '普通': .75, '优秀': .9, '精良': 1, '稀有': 1.15, '传说': 1.35, '史诗': 1.6, '神器': 1.9 };
 const forgeEffectCaps = (level: number, rarity: string) => {
   const scale = rarityScale[rarity] ?? 1;
-  return { hpMax: level * 24 * scale, mpMax: level * 20 * scale, physicalAttack: level * 8 * scale, magicAttack: level * 8 * scale, physicalDefense: level * 9 * scale, magicDefense: level * 9 * scale, accuracy: level * 8 * scale, evasion: level * 8 * scale, speed: level * 4 * scale, critRateBp: level * 10 * scale, damageBonusPct: 20 } as Record<string, number>;
+  const percentageCap = 20 * scale;
+  return {
+    hpMax: level * 24 * scale, mpMax: level * 20 * scale, physicalAttack: level * 8 * scale, magicAttack: level * 8 * scale,
+    physicalDefense: level * 9 * scale, magicDefense: level * 9 * scale, accuracy: level * 8 * scale, evasion: level * 8 * scale,
+    speed: level * 4 * scale, critRateBp: level * 10 * scale, damageBonusPct: 20,
+    hpPct: percentageCap, mpPct: percentageCap, physicalAttackPct: percentageCap, magicAttackPct: percentageCap,
+    physicalDefensePct: percentageCap, magicDefensePct: percentageCap, accuracyPct: percentageCap, evasionPct: percentageCap,
+    speedPct: percentageCap, critRatePct: percentageCap, critDamagePct: percentageCap, tenacityPct: percentageCap,
+    ...Object.fromEntries(combatElements.flatMap(element => [[`elementMastery_${element}`, level * 2 * scale], [`elementResistance_${element}`, level * 2 * scale]]))
+  } as Record<string, number>;
 };
 const capForgeEffect = (effect: Record<string, number>, level: number, rarity: string) => {
   const caps = forgeEffectCaps(level, rarity);
@@ -185,31 +204,55 @@ const capForgeEffect = (effect: Record<string, number>, level: number, rarity: s
     : Math.round(Math.max(-caps[key], Math.min(caps[key], Number(value))));
   return effect;
 };
+/** 熔铸仍沿用历史总额约束；打造的副词条已改为仅受各自单项上限约束。 */
+const capAdditionalEquipmentEffect = (effect: Record<string, number>, original: Record<string, unknown>, level: number, rarity: string) => {
+  const caps = forgeEffectCaps(level, rarity);
+  const contributions: Array<{ key: string; original: number; bonus: number; cap: number }> = [];
+  for (const [key, cap] of Object.entries(caps)) {
+    const origin = Number(original[key] ?? 0);
+    const bonus = Math.max(0, Number(effect[key] ?? 0) - origin);
+    if (!bonus) continue;
+    const bounded = Math.min(bonus, cap);
+    effect[key] = Math.round((origin + bounded) * 10) / 10;
+    contributions.push({ key, original: origin, bonus: bounded, cap });
+  }
+  const load = contributions.reduce((sum, entry) => sum + entry.bonus / entry.cap, 0);
+  if (load <= 2) return effect;
+  const factor = 2 / load;
+  for (const entry of contributions) effect[entry.key] = Math.round((entry.original + entry.bonus * factor) * 10) / 10;
+  return effect;
+};
+/** 打造装备的主属性由装备类型决定；同类辅材只会作为副属性参与词条抽取。 */
+export const forgePrimaryKeys = (category: string, subtype: string | null | undefined): string[] => {
+  if (category === '武器') {
+    if (subtype === '长剑') return ['physicalAttack'];
+    if (subtype === '法杖' || subtype === '法书' || subtype === '法球') return ['magicAttack'];
+    if (subtype === '匕首' || subtype === '拳刃') return ['physicalAttack', 'magicAttack'];
+    if (subtype === '盾牌') return ['physicalDefense', 'magicDefense'];
+    return ['physicalAttack', 'magicAttack'];
+  }
+  // 五种甲的物防、魔防均为主属性，防御倾向由基础数值区分。
+  return ['physicalDefense', 'magicDefense'];
+};
 const baseForgeEffect = (category: string, subtype: string, level: number): Record<string, number> => {
   const value = Math.max(1, level);
   if (category === '武器') {
-    if (subtype === '法杖') return { magicAttack: random(value * 3, value * 5), mpMax: random(value * 5, value * 8) };
-    if (subtype === '匕首') return { physicalAttack: random(value * 2, value * 4), magicAttack: random(value * 2, value * 4), accuracy: random(value * 2, value * 4), evasion: random(value, value * 2) };
-    if (subtype === '拳刃') return { physicalAttack: random(value * 2, value * 4), magicAttack: random(value, value * 2), critRateBp: random(value * 2, value * 4) };
-    return { physicalAttack: random(value * 3, value * 5), physicalDefense: random(value, value * 2) };
+    if (subtype === '长剑') return { physicalAttack: random(value * 5, value * 7) };
+    if (subtype === '法杖' || subtype === '法书' || subtype === '法球') return { magicAttack: random(value * 5, value * 7) };
+    if (subtype === '匕首') return { physicalAttack: random(value * 3, value * 5), magicAttack: random(value * 2, value * 4) };
+    if (subtype === '盾牌') return { physicalDefense: random(value * 7, value * 9), magicDefense: random(value * 5, value * 7) };
+    return { physicalAttack: random(value * 3, value * 5), magicAttack: random(value * 3, value * 5) };
   }
-  // 护甲本体属性：越重防御越高，机动属性越低；辅材仍可用于弥补或强化这些倾向。
-  const armor = subtype === '布甲'
-    ? { physicalDefense: 2, magicDefense: 2, accuracy: 4, evasion: 4, speed: 2 }
-    : subtype === '皮甲'
-      ? { physicalDefense: 3, magicDefense: 3, accuracy: 2, speed: 1 }
-      : subtype === '轻甲'
-        ? { physicalDefense: 5, magicDefense: 5 }
-        : subtype === '重甲'
-          ? { physicalDefense: 7, magicDefense: 7, evasion: -1, speed: -1 }
-          : { physicalDefense: 9, magicDefense: 9, accuracy: -2, evasion: -3, speed: -2 };
-  return Object.fromEntries(Object.entries(armor).map(([key, amount]) => [key, amount >= 0
-    ? random(value * amount, value * amount + value * 2)
-    : -random(value * Math.abs(amount), value * Math.abs(amount) + value)]));
+  if (subtype === '布甲') return { physicalDefense: random(value * 2, value * 4), magicDefense: random(value * 2, value * 4) };
+  if (subtype === '皮甲') return { physicalDefense: random(value * 3, value * 5), magicDefense: random(value * 3, value * 5) };
+  if (subtype === '轻甲') return { physicalDefense: random(value * 5, value * 7), magicDefense: random(value * 5, value * 7) };
+  if (subtype === '重甲') return { physicalDefense: random(value * 8, value * 10), magicDefense: random(value * 5, value * 7) };
+  return { physicalDefense: random(value * 9, value * 11), magicDefense: random(value * 9, value * 11) };
 };
-function forgeMaterialEffect(code: string): Record<string, number> {
+function forgeMaterialEffect(code: string, equipmentCategory = '武器'): Record<string, number> {
   const refinedSmall = (flat: Record<string, number>, percent: string) => Math.random() < .15 ? { ...flat, [percent]: Math.round((.1 + Math.random() * .9) * 10) / 10 } : flat;
   const refinedSpecial = (flat: Record<string, number>, percent: string) => Math.random() < .25 ? { ...flat, [percent]: Math.round((1 + Math.random()) * 10) / 10 } : flat;
+  const elemental = elementalDustEffect(code, equipmentCategory); if (elemental) return elemental;
   const effects: Record<string, Record<string, number>> = { beast_bone: { physicalAttack: random(1, 3) }, beast_hide: { physicalDefense: random(1, 3), magicDefense: random(1, 3) }, beast_tendon: { speed: random(1, 2) }, beast_core: { magicAttack: random(1, 3) }, magic_wool: { evasion: random(2, 5) }, magic_tusk: { physicalAttack: random(2, 5) }, magic_scale: { magicDefense: random(2, 5) }, magic_claw: { critRateBp: random(10, 30) }, magic_heartcore: { accuracy: random(2, 5) }, living_wood: { hpMax: random(2, 5) }, meteor_iron: { physicalDefense: random(3, 6) }, star_copper: { accuracy: random(3, 6) }, moon_silver: { mpMax: random(5, 10) }, sun_gold: { physicalAttack: random(1, 3), magicAttack: random(1, 3) }, riot_aura: { damageBonusPct: random(3, 5) } };
   if (code === 'refined_beast_bone') return refinedSmall({ physicalAttack: random(5, 9) }, 'physicalAttackPct');
   if (code === 'refined_beast_hide') return refinedSmall({ physicalDefense: random(5, 9), magicDefense: random(5, 9) }, 'physicalDefensePct');
@@ -220,6 +263,27 @@ function forgeMaterialEffect(code: string): Record<string, number> {
   if (code === 'refined_magic_scale') return refinedSpecial({ magicDefense: random(8, 14) }, 'magicDefensePct');
   if (code === 'refined_magic_claw') return refinedSpecial({ critRateBp: random(50, 100) }, 'critRatePct');
   if (code === 'refined_magic_heartcore') return refinedSpecial({ accuracy: random(8, 14) }, 'accuracyPct');
+  return effects[code] ?? { hpMax: 1 };
+}
+/** 打造用的辅材上限；随机成分统一在正态分布抽取阶段处理，避免投入数量直接线性叠加实际属性。 */
+function forgeMaterialCap(code: string, equipmentCategory = '武器'): Record<string, number> {
+  const elemental = elementalDustEffect(code, equipmentCategory); if (elemental) return elemental;
+  const effects: Record<string, Record<string, number>> = {
+    beast_bone: { physicalAttack: 3 }, beast_hide: { physicalDefense: 3, magicDefense: 3 }, beast_tendon: { speed: 2 }, beast_core: { magicAttack: 3 },
+    magic_wool: { evasion: 5 }, magic_tusk: { physicalAttack: 5 }, magic_scale: { magicDefense: 5 }, magic_claw: { critRateBp: 30 }, magic_heartcore: { accuracy: 5 },
+    living_wood: { hpMax: 5 }, meteor_iron: { physicalDefense: 6 }, star_copper: { accuracy: 6 }, moon_silver: { mpMax: 10 }, sun_gold: { physicalAttack: 3, magicAttack: 3 }, riot_aura: { damageBonusPct: 5 }
+  };
+  const refinedSmall = (flat: Record<string, number>, percent: string) => Math.random() < .15 ? { ...flat, [percent]: 1 } : flat;
+  const refinedSpecial = (flat: Record<string, number>, percent: string) => Math.random() < .25 ? { ...flat, [percent]: 2 } : flat;
+  if (code === 'refined_beast_bone') return refinedSmall({ physicalAttack: 9 }, 'physicalAttackPct');
+  if (code === 'refined_beast_hide') return refinedSmall({ physicalDefense: 9, magicDefense: 9 }, 'physicalDefensePct');
+  if (code === 'refined_beast_tendon') return refinedSmall({ speed: 6 }, 'speedPct');
+  if (code === 'refined_beast_core') return refinedSmall({ magicAttack: 9 }, 'magicAttackPct');
+  if (code === 'refined_magic_wool') return refinedSpecial({ evasion: 14 }, 'evasionPct');
+  if (code === 'refined_magic_tusk') return refinedSpecial({ physicalAttack: 14 }, 'physicalAttackPct');
+  if (code === 'refined_magic_scale') return refinedSpecial({ magicDefense: 14 }, 'magicDefensePct');
+  if (code === 'refined_magic_claw') return refinedSpecial({ critRateBp: 100 }, 'critRatePct');
+  if (code === 'refined_magic_heartcore') return refinedSpecial({ accuracy: 14 }, 'accuracyPct');
   return effects[code] ?? { hpMax: 1 };
 }
 const mergeEffect = (base: Record<string, number>, incoming: Record<string, number>) => { for (const [key, value] of Object.entries(incoming)) base[key] = Math.round((Number(base[key] ?? 0) + Number(value)) * 100) / 100; return base; };
@@ -236,6 +300,34 @@ const mergeDiminishingForgeEffect = (base: Record<string, number>, original: Rec
     base[key] = Math.round(Math.max(-cap, Math.min(cap, current + gain)) * 10) / 10;
   }
   return base;
+};
+type ForgePropertyEntry = { key: string; cap: number; weight: number };
+/**
+ * 辅材只决定某条副属性的可达上限；成品数值以中位偏上的正态分布落点抽取。
+ * 极端高值仍有概率出现，但会先被打造属性的既有衰减与单项上限收敛。
+ */
+const normalForgeFactor = () => {
+  const left = Math.max(Number.EPSILON, Math.random()); const right = Math.max(Number.EPSILON, Math.random());
+  const standard = Math.sqrt(-2 * Math.log(left)) * Math.cos(2 * Math.PI * right);
+  return Math.max(.08, Math.min(1, .62 + standard * .16));
+};
+const primaryForgeProperties = (category: string, subtype: string) => new Set(forgePrimaryKeys(category, subtype));
+const secondaryAffixCount = (rarity: string) => ({ '普通': 1, '优秀': 2, '精良': 3, '稀有': 4, '传说': 5, '史诗': 5, '神器': 5 }[rarity] ?? 1);
+/** 辅材混杂时，主属性始终保留；其余属性按投入权重无放回抽取，数量由最终品质决定。 */
+const chooseForgeProperties = (category: string, subtype: string, rarity: string, entries: ForgePropertyEntry[]) => {
+  const primary = primaryForgeProperties(category, subtype);
+  const weighted = new Map<string, number>();
+  for (const entry of entries) if (!primary.has(entry.key)) weighted.set(entry.key, Number(weighted.get(entry.key) ?? 0) + entry.weight);
+  const selected = new Set(primary);
+  while (selected.size - primary.size < secondaryAffixCount(rarity) && weighted.size) {
+    const total = [...weighted.values()].reduce((sum, value) => sum + value, 0);
+    let roll = Math.random() * total;
+    let picked = [...weighted.keys()][0];
+    for (const [key, weight] of weighted) { roll -= weight; if (roll <= 0) { picked = key; break; } }
+    selected.add(picked);
+    weighted.delete(picked);
+  }
+  return selected;
 };
 const forgeName = (subtype: string, level: number, effect: Record<string, number>) => {
   const affixes: Array<[string, string]> = [['physicalAttack', '锋利'], ['magicAttack', '灵辉'], ['physicalDefense', '坚固'], ['magicDefense', '秘护'], ['hpMax', '生机'], ['mpMax', '澄明'], ['accuracy', '精准'], ['evasion', '轻盈'], ['speed', '迅捷'], ['critRateBp', '致命']];
@@ -274,8 +366,28 @@ export const craftForgeEquipment = async (qqUserId: string, _confirmed = false) 
   const score = auxiliary.reduce((sum, item) => sum + forgeContribution(item.code) * Number(item.selected_quantity), 0); const success = 100;
   const [coins] = await connection.execute<(RowDataPacket & { copper_coins: number })[]>('SELECT copper_coins FROM characters WHERE id=? FOR UPDATE', [characterId]); if (Number(coins[0]?.copper_coins ?? 0) < 60) throw new Error('铜币不足，打造手续费需要 60 铜币。');
   for (const material of materials) await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [material.selected_quantity, characterId, material.id]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND quantity<=0', [characterId]); await connection.execute('UPDATE characters SET copper_coins=copper_coins-60 WHERE id=?', [characterId]); await connection.execute('DELETE FROM player_forge_materials WHERE character_id=?', [characterId]);
-  const rarity = forgeRarity(score, auxiliaryCount, auxiliary.some(material => material.code.startsWith('refined_'))); const effect = baseForgeEffect(session.equipment_category, session.subtype, Number(session.target_level)); const originalEffect = { ...effect }; for (const material of auxiliary) for (let i = 0; i < Number(material.selected_quantity); i++) mergeDiminishingForgeEffect(effect, originalEffect, forgeMaterialEffect(material.code), Number(session.target_level), rarity); capForgeEffect(effect, Number(session.target_level), rarity); const name = forgeName(session.subtype, Number(session.target_level), effect); const code = `crafted_${characterId}_${Date.now()}_${Math.floor(Math.random() * 100000)}`; const quality = Math.min(100, Math.max(0, Math.round((15 + score * .35 + random(-8, 8)) * 100) / 100));
-  const [definition] = await connection.execute<any>('INSERT INTO item_definitions (code,name,description,obtain_source,item_type,item_category,weapon_type,rarity,required_level,weight,stackable,effect_json) VALUES (?,?,?,?,?,?,?,?,?,?,0,?)', [code, name, `由铁匠铺打造的 Lv.${session.target_level}${session.subtype}。`, '百纳镇铁匠铺打造', 'equipment', session.equipment_category, session.equipment_category === '武器' ? session.subtype : null, rarity, session.target_level, 2, JSON.stringify(effect)]); const [instance] = await connection.execute<any>('INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max,effect_json) VALUES (?,?,?,100,100,?)', [characterId, definition.insertId, quality, JSON.stringify(effect)]); await connection.execute('DELETE FROM player_forge_sessions WHERE character_id=?', [characterId]);
+  const rarity = forgeRarity(score, auxiliaryCount, auxiliary.some(material => material.code.startsWith('refined_')));
+  const effect = baseForgeEffect(session.equipment_category, session.subtype, Number(session.target_level));
+  const originalEffect = { ...effect };
+  const propertyEntries: ForgePropertyEntry[] = [];
+  for (const material of auxiliary) {
+    const incoming = forgeMaterialCap(material.code, session.equipment_category);
+    const amount = Number(material.selected_quantity);
+    const materialWeight = Math.max(1, forgeContribution(material.code));
+    for (const [key, value] of Object.entries(incoming)) propertyEntries.push({ key, cap: Number(value) * amount, weight: materialWeight * Math.max(.1, Math.abs(Number(value))) });
+  }
+  const primaryKeys = forgePrimaryKeys(session.equipment_category, session.subtype);
+  const allowedProperties = chooseForgeProperties(session.equipment_category, session.subtype, rarity, propertyEntries);
+  const propertyCaps = new Map<string, number>();
+  for (const entry of propertyEntries) if (allowedProperties.has(entry.key)) {
+    propertyCaps.set(entry.key, Number(propertyCaps.get(entry.key) ?? 0) + entry.cap);
+  }
+  for (const [key, cap] of propertyCaps) {
+    mergeDiminishingForgeEffect(effect, originalEffect, { [key]: cap * normalForgeFactor() }, Number(session.target_level), rarity);
+  }
+  capForgeEffect(effect, Number(session.target_level), rarity);
+  const name = forgeName(session.subtype, Number(session.target_level), effect); const code = `crafted_${characterId}_${Date.now()}_${Math.floor(Math.random() * 100000)}`; const quality = Math.min(100, Math.max(0, Math.round((15 + score * .35 + random(-8, 8)) * 100) / 100));
+  const [definition] = await connection.execute<any>('INSERT INTO item_definitions (code,name,description,obtain_source,item_type,item_category,weapon_type,rarity,required_level,weight,stackable,effect_json) VALUES (?,?,?,?,?,?,?,?,?,?,0,?)', [code, name, `由铁匠铺打造的 Lv.${session.target_level}${session.subtype}。`, '百纳镇铁匠铺打造', 'equipment', session.equipment_category, session.subtype, rarity, session.target_level, 2, JSON.stringify(effect)]); const [instance] = await connection.execute<any>('INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max,effect_json,forge_primary_json) VALUES (?,?,?,100,100,?,?)', [characterId, definition.insertId, quality, JSON.stringify(effect), JSON.stringify(primaryKeys)]); await connection.execute('DELETE FROM player_forge_sessions WHERE character_id=?', [characterId]);
   const progress = await addBlacksmithProficiency(connection, characterId);
   return { needsConfirm: false as const, failed: false as const, name, rarity, quality, effect, instanceId: Number(instance.insertId), success, progress };
 });
