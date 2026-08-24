@@ -77,6 +77,44 @@ const randomDungeonBossTrait = () => {
   return dungeonBossTraits[weights.findIndex(weight => (roll -= weight) < 0) || 0];
 };
 
+const dungeonSmallMonsterPlan: Record<number, { target: number; codes: string[]; levelFor: (code: string) => number }> = {
+  [-10]: { target: 13, codes: firstFloorSlimes, levelFor: () => randomLevel(1, 9) },
+  [-20]: { target: 20, codes: secondFloorMonsters, levelFor: code => code === 'skeleton' || code === 'undead' ? randomLevel(16, 18) : code === 'skeleton_warrior' || code === 'death_wight' ? randomLevel(18, 20) : randomLevel(8, 16) },
+  [-30]: { target: 6, codes: ['skeleton_warrior', 'death_wight', 'undead'], levelFor: code => code === 'undead' ? randomLevel(16, 18) : randomLevel(18, 20) }
+};
+
+/** 整点补充未攻略迷宫中的小怪。Boss、楼层首领、宝箱格与宝箱状态均不在此处改动。 */
+const refreshDungeonSmallMonsters = async (connection: Pool | PoolConnection) => {
+  const dungeonRegionId = await regionId(connection, DUNGEON_REGION_CODE);
+  const [dungeons] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM dungeon_instances WHERE state=\'active\' FOR UPDATE');
+  if (!dungeons.length) return 0;
+  const allCodes = [...new Set(Object.values(dungeonSmallMonsterPlan).flatMap(plan => plan.codes))];
+  const [templates] = await connection.execute<(RowDataPacket & { id: number; code: string; constitution: number; spirit: number; strength: number; intelligence: number; agility: number; perception: number; skill_sequence: unknown })[]>(`SELECT id,code,constitution,spirit,strength,intelligence,agility,perception,skill_sequence FROM monster_templates WHERE code IN (${allCodes.map(() => '?').join(',')})`, allCodes);
+  const byCode = new Map(templates.map(template => [template.code, template]));
+  let spawned = 0;
+  for (const dungeon of dungeons) for (const z of FLOORS) {
+    const plan = dungeonSmallMonsterPlan[z];
+    const [countRows] = await connection.execute<(RowDataPacket & { total: number })[]>(`SELECT COUNT(*) AS total FROM dungeon_monsters dm
+      JOIN monster_spawns s ON s.id=dm.spawn_id
+      WHERE dm.dungeon_id=? AND dm.is_boss=0 AND dm.is_floor_leader=0 AND s.pos_z=? AND s.defeated_at IS NULL`, [dungeon.id, z]);
+    const missing = Math.max(0, plan.target - Number(countRows[0]?.total ?? 0));
+    if (!missing) continue;
+    const [cells] = await connection.execute<(RowDataPacket & { pos_x: number; pos_y: number })[]>(`SELECT dc.pos_x,dc.pos_y FROM dungeon_cells dc
+      WHERE dc.dungeon_id=? AND dc.pos_z=? AND dc.cell_type IN ('path','trap')
+        AND NOT EXISTS (SELECT 1 FROM monster_spawns s WHERE s.region_id=? AND s.pos_x=dc.pos_x AND s.pos_y=dc.pos_y AND s.pos_z=dc.pos_z AND s.defeated_at IS NULL)
+      ORDER BY dc.id FOR UPDATE`, [dungeon.id, z, dungeonRegionId]);
+    const slots = [...cells].sort(() => Math.random() - .5).slice(0, missing);
+    for (const slot of slots) {
+      const code = random(plan.codes); const template = byCode.get(code); if (!template) continue;
+      const level = plan.levelFor(code); const hp = Math.max(100, Math.floor((Number(template.constitution) * 42 + level * 70) * 1.2));
+      const [spawn] = await connection.execute<any>('INSERT INTO monster_spawns (template_id,region_id,pos_x,pos_y,pos_z,level,constitution,spirit,strength,intelligence,agility,perception,current_hp,skill_sequence,traits_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,JSON_ARRAY())', [template.id, dungeonRegionId, slot.pos_x, slot.pos_y, z, level, template.constitution, template.spirit, template.strength, template.intelligence, template.agility, template.perception, hp, skillJson(template.skill_sequence)]);
+      await connection.execute('INSERT INTO dungeon_monsters (dungeon_id,spawn_id,is_boss,is_floor_leader) VALUES (?,?,0,0)', [dungeon.id, Number(spawn.insertId)]);
+      spawned += 1;
+    }
+  }
+  return spawned;
+};
+
 /** 兼容旧迷宫：首领身份保留在 dungeon_monsters，显示与战斗词条改用通用 Boss 词条。 */
 const migrateDungeonBossTraits = async (connection: Pool | PoolConnection) => {
   const [rows] = await connection.execute<(RowDataPacket & { id: number })[]>(`SELECT s.id FROM dungeon_monsters dm
@@ -168,12 +206,13 @@ const createDungeon = async (connection: Pool | PoolConnection) => {
 };
 
 /** 启动与整点调用：全世界仅维持一座未攻略迷宫，攻略后两小时才替换结构。 */
-export const refreshDungeons = async (connection: Pool | PoolConnection) => {
+export const refreshDungeons = async (connection: Pool | PoolConnection, options: { refreshMonsters?: boolean } = {}) => {
   await migrateDungeonBossTraits(connection);
   await connection.execute(`UPDATE dungeon_instances SET state='closed' WHERE state='cleared' AND refresh_at<=NOW()`);
   const [activeRows] = await connection.execute<(RowDataPacket & { total: number })[]>('SELECT COUNT(*) AS total FROM dungeon_instances WHERE state<>\'closed\'');
   const missing = Math.max(0, 1 - Number(activeRows[0]?.total ?? 0));
   for (let index = 0; index < missing; index += 1) await createDungeon(connection);
+  if (options.refreshMonsters) await refreshDungeonSmallMonsters(connection);
 };
 
 /** 管理面板使用的当前地下迷宫事件概览。 */

@@ -1,5 +1,5 @@
 import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
-import { autoBattleConfig, autoBattleSkills, autoPotionItems, beginAutoBattleQuickSetup, deleteAutoBattleAction, finishAutoBattleQuickSetup, saveAutoBattleAction, saveQuickAutoBattleAction, setAutoBattleEnabled, setAutoPotionEnabled, setAutoPotionItem, setAutoPotionThreshold, type AutoBattleMode } from '../game/auto-battle.service';
+import { autoBattleConfig, autoBattleSkills, autoPotionItems, beginAutoBattleQuickSetup, deleteAutoBattleAction, finishAutoBattleQuickSetup, saveAutoBattleAction, saveQuickAutoBattleAction, setAutoBattleEnabled, setAutoPotionEnabled, setAutoPotionItem, setAutoPotionThreshold, toggleAutoBattleEncounterAction, type AutoBattleMode } from '../game/auto-battle.service';
 import { messageFormat } from '../game/message';
 
 const fail = (message: any, error: unknown) => message.send({ format: messageFormat('自动战斗配置失败', error instanceof Error ? error.message : '请稍后重试。') });
@@ -10,8 +10,9 @@ const modeArg = (mode: AutoBattleMode) => mode === 'pvp' ? ' PVP' : '';
 
 const configFormat = async (qqUserId: string, mode: AutoBattleMode = 'pve') => {
   const data = await autoBattleConfig(qqUserId, mode); const settings = data.settings; const suffix = modeArg(mode);
-  const markdown = Format.createMarkdown().addTitle(`自动战斗配置·${modeLabel(mode)}`).addNewline().addNewline()
-    .addText('出招顺序：').addButton('[快速配置]', { data: `/自动战斗 快速配置${suffix}`, autoEnter: false }).addButton('[新增]', { data: `/自动战斗 出招选择 ${data.actions.length + 1} 1${suffix}`, autoEnter: false }).addNewline();
+  const markdown = Format.createMarkdown().addTitle(`自动战斗配置·${modeLabel(mode)}`).addNewline().addNewline();
+  if (mode === 'pve') markdown.addText(`默认选择：${settings.default_encounter_action === 'persuade' ? '交涉' : '战斗'} `).addButton('[切换]', { data: '/自动战斗 默认选择', autoEnter: false }).addNewline();
+  markdown.addText('出招顺序： ').addButton('[快速配置]', { data: `/自动战斗 快速配置${suffix}`, autoEnter: false }).addText(' ').addButton('[新增]', { data: `/自动战斗 出招选择 ${data.actions.length + 1} 1${suffix}`, autoEnter: false }).addNewline();
   if (!data.actions.length) markdown.addBlockquote('尚未配置，自动战斗将使用普通攻击。').addNewline();
   else for (const action of data.actions) markdown.addBlockquote(`${'①②③④⑤⑥⑦⑧⑨⑩'.charAt(action.sequence - 1) || `${action.sequence}.`}${actionName(action.name)}`).addButton('[更换]', { data: `/自动战斗 出招选择 ${action.sequence} 1${suffix}`, autoEnter: false }).addButton('[删除]', { data: `/自动战斗 删除 ${action.sequence}${suffix}`, autoEnter: false }).addNewline();
   markdown.addNewline().addText('————————————').addNewline().addText('自动嗑药：').addNewline()
@@ -64,6 +65,11 @@ export default async () => { const [event] = useEvent(); const [route] = useRout
   }
   await message.send({ format: await configFormat(event.current.UserId, mode) });
 } catch (error) { await fail(message, error); } };
+export const toggleDefaultEncounterActionHandler = async () => {
+  const [event] = useEvent(); const [message] = useMessage();
+  try { await toggleAutoBattleEncounterAction(event.current.UserId); await message.send({ format: await configFormat(event.current.UserId, 'pve') }); }
+  catch (error) { await fail(message, error); }
+};
 export const selectActionHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); const mode = modeOf(route.param('mode')); try { await message.send({ format: await choiceFormat(event.current.UserId, Number(route.param('sequence')), Number(route.param('page') ?? 1), '', false, mode) }); } catch (error) { await fail(message, error); } };
 export const chooseActionHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); const mode = modeOf(route.param('mode')); try { await saveAutoBattleAction(event.current.UserId, Number(route.param('sequence')), Number(route.param('skill')) || null, mode); await message.send({ format: await configFormat(event.current.UserId, mode) }); } catch (error) { await fail(message, error); } };
 export const deleteActionHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); const mode = modeOf(route.param('mode')); try { await deleteAutoBattleAction(event.current.UserId, Number(route.param('sequence')), mode); await message.send({ format: await configFormat(event.current.UserId, mode) }); } catch (error) { await fail(message, error); } };

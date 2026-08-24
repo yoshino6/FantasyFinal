@@ -3,6 +3,7 @@ import { getCharacter, type CharacterView } from '../game/character.service';
 import { experienceRequiredForLevel, realmNameForStage } from '../game/constants';
 import { messageFormat } from '../game/message';
 import { playerPvpStatus } from '../game/pvp.service';
+import { durationText } from '../game/time-format';
 
 const elementOrder = ['水', '火', '木', '土', '风', '冰', '雷', '光', '暗'];
 const numberText = (value: number) => Number.isInteger(value) ? String(value) : value.toFixed(1);
@@ -43,7 +44,7 @@ export default async () => {
     const gender = character.gender === '男' ? '♂' : character.gender === '女' ? '♀' : '?'; const pvp = await playerPvpStatus(event.current.UserId);
     const markdown = Format.createMarkdown().addTitle('角色信息').addText(`\n\n昵称：${character.name} `)
       .addButton('[改名]', { data: '/改名 ', autoEnter: false }).addText(` \n性别：${gender}`)
-      .addButton('[改性]', { data: '/改性 ', autoEnter: false }).addText(`\n境界：${realmNameForStage(character.realmStage)}\n等级：Lv.${character.level}\n经验：${character.experience}/${experienceRequiredForLevel(character.level)}${pvp.detainedUntil ? '\n状态：收押中' : pvp.wanted ? '\n状态：通缉中（红名）' : ''}\n\n`);
+      .addButton('[改性]', { data: '/改性 ', autoEnter: false }).addText(`\n境界：${realmNameForStage(character.realmStage)}\n等级：Lv.${character.level}\n经验：${character.experience}/${experienceRequiredForLevel(character.level)}${pvp.detainedUntil ? `\n状态：关押中（剩余${durationText((new Date(pvp.detainedUntil).getTime() - Date.now()) / 1000)}）` : pvp.wanted ? '\n状态：通缉中（红名）' : ''}\n\n`);
     if (!character.adventurerRegistered) markdown.addText('属性暂时隐藏');
     else appendDetails(markdown, character);
     await message.send({ format: Format.create().addMarkdown(markdown) });

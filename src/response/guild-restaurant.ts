@@ -2,6 +2,7 @@ import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
 import { addNpcAffinity, requireNpcAtCurrentPosition } from '../game/adventure.service';
 import { enjoyRestaurantMeal, foodBuffText, restaurantMenu } from '../game/guild-restaurant.service';
 import { messageFormat } from '../game/message';
+import { durationText } from '../game/time-format';
 
 const pageButtons = (page: number, totalPages: number, keyword = '') => Format.createButtonGroup().addRow()
   .addButton('上一页', `/餐厅菜单页 ${Math.max(1, page - 1)}${keyword ? ` ${keyword}` : ''}`, { type: 'command', autoEnter: true, style: page > 1 ? 'blue' : undefined })
@@ -9,7 +10,6 @@ const pageButtons = (page: number, totalPages: number, keyword = '') => Format.c
   .addButton('下一页', `/餐厅菜单页 ${Math.min(totalPages, page + 1)}${keyword ? ` ${keyword}` : ''}`, { type: 'command', autoEnter: true, style: page < totalPages ? 'blue' : undefined })
   .addRow().addButton('返回 公会大厅', '/建筑进入 guild_counter', { type: 'command', autoEnter: true });
 
-const durationText = (seconds: number) => `${Math.floor(seconds / 60)}分${seconds % 60}秒`;
 const ingredientText = (ingredients: { category: string; name: string; quantity: number; owned: number }[]) => ingredients.map(item => `【${item.category}】${item.name}×${item.quantity}（持有${item.owned}）`).join('、') || '无需素材';
 
 export const restaurantFormat = (text?: string) => {

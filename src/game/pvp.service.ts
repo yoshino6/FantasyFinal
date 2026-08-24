@@ -1,15 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
+import { detentionMessage } from './time-format';
 
 type PvpCharacter = RowDataPacket & {
   id: number; game_id: number; name: string; current_region_id: number; pos_x: number; pos_y: number; pos_z: number;
   level: number; perception: number; perception_growth: number;
   hp_max: number; mp_max: number; current_hp: number; current_mp: number; physical_attack: number; magic_attack: number;
-  physical_defense: number; magic_defense: number; accuracy: number; evasion: number; activity_status: string;
+  physical_defense: number; magic_defense: number; accuracy: number; evasion: number; activity_status: string; detained_until: Date | null;
 };
 type PvpAction = { type: 'attack' } | { type: 'skill'; id: number; code: string; name: string; category: 'physical' | 'magic' | 'utility'; manaCost: number; power: number; cooldown: number } | { type: 'item'; id: number; name: string; effect: Record<string, number> };
-type PvpBattleRow = RowDataPacket & { id: string; attacker_character_id: number; defender_character_id: number; turn_no: number; state: string; attacker_hp: number; attacker_mp: number; defender_hp: number; defender_mp: number; attacker_cooldowns: unknown; defender_cooldowns: unknown };
+type PvpBattleRow = RowDataPacket & { id: string; attacker_character_id: number; defender_character_id: number; turn_no: number; state: string; attacker_hp: number; attacker_mp: number; defender_hp: number; defender_mp: number; attacker_cooldowns: unknown; defender_cooldowns: unknown; ambush_spawn_id: number | null; ambush_delivery_scope: 'group' | 'c2c' | null; ambush_delivery_target_id: string | null; ambush_delivery_bot_id: string | null };
+export type PvpAmbushDelivery = { scope: 'group' | 'c2c'; targetId: string; botId?: string };
 
 const random = <T>(items: T[]) => items[Math.floor(Math.random() * items.length)];
 const perceptionRange = (character: PvpCharacter) => {
@@ -211,8 +213,44 @@ export const settlePvpDefeat = async (connection: PoolConnection, winnerId: numb
     await connection.execute('UPDATE player_warrant_rewards SET claimed_at=NOW(),claimed_by_character_id=? WHERE id=?', [winnerId, reward.id]);
   }
   const restitution: RestitutionDetail | undefined = restitutionId ? { id: restitutionId, itemCount: returnedItems, copper: returnedCopper, debt: debtCopper } : undefined;
-  const resultText = `${captured ? `【${loser.name}】被逮捕，收押 12 小时。` : '对方倒下并陷入昏迷。'}${restitution ? `返还失物${returnedItems ? `×${returnedItems}` : ''}${returnedCopper ? `、扣回铜币×${returnedCopper}` : ''}${debtCopper ? `；欠缴铜币×${debtCopper}` : ''}。` : ''}${bountyItems || bountyCopper ? `获得通缉赏金${bountyItems ? `与物品×${bountyItems}` : ''}${bountyCopper ? `、铜币×${bountyCopper}` : ''}。` : ''}`;
+  const resultText = `${captured ? `【${loser.name}】被逮捕，关押 12 小时。` : '对方倒下并陷入昏迷。'}${restitution ? `返还失物${returnedItems ? `×${returnedItems}` : ''}${returnedCopper ? `、扣回铜币×${returnedCopper}` : ''}${debtCopper ? `；欠缴铜币×${debtCopper}` : ''}。` : ''}${bountyItems || bountyCopper ? `获得通缉赏金${bountyItems ? `与物品×${bountyItems}` : ''}${bountyCopper ? `、铜币×${bountyCopper}` : ''}。` : ''}`;
   return { captured, restitution, text: resultText };
+};
+
+/** 城镇执法 NPC 击败通缉者时，按缉捕规则关押、返还赃物并追缴赃款。 */
+export const settleCityPursuitDefeat = async (connection: PoolConnection, loserId: number, cityRegionId: number) => {
+  const [loserRows] = await connection.execute<(PvpCharacter & { name: string })[]>('SELECT * FROM characters WHERE id=? FOR UPDATE', [loserId]);
+  const loser = loserRows[0]; if (!loser) return { text: '' };
+  const warrants = await activeWarrants(connection, loserId);
+  if (warrants.length) await connection.execute('UPDATE player_warrants SET status=\'captured\',captured_by_character_id=NULL,captured_at=NOW() WHERE wanted_character_id=? AND status=\'active\'', [loserId]);
+  await connection.execute('UPDATE characters SET current_hp=1,activity_status=\'detained\',rest_started_at=NULL,detained_until=DATE_ADD(NOW(),INTERVAL 12 HOUR) WHERE id=?', [loserId]);
+
+  const [stolen] = await connection.execute<StolenLootRow[]>('SELECT * FROM pvp_stolen_loot WHERE holder_character_id=? AND returned_at IS NULL FOR UPDATE', [loserId]);
+  const restitutionId = stolen.length ? randomUUID() : null;
+  let returnedItems = 0; let returnedCopper = 0; let debtCopper = 0;
+  const [balanceRows] = await connection.execute<(RowDataPacket & { copper_coins: number })[]>('SELECT copper_coins FROM characters WHERE id=? FOR UPDATE', [loserId]);
+  let availableCopper = Number(balanceRows[0]?.copper_coins ?? 0);
+  for (const loot of stolen) {
+    const heldQuantity = Math.min(Number(loot.quantity), Number(loot.held_quantity));
+    if (loot.item_id && Number(loot.quantity) > 0) {
+      await creditItem(connection, Number(loot.original_owner_character_id), Number(loot.item_id), Number(loot.quantity));
+      if (heldQuantity) await connection.execute('UPDATE player_inventory SET quantity=GREATEST(0,quantity-?) WHERE character_id=? AND item_id=?', [heldQuantity, loserId, loot.item_id]);
+      await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [loserId, loot.item_id]);
+      returnedItems += Number(loot.quantity);
+    }
+    const owedCopper = Number(loot.copper_amount) + Number(loot.sale_copper_amount);
+    const chargedCopper = Math.min(availableCopper, owedCopper); const rowDebt = owedCopper - chargedCopper;
+    if (chargedCopper) {
+      await connection.execute('UPDATE characters SET copper_coins=copper_coins-? WHERE id=?', [chargedCopper, loserId]);
+      await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [chargedCopper, loot.original_owner_character_id]);
+      availableCopper -= chargedCopper;
+    }
+    if (rowDebt && restitutionId) await connection.execute('INSERT INTO player_city_debts (debtor_character_id,original_owner_character_id,city_region_id,restitution_id,amount_copper) VALUES (?,?,?,?,?)', [loserId, loot.original_owner_character_id, cityRegionId, restitutionId, rowDebt]);
+    returnedCopper += chargedCopper; debtCopper += rowDebt;
+    await connection.execute('UPDATE pvp_stolen_loot SET returned_at=NOW(),restitution_id=?,restitution_charged_copper=?,restitution_debt_copper=? WHERE id=?', [restitutionId, chargedCopper, rowDebt, loot.id]);
+  }
+  const recovered = returnedItems || returnedCopper || debtCopper;
+  return { text: `【${loser.name}】被城镇守卫关押 12 小时。${recovered ? `返还失物${returnedItems ? `×${returnedItems}` : ''}${returnedCopper ? `、扣回铜币×${returnedCopper}` : ''}${debtCopper ? `；欠缴铜币×${debtCopper}` : ''}。` : ''}` };
 };
 
 const stealFromLoser = async (connection: PoolConnection, winner: PvpCharacter, loser: PvpCharacter, extra = false) => {
@@ -238,13 +276,13 @@ const stealFromLoser = async (connection: PoolConnection, winner: PvpCharacter, 
   return taken;
 };
 
-/** 所有 PvP 击倒共用的战利品结算；城镇红名会额外触发收押与失物返还。 */
+/** 所有 PvP 击倒共用的战利品结算；城镇红名会额外触发关押与失物返还。 */
 export const resolvePvpVictory = async (connection: PoolConnection, winnerId: number, loserId: number) => {
   const [winners] = await connection.execute<PvpCharacter[]>('SELECT * FROM characters WHERE id=? FOR UPDATE', [winnerId]);
   const [losers] = await connection.execute<PvpCharacter[]>('SELECT * FROM characters WHERE id=? FOR UPDATE', [loserId]);
   const winner = winners[0]; const loser = losers[0]; if (!winner || !loser) return { text: '' };
   const settlement = await settlePvpDefeat(connection, winnerId, loserId);
-  // 缉捕红名时优先没收并返还赃物，不再从被收押者身上制造新的掠夺记录。
+  // 缉捕红名时优先没收并返还赃物，不再从被关押者身上制造新的掠夺记录。
   const loot = settlement.captured ? [] : await stealFromLoser(connection, winner, loser);
   return { text: `${settlement.text}${loot.length ? ` 获得${loot.join('、')}。` : ''}`, restitution: settlement.restitution };
 };
@@ -273,10 +311,10 @@ const resolveAction = async (connection: PoolConnection, actor: PvpCharacter, ta
 export const cityPvp = async (qqUserId: string, targetGameId: number, confirmed = false) => withTransaction(async connection => {
   const attacker = await characterFor(connection, qqUserId); const town = await townRegion(connection);
   if (Number(attacker.current_region_id) !== Number(town.id)) throw new Error('只有在百纳镇内才能发起城镇 PvP。');
-  if (attacker.activity_status === 'detained') throw new Error('你正在被城镇守卫收押，暂时无法行动。');
+  if (attacker.activity_status === 'detained') throw new Error(detentionMessage(attacker.detained_until));
   const [targets] = await connection.execute<PvpCharacter[]>('SELECT * FROM characters WHERE game_id=? AND npc_code IS NULL FOR UPDATE', [targetGameId]); const target = targets[0];
   if (!target || Number(target.id) === Number(attacker.id) || Number(target.current_region_id) !== Number(town.id) || Number(target.pos_z) !== Number(attacker.pos_z) || Math.abs(Number(target.pos_x) - Number(attacker.pos_x)) + Math.abs(Number(target.pos_y) - Number(attacker.pos_y)) > 1) throw new Error('目标不在你相邻的城镇格子中。');
-  if (target.activity_status === 'detained') throw new Error('目标已被守卫收押。');
+  if (target.activity_status === 'detained') throw new Error('目标已被守卫关押。');
   const attackerWarrant = await wanted(connection, attacker.id, Number(town.id)); const targetWarrant = await wanted(connection, target.id, Number(town.id));
   // 已被本城通缉的目标可被任何玩家合法缉捕；缉捕者不会因此获得红名。
   const unlawfulAttack = !attackerWarrant && !targetWarrant;
@@ -299,12 +337,12 @@ export const cityPvp = async (qqUserId: string, targetGameId: number, confirmed 
 /** 城镇外的同地图 PvP；野外没有通缉确认，仍要求目标处于感知范围内。 */
 export const fieldPvp = async (qqUserId: string, targetGameId: number) => withTransaction(async connection => {
   const attacker = await characterFor(connection, qqUserId);
-  if (attacker.activity_status === 'detained') throw new Error('你正在被城镇守卫收押，暂时无法行动。');
+  if (attacker.activity_status === 'detained') throw new Error(detentionMessage(attacker.detained_until));
   const [targets] = await connection.execute<PvpCharacter[]>('SELECT * FROM characters WHERE game_id=? AND npc_code IS NULL FOR UPDATE', [targetGameId]);
   const target = targets[0];
   const distance = target ? Math.abs(Number(target.pos_x) - Number(attacker.pos_x)) + Math.abs(Number(target.pos_y) - Number(attacker.pos_y)) : Infinity;
   if (!target || Number(target.id) === Number(attacker.id) || Number(target.current_region_id) !== Number(attacker.current_region_id) || Number(target.pos_z) !== Number(attacker.pos_z) || distance > perceptionRange(attacker)) throw new Error('目标已经离开你的感知范围。');
-  if (target.activity_status === 'detained') throw new Error('目标已被守卫收押。');
+  if (target.activity_status === 'detained') throw new Error('目标已被守卫关押。');
   const opening = await resolveAction(connection, attacker, target, await actionFor(connection, attacker, true));
   const response = !opening.defeated && Number(target.current_hp) > 1 ? await resolveAction(connection, target, attacker, await actionFor(connection, target)) : null;
   return { text: [opening.text, response?.text].filter(Boolean).join('\n') };
@@ -359,7 +397,8 @@ export const startPvpBattle = async (qqUserId: string, targetGameId: number, con
   const distance = defender ? Math.abs(Number(defender.pos_x) - Number(attacker.pos_x)) + Math.abs(Number(defender.pos_y) - Number(attacker.pos_y)) : Infinity;
   const range = regionCode === 'dark_forest_dungeon' ? 1 : perceptionRange(attacker);
   if (!defender || Number(defender.id) === Number(attacker.id) || Number(defender.current_region_id) !== Number(attacker.current_region_id) || Number(defender.pos_z) !== Number(attacker.pos_z) || distance > range) throw new Error('目标已经离开你的感知范围。');
-  if (attacker.activity_status === 'detained' || defender.activity_status === 'detained') throw new Error('收押中的玩家无法进行战斗。');
+  if (attacker.activity_status === 'detained') throw new Error(detentionMessage(attacker.detained_until));
+  if (defender.activity_status === 'detained') throw new Error('目标已被守卫关押。');
   if (regionCode === 'baina_town') {
     const attackerWarrant = await wanted(connection, Number(attacker.id), Number(attacker.current_region_id)); const defenderWarrant = await wanted(connection, Number(defender.id), Number(attacker.current_region_id));
     // 仅攻击普通市民才会触发红名；攻击当前城市的通缉者属于合法缉捕。
@@ -378,6 +417,23 @@ export const startPvpBattle = async (qqUserId: string, targetGameId: number, con
   if (occupied[0]) throw new Error('其中一方正在进行玩家对战。');
   const id = randomUUID(); await connection.execute('INSERT INTO player_pvp_battle_sessions (id,attacker_character_id,defender_character_id,attacker_hp,attacker_mp,defender_hp,defender_mp,attacker_cooldowns,defender_cooldowns) VALUES (?,?,?,?,?,?,?,JSON_OBJECT(),JSON_OBJECT())', [id, attacker.id, defender.id, attacker.current_hp, attacker.current_mp, defender.current_hp, defender.current_mp]);
   return { needsConfirmation: false, target: defender.name };
+});
+
+/** BOSS 伏击的战后接管：不走城镇红名确认，也不受通常感知距离限制。 */
+export const startAmbushPvpBattle = async (attackerCharacterId: number, defenderCharacterId: number, spawnId: number, delivery: PvpAmbushDelivery) => withTransaction(async connection => {
+  const [fighters] = await connection.execute<PvpCharacter[]>('SELECT * FROM characters WHERE id IN (?,?) AND npc_code IS NULL FOR UPDATE', [attackerCharacterId, defenderCharacterId]);
+  const attacker = fighters.find(row => Number(row.id) === Number(attackerCharacterId));
+  const defender = fighters.find(row => Number(row.id) === Number(defenderCharacterId));
+  if (!attacker || !defender || Number(attacker.id) === Number(defender.id)) throw new Error('伏击目标已经离开战场。');
+  if (attacker.activity_status !== 'active' || defender.activity_status !== 'active') throw new Error('伏击条件已失效，战场中的一方无法继续战斗。');
+  const [occupied] = await connection.execute<RowDataPacket[]>(`SELECT 1 FROM player_pvp_battle_sessions
+    WHERE state='active' AND (attacker_character_id IN (?,?) OR defender_character_id IN (?,?)) LIMIT 1 FOR UPDATE`, [attacker.id, defender.id, attacker.id, defender.id]);
+  if (occupied[0]) throw new Error('伏击目标已进入另一场玩家对战。');
+  const id = randomUUID();
+  await connection.execute(`INSERT INTO player_pvp_battle_sessions
+    (id,attacker_character_id,defender_character_id,attacker_hp,attacker_mp,defender_hp,defender_mp,attacker_cooldowns,defender_cooldowns,ambush_spawn_id,ambush_delivery_scope,ambush_delivery_target_id,ambush_delivery_bot_id)
+    VALUES (?,?,?,?,?,?,?,JSON_OBJECT(),JSON_OBJECT(),?,?,?,?)`, [id, attacker.id, defender.id, attacker.current_hp, attacker.current_mp, defender.current_hp, defender.current_mp, spawnId, delivery.scope, delivery.targetId, delivery.botId ?? null]);
+  return { target: defender.name };
 });
 
 export const pvpBattleStatus = async (qqUserId: string) => withTransaction(async connection => {
@@ -403,7 +459,14 @@ export const pvpCombatAction = async (qqUserId: string, type: 'attack' | 'skill'
   }
   const nextAttackerCooldowns = tickCooldowns(cooldowns); const nextDefenderCooldowns = tickCooldowns(defenderCooldowns);
   await connection.execute(`UPDATE player_pvp_battle_sessions SET attacker_hp=?,attacker_mp=?,defender_hp=?,defender_mp=?,attacker_cooldowns=?,defender_cooldowns=?,turn_no=turn_no+1,state=? WHERE id=?`, [Math.max(0, Number(attacker.current_hp)), Math.max(0, Number(attacker.current_mp)), Math.max(0, Number(defender.current_hp)), Math.max(0, Number(defender.current_mp)), JSON.stringify(nextAttackerCooldowns), JSON.stringify(nextDefenderCooldowns), ended ? (first.defeated ? 'attacker_win' : 'defender_win') : 'active', battle.id]);
-  return { ended, log: `战斗<${battle.turn_no}>回合\n${log.join('\n————————\n')}`, settlement, restitutionId, requesterId: Number(requester.id), winnerId, winnerName };
+  if (!ended) {
+    await connection.execute('UPDATE characters SET current_hp=?,current_mp=? WHERE id=?', [Math.max(0, Number(attacker.current_hp)), Math.max(0, Number(attacker.current_mp)), attacker.id]);
+    await connection.execute('UPDATE characters SET current_hp=?,current_mp=? WHERE id=?', [Math.max(0, Number(defender.current_hp)), Math.max(0, Number(defender.current_mp)), defender.id]);
+  }
+  else if (winnerId === Number(attacker.id)) await connection.execute('UPDATE characters SET current_hp=?,current_mp=? WHERE id=?', [Math.max(1, Number(attacker.current_hp)), Math.max(0, Number(attacker.current_mp)), attacker.id]);
+  else if (winnerId === Number(defender.id)) await connection.execute('UPDATE characters SET current_hp=?,current_mp=? WHERE id=?', [Math.max(1, Number(defender.current_hp)), Math.max(0, Number(defender.current_mp)), defender.id]);
+  const ambushDelivery = battle.ambush_spawn_id ? { scope: battle.ambush_delivery_scope === 'group' ? 'group' as const : 'c2c' as const, targetId: battle.ambush_delivery_target_id || '', botId: battle.ambush_delivery_bot_id || undefined } : undefined;
+  return { ended, log: `战斗<${battle.turn_no}>回合\n${log.join('\n————————\n')}`, settlement, restitutionId, requesterId: Number(requester.id), winnerId, winnerName, ambushSpawnId: battle.ambush_spawn_id ? Number(battle.ambush_spawn_id) : undefined, ambushDelivery };
 });
 
 export const restitutionDetail = async (qqUserId: string, restitutionId: string) => {

@@ -102,6 +102,8 @@ appGroup.use('管理员邮件 退出编辑', () => import('./response/admin').th
 appGroup.use('管理员邮件 发送', () => import('./response/admin').then(module => ({ default: module.previewEditHandler })))
 appGroup.use('管理员邮件 确认发放', () => import('./response/admin').then(module => ({ default: module.confirmEditHandler })))
 appGroup.use('面板', () => import('./response/panel'))
+appGroup.use({ path: '地图标识', schema: { usage: '/地图标识 <折叠|显示>', args: [{ name: 'state', rules: [{ required: true, type: 'enum', enum: ['折叠', '显示'] }] }] } }, () => import('./response/panel').then(module => ({ default: module.mapLandmarkVisibilityHandler })))
+appGroup.use({ path: '感知内目标', schema: { usage: '/感知内目标 <隐藏玩家|显示玩家>', args: [{ name: 'state', rules: [{ required: true, type: 'enum', enum: ['隐藏玩家', '显示玩家'] }] }] } }, () => import('./response/panel').then(module => ({ default: module.nearbyPlayersVisibilityHandler })))
 appGroup.use('战斗信息', () => import('./response/battle-info'))
 appGroup.use('探索', () => import('./response/explore'))
 appGroup.use({ path: '背包', schema: { usage: '/背包 [装备|道具|材料]', args: [{ name: 'category', rules: [{ type: 'enum', enum: ['装备', '道具', '材料'] }] }] } }, () => import('./response/inventory'))
@@ -154,6 +156,7 @@ appGroup.use({ path: '调整移速', schema: { usage: '/调整移速 <单次移�
 appGroup.use('休息', () => import('./response/panel').then(module => ({ default: module.restHandler })))
 appGroup.use('行动', () => import('./response/panel').then(module => ({ default: module.resumeActionHandler })))
 appGroup.use({ path: '自动战斗', schema: { usage: '/自动战斗 [开启|关闭|PVE|PVP]', args: [{ name: 'action', rules: [{ type: 'enum', enum: ['开启', '关闭', '配置', 'PVE', 'PVP'] }] }, { name: 'mode', rules: [{ type: 'enum', enum: ['PVE', 'PVP'] }] }] } }, () => import('./response/auto-battle'))
+appGroup.use('自动战斗 默认选择', () => import('./response/auto-battle').then(module => ({ default: module.toggleDefaultEncounterActionHandler })))
 appGroup.use({ path: '自动战斗 出招选择', schema: { usage: '/自动战斗 出招选择 <位置> [页码] [PVP]', args: [{ name: 'sequence', rules: [{ required: true, type: 'number', min: 1, max: 30 }] }, { name: 'page', rules: [{ type: 'number', min: 1 }] }, { name: 'mode', rules: [{ type: 'enum', enum: ['PVP'] }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.selectActionHandler })))
 appGroup.use({ path: '自动战斗 选择出招', schema: { usage: '/自动战斗 选择出招 <位置> <技能编号，普攻为0> [PVP]', args: [{ name: 'sequence', rules: [{ required: true, type: 'number', min: 1, max: 30 }] }, { name: 'skill', rules: [{ required: true, type: 'number', min: 0 }] }, { name: 'mode', rules: [{ type: 'enum', enum: ['PVP'] }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.chooseActionHandler })))
 appGroup.use({ path: '自动战斗 出招搜索', schema: { usage: '/自动战斗 出招搜索 <位置> <关键词>', args: [{ name: 'sequence', rules: [{ required: true, type: 'number', min: 1, max: 30 }] }, { name: 'keyword', rules: [{ required: true, type: 'rest' }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.actionSearchHandler })))
@@ -197,6 +200,7 @@ appGroup.use({ path: '开采', schema: { usage: '/开采 <资源编号>', args: 
 appGroup.use('刷新开采', () => import('./response/adventure').then(module => ({ default: module.refreshMiningHandler })))
 appGroup.use('取消开采', () => import('./response/adventure').then(module => ({ default: module.cancelMiningHandler })))
 appGroup.use({ path: '目标', schema: { usage: '/目标 <编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/target'))
+appGroup.use({ path: '怪物攻击', schema: { usage: '/怪物攻击 <怪物编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/adventure').then(module => ({ default: module.nearbyMonsterAttackHandler })))
 appGroup.use({ path: '偷袭', schema: { usage: '/偷袭 <编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/adventure').then(module => ({ default: module.ambushHandler })))
 appGroup.use({ path: '伏击', schema: { usage: '/伏击 <编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/adventure').then(module => ({ default: module.queueAmbushHandler })))
 appGroup.use('离开战斗', () => import('./response/adventure').then(module => ({ default: module.leaveOccupiedBattleHandler })))
@@ -342,11 +346,15 @@ appGroup.use({ path: '炼金商店出售页', schema: { usage: '/炼金商店出
 appGroup.use({ path: '炼金商店出售搜索', schema: { usage: '/炼金商店出售搜索 <关键词>', args: [{ name: 'keyword', rules: [{ required: true }] }] } }, () => import('./response/alchemist').then(module => ({ default: module.alchemistSellSearchHandler })))
 appGroup.use({ path: '出售炼金商品', schema: { usage: '/出售炼金商品 <物品编号> [数量]', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'quantity', rules: [{ type: 'number', min: 1, max: 999 }] }] } }, () => import('./response/alchemist').then(module => ({ default: module.alchemistSellItemHandler })))
 appGroup.use('精炼', () => import('./response/blacksmith').then(module => ({ default: module.refineListHandler })))
+appGroup.use({ path: '精炼页', schema: { usage: '/精炼页 <页码> [关键词]', args: [{ name: 'page', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'keyword' }] } }, () => import('./response/blacksmith').then(module => ({ default: module.refinePageHandler })))
+appGroup.use({ path: '精炼搜索', schema: { usage: '/精炼搜索 <装备关键词>', args: [{ name: 'keyword', rules: [{ required: true }] }] } }, () => import('./response/blacksmith').then(module => ({ default: module.refineSearchHandler })))
 appGroup.use({ path: '精炼放入', schema: { usage: '/精炼放入 <武器实例编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/blacksmith').then(module => ({ default: module.refinePutHandler })))
 appGroup.use({ path: '精炼材料页', schema: { usage: '/精炼材料页 <武器实例编号> <页码> [关键词]', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'page', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'keyword' }] } }, () => import('./response/blacksmith').then(module => ({ default: module.refineMaterialPageHandler })))
 appGroup.use({ path: '精炼材料搜索', schema: { usage: '/精炼材料搜索 <武器实例编号> <关键词>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'keyword', rules: [{ required: true }] }] } }, () => import('./response/blacksmith').then(module => ({ default: module.refineMaterialSearchHandler })))
 appGroup.use({ path: '精炼执行', schema: { usage: '/精炼执行 <武器实例编号> <材料编号>', args: [{ name: 'instanceId', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'materialId', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/blacksmith').then(module => ({ default: module.refineExecuteHandler })))
 appGroup.use('熔铸', () => import('./response/blacksmith').then(module => ({ default: module.fuseListHandler })))
+appGroup.use({ path: '熔铸页', schema: { usage: '/熔铸页 <页码> [关键词]', args: [{ name: 'page', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'keyword' }] } }, () => import('./response/blacksmith').then(module => ({ default: module.fusePageHandler })))
+appGroup.use({ path: '熔铸搜索', schema: { usage: '/熔铸搜索 <装备关键词>', args: [{ name: 'keyword', rules: [{ required: true }] }] } }, () => import('./response/blacksmith').then(module => ({ default: module.fuseSearchHandler })))
 appGroup.use({ path: '熔铸放入', schema: { usage: '/熔铸放入 <武器实例编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/blacksmith').then(module => ({ default: module.fusePutHandler })))
 appGroup.use({ path: '熔铸材料页', schema: { usage: '/熔铸材料页 <武器实例编号> <页码> [关键词]', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'page', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'keyword' }] } }, () => import('./response/blacksmith').then(module => ({ default: module.fuseMaterialPageHandler })))
 appGroup.use({ path: '熔铸材料搜索', schema: { usage: '/熔铸材料搜索 <武器实例编号> <关键词>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'keyword', rules: [{ required: true }] }] } }, () => import('./response/blacksmith').then(module => ({ default: module.fuseMaterialSearchHandler })))
@@ -409,6 +417,6 @@ export default defineChildren({
         .catch(error => logger.warn({ err: error }, '到期移动补偿结算失败'))
         .finally(() => { settlingDueTravels = false; });
     }, 1000);
-    setCron('0 * * * *', () => void getPool().then(async pool => { await refreshShopStocks(pool); await refreshBounties(pool); await refreshDungeons(pool); await spawnMonsters(); }).catch(error => logger.error({ err: error }, '整点刷新失败')));
+    setCron('0 * * * *', () => void getPool().then(async pool => { await refreshShopStocks(pool); await refreshBounties(pool); await refreshDungeons(pool, { refreshMonsters: true }); await spawnMonsters(); }).catch(error => logger.error({ err: error }, '整点刷新失败')));
   }
 });

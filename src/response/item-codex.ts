@@ -31,8 +31,10 @@ const jsonObject = (value: unknown): Record<string, unknown> => {
 const equipmentSections = (effectJson: unknown) => {
   const effect = jsonObject(effectJson);
   const attributeLabels: Record<string, string> = {
-    physicalAttack: '物理攻击', magicAttack: '魔法攻击', critRateBp: '暴击', physicalAttackPct: '物理攻击', magicAttackPct: '魔法攻击',
-    physicalDefensePct: '物理防御', magicDefensePct: '魔法防御', critRatePct: '暴击', critDamagePct: '暴伤', accuracyPct: '命中', evasionPct: '闪避', speedPct: '速度', mpPct: '魔力', hpPct: '生命', tenacityPct: '韧性'
+    hpMax: '生命', mpMax: '魔力', physicalAttack: '物理攻击', magicAttack: '魔法攻击', physicalDefense: '物理防御', magicDefense: '魔法防御',
+    accuracy: '命中', evasion: '闪避', critRateBp: '暴击', critDamageBp: '暴伤', critResistBp: '暴免', critDamageReductionBp: '暴抗', tenacity: '韧性', speed: '速度',
+    physicalAttackPct: '物理攻击', magicAttackPct: '魔法攻击', physicalDefensePct: '物理防御', magicDefensePct: '魔法防御', critRatePct: '暴击', critDamagePct: '暴伤',
+    accuracyPct: '命中', evasionPct: '闪避', speedPct: '速度', mpPct: '魔力', hpPct: '生命', tenacityPct: '韧性'
   };
   const attributeLabel = (key: string) => attributeLabels[key] ?? (key.startsWith('elementMastery_') ? `${key.slice('elementMastery_'.length)}元素精通` : key.startsWith('elementResistance_') ? `${key.slice('elementResistance_'.length)}元素抗性` : '');
   const attributes = Object.entries(effect).filter(([key, value]) => attributeLabel(key) && Number(value)).map(([key, value]) => `${attributeLabel(key)} ${Number(value) >= 0 ? '+' : ''}${key.endsWith('Pct') ? `${Number(value)}%` : Number(value)}`);

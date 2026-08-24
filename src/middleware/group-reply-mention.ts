@@ -1,6 +1,10 @@
 import { Format, useEvent } from 'alemonjs';
 
 const installedKey = Symbol.for('fantasy-final.group-reply-mention-installed');
+let rawFormatCreate: typeof Format.create | null = null;
+
+/** 用于纯图片等不应携带群聊 @ 的特殊消息。 */
+export const createFormatWithoutGroupMention = () => (rawFormatCreate ?? Format.create).call(Format);
 
 /**
  * 统一为群聊回复添加首行 @。通过包装 Format.create，现有所有消息格式都无需逐个修改。
@@ -11,6 +15,7 @@ export const installGroupReplyMention = () => {
   runtime[installedKey] = true;
 
   const create = Format.create;
+  rawFormatCreate = create;
   Format.create = () => {
     const format = create.call(Format);
     try {

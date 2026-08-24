@@ -156,26 +156,33 @@ const numberMark = '①②③④⑤⑥⑦⑧⑨⑩';
 const deconstructionFormat = async (qqUserId: string, category: DeconstructionCategory = '材料', page = 1, keyword = '') => {
   const items = await deconstructionItems(qqUserId, category);
   const filtered = items.filter(item => !keyword || item.name.includes(keyword) || item.category.includes(keyword));
-  const totalPages = Math.max(1, Math.ceil(filtered.length / 5)); const currentPage = Math.min(Math.max(1, page), totalPages);
-  const entries = filtered.slice((currentPage - 1) * 5, currentPage * 5);
-  const markdown = Format.createMarkdown().addTitle('解构师·分解').addNewline().addNewline().addText('玩家物品：').addNewline();
+  const totalPages = Math.max(1, Math.ceil(filtered.length / 10)); const currentPage = Math.min(Math.max(1, page), totalPages);
+  const entries = filtered.slice((currentPage - 1) * 10, currentPage * 10);
+  const markdown = Format.createMarkdown().addTitle('解构师·分解').addNewline().addNewline().addText('分类：').addText(' ')
+    .addButton('[装备]', { data: '/分解页 装备 1', autoEnter: false }).addText(' ')
+    .addButton('[道具]', { data: '/分解页 道具 1', autoEnter: false }).addText(' ')
+    .addButton('[材料]', { data: '/分解页 材料 1', autoEnter: false }).addNewline().addNewline()
+    .addText('玩家物品：').addNewline();
   if (!entries.length) markdown.addBlockquote('当前分类没有可分解的物品。').addNewline();
   for (const [index, item] of entries.entries()) markdown.addBlockquote(`${numberMark.charAt(index)}【${item.category}】${item.name}×${item.quantity} `).addButton('[分解]', { data: `/分解物品 ${item.id} `, autoEnter: false }).addText('+数量').addNewline();
   markdown.addNewline().addBlockquote('格式：点击[分解]+数量').addNewline().addNewline().addText(`当前第（${currentPage}/${totalPages}）页`);
   const previous = Math.max(1, currentPage - 1); const next = Math.min(totalPages, currentPage + 1);
   const pageCommand = (target: number) => `/分解页 ${category} ${target}${keyword ? ` ${keyword}` : ''}`;
   const buttons = Format.createButtonGroup()
-    .addRow().addButton('上一页', pageCommand(previous), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined }).addButton('搜索', `/分解搜索 ${category} `, { type: 'command', autoEnter: false, style: 'blue' }).addButton('下一页', pageCommand(next), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined })
-    .addRow().addButton('装备', '/分解页 装备 1', { type: 'command', autoEnter: true, style: category === '装备' ? 'blue' : undefined }).addButton('道具', '/分解页 道具 1', { type: 'command', autoEnter: true, style: category === '道具' ? 'blue' : undefined }).addButton('材料', '/分解页 材料 1', { type: 'command', autoEnter: true, style: category === '材料' ? 'blue' : undefined });
+    .addRow().addButton('上一页', pageCommand(previous), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined }).addButton('搜索', `/分解搜索 ${category} `, { type: 'command', autoEnter: false, style: 'blue' }).addButton('下一页', pageCommand(next), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 
 const constructionFormat = async (qqUserId: string, category: ConstructionCategory = '基材', page = 1, keyword = '') => {
   const recipes = await constructionRecipesFor(qqUserId);
   const filtered = recipes.filter(recipe => recipe.constructionCategory === category && (!keyword || recipe.name.includes(keyword)));
-  const totalPages = Math.max(1, Math.ceil(filtered.length / 5)); const currentPage = Math.min(Math.max(1, page), totalPages);
-  const entries = filtered.slice((currentPage - 1) * 5, currentPage * 5);
-  const markdown = Format.createMarkdown().addTitle('解构师·构造').addNewline().addNewline().addText(`${category}：`).addNewline();
+  const totalPages = Math.max(1, Math.ceil(filtered.length / 10)); const currentPage = Math.min(Math.max(1, page), totalPages);
+  const entries = filtered.slice((currentPage - 1) * 10, currentPage * 10);
+  const markdown = Format.createMarkdown().addTitle('解构师·构造').addNewline().addNewline().addText('分类：').addText(' ')
+    .addButton('[基材]', { data: '/构造页 基材 1', autoEnter: false }).addText(' ')
+    .addButton('[构件]', { data: '/构造页 构件 1', autoEnter: false }).addText(' ')
+    .addButton('[异械]', { data: '/构造页 异械 1', autoEnter: false }).addNewline().addNewline()
+    .addText(`${category}：`).addNewline();
   if (!entries.length) markdown.addBlockquote('当前分类没有匹配的构造配方。').addNewline();
   for (const [index, recipe] of entries.entries()) {
     markdown.addText(`${numberMark.charAt(index)}【${recipe.name}】 `);
@@ -199,8 +206,7 @@ const constructionFormat = async (qqUserId: string, category: ConstructionCatego
   const previous = Math.max(1, currentPage - 1); const next = Math.min(totalPages, currentPage + 1);
   const pageCommand = (target: number) => `/构造页 ${category} ${target}${keyword ? ` ${keyword}` : ''}`;
   const buttons = Format.createButtonGroup()
-    .addRow().addButton('上一页', pageCommand(previous), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined }).addButton('搜索', `/构造搜索 ${category} `, { type: 'command', autoEnter: false, style: 'blue' }).addButton('下一页', pageCommand(next), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined })
-    .addRow().addButton('基材', '/构造页 基材 1', { type: 'command', autoEnter: true, style: category === '基材' ? 'blue' : undefined }).addButton('构件', '/构造页 构件 1', { type: 'command', autoEnter: true, style: category === '构件' ? 'blue' : undefined }).addButton('异械', '/构造页 异械 1', { type: 'command', autoEnter: true, style: category === '异械' ? 'blue' : undefined });
+    .addRow().addButton('上一页', pageCommand(previous), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined }).addButton('搜索', `/构造搜索 ${category} `, { type: 'command', autoEnter: false, style: 'blue' }).addButton('下一页', pageCommand(next), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 

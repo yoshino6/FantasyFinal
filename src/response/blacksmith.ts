@@ -26,6 +26,7 @@ const effectText = (effect: Record<string, unknown>) => {
 };
 const materialNames: Record<string, string> = { living_wood: '活木', meteor_iron: '陨铁', star_copper: '星铜', moon_silver: '月银', sun_gold: '曜金' };
 const materialTendencies: Record<string, string> = { beast_meat: '倾向于生命', beast_bone: '倾向于物攻', beast_hide: '倾向于物防、魔防', beast_tendon: '倾向于速度', beast_core: '倾向于魔攻', magic_wool: '倾向于闪避', magic_tusk: '倾向于物攻', magic_scale: '倾向于魔防', magic_claw: '倾向于暴击', magic_heartcore: '倾向于命中', living_wood: '倾向于生命', meteor_iron: '倾向于物防', star_copper: '倾向于命中', moon_silver: '倾向于魔力', sun_gold: '倾向于双攻', riot_aura: '倾向于伤害增加' };
+const numberMark = '①②③④⑤⑥⑦⑧⑨⑩';
 export const blacksmithFormat = async (qqUserId: string, text?: string) => {
   const hour = new Date().getHours();
   const scene = text ?? (hour < 11
@@ -52,11 +53,24 @@ const awardBlacksmithCraftAffinity = async (qqUserId: string) => {
   try { return await addNpcAffinity(qqUserId, 'blacksmith', 'craft'); }
   catch (error) { if (error instanceof Error && error.message.includes('已经离开')) return undefined; throw error; }
 };
-const weaponList = async (qqUserId: string, mode: 'refine' | 'fuse') => {
-  const weapons = mode === 'refine' ? await blacksmithWeapons(qqUserId) : await blacksmithFusionEquipment(qqUserId); const title = mode === 'refine' ? '精炼' : '熔铸'; const markdown = Format.createMarkdown().addTitle(title).addNewline().addNewline().addBlockquote(mode === 'refine' ? '选择一把武器放上铁砧。品质越高，精炼越困难；每次精炼有 3% 概率大成功。' : '选择一件装备放上熔炉。每 10 级获得 1 次熔铸机会，优秀及以上品质会额外增加机会；元素粉尘会随装备部位转为精通或抗性。').addNewline().addNewline();
-  if (!weapons.length) markdown.addText(`背包中没有可${mode === 'refine' ? '精炼的武器' : '熔铸的装备'}。`);
-  for (const weapon of weapons) markdown.addText(`【${weapon.category}】${weapon.name} #${weapon.id}\n`).addBlockquote(`品质：${weapon.quality.toFixed(1)}%｜稀有度：${weapon.rarity}｜熔铸：${weapon.fusionCount}/${weapon.fusionLimit}`).addNewline().addButton('[放入]', { data: mode === 'refine' ? `/精炼放入 ${weapon.id}` : `/熔铸放入 ${weapon.id}`, autoEnter: false }).addNewline().addNewline();
-  return Format.create().addMarkdown(markdown).addButtonGroup(blacksmithButtons());
+const weaponList = async (qqUserId: string, mode: 'refine' | 'fuse', page = 1, keyword = '') => {
+  const allWeapons = mode === 'refine' ? await blacksmithWeapons(qqUserId) : await blacksmithFusionEquipment(qqUserId);
+  const weapons = allWeapons.filter(weapon => !keyword || weapon.name.includes(keyword) || weapon.category.includes(keyword));
+  const totalPages = Math.max(1, Math.ceil(weapons.length / 10));
+  const currentPage = Math.min(Math.max(1, page), totalPages);
+  const entries = weapons.slice((currentPage - 1) * 10, currentPage * 10);
+  const title = mode === 'refine' ? '精炼' : '熔铸';
+  const markdown = Format.createMarkdown().addTitle(title).addNewline().addNewline().addBlockquote(mode === 'refine' ? '选择一把武器放上铁砧。品质越高，精炼越困难；每次精炼有 3% 概率大成功。' : '选择一件装备放上熔炉。每 10 级获得 1 次熔铸机会，优秀及以上品质会额外增加机会；元素粉尘会随装备部位转为精通或抗性。').addNewline().addNewline().addText('背包装备：').addNewline();
+  if (!entries.length) markdown.addBlockquote(`背包中没有可${mode === 'refine' ? '精炼的武器' : '熔铸的装备'}。`).addNewline();
+  for (const [index, weapon] of entries.entries()) {
+    markdown.addBlockquote(`${numberMark.charAt(index)}【${weapon.category}】${weapon.name} #${weapon.id}｜品质：${weapon.quality.toFixed(1)}%｜稀有度：${weapon.rarity}｜熔铸：${weapon.fusionCount}/${weapon.fusionLimit}`).addText(' ').addButton('[放入]', { data: mode === 'refine' ? `/精炼放入 ${weapon.id}` : `/熔铸放入 ${weapon.id}`, autoEnter: false }).addNewline();
+  }
+  markdown.addText(`当前第（${currentPage}/${totalPages}）页`).addNewline();
+  const prefix = mode === 'refine' ? '精炼' : '熔铸';
+  const previous = Math.max(1, currentPage - 1); const next = Math.min(totalPages, currentPage + 1);
+  const pageCommand = (target: number) => `/${prefix}页 ${target}${keyword ? ` ${keyword}` : ''}`;
+  return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup()
+    .addRow().addButton('上一页', pageCommand(previous), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined }).addButton('搜索', `/${prefix}搜索 `, { type: 'command', autoEnter: false, style: 'blue' }).addButton('下一页', pageCommand(next), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined }));
 };
 const materialList = async (qqUserId: string, mode: 'refine' | 'fuse', instanceId: number, page = 1, keyword = '') => {
   const weapons = mode === 'refine' ? await blacksmithWeapons(qqUserId) : await blacksmithFusionEquipment(qqUserId); const weapon = weapons.find(item => item.id === instanceId); if (!weapon) throw new Error(`未找到该${mode === 'refine' ? '武器' : '装备'}。`);
@@ -67,23 +81,27 @@ const materialList = async (qqUserId: string, mode: 'refine' | 'fuse', instanceI
   const progress = mode === 'fuse' ? await blacksmithProgress(qqUserId) : null;
   const markdown = Format.createMarkdown().addTitle(mode === 'refine' ? '精炼·选择材料' : '熔铸·选择材料').addNewline().addNewline().addText(`已放入：【${weapon.category}】${weapon.name}\n`).addBlockquote(`品质：${weapon.quality.toFixed(1)}%｜熔铸：${weapon.fusionCount}/${weapon.fusionLimit}${progress ? `｜成功率：${Math.min(100, 70 + progress.bonus)}%` : ''}`).addNewline().addNewline();
   if (!entries.length) markdown.addBlockquote(mode === 'refine' ? '没有符合条件的精炼材料。' : '没有符合条件的熔铸材料。').addNewline();
-  for (const material of entries) {
+  for (const [index, material] of entries.entries()) {
     const detail = mode === 'refine' ? `本次提升 ${material.minGain}%～${material.maxGain}%` : effectText(material.effect);
-    markdown.addBlockquote(`【${material.category}】${material.name}×${material.quantity}｜${detail}`).addText(' ').addButton('[使用]', { data: mode === 'refine' ? `/精炼执行 ${instanceId} ${material.id}` : `/熔铸执行 ${instanceId} ${material.id}`, autoEnter: false }).addNewline();
+    markdown.addBlockquote(`${numberMark.charAt(index)}【${material.category}】${material.name}×${material.quantity}｜${detail}`).addText(' ').addButton('[使用]', { data: mode === 'refine' ? `/精炼执行 ${instanceId} ${material.id}` : `/熔铸执行 ${instanceId} ${material.id}`, autoEnter: false }).addNewline();
   }
+  markdown.addText(`当前第（${currentPage}/${totalPages}）页`).addNewline();
   const previous = Math.max(1, currentPage - 1); const next = Math.min(totalPages, currentPage + 1);
   const prefix = mode === 'refine' ? '精炼材料' : '熔铸材料';
   const pageCommand = (target: number) => `/${prefix}页 ${instanceId} ${target}${keyword ? ` ${keyword}` : ''}`;
   return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup()
-    .addRow().addButton('上一页', pageCommand(previous), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined }).addButton('搜索', `/${prefix}搜索 ${instanceId} `, { type: 'command', autoEnter: false, style: 'blue' }).addButton('下一页', pageCommand(next), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined })
-    .addRow().addButton(mode === 'refine' ? '返回武器列表' : '返回装备列表', mode === 'refine' ? '/精炼' : '/熔铸', { type: 'command', autoEnter: true }));
+    .addRow().addButton('上一页', pageCommand(previous), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined }).addButton('搜索', `/${prefix}搜索 ${instanceId} `, { type: 'command', autoEnter: false, style: 'blue' }).addButton('下一页', pageCommand(next), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined }));
 };
 export const refineListHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await message.send({ format: await weaponList(event.current.UserId, 'refine') }); } catch (error) { await message.send({ format: messageFormat('无法精炼', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const refinePageHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await message.send({ format: await weaponList(event.current.UserId, 'refine', Number(route.param('page')), String(route.param('keyword') ?? '')) }); } catch (error) { await message.send({ format: messageFormat('无法查看精炼装备', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const refineSearchHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await message.send({ format: await weaponList(event.current.UserId, 'refine', 1, String(route.param('keyword'))) }); } catch (error) { await message.send({ format: messageFormat('无法搜索精炼装备', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const refinePutHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await message.send({ format: await materialList(event.current.UserId, 'refine', Number(route.param('id'))) }); } catch (error) { await message.send({ format: messageFormat('无法放入武器', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const refineMaterialPageHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await message.send({ format: await materialList(event.current.UserId, 'refine', Number(route.param('id')), Number(route.param('page')), String(route.param('keyword') ?? '')) }); } catch (error) { await message.send({ format: messageFormat('无法查看材料', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const refineMaterialSearchHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await message.send({ format: await materialList(event.current.UserId, 'refine', Number(route.param('id')), 1, String(route.param('keyword'))) }); } catch (error) { await message.send({ format: messageFormat('无法搜索材料', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const refineExecuteHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); const result = await refineWeapon(event.current.UserId, Number(route.param('instanceId')), Number(route.param('materialId'))); await awardBlacksmithCraftAffinity(event.current.UserId); const text = result.failed ? `【${result.name}】的精炼未能突破瓶颈。\n消耗【${result.material}】×1\n品质维持 ${result.oldQuality.toFixed(1)}%` : `【${result.name}】精炼${result.great ? '大成功！' : '成功！'}\n消耗【${result.material}】×1\n品质：${result.oldQuality.toFixed(1)}% → ${result.newQuality.toFixed(1)}%（+${result.gain.toFixed(1)}%）`; await message.send({ format: messageFormat('精炼结果', text) }); await message.send({ format: await materialList(event.current.UserId, 'refine', Number(route.param('instanceId'))) }); } catch (error) { await message.send({ format: messageFormat('精炼失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const fuseListHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await message.send({ format: await weaponList(event.current.UserId, 'fuse') }); } catch (error) { await message.send({ format: messageFormat('无法熔铸', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const fusePageHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await message.send({ format: await weaponList(event.current.UserId, 'fuse', Number(route.param('page')), String(route.param('keyword') ?? '')) }); } catch (error) { await message.send({ format: messageFormat('无法查看熔铸装备', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const fuseSearchHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await message.send({ format: await weaponList(event.current.UserId, 'fuse', 1, String(route.param('keyword'))) }); } catch (error) { await message.send({ format: messageFormat('无法搜索熔铸装备', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const fusePutHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await message.send({ format: await materialList(event.current.UserId, 'fuse', Number(route.param('id'))) }); } catch (error) { await message.send({ format: messageFormat('无法放入武器', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const fuseMaterialPageHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await message.send({ format: await materialList(event.current.UserId, 'fuse', Number(route.param('id')), Number(route.param('page')), String(route.param('keyword') ?? '')) }); } catch (error) { await message.send({ format: messageFormat('无法查看材料', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const fuseMaterialSearchHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await message.send({ format: await materialList(event.current.UserId, 'fuse', Number(route.param('id')), 1, String(route.param('keyword'))) }); } catch (error) { await message.send({ format: messageFormat('无法搜索材料', error instanceof Error ? error.message : '请稍后重试。') }); } };
@@ -98,7 +116,6 @@ const forgeMaterialsFormat = async (qqUserId: string, page = 1, keyword = '') =>
   const state = await forgeState(qqUserId);
   if (!state.category || !state.subtype || !state.level) throw new Error('请完成部位、类型和等级选择。');
   const requiredCodes = new Set(state.requirements.map(item => item.code));
-  const requirementsMet = state.requirements.every(requirement => (state.materials.find(item => item.code === requirement.code)?.quantity ?? 0) >= requirement.quantity);
   const auxiliary = state.materials.filter(item => item.selected > 0 && !requiredCodes.has(item.code));
   const filtered = state.materials.filter(item => !requiredCodes.has(item.code) && (!keyword || item.name.includes(keyword) || item.category.includes(keyword)));
   const totalPages = Math.max(1, Math.ceil(filtered.length / 10));
@@ -125,9 +142,10 @@ const forgeMaterialsFormat = async (qqUserId: string, page = 1, keyword = '') =>
     const tendency = material.code.endsWith('_element_dust') ? `倾向于${state.category === '武器' ? '对应元素精通' : '对应元素抗性'}` : materialTendencies[material.code] ?? '倾向于随机基础属性';
     markdown.addBlockquote(`${'①②③④⑤⑥⑦⑧⑨⑩'.charAt(index)}【${material.category}】${material.name}×${material.quantity}（已放入${material.selected}）｜${tendency}`).addText(' ').addButton('[放入]', { data: `/放入打造材料 ${material.id}`, autoEnter: false }).addText(' ').addButton('[取出]', { data: `/取出打造材料 ${material.id}`, autoEnter: false }).addNewline();
   }
-  markdown.addText(`当前第（${currentPage}/${totalPages}）页`).addNewline();
+  markdown.addText(`当前第（${currentPage}/${totalPages}）页`).addNewline()
+    .addText('操作：').addText(' ').addButton('[开始打造]', { data: '/开始打造', autoEnter: false }).addText(' ').addButton('[重新选择]', { data: forgeCommand(state.source), autoEnter: false });
   const previous = Math.max(1, currentPage - 1); const next = Math.min(totalPages, currentPage + 1); const pageCommand = (target: number) => `/打造材料页 ${target}${keyword ? ` ${keyword}` : ''}`;
-  return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('上一页', pageCommand(previous), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined }).addButton('搜索', '/打造材料搜索', { type: 'command', autoEnter: false }).addButton('下一页', pageCommand(next), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined }).addRow().addButton('开始打造', '/开始打造', { type: 'command', autoEnter: true, style: requirementsMet ? 'blue' : undefined }).addButton('重新选择', forgeCommand(state.source), { type: 'command', autoEnter: true }));
+  return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('上一页', pageCommand(previous), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined }).addButton('搜索', '/打造材料搜索', { type: 'command', autoEnter: false }).addButton('下一页', pageCommand(next), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined }));
 };
 const openForge = (source: 'blacksmith' | 'profession') => async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await resetForgeSession(event.current.UserId, source); await message.send({ format: await forgeFormat(source) }); } catch (error) { await message.send({ format: messageFormat('无法打造', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const forgeHandler = openForge('blacksmith');

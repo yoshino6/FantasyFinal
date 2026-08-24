@@ -178,7 +178,8 @@ const purificationFormat = async (qqUserId: string, page = 1, keyword = '') => {
   markdown.addText(`当前第（${currentPage}/${totalPages}）页`).addNewline();
   const previous = Math.max(1, currentPage - 1); const next = Math.min(totalPages, currentPage + 1);
   const pageCommand = (target: number) => `/提纯材料页 ${target}${keyword ? ` ${keyword}` : ''}`;
-  const buttons = Format.createButtonGroup().addRow().addButton('上一页', pageCommand(previous), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined }).addButton('搜索', '/提纯材料搜索 ', { type: 'command', autoEnter: false, style: 'blue' }).addButton('下一页', pageCommand(next), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined }).addRow().addButton('开始提纯', '/开始提纯', { type: 'command', autoEnter: true, style: state.itemId && state.quantity >= 1 ? 'blue' : undefined }).addButton('返回副职业', '/副职业', { type: 'command', autoEnter: true });
+  markdown.addText('操作：').addText(' ').addButton('[开始提纯]', { data: '/开始提纯', autoEnter: false });
+  const buttons = Format.createButtonGroup().addRow().addButton('上一页', pageCommand(previous), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined }).addButton('搜索', '/提纯材料搜索 ', { type: 'command', autoEnter: false, style: 'blue' }).addButton('下一页', pageCommand(next), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 
@@ -207,10 +208,9 @@ const alchemyFormat = async (qqUserId: string, page = 1, keyword = '') => {
   markdown.addText(`当前第（${currentPage}/${totalPages}）页`).addNewline();
   const previous = Math.max(1, currentPage - 1); const next = Math.min(totalPages, currentPage + 1);
   const pageCommand = (target: number) => `/炼金材料页 ${target}${keyword ? ` ${keyword}` : ''}`;
+  markdown.addText('操作：').addText(' ').addButton('[保存配方]', { data: '/保存炼金配方', autoEnter: false }).addText(' ').addButton('[查看配方]', { data: '/炼金配方', autoEnter: false }).addText(' ').addButton('[开始炼金]', { data: '/开始炼金', autoEnter: false });
   const buttons = Format.createButtonGroup()
-    .addRow().addButton('上一页', pageCommand(previous), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined }).addButton('搜索', '/炼金材料搜索 ', { type: 'command', autoEnter: false, style: 'blue' }).addButton('下一页', pageCommand(next), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined })
-    .addRow().addButton('保存配方', '/保存炼金配方', { type: 'command', autoEnter: true, style: state.mainId ? 'blue' : undefined }).addButton('查看配方', '/炼金配方', { type: 'command', autoEnter: true, style: 'blue' })
-    .addRow().addButton('开始炼金', '/开始炼金', { type: 'command', autoEnter: true, style: state.outputName ? 'blue' : undefined }).addButton('返回副职业', '/副职业', { type: 'command', autoEnter: true });
+    .addRow().addButton('上一页', pageCommand(previous), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined }).addButton('搜索', '/炼金材料搜索 ', { type: 'command', autoEnter: false, style: 'blue' }).addButton('下一页', pageCommand(next), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 export const purificationHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await message.send({ format: await purificationFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法提纯', error instanceof Error ? error.message : '请稍后重试。') }); } };

@@ -3,7 +3,7 @@ import { getPool, withTransaction } from '../database/pool';
 
 type CharacterRow = RowDataPacket & { id: number };
 type ActionRow = RowDataPacket & { sequence_no: number; skill_id: number | null; name: string | null };
-type SettingRow = RowDataPacket & { enabled: number; auto_potion_enabled: number; hp_threshold: number; hp_item_id: number | null; hp_item_name: string | null; mp_threshold: number; mp_item_id: number | null; mp_item_name: string | null };
+type SettingRow = RowDataPacket & { enabled: number; default_encounter_action?: 'battle' | 'persuade'; auto_potion_enabled: number; hp_threshold: number; hp_item_id: number | null; hp_item_name: string | null; mp_threshold: number; mp_item_id: number | null; mp_item_name: string | null };
 type AutoCombatStateRow = RowDataPacket & { character_id: number; qq_user_id?: string; enabled: number; auto_potion_enabled: number; hp_threshold: number; hp_item_id: number | null; mp_threshold: number; mp_item_id: number | null; turn_no: number; current_hp: number; current_mp: number; hp_max: number; mp_max: number };
 type AutoCombatAction = { type: 'attack' } | { type: 'skill'; skillId: number } | { type: 'item'; itemId: number };
 export type AutoBattleMode = 'pve' | 'pvp';
@@ -36,6 +36,17 @@ export const setAutoBattleEnabled = async (qqUserId: string, enabled: boolean, m
   if (!rows[0]) throw new Error('请先发送“注册”创建角色。');
   await connection.execute(`INSERT INTO ${autoTables(mode).settings} (character_id,enabled) VALUES (?,?) ON DUPLICATE KEY UPDATE enabled=VALUES(enabled)`, [rows[0].id, enabled ? 1 : 0]);
   return enabled;
+});
+
+/** PVE 自动寻怪遇敌时的默认决策；PVP 不使用该配置。 */
+export const toggleAutoBattleEncounterAction = async (qqUserId: string) => withTransaction(async connection => {
+  const [rows] = await connection.execute<CharacterRow[]>('SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE', [qqUserId]);
+  if (!rows[0]) throw new Error('请先发送“注册”创建角色。');
+  const characterId = Number(rows[0].id);
+  await connection.execute('INSERT IGNORE INTO player_auto_battle_settings (character_id) VALUES (?)', [characterId]);
+  await connection.execute("UPDATE player_auto_battle_settings SET default_encounter_action=IF(default_encounter_action='battle','persuade','battle') WHERE character_id=?", [characterId]);
+  const [settings] = await connection.execute<(RowDataPacket & { default_encounter_action: 'battle' | 'persuade' })[]>('SELECT default_encounter_action FROM player_auto_battle_settings WHERE character_id=?', [characterId]);
+  return settings[0]?.default_encounter_action ?? 'battle';
 });
 
 export const setAutoPotionEnabled = async (qqUserId: string, enabled: boolean, mode: AutoBattleMode = 'pve') => withTransaction(async connection => {

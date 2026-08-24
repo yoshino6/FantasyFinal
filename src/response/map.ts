@@ -5,6 +5,7 @@ import { getPool } from '../database/pool';
 import { messageFormat } from '../game/message';
 import type { RowDataPacket } from 'mysql2/promise';
 import { markedDungeonEntrances } from '../game/dungeon-quest.service';
+import { durationText } from '../game/time-format';
 
 type OwnedMap = RowDataPacket & { code: string; name: string; description: string; region_code: string | null; region_name: string | null };
 type MapTarget = RowDataPacket & { code: string; name: string; x: number; y: number; target_order: number };
@@ -58,12 +59,12 @@ export default async () => {
       }
       for (const target of targets) {
         const seconds = estimateSeconds(x, y, target, bag.movementSpeed);
-        markdown.addText('> ').addButton(target.name, { data: `/前往 ${target.x} ${target.y}`, autoEnter: false }).addText(`（${target.x}, ${target.y}）[预计${seconds}s]`).addNewline();
+        markdown.addText('> ').addButton(target.name, { data: `/前往 ${target.x} ${target.y}`, autoEnter: false }).addText(`（${target.x}, ${target.y}）[预计${durationText(seconds)}]`).addNewline();
       }
       const entrances = await markedDungeonEntrances(event.current.UserId, map.region_code);
       for (const entrance of entrances) {
         const seconds = Math.max(1, Math.ceil((Math.abs(entrance.x - x) + Math.abs(entrance.y - y)) / bag.movementSpeed));
-        markdown.addText('> ').addButton(entrance.name, { data: `/前往 ${entrance.x} ${entrance.y}`, autoEnter: false }).addText(`（${entrance.x}, ${entrance.y}）[预计${seconds}s]`).addNewline();
+        markdown.addText('> ').addButton(entrance.name, { data: `/前往 ${entrance.x} ${entrance.y}`, autoEnter: false }).addText(`（${entrance.x}, ${entrance.y}）[预计${durationText(seconds)}]`).addNewline();
       }
       markdown.addNewline();
     }

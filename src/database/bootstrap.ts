@@ -233,6 +233,25 @@ const schemaStatements = [
     CONSTRAINT fk_warrant_victim_warrant FOREIGN KEY (warrant_id) REFERENCES player_warrants(id) ON DELETE CASCADE,
     CONSTRAINT fk_warrant_victim_target FOREIGN KEY (target_character_id) REFERENCES characters(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_adventurer_card_cache (
+    character_id BIGINT UNSIGNED NOT NULL, fingerprint CHAR(64) NOT NULL, image_data LONGBLOB NOT NULL,
+    generated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (character_id), KEY idx_adventurer_card_generated (generated_at),
+    CONSTRAINT fk_adventurer_card_cache_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS city_pursuit_cooldowns (
+    character_id BIGINT UNSIGNED NOT NULL, city_region_id BIGINT UNSIGNED NOT NULL, expires_at DATETIME NOT NULL,
+    PRIMARY KEY (character_id,city_region_id), KEY idx_city_pursuit_cooldown_expiry (expires_at),
+    CONSTRAINT fk_city_pursuit_cooldown_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
+    CONSTRAINT fk_city_pursuit_cooldown_city FOREIGN KEY (city_region_id) REFERENCES map_regions(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS city_pursuit_tracks (
+    character_id BIGINT UNSIGNED NOT NULL, city_region_id BIGINT UNSIGNED NOT NULL, warrant_id BIGINT UNSIGNED NOT NULL,
+    officer_template_id BIGINT UNSIGNED NOT NULL,
+    PRIMARY KEY (character_id,city_region_id), KEY idx_city_pursuit_track_warrant (warrant_id),
+    CONSTRAINT fk_city_pursuit_track_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
+    CONSTRAINT fk_city_pursuit_track_city FOREIGN KEY (city_region_id) REFERENCES map_regions(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS pvp_stolen_loot (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, original_owner_character_id BIGINT UNSIGNED NOT NULL, holder_character_id BIGINT UNSIGNED NOT NULL,
     item_id BIGINT UNSIGNED NULL, quantity INT UNSIGNED NOT NULL DEFAULT 0, held_quantity INT UNSIGNED NOT NULL DEFAULT 0, sold_quantity INT UNSIGNED NOT NULL DEFAULT 0,
@@ -377,6 +396,8 @@ const schemaStatements = [
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS combat_ambushes (
     spawn_id BIGINT UNSIGNED NOT NULL, character_id BIGINT UNSIGNED NOT NULL, ready_spawn_id BIGINT UNSIGNED NULL, status ENUM('waiting','ready','resolved') NOT NULL DEFAULT 'waiting',
+    handoff_kind VARCHAR(16) NULL, source_session_id CHAR(36) NULL, opponent_character_id BIGINT UNSIGNED NULL,
+    delivery_scope VARCHAR(16) NULL, delivery_target_id VARCHAR(128) NULL, delivery_bot_id VARCHAR(128) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (spawn_id,character_id), KEY idx_ambush_character_status (character_id,status),
     CONSTRAINT fk_ambush_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
@@ -389,7 +410,7 @@ const schemaStatements = [
     CONSTRAINT fk_travel_region FOREIGN KEY (region_id) REFERENCES map_regions(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_movement_settings (
-    character_id BIGINT UNSIGNED NOT NULL, movement_step TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    character_id BIGINT UNSIGNED NOT NULL, movement_step TINYINT UNSIGNED NOT NULL DEFAULT 1, show_landmarks TINYINT(1) NOT NULL DEFAULT 1, show_players TINYINT(1) NOT NULL DEFAULT 1,
     PRIMARY KEY (character_id), CONSTRAINT fk_movement_settings_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_hunt_history (
@@ -417,7 +438,7 @@ const schemaStatements = [
     PRIMARY KEY (character_id), CONSTRAINT fk_appraisal_progress_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_auto_battle_settings (
-    character_id BIGINT UNSIGNED NOT NULL, enabled TINYINT(1) NOT NULL DEFAULT 0, auto_potion_enabled TINYINT(1) NOT NULL DEFAULT 0,
+    character_id BIGINT UNSIGNED NOT NULL, enabled TINYINT(1) NOT NULL DEFAULT 0, default_encounter_action ENUM('battle','persuade') NOT NULL DEFAULT 'battle', auto_potion_enabled TINYINT(1) NOT NULL DEFAULT 0,
     hp_threshold TINYINT UNSIGNED NOT NULL DEFAULT 30, hp_item_id BIGINT UNSIGNED NULL, mp_threshold TINYINT UNSIGNED NOT NULL DEFAULT 30, mp_item_id BIGINT UNSIGNED NULL,
     PRIMARY KEY (character_id), CONSTRAINT fk_auto_battle_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
@@ -450,7 +471,9 @@ const schemaStatements = [
     id CHAR(36) NOT NULL, attacker_character_id BIGINT UNSIGNED NOT NULL, defender_character_id BIGINT UNSIGNED NOT NULL,
     turn_no INT UNSIGNED NOT NULL DEFAULT 1, state ENUM('active','attacker_win','defender_win','escaped') NOT NULL DEFAULT 'active',
     attacker_hp INT UNSIGNED NOT NULL, attacker_mp INT UNSIGNED NOT NULL, defender_hp INT UNSIGNED NOT NULL, defender_mp INT UNSIGNED NOT NULL,
-    attacker_cooldowns JSON NOT NULL, defender_cooldowns JSON NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    attacker_cooldowns JSON NOT NULL, defender_cooldowns JSON NOT NULL,
+    ambush_spawn_id BIGINT UNSIGNED NULL, ambush_delivery_scope VARCHAR(16) NULL, ambush_delivery_target_id VARCHAR(128) NULL, ambush_delivery_bot_id VARCHAR(128) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id), KEY idx_pvp_battle_attacker (attacker_character_id,state), KEY idx_pvp_battle_defender (defender_character_id,state),
     CONSTRAINT fk_pvp_battle_attacker FOREIGN KEY (attacker_character_id) REFERENCES characters(id) ON DELETE CASCADE,
     CONSTRAINT fk_pvp_battle_defender FOREIGN KEY (defender_character_id) REFERENCES characters(id) ON DELETE CASCADE
@@ -487,6 +510,11 @@ const schemaStatements = [
     weakness_json JSON NULL, resistance_json JSON NULL, element_mastery_json JSON NULL, element_resistance_json JSON NULL,
     skill_sequence JSON NULL, experience INT UNSIGNED NOT NULL, drops_json JSON NULL,
     PRIMARY KEY (id), UNIQUE KEY uk_monster_code (code)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS city_pursuit_officers (
+    template_id BIGINT UNSIGNED NOT NULL, profession VARCHAR(32) NOT NULL, equipment_text VARCHAR(255) NOT NULL,
+    PRIMARY KEY (template_id),
+    CONSTRAINT fk_city_pursuit_officer_template FOREIGN KEY (template_id) REFERENCES monster_templates(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_monster_codex (
     character_id BIGINT UNSIGNED NOT NULL, monster_template_id BIGINT UNSIGNED NOT NULL, unlocked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -664,6 +692,9 @@ export const initializeSchema = async (pool: Pool) => {
   try { await pool.query("ALTER TABLE dungeon_cells ADD COLUMN chest_quality ENUM('青铜','白银','黄金') NULL AFTER landmark_text"); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   try { await pool.query('ALTER TABLE dungeon_monsters ADD COLUMN is_floor_leader TINYINT(1) NOT NULL DEFAULT 0 AFTER is_boss'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   try { await pool.query('ALTER TABLE player_pvp_auto_battle_settings ADD COLUMN action_cursor SMALLINT UNSIGNED NOT NULL DEFAULT 1'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  try { await pool.query("ALTER TABLE player_auto_battle_settings ADD COLUMN default_encounter_action ENUM('battle','persuade') NOT NULL DEFAULT 'battle' AFTER enabled"); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  try { await pool.query('ALTER TABLE player_movement_settings ADD COLUMN show_landmarks TINYINT(1) NOT NULL DEFAULT 1'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  try { await pool.query('ALTER TABLE player_movement_settings ADD COLUMN show_players TINYINT(1) NOT NULL DEFAULT 1'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   await pool.query(`UPDATE dungeon_monsters dm JOIN (
     SELECT * FROM (SELECT dm2.dungeon_id,MIN(dm2.spawn_id) AS spawn_id FROM dungeon_monsters dm2
       JOIN monster_spawns s2 ON s2.id=dm2.spawn_id WHERE dm2.is_boss=0 AND s2.pos_z=-10 GROUP BY dm2.dungeon_id) AS first_floor_leaders
@@ -716,7 +747,20 @@ export const initializeSchema = async (pool: Pool) => {
   try { await pool.query('ALTER TABLE bounty_notices ADD COLUMN source_spawn_id BIGINT UNSIGNED NULL'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   try { await pool.query("ALTER TABLE player_forge_sessions ADD COLUMN entry_source ENUM('blacksmith','profession') NOT NULL DEFAULT 'blacksmith'"); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   try { await pool.query('ALTER TABLE bounty_notices MODIFY COLUMN refresh_key VARCHAR(32) NOT NULL'); } catch (error: any) { if (error?.code !== 'ER_BAD_FIELD_ERROR') throw error; }
-  try { await pool.query('ALTER TABLE combat_ambushes ADD COLUMN ready_spawn_id BIGINT UNSIGNED NULL'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  for (const column of [
+    'ready_spawn_id BIGINT UNSIGNED NULL',
+    'handoff_kind VARCHAR(16) NULL',
+    'source_session_id CHAR(36) NULL',
+    'opponent_character_id BIGINT UNSIGNED NULL',
+    'delivery_scope VARCHAR(16) NULL',
+    'delivery_target_id VARCHAR(128) NULL',
+    'delivery_bot_id VARCHAR(128) NULL'
+  ]) {
+    try { await pool.query(`ALTER TABLE combat_ambushes ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  }
+  for (const column of ['ambush_spawn_id BIGINT UNSIGNED NULL', 'ambush_delivery_scope VARCHAR(16) NULL', 'ambush_delivery_target_id VARCHAR(128) NULL', 'ambush_delivery_bot_id VARCHAR(128) NULL']) {
+    try { await pool.query(`ALTER TABLE player_pvp_battle_sessions ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  }
   for (const column of ['element_mastery_json JSON NULL', 'element_resistance_json JSON NULL']) {
     try { await pool.query(`ALTER TABLE characters ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
     try { await pool.query(`ALTER TABLE monster_templates ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
@@ -748,7 +792,7 @@ export const initializeSchema = async (pool: Pool) => {
   try { await pool.query('ALTER TABLE characters ADD UNIQUE KEY uk_characters_game_id (game_id)'); } catch (error: any) { if (error?.code !== 'ER_DUP_KEYNAME') throw error; }
   await pool.query('UPDATE characters SET game_id=10000000+id WHERE player_id IS NOT NULL AND game_id IS NULL');
   try { await pool.query("ALTER TABLE parties ADD COLUMN name VARCHAR(32) NOT NULL DEFAULT '未命名队伍' AFTER id"); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
-  await pool.query(`CREATE TABLE IF NOT EXISTS player_auto_battle_settings (character_id BIGINT UNSIGNED NOT NULL, enabled TINYINT(1) NOT NULL DEFAULT 0, auto_potion_enabled TINYINT(1) NOT NULL DEFAULT 0, hp_threshold TINYINT UNSIGNED NOT NULL DEFAULT 30, hp_item_id BIGINT UNSIGNED NULL, mp_threshold TINYINT UNSIGNED NOT NULL DEFAULT 30, mp_item_id BIGINT UNSIGNED NULL, PRIMARY KEY (character_id), CONSTRAINT fk_auto_battle_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE) ENGINE=InnoDB`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS player_auto_battle_settings (character_id BIGINT UNSIGNED NOT NULL, enabled TINYINT(1) NOT NULL DEFAULT 0, default_encounter_action ENUM('battle','persuade') NOT NULL DEFAULT 'battle', auto_potion_enabled TINYINT(1) NOT NULL DEFAULT 0, hp_threshold TINYINT UNSIGNED NOT NULL DEFAULT 30, hp_item_id BIGINT UNSIGNED NULL, mp_threshold TINYINT UNSIGNED NOT NULL DEFAULT 30, mp_item_id BIGINT UNSIGNED NULL, PRIMARY KEY (character_id), CONSTRAINT fk_auto_battle_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE) ENGINE=InnoDB`);
   await pool.query(`CREATE TABLE IF NOT EXISTS player_auto_battle_actions (character_id BIGINT UNSIGNED NOT NULL, sequence_no TINYINT UNSIGNED NOT NULL, skill_id BIGINT UNSIGNED NULL, PRIMARY KEY (character_id,sequence_no), CONSTRAINT fk_auto_action_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE) ENGINE=InnoDB`);
   await pool.query(`CREATE TABLE IF NOT EXISTS player_auto_battle_quick_setup (character_id BIGINT UNSIGNED NOT NULL, next_sequence TINYINT UNSIGNED NOT NULL DEFAULT 1, PRIMARY KEY (character_id), CONSTRAINT fk_auto_quick_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE) ENGINE=InnoDB`);
   await pool.query(`UPDATE player_auto_battle_settings settings LEFT JOIN player_story_progress story
@@ -1260,9 +1304,7 @@ export const initializeSchema = async (pool: Pool) => {
     upgrade_cost=1,max_level=5,power_per_level=CASE WHEN code IN ('warrior_taunt','healing_prayer','blessing_aegis','mana_benediction') THEN 0 ELSE 10 END,
     cooldown_reduction_per_level=CASE WHEN code IN ('warrior_taunt','shield_counter','guard_break','arcane_shackle','ember_burst','sanctified_bolt','sweeping_slash','piercing_thrust','wind_blade','thunder_lance') THEN 1 ELSE 0 END
     WHERE code IN ('warrior_taunt','shield_counter','guard_break','arcane_shackle','ember_burst','healing_prayer','blessing_aegis','mana_benediction','sanctified_bolt','sweeping_slash','piercing_thrust','wind_blade','thunder_lance')`);
-  // 人类可学习的前期主动技能，以基础冷却区分威力；效果强度仍由 skill_effects 单独决定。
-  await pool.query(`UPDATE skill_definitions SET power=CASE cooldown_turns WHEN 1 THEN 110 WHEN 2 THEN 125 WHEN 3 THEN 140 ELSE power END
-    WHERE code IN ('heavy_strike','armor_break','arcane_bolt','bloodletting','jump_strike','bite_slash','charge','shell_breaker','thorn_stab','mist_step_slash','vine_bolt','moonlight_bolt','spore_bolt','echo_shock','toxic_edge','fireball','frost_bind','purifying_light')`);
+  // 主动技能的基础威力与蓝耗在所有技能（含迷宫、BOSS、NPC 技能）写入后统一校准。
   await pool.query(`UPDATE skill_definitions SET category='passive',learn_cost=CASE WHEN code='appraisal' THEN 1 ELSE 99 END,upgrade_cost=99,max_level=1,power_per_level=0,passive_effect_json=CASE code
     WHEN 'appraisal' THEN JSON_OBJECT('revealMonsterTraits',true,'unlockMonsterDetail',true)
     WHEN 'growth_blessing' THEN JSON_OBJECT('experienceMultiplier',2)
@@ -1576,6 +1618,24 @@ export const initializeSchema = async (pool: Pool) => {
     WHEN code IN ('purifying_light','frost_barrier','healing_light','blessing_hymn','healing_prayer','blessing_aegis','mana_benediction','regenerate_slime') THEN '元素'
     ELSE '灵异' END
     WHERE category='utility'`);
+  // 主动攻击技能按冷却档位统一基础数值：0 回合可连续施放，因此显著低于 1 回合档；
+  // 1/2/3 回合分别控制在 110、120、130 威力以内，蓝耗约为 50/90/160。
+  await pool.query(`UPDATE skill_definitions SET
+    power=CASE cooldown_turns
+      WHEN 0 THEN 90 WHEN 1 THEN 108 WHEN 2 THEN 116 WHEN 3 THEN 126 WHEN 4 THEN 134 WHEN 5 THEN 142 ELSE power END,
+    mana_cost=CASE cooldown_turns
+      WHEN 0 THEN 30 WHEN 1 THEN 50 WHEN 2 THEN 90 WHEN 3 THEN 160 WHEN 4 THEN 210 WHEN 5 THEN 260 ELSE mana_cost END
+    WHERE category IN ('physical','magic') AND power>0`);
+  // 辅助技能不按攻击技能档位计算；其蓝耗固定为原设计蓝耗的三倍，避免每次启动重复累乘。
+  await pool.query(`UPDATE skill_definitions SET mana_cost=CASE code
+    WHEN 'warrior_taunt_player' THEN 75 WHEN 'smoke_screen' THEN 105 WHEN 'purifying_light' THEN 270
+    WHEN 'frost_barrier' THEN 180 WHEN 'healing_light' THEN 150 WHEN 'blessing_hymn' THEN 195
+    WHEN 'war_cry' THEN 270 WHEN 'regenerate_slime' THEN 165 WHEN 'healing_prayer' THEN 195
+    WHEN 'blessing_aegis' THEN 225 WHEN 'mana_benediction' THEN 240 WHEN 'wolfking_summon_shadow_wolf' THEN 240
+    WHEN 'wolfking_shadow_curse' THEN 270 WHEN 'black_slime_mend' THEN 126 WHEN 'skeleton_command' THEN 156
+    WHEN 'skeleton_guard' THEN 174 WHEN 'death_knight_aura' THEN 165 WHEN 'necromancer_raise' THEN 216
+    WHEN 'necromancer_rebirth' THEN 285 WHEN 'necromancer_purging_mist' THEN 204 ELSE mana_cost END
+    WHERE category='utility'`);
   await pool.query(`DELETE se FROM skill_effects se JOIN skill_definitions s ON s.id=se.skill_id WHERE s.code IN ('slime_ember_blob','slime_amber_blob','slime_spark_blob','slime_acid_blob','slime_tide_blob','slime_frost_blob','slime_dusk_blob','black_slime_wave','black_slime_mend','black_slime_bind','skeleton_command','skeleton_impale','skeleton_quake','skeleton_guard','death_knight_charge','death_knight_aura','death_knight_cleave','death_knight_lance','death_knight_prison','necromancer_curse','necromancer_storm','necromancer_rebirth','necromancer_grave_bind','necromancer_purging_mist')`);
   await pool.query(`INSERT INTO skill_effects (skill_id,effect_id,effect_level,value_override,duration_override,target_scope,trigger_timing) VALUES
     ((SELECT id FROM skill_definitions WHERE code='slime_ember_blob'),(SELECT id FROM effect_definitions WHERE code='burn'),1,2,2,'enemy','on_hit'),
@@ -1625,6 +1685,35 @@ export const initializeSchema = async (pool: Pool) => {
     ON DUPLICATE KEY UPDATE name=VALUES(name),monster_class=VALUES(monster_class),level=VALUES(level),constitution=VALUES(constitution),spirit=VALUES(spirit),strength=VALUES(strength),intelligence=VALUES(intelligence),agility=VALUES(agility),perception=VALUES(perception),constitution_growth=VALUES(constitution_growth),spirit_growth=VALUES(spirit_growth),strength_growth=VALUES(strength_growth),intelligence_growth=VALUES(intelligence_growth),agility_growth=VALUES(agility_growth),perception_growth=VALUES(perception_growth),skill_sequence=VALUES(skill_sequence),experience=VALUES(experience),drops_json=VALUES(drops_json),weakness_json=VALUES(weakness_json),resistance_json=VALUES(resistance_json),element_mastery_json=VALUES(element_mastery_json),element_resistance_json=VALUES(element_resistance_json)`);
   await pool.query(`UPDATE monster_spawns s JOIN monster_templates t ON t.id=s.template_id
     SET s.skill_sequence=t.skill_sequence WHERE s.defeated_at IS NULL AND t.code IN ('black_slime','skeleton_general','death_knight','necromancer_uz')`);
+  // 城镇追捕专用执法者：只在三星及以上通缉者移动时临时生成，绝不加入地图怪物池或地图 NPC。
+  await pool.query(`INSERT INTO monster_templates (code,name,monster_class,level,constitution,spirit,strength,intelligence,agility,perception,constitution_growth,spirit_growth,strength_growth,intelligence_growth,agility_growth,perception_growth,skill_sequence,experience,drops_json,weakness_json,resistance_json,element_mastery_json,element_resistance_json) VALUES
+    ('city_guard_gareth','剑盾巡卫·加雷斯','elite',20,34,18,37,17,25,28,1.4,.7,1.5,.6,1,1.1,JSON_ARRAY('shield_counter','guard_break','sweeping_slash'),0,JSON_ARRAY(),JSON_ARRAY('魔法'),JSON_ARRAY('刺击'),JSON_OBJECT(),JSON_OBJECT()),
+    ('city_ranger_vera','缉捕游侠·薇拉','elite',21,23,24,27,28,38,42,.8,1,1,1.1,1.6,1.8,JSON_ARRAY('wind_blade','piercing_thrust','backstab'),0,JSON_ARRAY(),JSON_ARRAY('冰'),JSON_ARRAY('风'),JSON_OBJECT('风',18),JSON_OBJECT('风',12)),
+    ('city_mage_sen','元素执法官·赛恩','elite',22,19,38,18,45,27,34,.6,1.7,.5,2,1,1.4,JSON_ARRAY('fire_lance','frost_bind','arcane_shackle'),0,JSON_ARRAY(),JSON_ARRAY('水'),JSON_ARRAY('火'),JSON_OBJECT('火',26,'冰',18),JSON_OBJECT('火',12,'冰',10)),
+    ('city_priest_mare','圣堂见习官·玛蕾','elite',22,30,41,19,37,24,31,1.2,1.8,.7,1.6,.9,1.2,JSON_ARRAY('sanctified_bolt','healing_prayer','blessing_aegis'),0,JSON_ARRAY(),JSON_ARRAY('暗'),JSON_ARRAY('光'),JSON_OBJECT('光',25),JSON_OBJECT('光',16)),
+    ('city_rogue_loke','追迹盗贼·洛克','elite',23,21,23,31,25,43,45,.7,.8,1.2,.9,1.8,1.9,JSON_ARRAY('backstab','smoke_screen','toxic_edge'),0,JSON_ARRAY(),JSON_ARRAY('打击'),JSON_ARRAY('刺击'),JSON_OBJECT(),JSON_OBJECT()),
+    ('city_marshal_blake','链锤治安官·布莱克','elite',24,43,20,46,18,20,27,1.8,.7,1.9,.6,.7,1,JSON_ARRAY('heavy_strike','shield_counter','guard_break'),0,JSON_ARRAY(),JSON_ARRAY('魔法'),JSON_ARRAY('打击'),JSON_OBJECT(),JSON_OBJECT()),
+    ('city_thunder_isk','雷铳术士·伊斯克','elite',25,20,44,20,50,30,37,.7,2,.7,2.2,1.1,1.5,JSON_ARRAY('thunder_lance','arcane_bolt','frost_bind'),0,JSON_ARRAY(),JSON_ARRAY('土'),JSON_ARRAY('雷'),JSON_OBJECT('雷',30),JSON_OBJECT('雷',18)),
+    ('city_warden_ada','森林监察使·艾妲','elite',26,31,29,32,36,35,40,1.2,1.1,1.2,1.5,1.4,1.6,JSON_ARRAY('vine_bolt','wind_blade','piercing_thrust'),0,JSON_ARRAY(),JSON_ARRAY('火'),JSON_ARRAY('木'),JSON_OBJECT('木',24,'风',16),JSON_OBJECT('木',16)),
+    ('city_paladin_hector','圣盾裁决官·赫克托','elite',27,45,32,43,29,24,33,1.9,1.3,1.8,1.2,.9,1.3,JSON_ARRAY('sanctified_bolt','guard_break','blessing_aegis'),0,JSON_ARRAY(),JSON_ARRAY('暗'),JSON_ARRAY('光'),JSON_OBJECT('光',28),JSON_OBJECT('光',20)),
+    ('city_hex_helena','咒印审查官·伊蕾娜','elite',28,24,48,19,55,28,44,.8,2.1,.6,2.4,1,1.8,JSON_ARRAY('arcane_shackle','frost_bind','moonlight_bolt'),0,JSON_ARRAY(),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('暗',32,'冰',20),JSON_OBJECT('暗',22)),
+    ('city_brawler_torr','破阵斗士·托尔','elite',29,39,23,49,18,38,35,1.6,.8,2,.6,1.5,1.3,JSON_ARRAY('jump_strike','heavy_strike','sweeping_slash'),0,JSON_ARRAY(),JSON_ARRAY('魔法'),JSON_ARRAY('打击'),JSON_OBJECT(),JSON_OBJECT()),
+    ('city_captain_roderick','百纳卫队长·罗德里克','elite',30,48,31,52,30,31,43,2,1.3,2.2,1.2,1.2,1.7,JSON_ARRAY('warrior_taunt','shield_counter','guard_break','sweeping_slash'),0,JSON_ARRAY(),JSON_ARRAY('暗'),JSON_ARRAY('刺击'),JSON_OBJECT('光',12),JSON_OBJECT('光',12))
+    ON DUPLICATE KEY UPDATE name=VALUES(name),monster_class=VALUES(monster_class),level=VALUES(level),constitution=VALUES(constitution),spirit=VALUES(spirit),strength=VALUES(strength),intelligence=VALUES(intelligence),agility=VALUES(agility),perception=VALUES(perception),constitution_growth=VALUES(constitution_growth),spirit_growth=VALUES(spirit_growth),strength_growth=VALUES(strength_growth),intelligence_growth=VALUES(intelligence_growth),agility_growth=VALUES(agility_growth),perception_growth=VALUES(perception_growth),skill_sequence=VALUES(skill_sequence),experience=VALUES(experience),drops_json=VALUES(drops_json),weakness_json=VALUES(weakness_json),resistance_json=VALUES(resistance_json),element_mastery_json=VALUES(element_mastery_json),element_resistance_json=VALUES(element_resistance_json)`);
+  await pool.query(`INSERT INTO city_pursuit_officers (template_id,profession,equipment_text) VALUES
+    ((SELECT id FROM monster_templates WHERE code='city_guard_gareth'),'卫戍战士','精钢长剑与塔盾'),
+    ((SELECT id FROM monster_templates WHERE code='city_ranger_vera'),'游侠','复合长弓与短刃'),
+    ((SELECT id FROM monster_templates WHERE code='city_mage_sen'),'元素法师','炎纹法杖与寒晶副手'),
+    ((SELECT id FROM monster_templates WHERE code='city_priest_mare'),'圣堂牧师','银铃法球与祷告书'),
+    ((SELECT id FROM monster_templates WHERE code='city_rogue_loke'),'追迹盗贼','双匕首与烟幕斗篷'),
+    ((SELECT id FROM monster_templates WHERE code='city_marshal_blake'),'重装治安官','链锤与板甲'),
+    ((SELECT id FROM monster_templates WHERE code='city_thunder_isk'),'雷铳术士','雷铜法杖与聚能镜'),
+    ((SELECT id FROM monster_templates WHERE code='city_warden_ada'),'森林监察使','藤木长弓与兽皮护具'),
+    ((SELECT id FROM monster_templates WHERE code='city_paladin_hector'),'圣盾裁决官','圣辉长剑与祝祷盾'),
+    ((SELECT id FROM monster_templates WHERE code='city_hex_helena'),'咒印审查官','暗金法书与封印戒'),
+    ((SELECT id FROM monster_templates WHERE code='city_brawler_torr'),'破阵斗士','拳刃与重革手甲'),
+    ((SELECT id FROM monster_templates WHERE code='city_captain_roderick'),'百纳卫队长','星钢长剑与城卫重甲')
+    ON DUPLICATE KEY UPDATE profession=VALUES(profession),equipment_text=VALUES(equipment_text)`);
   await pool.query(`INSERT IGNORE INTO monster_encounter_texts (monster_template_id,description) VALUES
     ((SELECT id FROM monster_templates WHERE code='slime_red'),'潮湿石缝里滚出一团赤红胶质，热气在它身周嘶嘶作响。'),
     ((SELECT id FROM monster_templates WHERE code='slime_orange'),'橙色的胶团从碎石间弹起，裹挟着细砂朝你蠕动。'),
