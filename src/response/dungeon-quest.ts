@@ -10,7 +10,7 @@ export const dungeonSecretGuildHandler = async () => {
   const [event] = useEvent(); const [message] = useMessage();
   try {
     const text = await consultDungeonAtGuild(event.current.UserId);
-    await message.send({ format: chapterFormat(2, text, Format.createButtonGroup().addRow().addButton('前往 异工坊', '/前往 4 -121', { type: 'command', autoEnter: true, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
+    await message.send({ format: chapterFormat(2, text, Format.createButtonGroup().addRow().addButton('前往 异工坊', '/前往 6 -121', { type: 'command', autoEnter: true, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
   } catch (error) { await message.send({ format: messageFormat('无法询问地下迷宫', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
 
@@ -28,8 +28,8 @@ export const dungeonSecretEntranceHandler = async () => {
     const dungeonId = Number(route.param('id')); const result = await entranceStory(event.current.UserId, dungeonId);
     const buttons = Format.createButtonGroup().addRow();
     if (result.stage >= 5) buttons.addButton('进入', `/下迷宫 ${dungeonId}`, { type: 'command', autoEnter: true, style: 'blue' });
-    else if (result.stage < 2) buttons.addButton('前往 冒险者公会', '/前往 -8 -116', { type: 'command', autoEnter: true, style: 'blue' });
-    else if (result.stage < 4) buttons.addButton('前往 异工坊', '/前往 4 -121', { type: 'command', autoEnter: true, style: 'blue' });
+    else if (result.stage < 2) buttons.addButton('前往 冒险者公会', '/前往 -2 -111', { type: 'command', autoEnter: true, style: 'blue' });
+    else if (result.stage < 4) buttons.addButton('前往 异工坊', '/前往 6 -121', { type: 'command', autoEnter: true, style: 'blue' });
     else if (result.stage === 4) buttons.addButton('再次查看石门', `/地下的秘密 ${dungeonId}`, { type: 'command', autoEnter: true, style: 'blue' });
     buttons.addButton('任务', '/任务', { type: 'command', autoEnter: true });
     await message.send({ format: chapterFormat(Math.min(6, Math.max(1, result.stage)), result.text, buttons) });

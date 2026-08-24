@@ -13,7 +13,7 @@ const warrantFormat = async (qqUserId: string, filter: WarrantFilter = '全部')
     const bounty = [warrant.copper ? `铜币×${warrant.copper}` : '', warrant.items].filter(Boolean).join('|') || '暂无赏金';
     const trace = warrant.exposed ? `已暴露|${warrant.regionName}（${warrant.x}，${warrant.y}）` : warrant.recent ? `近期露面|${warrant.regionName}（${warrant.x}，${warrant.y}）` : '无行踪|最后行踪已消失';
     markdown.addText(`${sequence.charAt(index) || `${index + 1}.`}【${warrant.name}】`).addNewline()
-      .addBlockquote(`星级：${'★'.repeat(warrant.stars)}${'☆'.repeat(5 - warrant.stars)}`).addNewline()
+      .addBlockquote(`星级：${'★'.repeat(warrant.stars)}${'☆'.repeat(5 - warrant.stars)}${warrant.skulls ? `｜追捕烈度：${'☠'.repeat(warrant.skulls)}` : ''}`).addNewline()
       .addBlockquote(`赏金：${bounty}`).addNewline()
       .addBlockquote(trace).addNewline();
     if (warrant.exposed || warrant.recent) markdown.addButton('[前往]', { data: `/前往 ${warrant.x} ${warrant.y}`, autoEnter: false }).addText(' ');

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
-import { SESSION_TTL_MINUTES, artifactGiftSlots, calculateDerivedStats, gifts, isGiftCode } from './constants';
+import { SESSION_TTL_MINUTES, STAMINA_RECOVERY_MS, artifactGiftSlots, calculateDerivedStats, gifts, isGiftCode, staminaMaxForRealm } from './constants';
 import { attributes, type Allocation, type DerivedStats, type Growth } from './types';
 import { recordSkillPointChange } from './skill-point-ledger.service';
 
@@ -9,7 +9,7 @@ type RegistrationStage = 'story' | 'audience' | 'question' | 'destination' | 'da
 type SessionRow = RowDataPacket & { id: string; player_id: number; stage: RegistrationStage; expires_at: Date };
 type PlayerRow = RowDataPacket & { id: number; status: string };
 type RegionRow = RowDataPacket & { id: number; name: string; min_x: number; max_x: number; min_y: number; max_y: number; min_z: number; max_z: number };
-export type CharacterView = Allocation & DerivedStats & { name: string; gender: string; regionName: string; x: number; y: number; z: number; level: number; experience: number; realmStage: number; adventurerRegistered: boolean; giftName: string | null; growth: Growth; currentHp: number; currentMp: number; activityStatus: 'active' | 'resting' | 'unconscious' | 'detained'; elementMastery: Record<string, number>; elementResistance: Record<string, number>; extraAttributes: { damageBonusPct: number } };
+export type CharacterView = Allocation & DerivedStats & { name: string; gender: string; regionName: string; x: number; y: number; z: number; level: number; experience: number; realmStage: number; adventurerRegistered: boolean; giftName: string | null; growth: Growth; currentHp: number; currentMp: number; stamina: number; staminaMax: number; activityStatus: 'active' | 'resting' | 'unconscious' | 'detained'; elementMastery: Record<string, number>; elementResistance: Record<string, number>; extraAttributes: { damageBonusPct: number } };
 
 const elements = ['水', '火', '土', '木', '风', '冰', '雷', '光', '暗'] as const;
 const randomBalancedElements = () => {
@@ -90,6 +90,24 @@ export const recalculateCharacterStats = async (connection: Pool | PoolConnectio
   const baseResistance = jsonRecord(character.element_base_resistance_json ?? character.element_resistance_json);
   const elemental = await withEquipmentElements(connection, characterId, baseMastery, baseResistance);
   await connection.execute('UPDATE characters SET hp_max=?,mp_max=?,current_hp=LEAST(current_hp,?),current_mp=LEAST(current_mp,?),physical_attack=?,magic_attack=?,physical_defense=?,magic_defense=?,accuracy=?,evasion=?,crit_rate_bp=?,crit_damage_bp=?,crit_resist_bp=?,crit_damage_reduction_bp=?,tenacity=?,speed=?,element_mastery_json=?,element_resistance_json=? WHERE id=?', [stats.hpMax, stats.mpMax, stats.hpMax, stats.mpMax, stats.physicalAttack, stats.magicAttack, stats.physicalDefense, stats.magicDefense, stats.accuracy, stats.evasion, stats.critRateBp, stats.critDamageBp, stats.critResistBp, stats.critDamageReductionBp, stats.tenacity, stats.speed, JSON.stringify(elemental.mastery), JSON.stringify(elemental.resistance), characterId]);
+};
+
+/** 体力按实际经过的完整五分钟结算；满体力时重置计时，避免积攒超出上限的恢复。 */
+export const refreshCharacterStamina = async (connection: PoolConnection, characterId: number) => {
+  const [rows] = await connection.execute<(RowDataPacket & { stamina: number; realm_stage: number; stamina_updated_at: Date })[]>(
+    'SELECT stamina,realm_stage,stamina_updated_at FROM characters WHERE id=? FOR UPDATE', [characterId]
+  );
+  const row = rows[0]; if (!row) throw new Error('未找到角色。');
+  const maximum = staminaMaxForRealm(Number(row.realm_stage));
+  const current = Math.max(0, Math.min(maximum, Number(row.stamina ?? maximum)));
+  const elapsed = Math.max(0, Date.now() - new Date(row.stamina_updated_at).getTime());
+  const restored = Math.floor(elapsed / STAMINA_RECOVERY_MS);
+  const stamina = Math.min(maximum, current + restored);
+  if (stamina !== current || current !== Number(row.stamina) || stamina >= maximum) {
+    const updatedAt = stamina >= maximum ? new Date() : new Date(new Date(row.stamina_updated_at).getTime() + restored * STAMINA_RECOVERY_MS);
+    await connection.execute('UPDATE characters SET stamina=?,stamina_updated_at=? WHERE id=?', [stamina, updatedAt, characterId]);
+  }
+  return { stamina, staminaMax: maximum };
 };
 
 const getPlayer = async (connection: PoolConnection, qqUserId: string, nickname?: string): Promise<PlayerRow> => {
@@ -210,15 +228,18 @@ export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: 
   await connection.execute('UPDATE players SET status = \'active\' WHERE id = ?', [player.id]);
   await connection.execute('DELETE FROM registration_sessions WHERE id = ?', [session.id]);
   await connection.execute('INSERT INTO player_events (player_id, event_type, payload) VALUES (?, \'character.created\', ?)', [player.id, JSON.stringify({ region: region.name, x, y, z, giftCode })]);
-  return { ...allocation, ...stats, growth, name, gender: '未设定', regionName: region.name, x, y, z, level: 1, experience: 0, realmStage: 1, adventurerRegistered: false, giftName: gifts[giftCode].name, currentHp: stats.hpMax, currentMp: stats.mpMax, activityStatus: 'active', elementMastery, elementResistance, extraAttributes: { damageBonusPct: 0 } };
+  return { ...allocation, ...stats, growth, name, gender: '未设定', regionName: region.name, x, y, z, level: 1, experience: 0, realmStage: 1, adventurerRegistered: false, giftName: gifts[giftCode].name, currentHp: stats.hpMax, currentMp: stats.mpMax, stamina: 120, staminaMax: 120, activityStatus: 'active', elementMastery, elementResistance, extraAttributes: { damageBonusPct: 0 } };
 });
 
 export const getCharacter = async (qqUserId: string): Promise<CharacterView | null> => {
   const pool = await getPool();
   const [characterRows] = await pool.execute<(RowDataPacket & { id: number })[]>('SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1', [qqUserId]);
-  if (characterRows[0]) await withTransaction(async connection => recalculateCharacterStats(connection, Number(characterRows[0].id)));
+  if (characterRows[0]) await withTransaction(async connection => {
+    await refreshCharacterStamina(connection, Number(characterRows[0].id));
+    await recalculateCharacterStats(connection, Number(characterRows[0].id));
+  });
   const [rows] = await pool.execute<(RowDataPacket & CharacterView)[]>(
-    `SELECT c.name, c.gender, c.level, c.experience, c.realm_stage AS realmStage, c.adventurer_registered AS adventurerRegistered, c.constitution, c.spirit, c.strength, c.intelligence, c.agility, c.perception, c.constitution_growth AS constitutionGrowth, c.spirit_growth AS spiritGrowth, c.strength_growth AS strengthGrowth, c.intelligence_growth AS intelligenceGrowth, c.agility_growth AS agilityGrowth, c.perception_growth AS perceptionGrowth, c.hp_max AS hpMax, c.mp_max AS mpMax, c.current_hp AS currentHp, c.current_mp AS currentMp, c.activity_status AS activityStatus, c.physical_attack AS physicalAttack, c.magic_attack AS magicAttack, c.physical_defense AS physicalDefense, c.magic_defense AS magicDefense, c.accuracy, c.evasion, c.crit_rate_bp AS critRateBp, c.crit_damage_bp AS critDamageBp, c.crit_resist_bp AS critResistBp, c.crit_damage_reduction_bp AS critDamageReductionBp, c.tenacity, c.speed, c.element_mastery_json AS elementMastery, c.element_resistance_json AS elementResistance, r.name AS regionName, c.pos_x AS x, c.pos_y AS y, c.pos_z AS z, COALESCE((SELECT ai.name FROM player_equipment ape JOIN item_definitions ai ON ai.id=ape.item_id WHERE ape.character_id=c.id AND ai.rarity='神器' LIMIT 1), b.code) AS giftName FROM characters c JOIN players p ON p.id = c.player_id JOIN map_regions r ON r.id=c.current_region_id LEFT JOIN player_blessings b ON b.character_id=c.id WHERE p.qq_user_id = ? LIMIT 1`,
+    `SELECT c.name, c.gender, c.level, c.experience, c.realm_stage AS realmStage, c.stamina, c.adventurer_registered AS adventurerRegistered, c.constitution, c.spirit, c.strength, c.intelligence, c.agility, c.perception, c.constitution_growth AS constitutionGrowth, c.spirit_growth AS spiritGrowth, c.strength_growth AS strengthGrowth, c.intelligence_growth AS intelligenceGrowth, c.agility_growth AS agilityGrowth, c.perception_growth AS perceptionGrowth, c.hp_max AS hpMax, c.mp_max AS mpMax, c.current_hp AS currentHp, c.current_mp AS currentMp, c.activity_status AS activityStatus, c.physical_attack AS physicalAttack, c.magic_attack AS magicAttack, c.physical_defense AS physicalDefense, c.magic_defense AS magicDefense, c.accuracy, c.evasion, c.crit_rate_bp AS critRateBp, c.crit_damage_bp AS critDamageBp, c.crit_resist_bp AS critResistBp, c.crit_damage_reduction_bp AS critDamageReductionBp, c.tenacity, c.speed, c.element_mastery_json AS elementMastery, c.element_resistance_json AS elementResistance, r.name AS regionName, c.pos_x AS x, c.pos_y AS y, c.pos_z AS z, COALESCE((SELECT ai.name FROM player_equipment ape JOIN item_definitions ai ON ai.id=ape.item_id WHERE ape.character_id=c.id AND ai.rarity='神器' LIMIT 1), b.code) AS giftName FROM characters c JOIN players p ON p.id = c.player_id JOIN map_regions r ON r.id=c.current_region_id LEFT JOIN player_blessings b ON b.character_id=c.id WHERE p.qq_user_id = ? LIMIT 1`,
     [qqUserId]
   );
   const row = rows[0];
@@ -227,6 +248,8 @@ export const getCharacter = async (qqUserId: string): Promise<CharacterView | nu
   return {
     ...row,
     ...finalAttributes(row),
+    stamina: Math.min(staminaMaxForRealm(Number(row.realmStage)), Math.max(0, Number(row.stamina))),
+    staminaMax: staminaMaxForRealm(Number(row.realmStage)),
     elementMastery: typeof row.elementMastery === 'string' ? JSON.parse(row.elementMastery) : row.elementMastery ?? {},
     elementResistance: typeof row.elementResistance === 'string' ? JSON.parse(row.elementResistance) : row.elementResistance ?? {},
     extraAttributes,

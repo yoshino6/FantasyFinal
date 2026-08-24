@@ -3,7 +3,7 @@ import { addNpcAffinity, grantNpcAffinity, requireNpcAtCurrentPosition } from '.
 import { bookshopCatalog, bookshopSellCatalog, buyBookshopItem, readSkillBook, sellBookshopItem } from '../game/bookshop.service';
 import { messageFormat } from '../game/message';
 import { npcChatDialogue } from '../game/npc-dialogue.service';
-import { acceptOmniscientQuest, claimOmniscientQuest, omniscientProgress, omniscientQuest, omniscientTraces } from '../game/omniscient.service';
+import { acceptOmniscientQuest, claimOmniscientQuest, omniscientProgress, omniscientQuest } from '../game/omniscient.service';
 
 const code = 'bookshop';
 const requireBookshop = (qqUserId: string) => requireNpcAtCurrentPosition(qqUserId, code);
@@ -101,10 +101,10 @@ export const claimOmniscientQuestHandler = async () => {
 export const omniscientProfessionFormat = async (qqUserId: string) => {
   const progress = await omniscientProgress(qqUserId); const filled = Math.floor(Math.max(0, Math.min(1, progress.proficiency / progress.required)) * 10);
   const markdown = Format.createMarkdown().addTitle('副职业·全知者').addNewline().addNewline().addText(`等级：Lv.${progress.level}\n熟练度：${progress.proficiency}/${progress.required}\n${'■'.repeat(filled)}${'□'.repeat(10 - filled)}`).addNewline().addNewline()
-    .addBlockquote(`【鉴识】慧眼 Lv+${progress.rangeBonus}｜识珠 Lv+${progress.informationBonus}`).addNewline()
-    .addBlockquote(`队伍掉率+${progress.dropBonusPct}%（唯一被动）`).addNewline()
-    .addBlockquote('你在地图上能发现更多的踪迹（仅单人或作为队长时生效）');
-  return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('明鉴', '/全知者明鉴', { type: 'command', autoEnter: true, style: 'blue' }).addButton('识踪', '/全知者识踪', { type: 'command', autoEnter: true, style: 'blue' }));
+  return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow()
+    .addButton('明鉴', '/全知者明鉴', { type: 'command', autoEnter: true, style: 'blue' })
+    .addButton('识踪', '/全知者识踪', { type: 'command', autoEnter: true, style: 'blue' })
+    .addButton('巧思', '/全知者巧思', { type: 'command', autoEnter: true, style: 'blue' }));
 };
 
 export const omniscientInsightHandler = async () => {
@@ -112,17 +112,28 @@ export const omniscientInsightHandler = async () => {
   try {
     const progress = await omniscientProgress(event.current.UserId);
     const markdown = Format.createMarkdown().addTitle('全知者·明鉴').addNewline().addNewline()
-      .addBlockquote(`【鉴识】慧眼 Lv+${progress.rangeBonus}｜识珠 Lv+${progress.informationBonus}。`).addNewline()
-      .addBlockquote(`队伍掉率+${progress.dropBonusPct}%（唯一被动；同队多名全知者取最高加成）。`).addNewline()
-      .addBlockquote('识踪可让你发现地图中的更多魔力痕迹；单人或担任队长时，迷宫内还会给出路线指引。');
-    await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('识踪', '/全知者识踪', { type: 'command', autoEnter: true, style: 'blue' }).addButton('返回副职业', '/副职业', { type: 'command', autoEnter: true })) });
+      .addText('> ').addBold('【鉴识】').addNewline().addBlockquote(`慧眼 Lv+${progress.rangeBonus}｜识珠 Lv+${progress.informationBonus}`).addNewline().addNewline()
+      .addBlockquote(`队伍掉率+${progress.dropBonusPct}%（唯一光环）`);
+    await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('返回副职业', '/副职业', { type: 'command', autoEnter: true, style: 'blue' })) });
   } catch (error) { await message.send({ format: messageFormat('明鉴失败', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
 
 export const omniscientTraceHandler = async () => {
   const [event] = useEvent(); const [message] = useMessage();
   try {
-    const traces = await omniscientTraces(event.current.UserId); const markdown = Format.createMarkdown().addTitle('全知者·识踪').addNewline().addNewline().addBlockquote('你静下心来，让目光掠过地面残痕与空气中细微的魔力波纹。').addNewline().addNewline().addText('首领线索：').addNewline().addBlockquote(traces.boss?.text ?? '当前地图没有可追溯的首领魔力痕迹。').addNewline().addText('稀有矿材线索：').addNewline().addBlockquote(traces.ore?.text ?? '地脉暂时平静，未察觉到稀有矿材的异常共鸣。');
-    await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('明鉴', '/全知者明鉴', { type: 'command', autoEnter: true }).addButton('再次识踪', '/全知者识踪', { type: 'command', autoEnter: true, style: 'blue' })) });
+    await omniscientProgress(event.current.UserId);
+    const markdown = Format.createMarkdown().addTitle('全知者·识踪').addNewline().addNewline().addBlockquote('你在地图探索时，能发现更加细致入微的痕迹。');
+    await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('返回副职业', '/副职业', { type: 'command', autoEnter: true, style: 'blue' })) });
   } catch (error) { await message.send({ format: messageFormat('识踪失败', error instanceof Error ? error.message : '请稍后重试。') }); }
+};
+
+export const omniscientIngenuityHandler = async () => {
+  const [event] = useEvent(); const [message] = useMessage();
+  try {
+    const progress = await omniscientProgress(event.current.UserId);
+    const markdown = Format.createMarkdown().addTitle('全知者·巧思').addNewline().addNewline()
+      .addBlockquote(`战斗后，自身技能领悟概率+${progress.level * 10}%。`).addNewline()
+      .addBlockquote('你可以将已领悟技能贯注入技能石。');
+    await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('返回副职业', '/副职业', { type: 'command', autoEnter: true, style: 'blue' })) });
+  } catch (error) { await message.send({ format: messageFormat('巧思失败', error instanceof Error ? error.message : '请稍后重试。') }); }
 };

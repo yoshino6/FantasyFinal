@@ -31,7 +31,7 @@ export const currentMainQuest = async (qqUserId: string): Promise<MainQuest> => 
 
   if (!Number(character.has_appraisal)) return {
     title: '【主线·初识鉴识】',
-    description: '未知往往比锋刃更致命。现在的你无法辨认敌人的名称、生命、技能与危险程度，贸然交战很容易陷入不利局面。\n\n打开“技能列表”，切换到“未学习”页，找到【鉴识】并消耗 1 点技能点学习。学会后，你可以在战斗中点击“鉴识”查看敌我状态；这也是在异世界活下去的第一课。\n\n目标：学习被动技能【鉴识】。',
+    description: '未知往往比锋刃更致命。现在的你无法辨认敌人的名称、生命、技能与危险程度，贸然交战很容易陷入不利局面。\n\n打开“技能列表”，切换到“未学习”页，找到【鉴识】并消耗 1 点技能点学习。学会后，你可以在战斗中点击“鉴识”查看敌我状态；这也是在异世界活下去的第一课。\n\n目标：学习绑定技能【鉴识】。',
     action: { label: '[打开 技能·未学习]', command: '/技能列表 未学习' }
   };
   if (level < 5) return {
@@ -45,14 +45,14 @@ export const currentMainQuest = async (qqUserId: string): Promise<MainQuest> => 
   if (!Number(character.owns_forest_map)) return {
     title: '【主线·探索的准备】',
     description: '前往冒险者公会商店，购买【地图·幽暗密林】。',
-    action: { label: '[前往 冒险者公会]', command: '/前往 -8 -116' }
+    action: { label: '[前往 冒险者公会]', command: '/前往 -2 -111' }
   };
   if (Number(character.realm_stage) === 1 && level >= 10 && experience >= experienceRequiredForLevel(10)) {
     const stage = barrierStage(character.barrier_stage);
-    if (stage === 0) return { title: '【主线·无形的禁锢】', description: '你决定去找专业的人来请教这件事情。\n先去冒险者公会里面问问吧。', action: { label: '[前往 冒险者公会]', command: '/前往 -8 -116' } };
-    if (stage === 1) return { title: '【主线·寻访晴儿】', description: '前台小姐姐建议你去找炼金师晴儿。\n前往糖水屋，询问这道无形的禁锢。', action: { label: '[前往 糖水屋]', command: '/前往 -12 -127' } };
+    if (stage === 0) return { title: '【主线·无形的禁锢】', description: '你决定去找专业的人来请教这件事情。\n先去冒险者公会里面问问吧。', action: { label: '[前往 冒险者公会]', command: '/前往 -2 -111' } };
+    if (stage === 1) return { title: '【主线·寻访晴儿】', description: '前台小姐姐建议你去找炼金师晴儿。\n前往糖水屋，询问这道无形的禁锢。', action: { label: '[前往 糖水屋]', command: '/前往 -12 -128' } };
     if (stage === 2 && !Number(character.owns_sky_dust)) return { title: '【主线·追寻天空粉尘】', description: '击败幽影狼王，收集一份【天空粉尘】。\n它或许能帮助你感悟这方世界。' };
-    if (stage === 2 || stage === 3) return { title: '【主线·归还天空粉尘】', description: '你已获得【天空粉尘】。\n回到糖水屋，把它交给晴儿看看。', action: { label: '[前往 糖水屋]', command: '/前往 -12 -127' } };
+    if (stage === 2 || stage === 3) return { title: '【主线·归还天空粉尘】', description: '你已获得【天空粉尘】。\n回到糖水屋，把它交给晴儿看看。', action: { label: '[前往 糖水屋]', command: '/前往 -12 -128' } };
     return { title: '【主线·窥探世间】', description: '天空粉尘在背包中微微发亮，似乎正在等待你的感悟。', action: { label: '[打开背包]', command: '/背包 材料' } };
   }
   if (level < 11) return {

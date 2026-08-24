@@ -47,12 +47,19 @@ export default async () => {
         continue;
       }
       const [targets] = await pool.execute<MapTarget[]>(`SELECT code,name,pos_x AS x,pos_y AS y,
-          CASE code WHEN 'guild_counter' THEN 1 WHEN 'pear_guide' THEN 2 WHEN 'blacksmith' THEN 3 WHEN 'alchemy_sweetshop' THEN 4 WHEN 'oddworkshop' THEN 5 WHEN 'bookshop' THEN 6 WHEN 'hunter_lodge' THEN 7 ELSE 99 END AS target_order
+          CASE code WHEN 'guild_counter' THEN 1 WHEN 'pear_guide' THEN 2 WHEN 'blacksmith' THEN 3 WHEN 'alchemy_sweetshop' THEN 4 WHEN 'oddworkshop' THEN 5 WHEN 'bookshop' THEN 6 WHEN 'baina_residence' THEN 7 WHEN 'hunter_lodge' THEN 8 ELSE 99 END AS target_order
         FROM map_npcs WHERE region_id=(SELECT id FROM map_regions WHERE code=?)
         UNION ALL
         SELECT code,name,pos_x AS x,pos_y AS y,100 AS target_order
         FROM map_special_objects WHERE region_id=(SELECT id FROM map_regions WHERE code=?)
         ORDER BY target_order,name`, [map.region_code, map.region_code]);
+      if (map.region_code === 'baina_town') {
+        const [homes] = await pool.execute<(RowDataPacket & MapTarget)[]>(`SELECT 'player_home' AS code,CONCAT('我的小屋·',h.house_level,'级') AS name,h.plot_x AS x,h.plot_y AS y,8 AS target_order
+          FROM player_homes h JOIN characters c ON c.id=h.character_id JOIN players p ON p.id=c.player_id
+          WHERE p.qq_user_id=? AND h.status='active' LIMIT 1`, [event.current.UserId]);
+        targets.push(...homes);
+        targets.sort((left, right) => Number(left.target_order) - Number(right.target_order) || left.name.localeCompare(right.name, 'zh-CN'));
+      }
       if (!targets.length && map.region_code !== 'dark_forest') {
         markdown.addText('> ').addButton(map.description, { data: '/面板', autoEnter: false }).addNewline().addNewline();
         continue;

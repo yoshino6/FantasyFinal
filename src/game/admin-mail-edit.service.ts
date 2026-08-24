@@ -74,7 +74,6 @@ export const openMailEdit = async (adminQqUserId: string, scope: Scope) => withT
     edit.recipient_scope = scope;
     edit.status = 'editing';
   }
-  await recordAdminOperation(adminQqUserId, '邮件编辑', `开始${scope === 'global' ? '全服' : '个人'}邮件编辑`, null, connection);
   return loadEdit(connection, edit);
 });
 
@@ -85,7 +84,6 @@ export const switchMailEditToGlobal = async (adminQqUserId: string) => withTrans
     await connection.execute("UPDATE admin_mail_edits SET recipient_scope='global' WHERE id=?", [edit.id]);
     await connection.execute('DELETE FROM admin_mail_edit_recipients WHERE edit_id=?', [edit.id]);
     edit.recipient_scope = 'global';
-    await recordAdminOperation(adminQqUserId, '邮件编辑', '将邮件编辑切换为全服发放', null, connection);
   }
   return loadEdit(connection, edit);
 });
@@ -101,7 +99,6 @@ export const addMailRecipientByQq = async (adminQqUserId: string, targetQqUserId
   if (edit.recipient_scope !== 'personal') throw new Error('全服发放无需添加个人接收人。');
   const recipient = await recipientForQq(connection, targetQqUserId);
   await connection.execute('INSERT IGNORE INTO admin_mail_edit_recipients (edit_id,qq_user_id,nickname) VALUES (?,?,?)', [edit.id, recipient.qq_user_id, recipient.name]);
-  await recordAdminOperation(adminQqUserId, '邮件编辑', `添加邮件接收人「${recipient.name}」`, recipient.qq_user_id, connection);
   return loadEdit(connection, edit);
 });
 
@@ -110,14 +107,12 @@ export const addMailRecipientByName = async (adminQqUserId: string, name: string
   if (edit.recipient_scope !== 'personal') throw new Error('全服发放无需添加个人接收人。');
   const recipient = await recipientForName(connection, name.trim());
   await connection.execute('INSERT IGNORE INTO admin_mail_edit_recipients (edit_id,qq_user_id,nickname) VALUES (?,?,?)', [edit.id, recipient.qq_user_id, recipient.name]);
-  await recordAdminOperation(adminQqUserId, '邮件编辑', `按昵称添加邮件接收人「${recipient.name}」`, recipient.qq_user_id, connection);
   return loadEdit(connection, edit);
 });
 
 export const removeMailRecipient = async (adminQqUserId: string, targetQqUserId: string) => withTransaction(async connection => {
   await requireAdministrator(adminQqUserId, connection); const edit = await requireEdit(connection, adminQqUserId);
   await connection.execute('DELETE FROM admin_mail_edit_recipients WHERE edit_id=? AND qq_user_id=?', [edit.id, targetQqUserId]);
-  await recordAdminOperation(adminQqUserId, '邮件编辑', `移除邮件接收人 ${targetQqUserId}`, targetQqUserId, connection);
   return loadEdit(connection, edit);
 });
 
@@ -125,7 +120,6 @@ export const updateMailContent = async (adminQqUserId: string, content: string) 
   await requireAdministrator(adminQqUserId, connection); const edit = await requireEdit(connection, adminQqUserId);
   const text = content.trim(); if (text.length > 2000) throw new Error('邮件内容不能超过 2000 字。');
   await connection.execute('UPDATE admin_mail_edits SET content=? WHERE id=?', [text, edit.id]); edit.content = text;
-  await recordAdminOperation(adminQqUserId, '邮件编辑', '修改邮件内容', null, connection);
   return loadEdit(connection, edit);
 });
 
@@ -133,14 +127,12 @@ export const updateMailTitle = async (adminQqUserId: string, title: string) => w
   await requireAdministrator(adminQqUserId, connection); const edit = await requireEdit(connection, adminQqUserId);
   const text = title.trim(); if (text.length > 96) throw new Error('邮件标题不能超过 96 字。');
   await connection.execute('UPDATE admin_mail_edits SET title=? WHERE id=?', [text, edit.id]); edit.title = text;
-  await recordAdminOperation(adminQqUserId, '邮件编辑', `修改邮件标题为「${text || '无'}」`, null, connection);
   return loadEdit(connection, edit);
 });
 
 export const addMailAttachment = async (adminQqUserId: string, itemKey: string, quantity: number) => withTransaction(async connection => {
   await requireAdministrator(adminQqUserId, connection); const edit = await requireEdit(connection, adminQqUserId); const item = await itemFor(connection, itemKey); const amount = validQuantity(quantity);
   await connection.execute('INSERT INTO admin_mail_edit_attachments (edit_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity)', [edit.id, item.id, amount]);
-  await recordAdminOperation(adminQqUserId, '邮件编辑', `添加附件「${item.name}」×${amount}`, null, connection);
   return loadEdit(connection, edit);
 });
 
@@ -148,28 +140,24 @@ export const updateMailAttachmentQuantity = async (adminQqUserId: string, itemId
   await requireAdministrator(adminQqUserId, connection); const edit = await requireEdit(connection, adminQqUserId); const amount = validQuantity(quantity);
   const [result] = await connection.execute<ResultSetHeader>('UPDATE admin_mail_edit_attachments SET quantity=? WHERE edit_id=? AND item_id=?', [amount, edit.id, itemId]);
   if (!result.affectedRows) throw new Error('该附件不在当前邮件中。');
-  await recordAdminOperation(adminQqUserId, '邮件编辑', `修改附件 #${itemId} 数量为 ${amount}`, null, connection);
   return loadEdit(connection, edit);
 });
 
 export const removeMailAttachment = async (adminQqUserId: string, itemId: number) => withTransaction(async connection => {
   await requireAdministrator(adminQqUserId, connection); const edit = await requireEdit(connection, adminQqUserId);
   await connection.execute('DELETE FROM admin_mail_edit_attachments WHERE edit_id=? AND item_id=?', [edit.id, itemId]);
-  await recordAdminOperation(adminQqUserId, '邮件编辑', `删除附件 #${itemId}`, null, connection);
   return loadEdit(connection, edit);
 });
 
 export const stashMailEdit = async (adminQqUserId: string) => withTransaction(async connection => {
   await requireAdministrator(adminQqUserId, connection); const edit = await requireEdit(connection, adminQqUserId);
   await connection.execute("UPDATE admin_mail_edits SET status='draft' WHERE id=?", [edit.id]);
-  await recordAdminOperation(adminQqUserId, '邮件编辑', '暂存邮件编辑', null, connection);
 });
 
 export const discardMailEdit = async (adminQqUserId: string) => withTransaction(async connection => {
   await requireAdministrator(adminQqUserId, connection); const edit = await editRow(connection, adminQqUserId, true);
   if (!edit) throw new Error('当前没有可退出的邮件编辑。');
   await connection.execute('DELETE FROM admin_mail_edits WHERE id=?', [edit.id]);
-  await recordAdminOperation(adminQqUserId, '邮件编辑', '退出并删除邮件编辑', null, connection);
 });
 
 export const previewMailEdit = async (adminQqUserId: string) => {
@@ -187,6 +175,9 @@ export const sendMailEdit = async (adminQqUserId: string) => withTransaction(asy
     for (const attachment of data.attachments) await connection.execute('INSERT INTO player_mail_attachments (mail_id,item_id,quantity) VALUES (?,?,?)', [mail.insertId, attachment.itemId, attachment.quantity]);
   }
   await connection.execute('DELETE FROM admin_mail_edits WHERE id=?', [edit.id]);
-  await recordAdminOperation(adminQqUserId, '邮件发放', `${data.scope === 'global' ? '全服' : '个人'}发放邮件「${data.title}」，接收 ${targets.length} 人，附件 ${data.attachments.length} 项`, null, connection);
+  const recipients = data.scope === 'global' ? '全服' : data.recipients.map(recipient => recipient.nickname).join('、');
+  const attachments = data.attachments.length ? data.attachments.map(attachment => `【${attachment.name}】×${attachment.quantity}`).join('、') : '无';
+  const content = data.content || '无';
+  await recordAdminOperation(adminQqUserId, '邮件发放', `发放完成｜接收人：${recipients}（${targets.length}人）｜标题：${data.title}｜内容：${content}｜附件：${attachments}`, null, connection);
   return { recipientCount: targets.length, attachments: data.attachments };
 });

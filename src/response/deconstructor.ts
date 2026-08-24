@@ -147,7 +147,7 @@ export const deconstructorProfessionFormat = async (qqUserId: string) => {
     .addBlockquote(`构造成功率+${Math.max(0, progress.level - 1) * 6}%`);
   return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup()
     .addRow().addButton('分解', '/分解', { type: 'command', autoEnter: true, style: 'blue' }).addButton('构造', '/构造', { type: 'command', autoEnter: true, style: 'blue' })
-    .addRow().addButton('前往 异工坊', '/前往 4 -121', { type: 'command', autoEnter: true, style: 'blue' }));
+    .addRow().addButton('前往 异工坊', '/前往 6 -121', { type: 'command', autoEnter: true, style: 'blue' }));
 };
 
 type DeconstructionCategory = '装备' | '道具' | '材料';

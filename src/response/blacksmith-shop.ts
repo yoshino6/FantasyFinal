@@ -95,7 +95,7 @@ export const blacksmithChatHandler = async () => {
       const markdown = Format.createMarkdown().addTitle('百纳镇·铁匠铺').addNewline().addNewline().addText('【漠北】').addNewline().addNewline().addBlockquote(text).addNewline().addNewline();
       if (detailsUnlocked) markdown.addText(`好感：${affinity}｜${rank.title}`).addNewline().addNewline();
       markdown.addText('小北从工具架上取下一枚刻着锤纹的铁片：“我有个不错的本事，或许你学得会。要不要试试？”').addNewline().addNewline()
-        .addText('是否消耗 5 技能点学习被动技能【匠心】？');
+        .addText('是否消耗 5 技能点学习绑定技能【匠心】？');
       const buttons = Format.createButtonGroup().addRow()
         .addButton('确认学习', '/学习小北的匠心', { type: 'command', autoEnter: true, style: 'blue' })
         .addButton('下次再来', '/铁匠铺', { type: 'command', autoEnter: true })
@@ -114,6 +114,6 @@ export const learnXiaobeiCraftsmanshipHandler = async () => {
   try {
     await requireBlacksmithShop(event.current.UserId);
     const result = await learnXiaobeiCraftsmanship(event.current.UserId);
-    await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('学习技能').addNewline().addNewline().addText(`已学习被动技能【${result.name}】，消耗 ${result.cost} 技能点。`)).addButtonGroup(Format.createButtonGroup().addRow().addButton('技能列表', '/技能列表 已学习', { type: 'command', autoEnter: true, style: 'blue' }).addButton('返回 铁匠铺', '/铁匠铺', { type: 'command', autoEnter: true })) });
+    await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('学习技能').addNewline().addNewline().addText(`已学习绑定技能【${result.name}】，消耗 ${result.cost} 技能点。`)).addButtonGroup(Format.createButtonGroup().addRow().addButton('技能列表', '/技能列表 已学习', { type: 'command', autoEnter: true, style: 'blue' }).addButton('返回 铁匠铺', '/铁匠铺', { type: 'command', autoEnter: true })) });
   } catch (error) { await message.send({ format: messageFormat('学习失败', error instanceof Error ? error.message : '请稍后重试。') }); }
 };

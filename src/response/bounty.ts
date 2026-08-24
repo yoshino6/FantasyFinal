@@ -55,22 +55,22 @@ export const taskFormat = async (qqUserId: string, category?: TaskCategory, page
   });
   if (alchemyQuest.status === 'accepted' || alchemyQuest.status === 'completed') entries.push({
     category: '支线', title: '【副职业·炼金师入门】', description: `收集微光草药：${alchemyQuest.herbs}/3`,
-    action: alchemyQuest.status === 'completed' ? { label: '[前往提交 糖水屋(-12,-127)]', command: '/前往 -12 -127' } : undefined,
+    action: alchemyQuest.status === 'completed' ? { label: '[前往提交 糖水屋(-12,-128)]', command: '/前往 -12 -128' } : undefined,
     abandonCommand: '/放弃副职业任务 alchemist_apprentice'
   });
   if (deconstructQuest.status === 'accepted' || deconstructQuest.status === 'completed') entries.push({
     category: '支线', title: '【副职业·解构师入门】', description: `收集兽核：${deconstructQuest.cores}/1`,
-    action: deconstructQuest.status === 'completed' ? { label: '[前往提交 异工坊(4,-121)]', command: '/前往 4 -121' } : undefined,
+    action: deconstructQuest.status === 'completed' ? { label: '[前往提交 异工坊(6,-121)]', command: '/前往 6 -121' } : undefined,
     abandonCommand: '/放弃副职业任务 deconstructor_apprentice'
   });
   if (omniscientQuestProgress.status === 'accepted' || omniscientQuestProgress.status === 'completed') entries.push({
     category: '支线', title: '【副职业·全知者入门】', description: `挑战并观察森林史莱姆：${omniscientQuestProgress.slimeObserved ? '已完成' : '未完成'}\n挑战并观察幽影狼王：${omniscientQuestProgress.wolfKingObserved ? '已完成' : '未完成'}`,
-    action: omniscientQuestProgress.status === 'completed' ? { label: '[前往提交 百味书屋(12,-116)]', command: '/前往 12 -116' } : undefined,
+    action: omniscientQuestProgress.status === 'completed' ? { label: '[前往提交 百味书屋(14,-108)]', command: '/前往 14 -108' } : undefined,
     abandonCommand: '/放弃副职业任务 omniscient_apprentice'
   });
   if (needsSecondaryGuide) entries.push({
     category: '支线', title: '【支线·职业之外的道路】', description: '你的冒险经历已足以支撑一门副职业。去百纳镇的各个店铺转转吧：炉火、药香、零件与书页之间，或许有一条适合你的道路。',
-    action: { label: '[前往 百纳镇]', command: '/前往 -8 -116' }
+    action: { label: '[前往 百纳镇]', command: '/前往 -2 -111' }
   });
   if (dungeonSecret.status === 'accepted' && dungeonSecret.stage > 0 && dungeonSecret.stage < 7) {
     const details: Record<number, string> = {
@@ -81,7 +81,7 @@ export const taskFormat = async (qqUserId: string, category?: TaskCategory, page
       5: '石门前的猎人正等着你。听完他的忠告，再确认是否进入迷宫。',
       6: '进入地下迷宫第一层，寻找并击败这一层的小头目。'
     };
-    entries.push({ category: '支线', title: '【支线·地下的秘密】', description: details[dungeonSecret.stage] ?? '继续追查地下迷宫的秘密。', action: dungeonSecret.stage === 1 ? { label: '[前往 冒险者公会(-8,-116)]', command: '/前往 -8 -116' } : dungeonSecret.stage === 2 || dungeonSecret.stage === 3 ? { label: '[前往 异工坊(4,-121)]', command: '/前往 4 -121' } : undefined });
+    entries.push({ category: '支线', title: '【支线·地下的秘密】', description: details[dungeonSecret.stage] ?? '继续追查地下迷宫的秘密。', action: dungeonSecret.stage === 1 ? { label: '[前往 冒险者公会(-2,-111)]', command: '/前往 -2 -111' } : dungeonSecret.stage === 2 || dungeonSecret.stage === 3 ? { label: '[前往 异工坊(6,-121)]', command: '/前往 6 -121' } : undefined });
   }
   const normalizedKeyword = keyword.trim();
   const filtered = entries.filter(task => (!category || task.category === category) && (!normalizedKeyword || `${task.title}\n${task.description}`.includes(normalizedKeyword)));
@@ -116,9 +116,9 @@ const taskAbandonedFormat = (title: string, pickupLocation: string) => Format.cr
   .addButtonGroup(Format.createButtonGroup().addRow().addButton('任务', '/任务', { type: 'command', autoEnter: true }));
 const secondaryQuestPickup: Record<'blacksmith_apprentice' | 'alchemist_apprentice' | 'deconstructor_apprentice' | 'omniscient_apprentice', { title: string; location: string }> = {
   blacksmith_apprentice: { title: '副职业·锻造师入门', location: '百纳镇·铁匠铺（-17, -123）' },
-  alchemist_apprentice: { title: '副职业·炼金师入门', location: '百纳镇·糖水屋（-12, -127）' },
-  deconstructor_apprentice: { title: '副职业·解构师入门', location: '百纳镇·异工坊（4, -121）' },
-  omniscient_apprentice: { title: '副职业·全知者入门', location: '百纳镇·百味书屋（12, -116）' }
+  alchemist_apprentice: { title: '副职业·炼金师入门', location: '百纳镇·糖水屋（-12, -128）' },
+  deconstructor_apprentice: { title: '副职业·解构师入门', location: '百纳镇·异工坊（6, -121）' },
+  omniscient_apprentice: { title: '副职业·全知者入门', location: '百纳镇·百味书屋（14, -108）' }
 };
 export const taskHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await message.send({ format: await taskFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法查看任务栏', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const taskCategoryHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const category = parseCategory(String(route.param('category'))); if (!category) throw new Error('不存在该任务分类。'); await message.send({ format: await taskFormat(event.current.UserId, category) }); } catch (error) { await message.send({ format: messageFormat('无法查看任务栏', error instanceof Error ? error.message : '请稍后重试。') }); } };

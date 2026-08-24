@@ -75,12 +75,14 @@ const schemaStatements = [
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, player_id BIGINT UNSIGNED NULL, npc_id BIGINT UNSIGNED NULL, npc_code VARCHAR(64) NULL, name VARCHAR(24) NOT NULL,
     gender VARCHAR(8) NOT NULL DEFAULT '未设定', free_name_change_used TINYINT(1) NOT NULL DEFAULT 0, free_gender_change_used TINYINT(1) NOT NULL DEFAULT 0,
     level INT UNSIGNED NOT NULL DEFAULT 1, experience BIGINT UNSIGNED NOT NULL DEFAULT 0, realm_stage TINYINT UNSIGNED NOT NULL DEFAULT 1, skill_points INT UNSIGNED NOT NULL DEFAULT 1, copper_coins BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    stamina SMALLINT UNSIGNED NOT NULL DEFAULT 120, stamina_updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     constitution SMALLINT UNSIGNED NOT NULL, spirit SMALLINT UNSIGNED NOT NULL, strength SMALLINT UNSIGNED NOT NULL,
     intelligence SMALLINT UNSIGNED NOT NULL, agility SMALLINT UNSIGNED NOT NULL, perception SMALLINT UNSIGNED NOT NULL,
     constitution_growth DECIMAL(4,1) NOT NULL DEFAULT 0, spirit_growth DECIMAL(4,1) NOT NULL DEFAULT 0, strength_growth DECIMAL(4,1) NOT NULL DEFAULT 0,
     intelligence_growth DECIMAL(4,1) NOT NULL DEFAULT 0, agility_growth DECIMAL(4,1) NOT NULL DEFAULT 0, perception_growth DECIMAL(4,1) NOT NULL DEFAULT 0,
     adventurer_registered TINYINT(1) NOT NULL DEFAULT 0,
     adventurer_rank ENUM('F','E','D','C','B','A','S','SS','SSS') NOT NULL DEFAULT 'F', profession_code VARCHAR(32) NULL, secondary_profession_code VARCHAR(32) NULL,
+    delete_confirmation_code CHAR(6) NULL, delete_confirmation_expires_at DATETIME NULL,
     hp_max INT UNSIGNED NOT NULL, mp_max INT UNSIGNED NOT NULL, current_hp INT UNSIGNED NOT NULL, current_mp INT UNSIGNED NOT NULL,
     activity_status ENUM('active','resting','unconscious') NOT NULL DEFAULT 'active', rest_started_at DATETIME NULL, physical_attack INT UNSIGNED NOT NULL, magic_attack INT UNSIGNED NOT NULL,
     physical_defense INT UNSIGNED NOT NULL, magic_defense INT UNSIGNED NOT NULL, accuracy INT UNSIGNED NOT NULL, evasion INT UNSIGNED NOT NULL,
@@ -221,7 +223,7 @@ const schemaStatements = [
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_warrants (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, wanted_character_id BIGINT UNSIGNED NOT NULL, city_region_id BIGINT UNSIGNED NOT NULL,
-    status ENUM('active','captured','cleared') NOT NULL DEFAULT 'active', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status ENUM('active','captured','cleared') NOT NULL DEFAULT 'active', pursuit_defeats TINYINT UNSIGNED NOT NULL DEFAULT 0, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     captured_at DATETIME NULL, captured_by_character_id BIGINT UNSIGNED NULL, last_seen_at DATETIME NULL, last_seen_x INT NULL, last_seen_y INT NULL,
     PRIMARY KEY (id), KEY idx_warrant_character_city_status (wanted_character_id,city_region_id,status), KEY idx_warrant_city_status (city_region_id,status),
     CONSTRAINT fk_warrant_character FOREIGN KEY (wanted_character_id) REFERENCES characters(id) ON DELETE CASCADE,
@@ -421,7 +423,7 @@ const schemaStatements = [
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS skill_definitions (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, code VARCHAR(64) NOT NULL, name VARCHAR(64) NOT NULL,
-    category ENUM('physical','magic','utility','passive','special') NOT NULL, damage_type VARCHAR(16) NOT NULL DEFAULT '无', skill_kind VARCHAR(16) NOT NULL DEFAULT '无', element VARCHAR(16) NOT NULL DEFAULT '无', range_type VARCHAR(16) NOT NULL DEFAULT '近战', codex_id CHAR(7) NULL,
+    category ENUM('physical','magic','utility','passive','bound','special') NOT NULL, damage_type VARCHAR(16) NOT NULL DEFAULT '无', skill_kind VARCHAR(16) NOT NULL DEFAULT '无', element VARCHAR(16) NOT NULL DEFAULT '无', range_type VARCHAR(16) NOT NULL DEFAULT '近战', codex_id CHAR(7) NULL,
     mana_cost INT UNSIGNED NOT NULL DEFAULT 0, cooldown_turns TINYINT UNSIGNED NOT NULL DEFAULT 0, chant_turns TINYINT UNSIGNED NOT NULL DEFAULT 0,
     power INT UNSIGNED NOT NULL DEFAULT 100, learn_cost TINYINT UNSIGNED NOT NULL DEFAULT 1, upgrade_cost TINYINT UNSIGNED NOT NULL DEFAULT 1,
     max_level TINYINT UNSIGNED NOT NULL DEFAULT 5, power_per_level INT UNSIGNED NOT NULL DEFAULT 15, cooldown_reduction_per_level TINYINT UNSIGNED NOT NULL DEFAULT 0,
@@ -429,7 +431,7 @@ const schemaStatements = [
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_skills (
     character_id BIGINT UNSIGNED NOT NULL, skill_id BIGINT UNSIGNED NOT NULL, level TINYINT UNSIGNED NOT NULL DEFAULT 1,
-    quick_slot TINYINT UNSIGNED NULL, learned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (character_id, skill_id), UNIQUE KEY uk_quick_slot (character_id, quick_slot),
+    quick_slot TINYINT UNSIGNED NULL, passive_linked TINYINT(1) NOT NULL DEFAULT 0, learned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (character_id, skill_id), UNIQUE KEY uk_quick_slot (character_id, quick_slot),
     CONSTRAINT fk_player_skill_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
     CONSTRAINT fk_player_skill_definition FOREIGN KEY (skill_id) REFERENCES skill_definitions(id)
   ) ENGINE=InnoDB`
@@ -623,7 +625,7 @@ const schemaStatements = [
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS combat_members (
     session_id CHAR(36) NOT NULL, character_id BIGINT UNSIGNED NOT NULL, current_hp INT UNSIGNED NOT NULL, current_mp INT UNSIGNED NOT NULL,
-    selected_target_id BIGINT UNSIGNED NULL, pending_action JSON NULL, cooldowns JSON NOT NULL, is_defeated TINYINT(1) NOT NULL DEFAULT 0,
+    selected_target_id BIGINT UNSIGNED NULL, pending_action JSON NULL, cooldowns JSON NOT NULL, stamina_eligible TINYINT(1) NOT NULL DEFAULT 1, is_defeated TINYINT(1) NOT NULL DEFAULT 0,
     PRIMARY KEY (session_id, character_id), KEY idx_combat_member_character (character_id),
     CONSTRAINT fk_combat_member_session FOREIGN KEY (session_id) REFERENCES combat_sessions(id) ON DELETE CASCADE,
     CONSTRAINT fk_combat_member_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
@@ -682,6 +684,46 @@ const schemaStatements = [
     CONSTRAINT fk_party_member_party FOREIGN KEY (party_id) REFERENCES parties(id) ON DELETE CASCADE,
     CONSTRAINT fk_party_member_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_homes (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, character_id BIGINT UNSIGNED NOT NULL, town_region_id BIGINT UNSIGNED NOT NULL,
+    plot_x INT NOT NULL, plot_y INT NOT NULL, plot_z INT NOT NULL DEFAULT 0, house_level TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    floor_count TINYINT UNSIGNED NOT NULL DEFAULT 1, status ENUM('active','demolished') NOT NULL DEFAULT 'active',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id), UNIQUE KEY uk_home_character (character_id), KEY idx_home_plot (town_region_id,plot_x,plot_y,plot_z), KEY idx_home_town_status (town_region_id,status),
+    CONSTRAINT fk_home_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
+    CONSTRAINT fk_home_town FOREIGN KEY (town_region_id) REFERENCES map_regions(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_home_visits (
+    character_id BIGINT UNSIGNED NOT NULL, home_id BIGINT UNSIGNED NOT NULL, entered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (character_id), UNIQUE KEY uk_home_visit_home (home_id),
+    CONSTRAINT fk_home_visit_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
+    CONSTRAINT fk_home_visit_home FOREIGN KEY (home_id) REFERENCES player_homes(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS home_furniture_definitions (
+    code VARCHAR(64) NOT NULL, name VARCHAR(64) NOT NULL, description TEXT NOT NULL, effect_json JSON NOT NULL,
+    required_house_level TINYINT UNSIGNED NOT NULL DEFAULT 1, max_per_floor TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    floor_slot_cost TINYINT UNSIGNED NOT NULL DEFAULT 1, is_active TINYINT(1) NOT NULL DEFAULT 1, PRIMARY KEY (code)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS home_furniture_recipes (
+    furniture_code VARCHAR(64) NOT NULL, item_id BIGINT UNSIGNED NOT NULL, quantity INT UNSIGNED NOT NULL, PRIMARY KEY (furniture_code,item_id),
+    CONSTRAINT fk_home_recipe_furniture FOREIGN KEY (furniture_code) REFERENCES home_furniture_definitions(code) ON DELETE CASCADE,
+    CONSTRAINT fk_home_recipe_item FOREIGN KEY (item_id) REFERENCES item_definitions(id)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_home_furniture (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, home_id BIGINT UNSIGNED NOT NULL, furniture_code VARCHAR(64) NOT NULL,
+    floor_no TINYINT UNSIGNED NOT NULL DEFAULT 1, slot_key VARCHAR(32) NOT NULL, placed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id), UNIQUE KEY uk_home_furniture_slot (home_id,floor_no,slot_key), KEY idx_home_furniture_floor (home_id,floor_no,furniture_code),
+    CONSTRAINT fk_home_furniture_home FOREIGN KEY (home_id) REFERENCES player_homes(id) ON DELETE CASCADE,
+    CONSTRAINT fk_home_furniture_definition FOREIGN KEY (furniture_code) REFERENCES home_furniture_definitions(code)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS home_shop_offers (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, offer_code VARCHAR(64) NOT NULL, output_item_id BIGINT UNSIGNED NOT NULL,
+    output_quantity INT UNSIGNED NOT NULL, input_item_id BIGINT UNSIGNED NULL, input_quantity INT UNSIGNED NOT NULL DEFAULT 0,
+    copper_price BIGINT UNSIGNED NOT NULL DEFAULT 0, is_active TINYINT(1) NOT NULL DEFAULT 1, sort_order SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    PRIMARY KEY (id), UNIQUE KEY uk_home_offer_code (offer_code), KEY idx_home_offer_active (is_active,sort_order),
+    CONSTRAINT fk_home_offer_output FOREIGN KEY (output_item_id) REFERENCES item_definitions(id),
+    CONSTRAINT fk_home_offer_input FOREIGN KEY (input_item_id) REFERENCES item_definitions(id)
+  ) ENGINE=InnoDB`
 ];
 
 export const initializeSchema = async (pool: Pool) => {
@@ -732,6 +774,7 @@ export const initializeSchema = async (pool: Pool) => {
   try { await pool.query('ALTER TABLE combat_members ADD COLUMN cooldowns JSON NULL'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   await pool.query('UPDATE combat_members SET cooldowns=JSON_OBJECT() WHERE cooldowns IS NULL');
   await pool.query('ALTER TABLE combat_members MODIFY COLUMN cooldowns JSON NOT NULL');
+  try { await pool.query('ALTER TABLE combat_members ADD COLUMN stamina_eligible TINYINT(1) NOT NULL DEFAULT 1 AFTER cooldowns'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   for (const column of ['constitution SMALLINT UNSIGNED NOT NULL DEFAULT 0', 'spirit SMALLINT UNSIGNED NOT NULL DEFAULT 0', 'strength SMALLINT UNSIGNED NOT NULL DEFAULT 0', 'intelligence SMALLINT UNSIGNED NOT NULL DEFAULT 0', 'agility SMALLINT UNSIGNED NOT NULL DEFAULT 0', 'perception SMALLINT UNSIGNED NOT NULL DEFAULT 0', 'constitution_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'spirit_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'strength_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'intelligence_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'agility_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'perception_growth DECIMAL(4,1) NOT NULL DEFAULT 0']) {
     try { await pool.query(`ALTER TABLE monster_templates ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }
@@ -740,11 +783,12 @@ export const initializeSchema = async (pool: Pool) => {
   }
   await pool.query("ALTER TABLE registration_sessions MODIFY stage ENUM('story','audience','question','destination','danger','choice') NOT NULL DEFAULT 'story'");
   await pool.query("ALTER TABLE player_story_progress MODIFY COLUMN status ENUM('met','joined','declined','awaiting_arrival','arrival_story','guild_story','completed') NOT NULL DEFAULT 'met'");
-  for (const column of ["adventurer_rank ENUM('F','E','D','C','B','A','S','SS','SSS') NOT NULL DEFAULT 'F'", 'profession_code VARCHAR(32) NULL', 'secondary_profession_code VARCHAR(32) NULL', 'copper_coins BIGINT UNSIGNED NOT NULL DEFAULT 0']) {
+  for (const column of ["adventurer_rank ENUM('F','E','D','C','B','A','S','SS','SSS') NOT NULL DEFAULT 'F'", 'profession_code VARCHAR(32) NULL', 'secondary_profession_code VARCHAR(32) NULL', 'copper_coins BIGINT UNSIGNED NOT NULL DEFAULT 0', 'delete_confirmation_code CHAR(6) NULL', 'delete_confirmation_expires_at DATETIME NULL']) {
     try { await pool.query(`ALTER TABLE characters ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }
   try { await pool.query("ALTER TABLE admin_mail_edits ADD COLUMN title VARCHAR(96) NOT NULL DEFAULT '' AFTER recipient_scope"); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   try { await pool.query('ALTER TABLE bounty_notices ADD COLUMN source_spawn_id BIGINT UNSIGNED NULL'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  try { await pool.query('ALTER TABLE player_warrants ADD COLUMN pursuit_defeats TINYINT UNSIGNED NOT NULL DEFAULT 0'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   try { await pool.query("ALTER TABLE player_forge_sessions ADD COLUMN entry_source ENUM('blacksmith','profession') NOT NULL DEFAULT 'blacksmith'"); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   try { await pool.query('ALTER TABLE bounty_notices MODIFY COLUMN refresh_key VARCHAR(32) NOT NULL'); } catch (error: any) { if (error?.code !== 'ER_BAD_FIELD_ERROR') throw error; }
   for (const column of [
@@ -788,6 +832,9 @@ export const initializeSchema = async (pool: Pool) => {
     try { await pool.query(`ALTER TABLE characters ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }
   try { await pool.query('ALTER TABLE characters ADD COLUMN realm_stage TINYINT UNSIGNED NOT NULL DEFAULT 1 AFTER experience'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  for (const column of ['stamina SMALLINT UNSIGNED NOT NULL DEFAULT 120', 'stamina_updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP']) {
+    try { await pool.query(`ALTER TABLE characters ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  }
   try { await pool.query('ALTER TABLE characters ADD COLUMN game_id BIGINT UNSIGNED NULL AFTER id'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   try { await pool.query('ALTER TABLE characters ADD UNIQUE KEY uk_characters_game_id (game_id)'); } catch (error: any) { if (error?.code !== 'ER_DUP_KEYNAME') throw error; }
   await pool.query('UPDATE characters SET game_id=10000000+id WHERE player_id IS NOT NULL AND game_id IS NULL');
@@ -802,8 +849,9 @@ export const initializeSchema = async (pool: Pool) => {
     try { await pool.query(`ALTER TABLE skill_definitions ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }
   try { await pool.query('ALTER TABLE skill_definitions ADD COLUMN passive_effect_json JSON NULL'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
-  await pool.query("ALTER TABLE skill_definitions MODIFY COLUMN category ENUM('physical','magic','utility','passive','special') NOT NULL");
+  await pool.query("ALTER TABLE skill_definitions MODIFY COLUMN category ENUM('physical','magic','utility','passive','bound','special') NOT NULL");
   try { await pool.query('ALTER TABLE player_skills ADD COLUMN learned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  try { await pool.query('ALTER TABLE player_skills ADD COLUMN passive_linked TINYINT(1) NOT NULL DEFAULT 0 AFTER quick_slot'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   for (const column of ['daily_chat_count TINYINT UNSIGNED NOT NULL DEFAULT 0', 'daily_buy_count TINYINT UNSIGNED NOT NULL DEFAULT 0', 'daily_sell_count TINYINT UNSIGNED NOT NULL DEFAULT 0', 'daily_craft_count TINYINT UNSIGNED NOT NULL DEFAULT 0']) {
     try { await pool.query(`ALTER TABLE player_npc_affinity ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }
@@ -823,7 +871,8 @@ export const initializeSchema = async (pool: Pool) => {
   try { await pool.query('ALTER TABLE characters ADD UNIQUE KEY uk_characters_npc_code (npc_code)'); } catch (error: any) { if (error?.code !== 'ER_DUP_KEYNAME') throw error; }
   await pool.query(`UPDATE characters c JOIN players p ON p.id=c.player_id SET c.player_id=NULL,c.npc_id=CASE p.qq_user_id WHEN 'npc_forest_warrior' THEN 900000001 WHEN 'npc_forest_mage' THEN 900000002 WHEN 'npc_forest_priest' THEN 900000003 END,c.npc_code=p.qq_user_id WHERE p.qq_user_id IN ('npc_forest_warrior','npc_forest_mage','npc_forest_priest')`);
   await pool.query(`DELETE FROM players WHERE qq_user_id IN ('npc_forest_warrior','npc_forest_mage','npc_forest_priest')`);
-  await pool.query(`UPDATE item_definitions SET item_category=CASE code WHEN 'holy_sword_shirulu' THEN '武器' WHEN 'demon_sword_aphia' THEN '武器' WHEN 'healing_herb' THEN '药剂' WHEN 'wolf_fang' THEN '兽材' ELSE item_category END, stackable=CASE WHEN item_type='equipment' THEN 0 ELSE 1 END`);
+  await pool.query(`UPDATE item_definitions SET item_category=CASE code WHEN 'holy_sword_shirulu' THEN '武器' WHEN 'demon_sword_aphia' THEN '武器' WHEN 'healing_herb' THEN '药剂' WHEN 'wolf_fang' THEN '怪材' ELSE item_category END, stackable=CASE WHEN item_type='equipment' THEN 0 ELSE 1 END`);
+  await pool.query("UPDATE item_definitions SET item_category='怪材' WHERE item_category IN ('兽材','精兽材')");
   try { await pool.query("ALTER TABLE map_npcs ADD COLUMN interaction_kind ENUM('npc','building') NOT NULL DEFAULT 'npc' AFTER description"); }
   catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   await pool.query(`UPDATE item_definitions SET is_tradeable=0 WHERE item_category IN ('地图','特殊','任务','剧情') OR code='adventurer_card'`);
@@ -900,26 +949,30 @@ export const initializeSchema = async (pool: Pool) => {
     ('qinger_gift', '晴儿的赠礼', '晴儿调配的澄澈小瓶，散发着让人安定的草木香。', '副职业·炼金师转职', 'consumable', '特殊', 0.01, 1, JSON_OBJECT('npcGift','qinger')),
     ('xiaowei_gift', '唯薇安的赠礼', '唯薇安亲手拼出的奇巧小匣，轻晃时会传出细微的齿轮声。', '副职业·解构师转职', 'consumable', '特殊', 0.01, 1, JSON_OBJECT('npcGift','xiaowei')),
     ('luowen_gift', '洛文的赠礼', '夹着泛黄批注的旧书签，字迹严谨而温和。', '副职业·全知者转职', 'consumable', '特殊', 0.01, 1, JSON_OBJECT('npcGift','luowen')),
-    ('wolf_fang', '幽狼之牙', '可出售的普通材料。', '野外怪物掉落', 'material', '兽材', 0.15, 1, NULL),
-    ('beast_meat', '兽肉', '新鲜的野兽肉，可作为烹饪食材。', '幽暗密林怪物掉落', 'material', '兽材', 0.30, 1, NULL),
-    ('beast_bone', '兽骨', '坚硬完整的兽骨，常用于制作与加工。', '幽暗密林怪物掉落', 'material', '兽材', 0.25, 1, NULL),
-    ('beast_hide', '兽皮', '处理后可制成皮革的普通兽皮。', '幽暗密林怪物掉落', 'material', '兽材', 0.20, 1, NULL),
-    ('beast_tendon', '兽筋', '韧性十足的兽筋，是常见的强化素材。', '幽暗密林怪物掉落', 'material', '兽材', 0.10, 1, NULL),
-    ('beast_core', '兽核', '凝聚着微弱魔力的兽类核心。', '幽暗密林怪物掉落', 'material', '兽材', 0.08, 1, NULL),
-    ('magic_wool', '魔力绒毛', '带有柔和魔力的兔类绒毛。', '兔类怪物掉落', 'material', '兽材', 0.05, 1, NULL),
-    ('magic_tusk', '魔力獠牙', '蕴藏野性魔力的锋利獠牙。', '猪类怪物掉落', 'material', '兽材', 0.08, 1, NULL),
-    ('magic_scale', '魔力鳞片', '带有自然魔力的蛇类鳞片。', '蛇类怪物掉落', 'material', '兽材', 0.05, 1, NULL),
-    ('magic_claw', '魔力利爪', '由熊类巨爪凝成的锋利素材。', '熊类怪物掉落', 'material', '兽材', 0.10, 1, NULL),
-    ('magic_heartcore', '魔力心核', '狼类魔力在心脏处凝聚而成的核心。', '狼类怪物掉落', 'material', '兽材', 0.08, 1, NULL),
-    ('refined_beast_bone', '兽骨（精）', '经炼金提纯的致密兽骨，适合作为高品质锻造素材。', '炼金师提纯', 'material', '精兽材', 0.12, 1, NULL),
-    ('refined_beast_hide', '兽皮（精）', '经炼金提纯的柔韧兽皮，蕴含更稳定的护持力量。', '炼金师提纯', 'material', '精兽材', 0.10, 1, NULL),
-    ('refined_beast_tendon', '兽筋（精）', '经炼金提纯的坚韧兽筋，能将力量传递得更加流畅。', '炼金师提纯', 'material', '精兽材', 0.06, 1, NULL),
-    ('refined_beast_core', '兽核（精）', '经炼金提纯的兽核，内部魔力更为纯净。', '炼金师提纯', 'material', '精兽材', 0.05, 1, NULL),
-    ('refined_magic_wool', '魔力绒毛（精）', '提纯后的魔力绒毛，轻盈而富有灵性。', '炼金师提纯', 'material', '精兽材', 0.03, 1, NULL),
-    ('refined_magic_tusk', '魔力獠牙（精）', '提纯后的魔力獠牙，锋芒与野性被完整保留。', '炼金师提纯', 'material', '精兽材', 0.05, 1, NULL),
-    ('refined_magic_scale', '魔力鳞片（精）', '提纯后的魔力鳞片，表面流转着稳定的术式纹路。', '炼金师提纯', 'material', '精兽材', 0.03, 1, NULL),
-    ('refined_magic_claw', '魔力利爪（精）', '提纯后的魔力利爪，锐利且蕴含强烈战意。', '炼金师提纯', 'material', '精兽材', 0.05, 1, NULL),
-    ('refined_magic_heartcore', '魔力心核（精）', '提纯后的魔力心核，搏动间仍有幽影般的魔力回响。', '炼金师提纯', 'material', '精兽材', 0.04, 1, NULL),
+    ('wolf_fang', '幽狼之牙', '可出售的普通材料。', '野外怪物掉落', 'material', '怪材', 0.15, 1, NULL),
+    ('beast_meat', '兽肉', '新鲜的野兽肉，可作为烹饪食材。', '幽暗密林怪物掉落', 'material', '怪材', 0.30, 1, NULL),
+    ('beast_bone', '兽骨', '坚硬完整的兽骨，常用于制作与加工。', '幽暗密林怪物掉落', 'material', '怪材', 0.25, 1, NULL),
+    ('beast_hide', '兽皮', '处理后可制成皮革的普通兽皮。', '幽暗密林怪物掉落', 'material', '怪材', 0.20, 1, NULL),
+    ('beast_tendon', '兽筋', '韧性十足的兽筋，是常见的强化素材。', '幽暗密林怪物掉落', 'material', '怪材', 0.10, 1, NULL),
+    ('beast_core', '兽核', '凝聚着微弱魔力的兽类核心。', '幽暗密林怪物掉落', 'material', '怪材', 0.08, 1, NULL),
+    ('magic_wool', '魔力绒毛', '带有柔和魔力的兔类绒毛。', '兔类怪物掉落', 'material', '怪材', 0.05, 1, NULL),
+    ('magic_tusk', '魔力獠牙', '蕴藏野性魔力的锋利獠牙。', '猪类怪物掉落', 'material', '怪材', 0.08, 1, NULL),
+    ('magic_scale', '魔力鳞片', '带有自然魔力的蛇类鳞片。', '蛇类怪物掉落', 'material', '怪材', 0.05, 1, NULL),
+    ('magic_claw', '魔力利爪', '由熊类巨爪凝成的锋利素材。', '熊类怪物掉落', 'material', '怪材', 0.10, 1, NULL),
+    ('magic_heartcore', '魔力心核', '狼类魔力在心脏处凝聚而成的核心。', '狼类怪物掉落', 'material', '怪材', 0.08, 1, NULL),
+    ('refined_beast_bone', '兽骨（精）', '经炼金提纯的致密兽骨，适合作为高品质锻造素材。', '炼金师提纯', 'material', '怪材', 0.12, 1, NULL),
+    ('refined_beast_hide', '兽皮（精）', '经炼金提纯的柔韧兽皮，蕴含更稳定的护持力量。', '炼金师提纯', 'material', '怪材', 0.10, 1, NULL),
+    ('refined_beast_tendon', '兽筋（精）', '经炼金提纯的坚韧兽筋，能将力量传递得更加流畅。', '炼金师提纯', 'material', '怪材', 0.06, 1, NULL),
+    ('refined_beast_core', '兽核（精）', '经炼金提纯的兽核，内部魔力更为纯净。', '炼金师提纯', 'material', '怪材', 0.05, 1, NULL),
+    ('refined_magic_wool', '魔力绒毛（精）', '提纯后的魔力绒毛，轻盈而富有灵性。', '炼金师提纯', 'material', '怪材', 0.03, 1, NULL),
+    ('refined_magic_tusk', '魔力獠牙（精）', '提纯后的魔力獠牙，锋芒与野性被完整保留。', '炼金师提纯', 'material', '怪材', 0.05, 1, NULL),
+    ('refined_magic_scale', '魔力鳞片（精）', '提纯后的魔力鳞片，表面流转着稳定的术式纹路。', '炼金师提纯', 'material', '怪材', 0.03, 1, NULL),
+    ('refined_magic_claw', '魔力利爪（精）', '提纯后的魔力利爪，锐利且蕴含强烈战意。', '炼金师提纯', 'material', '怪材', 0.05, 1, NULL),
+    ('refined_magic_heartcore', '魔力心核（精）', '提纯后的魔力心核，搏动间仍有幽影般的魔力回响。', '炼金师提纯', 'material', '怪材', 0.04, 1, NULL),
+    ('home_wood', '木材', '适用于扩建房屋和打造家具的基础建材。', '百纳居购买与兑换', 'material', '建材', 0.20, 1, NULL),
+    ('home_stone', '石料', '经过筛选的坚固石料，可用于加固房屋。', '百纳居购买与兑换', 'material', '建材', 0.35, 1, NULL),
+    ('home_metal', '金属', '可用于制作耐用家具与房屋构件的金属。', '百纳居购买与兑换', 'material', '建材', 0.30, 1, NULL),
+    ('slime_gel', '史莱姆凝胶', '从史莱姆身上收集的弹性凝胶，是制作奇妙家具的怪物材料。', '各类史莱姆怪物掉落', 'material', '怪材', 0.10, 1, NULL),
     ('blood_residue', '血肉残渣', '从兽材结构中拆出的血肉粒子，是生命药剂的基础主材。', '解构师分解', 'material', '粒子', 0.10, 1, NULL),
     ('energy_ember', '能量余烬', '从兽材魔力结构中析出的微弱能量粒子，是魔力药剂的基础主材。', '解构师分解', 'material', '粒子', 0.08, 1, NULL),
     ('magic_unit', '魔力微弧', '高级兽材分解后偶得的稳定魔力微弧，可用于调制秘药。', '解构师分解', 'material', '粒子', 0.05, 1, NULL),
@@ -961,8 +1014,8 @@ export const initializeSchema = async (pool: Pool) => {
     ('herbal_extract', '草木萃取液', '草药经温和反应析出的基础萃取液。', '炼金师炼金', 'material', '炼材', 0.10, 1, NULL),
     ('mana_dust', '魔力粉尘', '兽核在反应中散逸后凝结的细小魔力颗粒。', '炼金师炼金', 'material', '炼材', 0.05, 1, NULL),
     ('magic_branch', '魔力枝叶', '树精枝梢上凝结的魔力叶片，仍散发着柔和的木属性气息。', '幽暗密林树精掉落', 'material', '锻材', 0.12, 1, NULL),
-    ('goblin_ear', '哥布林耳', '哥布林身上留下的辨识素材。', '哥布林掉落', 'material', '兽材', 0.03, 1, NULL),
-    ('riot_aura', '暴动的气息', '从暴动怪物身上剥离的躁动气息，隐约散发着危险的魔力。', '暴动怪物额外掉落', 'material', '兽材', 0.05, 1, NULL),
+    ('goblin_ear', '哥布林耳', '哥布林身上留下的辨识素材。', '哥布林掉落', 'material', '怪材', 0.03, 1, NULL),
+    ('riot_aura', '暴动的气息', '从暴动怪物身上剥离的躁动气息，隐约散发着危险的魔力。', '暴动怪物额外掉落', 'material', '怪材', 0.05, 1, NULL),
     ('living_wood', '活木', '仍带着微弱生命律动的木材，可用于基础精炼。', '幽暗密林植被开采', 'material', '锻材', 0.40, 1, NULL),
     ('meteor_iron', '陨铁', '自天外坠落的沉重铁矿，杂质极少，适合打造玄铁装备。', '幽暗密林矿脉开采', 'material', '锻材', 0.60, 1, NULL),
     ('star_copper', '星铜', '在夜色中泛着细碎星辉的铜材。', '后续开放获取', 'material', '锻材', 0.50, 1, NULL),
@@ -1019,6 +1072,38 @@ export const initializeSchema = async (pool: Pool) => {
     ,('demon_breaker_teleporter', '破魔传送器', '唯薇安研制的便携式传送装置。持有时可穿过地下迷宫入口的封印，也能在迷宫中借它强制脱离，回到入口之外。', '百纳镇·异工坊', 'consumable', '特殊', 0.60, 1, JSON_OBJECT('dungeonGatePass',true))
     ,('demon_breaker_teleporter_blueprint', '破魔传送器图纸', '记载破魔传送器完整回路的图纸；解构师持有后可稳定构造该装置。', '百纳镇·异工坊', 'consumable', '图纸', 0.01, 1, JSON_OBJECT('constructionBlueprint','demon_breaker_teleporter'))
     ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description), obtain_source = VALUES(obtain_source), item_category = VALUES(item_category), stackable = VALUES(stackable), effect_json = VALUES(effect_json)`);
+  await pool.query(`INSERT INTO home_furniture_definitions (code,name,description,effect_json,required_house_level,max_per_floor,floor_slot_cost,is_active) VALUES
+    ('wooden_bed','木床','朴素却结实的木床，在家休息时恢复速度 +10%。',JSON_OBJECT('restRecoveryPct',10),1,1,1,1),
+    ('slime_bed','史莱姆床','会轻轻回弹的凝胶床，在家休息时生命与魔力恢复速度 +20%。',JSON_OBJECT('restRecoveryPct',20),1,1,1,1),
+    ('storage_chest','家园储物箱','加固的木箱，让家园面板显示额外储物容量 +20。',JSON_OBJECT('storageCapacity',20),1,3,1,1),
+    ('training_dummy','训练木桩','可以反复练习发力的木桩，显示训练加成 +5%。',JSON_OBJECT('trainingBonusPct',5),1,2,1,1),
+    ('warm_hearth','暖炉','温暖炉火驱散疲惫，在家休息时恢复速度 +15%。',JSON_OBJECT('restRecoveryPct',15),2,1,2,1),
+    ('wolfhide_carpet','幽狼皮毯','由柔韧怪材制成的地毯，显示感知布置 +2。',JSON_OBJECT('homePerception',2),2,2,1,1),
+    ('alchemy_shelf','炼金陈列架','摆满瓶罐的陈列架，显示炼金氛围 +10%。',JSON_OBJECT('alchemyBonusPct',10),2,1,1,1),
+    ('moonlight_lamp','月光灯','嵌有月银碎片的灯具，在家休息时恢复速度 +8%。',JSON_OBJECT('restRecoveryPct',8),3,2,1,1)
+    ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),effect_json=VALUES(effect_json),required_house_level=VALUES(required_house_level),max_per_floor=VALUES(max_per_floor),floor_slot_cost=VALUES(floor_slot_cost),is_active=VALUES(is_active)`);
+  await pool.query(`INSERT INTO home_furniture_recipes (furniture_code,item_id,quantity)
+    SELECT recipe.furniture_code,i.id,recipe.quantity FROM (
+      SELECT 'wooden_bed' AS furniture_code,'home_wood' AS item_code,20 AS quantity UNION ALL SELECT 'wooden_bed','home_stone',4
+      UNION ALL SELECT 'slime_bed','home_wood',25 UNION ALL SELECT 'slime_bed','slime_gel',15
+      UNION ALL SELECT 'storage_chest','home_wood',15 UNION ALL SELECT 'storage_chest','home_metal',2
+      UNION ALL SELECT 'training_dummy','home_wood',30 UNION ALL SELECT 'training_dummy','home_metal',5
+      UNION ALL SELECT 'warm_hearth','home_stone',24 UNION ALL SELECT 'warm_hearth','home_metal',8
+      UNION ALL SELECT 'wolfhide_carpet','beast_hide',12 UNION ALL SELECT 'wolfhide_carpet','magic_wool',8
+      UNION ALL SELECT 'alchemy_shelf','home_wood',22 UNION ALL SELECT 'alchemy_shelf','beast_core',3
+      UNION ALL SELECT 'moonlight_lamp','home_metal',10 UNION ALL SELECT 'moonlight_lamp','moon_silver',1
+    ) recipe JOIN item_definitions i ON i.code=recipe.item_code
+    ON DUPLICATE KEY UPDATE quantity=VALUES(quantity)`);
+  await pool.query(`INSERT INTO home_shop_offers (offer_code,output_item_id,output_quantity,input_item_id,input_quantity,copper_price,is_active,sort_order)
+    SELECT offers.offer_code,out_item.id,offers.output_quantity,in_item.id,offers.input_quantity,offers.copper_price,1,offers.sort_order FROM (
+      SELECT 'buy_wood' AS offer_code,'home_wood' AS output_code,1 AS output_quantity,NULL AS input_code,0 AS input_quantity,5 AS copper_price,1 AS sort_order
+      UNION ALL SELECT 'buy_stone','home_stone',1,NULL,0,8,2 UNION ALL SELECT 'buy_metal','home_metal',1,NULL,0,15,3
+      UNION ALL SELECT 'exchange_living_wood','home_wood',10,'living_wood',1,0,10
+      UNION ALL SELECT 'exchange_refined_bone','home_stone',12,'refined_beast_bone',1,0,11
+      UNION ALL SELECT 'exchange_meteor_iron','home_metal',8,'meteor_iron',1,0,12
+      UNION ALL SELECT 'exchange_star_copper','home_metal',18,'star_copper',1,0,13
+    ) offers JOIN item_definitions out_item ON out_item.code=offers.output_code LEFT JOIN item_definitions in_item ON in_item.code=offers.input_code
+    ON DUPLICATE KEY UPDATE output_item_id=VALUES(output_item_id),output_quantity=VALUES(output_quantity),input_item_id=VALUES(input_item_id),input_quantity=VALUES(input_quantity),copper_price=VALUES(copper_price),is_active=1,sort_order=VALUES(sort_order)`);
   await pool.query(`INSERT INTO oddworkshop_items (item_id,buy_price,stock_capacity,stock_quantity,is_active)
     SELECT id,CASE code WHEN 'demon_breaker_teleporter' THEN 200 WHEN 'demon_breaker_teleporter_blueprint' THEN 999 ELSE 1 END,99,99,1
     FROM item_definitions WHERE code IN ('demon_breaker_teleporter','demon_breaker_teleporter_blueprint')
@@ -1238,7 +1323,8 @@ export const initializeSchema = async (pool: Pool) => {
     ('crimson_recovery', '猩红复苏', 'passive', 0, 0, 0, '普攻与刺击伤害的 16% 转化为生命。'),
     ('seer_instinct', '先知直觉', 'passive', 0, 0, 0, '命中与暴击属性在战斗中提高 16%。'),
     ('hunter_blessing', '猎人恩典', 'passive', 0, 0, 0, '战利品掉落概率提高 35%。'),
-    ('craftsmanship', '匠心', 'passive', 0, 0, 0, '随副职业等级发挥不同效果：锻造师降低耐久损耗，炼金师提高药品效果。')
+    ('craftsmanship', '匠心', 'passive', 0, 0, 0, '随副职业等级发挥不同效果：锻造师降低耐久损耗，炼金师提高药品效果。'),
+    ('boss_mana_charge', '魔力充能', 'utility', 0, 0, 0, '吸收周遭游离魔力，立即将自身魔力恢复至最大值。')
     ON DUPLICATE KEY UPDATE name=VALUES(name),mana_cost=VALUES(mana_cost),cooldown_turns=VALUES(cooldown_turns),power=VALUES(power),description=VALUES(description)`);
   await pool.query(`INSERT INTO skill_definitions (code,name,category,damage_type,skill_kind,element,range_type,mana_cost,cooldown_turns,power,learn_cost,max_level,description) VALUES
     ('sword_shield_mastery','剑盾精通','passive','无','精通','无','自身',0,0,0,99,1,'装备长剑时攻击提高8%，装备盾牌时防御提高8%。'),
@@ -1267,7 +1353,7 @@ export const initializeSchema = async (pool: Pool) => {
     ('wolfking_shadow_curse','影咒','utility','无','强化','无','自身',90,4,0,99,99,1,0,'恢复已损失生命的一半，并在短时间内强化自身。'),
     ('wolfking_fang_devour','齿噬','physical','斩击','斩击','无','近战',60,0,125,99,99,1,0,'利齿必定造成暴击，并使目标陷入脆弱。')
     ON DUPLICATE KEY UPDATE name=VALUES(name),category=VALUES(category),damage_type=VALUES(damage_type),skill_kind=VALUES(skill_kind),element=VALUES(element),range_type=VALUES(range_type),mana_cost=VALUES(mana_cost),cooldown_turns=VALUES(cooldown_turns),power=VALUES(power),description=VALUES(description)`);
-  await pool.query(`UPDATE skill_definitions SET skill_kind=CASE category WHEN 'physical' THEN CASE damage_type WHEN '斩击' THEN '斩击' WHEN '刺击' THEN '刺击' ELSE '打击' END WHEN 'magic' THEN CASE WHEN damage_type IN ('水','火','土','木','风','冰','雷','光','暗') THEN '元素' WHEN damage_type='奥术' THEN '能量' ELSE '灵异' END WHEN 'utility' THEN '辅助' WHEN 'passive' THEN '被动' ELSE skill_kind END, element=CASE WHEN category='magic' AND damage_type IN ('水','火','土','木','风','冰','雷','光','暗') THEN damage_type ELSE '无' END, range_type=CASE WHEN category='physical' THEN '近战' WHEN category='magic' THEN '远程' WHEN category='utility' THEN '全体' WHEN category='passive' THEN '自身' ELSE range_type END`);
+  await pool.query(`UPDATE skill_definitions SET skill_kind=CASE category WHEN 'physical' THEN CASE damage_type WHEN '斩击' THEN '斩击' WHEN '刺击' THEN '刺击' ELSE '打击' END WHEN 'magic' THEN CASE WHEN damage_type IN ('水','火','土','木','风','冰','雷','光','暗') THEN '元素' WHEN damage_type='奥术' THEN '能量' ELSE '灵异' END WHEN 'utility' THEN '辅助' WHEN 'passive' THEN '被动' WHEN 'bound' THEN '绑定' ELSE skill_kind END, element=CASE WHEN category='magic' AND damage_type IN ('水','火','土','木','风','冰','雷','光','暗') THEN damage_type ELSE '无' END, range_type=CASE WHEN category='physical' THEN '近战' WHEN category='magic' THEN '远程' WHEN category='utility' THEN '全体' WHEN category IN ('passive','bound') THEN '自身' ELSE range_type END`);
   await pool.query(`UPDATE skill_definitions SET category='magic',damage_type=CASE code WHEN 'vine_hex' THEN '木' WHEN 'vine_bolt' THEN '木' WHEN 'moonbolt' THEN '暗' WHEN 'moonlight_bolt' THEN '暗' END,skill_kind='元素',element=CASE code WHEN 'vine_hex' THEN '木' WHEN 'vine_bolt' THEN '木' WHEN 'moonbolt' THEN '暗' WHEN 'moonlight_bolt' THEN '暗' END,range_type='远程',learn_cost=CASE WHEN code IN ('vine_bolt','moonlight_bolt') THEN 1 ELSE 99 END,upgrade_cost=CASE WHEN code IN ('vine_bolt','moonlight_bolt') THEN 1 ELSE 99 END,max_level=CASE WHEN code IN ('vine_hex','moonbolt') THEN 1 ELSE 5 END,power_per_level=CASE WHEN code IN ('vine_hex','moonbolt') THEN 0 ELSE 15 END WHERE code IN ('vine_hex','vine_bolt','moonbolt','moonlight_bolt')`);
   await pool.query(`UPDATE skill_definitions SET category='utility',damage_type='无',skill_kind='辅助',element='无',range_type='全体',mana_cost=90,cooldown_turns=3,power=0,description='发出战吼，提升全队的物理与魔法攻击。' WHERE code='war_cry'`);
   await pool.query(`UPDATE skill_definitions SET category=CASE code WHEN 'thorn_burst' THEN 'physical' ELSE 'magic' END,
@@ -1305,8 +1391,7 @@ export const initializeSchema = async (pool: Pool) => {
     cooldown_reduction_per_level=CASE WHEN code IN ('warrior_taunt','shield_counter','guard_break','arcane_shackle','ember_burst','sanctified_bolt','sweeping_slash','piercing_thrust','wind_blade','thunder_lance') THEN 1 ELSE 0 END
     WHERE code IN ('warrior_taunt','shield_counter','guard_break','arcane_shackle','ember_burst','healing_prayer','blessing_aegis','mana_benediction','sanctified_bolt','sweeping_slash','piercing_thrust','wind_blade','thunder_lance')`);
   // 主动技能的基础威力与蓝耗在所有技能（含迷宫、BOSS、NPC 技能）写入后统一校准。
-  await pool.query(`UPDATE skill_definitions SET category='passive',learn_cost=CASE WHEN code='appraisal' THEN 1 ELSE 99 END,upgrade_cost=99,max_level=1,power_per_level=0,passive_effect_json=CASE code
-    WHEN 'appraisal' THEN JSON_OBJECT('revealMonsterTraits',true,'unlockMonsterDetail',true)
+  await pool.query(`UPDATE skill_definitions SET category='passive',learn_cost=99,upgrade_cost=99,max_level=1,power_per_level=0,passive_effect_json=CASE code
     WHEN 'growth_blessing' THEN JSON_OBJECT('experienceMultiplier',2)
     WHEN 'mana_affinity' THEN JSON_OBJECT('manaCostReductionPct',30)
     WHEN 'lucky_favor' THEN JSON_OBJECT('dropBonusPct',20)
@@ -1316,8 +1401,10 @@ export const initializeSchema = async (pool: Pool) => {
     WHEN 'seer_instinct' THEN JSON_OBJECT('accuracyPct',16,'critRatePct',16)
     WHEN 'hunter_blessing' THEN JSON_OBJECT('dropBonusPct',35)
     ELSE passive_effect_json END
-    WHERE code IN ('appraisal','growth_blessing','mana_affinity','lucky_favor','war_god_favor','arcane_revelation','crimson_recovery','seer_instinct','hunter_blessing')`);
-  await pool.query(`UPDATE skill_definitions SET upgrade_cost=1,max_level=13,description='鉴识未知的敌对生物。慧眼每升一级可额外鉴识高于自身 3 级的目标；识珠可逐步解锁更多情报。' WHERE code='appraisal'`);
+    WHERE code IN ('growth_blessing','mana_affinity','lucky_favor','war_god_favor','arcane_revelation','crimson_recovery','seer_instinct','hunter_blessing')`);
+  await pool.query(`UPDATE skill_definitions SET category='bound',skill_kind='绑定',range_type='自身',learn_cost=1,upgrade_cost=1,max_level=13,power_per_level=0,passive_effect_json=JSON_OBJECT('revealMonsterTraits',true,'unlockMonsterDetail',true),description='鉴识未知的敌对生物。慧眼每升一级可额外鉴识高于自身 3 级的目标；识珠可逐步解锁更多情报。' WHERE code='appraisal'`);
+  await pool.query(`UPDATE skill_definitions SET category='bound',skill_kind='绑定',range_type='自身' WHERE code IN ('longsword_mastery','shield_mastery','staff_mastery','spellbook_mastery','orb_mastery','dagger_mastery','fistblade_mastery','craftsmanship')`);
+  await pool.query(`UPDATE player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id SET ps.passive_linked=0,ps.quick_slot=NULL WHERE s.category='bound'`);
   await pool.query(`UPDATE skill_definitions SET codex_id=CONCAT(CASE category WHEN 'physical' THEN '41' WHEN 'magic' THEN '42' ELSE '49' END, LPAD(id,5,'0')) WHERE codex_id IS NULL`);
   await pool.query(`INSERT IGNORE INTO player_skills (character_id,skill_id)
     SELECT b.character_id,s.id FROM player_blessings b JOIN skill_definitions s ON s.code=b.code AND s.category='passive'`);
@@ -1521,16 +1608,17 @@ export const initializeSchema = async (pool: Pool) => {
     FROM map_regions r JOIN item_definitions i ON i.code IN ('living_wood','meteor_iron','star_copper','moon_silver')
     WHERE r.code='dark_forest_deep'
     ON DUPLICATE KEY UPDATE spawn_density=VALUES(spawn_density)`);
-  await pool.query(`DELETE n FROM map_npcs n JOIN map_regions r ON r.id=n.region_id WHERE r.code='baina_town' AND n.code NOT IN ('pear_guide','guild_counter','blacksmith','alchemy_sweetshop','oddworkshop','bookshop')`);
+  await pool.query(`DELETE n FROM map_npcs n JOIN map_regions r ON r.id=n.region_id WHERE r.code='baina_town' AND n.code NOT IN ('pear_guide','guild_counter','blacksmith','alchemy_sweetshop','oddworkshop','bookshop','baina_residence')`);
   await pool.query(`DELETE n FROM map_npcs n JOIN map_regions r ON r.id=n.region_id WHERE r.code='dark_forest'`);
   await pool.query(`INSERT INTO map_npcs (region_id, code, name, description, interaction_kind, pos_x, pos_y, pos_z) VALUES
     ((SELECT id FROM map_regions WHERE code='baina_town'), 'pear_guide', '梨子喵（新人引导）', '笑容明快的猫族新手引导员，像是正专程在等你。', 'npc', -22, -128, 0),
     ((SELECT id FROM map_regions WHERE code='world_tree'), 'tree_keeper', '树守·阿鲁', '守望世界树的沉默老人。', 'npc', 0, 0, 0),
-    ((SELECT id FROM map_regions WHERE code='baina_town'), 'guild_counter', '冒险者公会', '承接委托、登记冒险者与交换情报的大厅。', 'building', -8, -116, 0),
+    ((SELECT id FROM map_regions WHERE code='baina_town'), 'guild_counter', '冒险者公会', '承接委托、登记冒险者与交换情报的大厅。', 'building', -2, -111, 0),
     ((SELECT id FROM map_regions WHERE code='baina_town'), 'blacksmith', '铁匠铺', '炉火终日不熄。年轻的店主漠北正站在铁砧前，铁锤敲击声从半开的门里传来。', 'building', -17, -123, 0),
-    ((SELECT id FROM map_regions WHERE code='baina_town'), 'alchemy_sweetshop', '糖水屋', '“晴空糖水屋”的门口挂着晴空色风铃，甜香与清新的草药气息一同飘出。', 'building', -12, -127, 0),
-    ((SELECT id FROM map_regions WHERE code='baina_town'), 'oddworkshop', '异工坊', '异工坊的门牌歪斜地挂在墙上，屋内不时传出弹簧、齿轮与不明小玩意的清脆响动。', 'building', 4, -121, 0),
-    ((SELECT id FROM map_regions WHERE code='baina_town'), 'bookshop', '百味书屋', '三层高的书屋挤满了书架与求知的人。窗边一位白须老人正抱着厚重的百科全书，逐字细读。', 'building', 12, -116, 0),
+    ((SELECT id FROM map_regions WHERE code='baina_town'), 'alchemy_sweetshop', '糖水屋', '“晴空糖水屋”的门口挂着晴空色风铃，甜香与清新的草药气息一同飘出。', 'building', -12, -128, 0),
+    ((SELECT id FROM map_regions WHERE code='baina_town'), 'oddworkshop', '异工坊', '异工坊的门牌歪斜地挂在墙上，屋内不时传出弹簧、齿轮与不明小玩意的清脆响动。', 'building', 6, -121, 0),
+    ((SELECT id FROM map_regions WHERE code='baina_town'), 'bookshop', '百味书屋', '三层高的书屋挤满了书架与求知的人。窗边一位白须老人正抱着厚重的百科全书，逐字细读。', 'building', 14, -108, 0),
+    ((SELECT id FROM map_regions WHERE code='baina_town'), 'baina_residence', '百纳居', '挂着木材与石料样本的生活工坊，负责出售建材、兑换锻材并协助冒险者安置小屋。', 'building', 7, -99, 0),
     ((SELECT id FROM map_regions WHERE code='dark_forest'), 'hunter_lodge', '猎户小屋', '林间有一座覆着苔藓的木屋。门边挂着风干兽皮与一张旧弓，屋内偶尔传出磨箭的细响。', 'building', 18, -55, 0)
     ON DUPLICATE KEY UPDATE name=VALUES(name), description=VALUES(description), interaction_kind=VALUES(interaction_kind), pos_x=VALUES(pos_x), pos_y=VALUES(pos_y), pos_z=VALUES(pos_z)`);
   await pool.query(`INSERT INTO map_special_objects (region_id, code, name, description, pos_x, pos_y, pos_z) VALUES
@@ -1667,14 +1755,14 @@ export const initializeSchema = async (pool: Pool) => {
     ((SELECT id FROM skill_definitions WHERE code='necromancer_purging_mist'),(SELECT id FROM effect_definitions WHERE code='barrier'),1,25,2,'self','on_cast')
     ON DUPLICATE KEY UPDATE value_override=VALUES(value_override),duration_override=VALUES(duration_override),target_scope=VALUES(target_scope),trigger_timing=VALUES(trigger_timing)`);
   await pool.query(`INSERT INTO monster_templates (code,name,monster_class,level,constitution,spirit,strength,intelligence,agility,perception,constitution_growth,spirit_growth,strength_growth,intelligence_growth,agility_growth,perception_growth,skill_sequence,experience,drops_json,weakness_json,resistance_json,element_mastery_json,element_resistance_json) VALUES
-    ('slime_red','红色史莱姆','normal',1,10,5,7,7,5,5,.7,.4,.5,.5,.3,.3,JSON_ARRAY('slime_bump','slime_ember_blob'),38,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.34,'min_quantity',2,'max_quantity',7)),JSON_ARRAY('冰'),JSON_ARRAY('火'),JSON_OBJECT('火',8),JSON_OBJECT('火',8)),
-    ('slime_orange','橙色史莱姆','normal',2,13,5,8,6,4,5,.8,.3,.6,.4,.2,.3,JSON_ARRAY('slime_bump','slime_amber_blob'),44,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.36,'min_quantity',3,'max_quantity',8)),JSON_ARRAY('水'),JSON_ARRAY('土'),JSON_OBJECT('土',8),JSON_OBJECT('土',8)),
-    ('slime_yellow','黄色史莱姆','normal',3,8,7,6,9,9,8,.5,.5,.4,.7,.7,.6,JSON_ARRAY('slime_bump','slime_spark_blob'),50,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.38,'min_quantity',3,'max_quantity',9)),JSON_ARRAY('土'),JSON_ARRAY('雷'),JSON_OBJECT('雷',9),JSON_OBJECT('雷',9)),
-    ('slime_green','绿色史莱姆','normal',4,12,8,7,10,5,7,.8,.6,.5,.8,.3,.5,JSON_ARRAY('slime_bump','slime_acid_blob'),57,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.40,'min_quantity',4,'max_quantity',10)),JSON_ARRAY('火'),JSON_ARRAY('木'),JSON_OBJECT('木',10),JSON_OBJECT('木',10)),
-    ('slime_cyan','青色史莱姆','normal',5,10,11,6,12,8,8,.6,.8,.4,.9,.6,.6,JSON_ARRAY('slime_bump','slime_tide_blob'),65,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.42,'min_quantity',4,'max_quantity',12)),JSON_ARRAY('雷'),JSON_ARRAY('水'),JSON_OBJECT('水',12),JSON_OBJECT('水',12)),
-    ('slime_blue','蓝色史莱姆','normal',6,15,10,8,11,4,6,1,.7,.6,.8,.3,.4,JSON_ARRAY('slime_bump','slime_frost_blob'),74,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.44,'min_quantity',5,'max_quantity',13)),JSON_ARRAY('火'),JSON_ARRAY('冰'),JSON_OBJECT('冰',12),JSON_OBJECT('冰',12)),
-    ('slime_purple','紫色史莱姆','normal',8,11,15,6,16,7,12,.7,1.1,.4,1.2,.5,.9,JSON_ARRAY('slime_bump','slime_dusk_blob'),92,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.46,'min_quantity',6,'max_quantity',15)),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('暗',15),JSON_OBJECT('暗',15)),
-    ('black_slime','黑暗史莱姆','boss',10,31,22,20,26,12,18,1.5,1.3,1.1,1.5,.6,1,JSON_ARRAY('black_slime_crush','black_slime_bind','black_slime_wave','black_slime_mend'),260,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',1,'min_quantity',30,'max_quantity',70),JSON_OBJECT('code','silver_coin','chance',.12,'quantity',1)),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('暗',25),JSON_OBJECT('暗',25)),
+    ('slime_red','红色史莱姆','normal',1,10,5,7,7,5,5,.7,.4,.5,.5,.3,.3,JSON_ARRAY('slime_bump','slime_ember_blob'),38,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.34,'min_quantity',2,'max_quantity',7),JSON_OBJECT('code','slime_gel','chance',.55,'min_quantity',1,'max_quantity',2)),JSON_ARRAY('冰'),JSON_ARRAY('火'),JSON_OBJECT('火',8),JSON_OBJECT('火',8)),
+    ('slime_orange','橙色史莱姆','normal',2,13,5,8,6,4,5,.8,.3,.6,.4,.2,.3,JSON_ARRAY('slime_bump','slime_amber_blob'),44,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.36,'min_quantity',3,'max_quantity',8),JSON_OBJECT('code','slime_gel','chance',.60,'min_quantity',1,'max_quantity',2)),JSON_ARRAY('水'),JSON_ARRAY('土'),JSON_OBJECT('土',8),JSON_OBJECT('土',8)),
+    ('slime_yellow','黄色史莱姆','normal',3,8,7,6,9,9,8,.5,.5,.4,.7,.7,.6,JSON_ARRAY('slime_bump','slime_spark_blob'),50,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.38,'min_quantity',3,'max_quantity',9),JSON_OBJECT('code','slime_gel','chance',.65,'min_quantity',1,'max_quantity',3)),JSON_ARRAY('土'),JSON_ARRAY('雷'),JSON_OBJECT('雷',9),JSON_OBJECT('雷',9)),
+    ('slime_green','绿色史莱姆','normal',4,12,8,7,10,5,7,.8,.6,.5,.8,.3,.5,JSON_ARRAY('slime_bump','slime_acid_blob'),57,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.40,'min_quantity',4,'max_quantity',10),JSON_OBJECT('code','slime_gel','chance',.70,'min_quantity',1,'max_quantity',3)),JSON_ARRAY('火'),JSON_ARRAY('木'),JSON_OBJECT('木',10),JSON_OBJECT('木',10)),
+    ('slime_cyan','青色史莱姆','normal',5,10,11,6,12,8,8,.6,.8,.4,.9,.6,.6,JSON_ARRAY('slime_bump','slime_tide_blob'),65,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.42,'min_quantity',4,'max_quantity',12),JSON_OBJECT('code','slime_gel','chance',.75,'min_quantity',2,'max_quantity',3)),JSON_ARRAY('雷'),JSON_ARRAY('水'),JSON_OBJECT('水',12),JSON_OBJECT('水',12)),
+    ('slime_blue','蓝色史莱姆','normal',6,15,10,8,11,4,6,1,.7,.6,.8,.3,.4,JSON_ARRAY('slime_bump','slime_frost_blob'),74,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.44,'min_quantity',5,'max_quantity',13),JSON_OBJECT('code','slime_gel','chance',.80,'min_quantity',2,'max_quantity',4)),JSON_ARRAY('火'),JSON_ARRAY('冰'),JSON_OBJECT('冰',12),JSON_OBJECT('冰',12)),
+    ('slime_purple','紫色史莱姆','normal',8,11,15,6,16,7,12,.7,1.1,.4,1.2,.5,.9,JSON_ARRAY('slime_bump','slime_dusk_blob'),92,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.46,'min_quantity',6,'max_quantity',15),JSON_OBJECT('code','slime_gel','chance',.85,'min_quantity',2,'max_quantity',4)),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('暗',15),JSON_OBJECT('暗',15)),
+    ('black_slime','黑暗史莱姆','boss',10,31,22,20,26,12,18,1.5,1.3,1.1,1.5,.6,1,JSON_ARRAY('black_slime_crush','black_slime_bind','black_slime_wave','black_slime_mend'),260,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',1,'min_quantity',30,'max_quantity',70),JSON_OBJECT('code','silver_coin','chance',.12,'quantity',1),JSON_OBJECT('code','slime_gel','chance',1,'min_quantity',10,'max_quantity',18)),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('暗',25),JSON_OBJECT('暗',25)),
     ('skeleton','骷髅','large',16,24,9,27,8,15,12,1.1,.4,1.3,.3,.7,.5,JSON_ARRAY('skeleton_cleave'),180,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.55,'min_quantity',8,'max_quantity',18)),JSON_ARRAY('打击','光'),JSON_ARRAY('刺击'),JSON_OBJECT(),JSON_OBJECT('暗',8)),
     ('undead','亡灵','large',17,20,22,16,26,14,23,.9,1.2,.8,1.5,.6,1.2,JSON_ARRAY('skeleton_bolt','slime_dusk_blob'),210,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.58,'min_quantity',10,'max_quantity',22),JSON_OBJECT('code','silver_coin','chance',.06,'quantity',1)),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('暗',22),JSON_OBJECT('暗',18)),
     ('skeleton_warrior','骷髅战士','elite',19,33,12,37,10,20,16,1.5,.5,1.7,.4,.9,.7,JSON_ARRAY('skeleton_cleave','skeleton_execution'),380,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.8,'min_quantity',20,'max_quantity',42),JSON_OBJECT('code','silver_coin','chance',.18,'quantity',1)),JSON_ARRAY('打击','光'),JSON_ARRAY('刺击'),JSON_OBJECT(),JSON_OBJECT('暗',12)),
@@ -1698,7 +1786,12 @@ export const initializeSchema = async (pool: Pool) => {
     ('city_paladin_hector','圣盾裁决官·赫克托','elite',27,45,32,43,29,24,33,1.9,1.3,1.8,1.2,.9,1.3,JSON_ARRAY('sanctified_bolt','guard_break','blessing_aegis'),0,JSON_ARRAY(),JSON_ARRAY('暗'),JSON_ARRAY('光'),JSON_OBJECT('光',28),JSON_OBJECT('光',20)),
     ('city_hex_helena','咒印审查官·伊蕾娜','elite',28,24,48,19,55,28,44,.8,2.1,.6,2.4,1,1.8,JSON_ARRAY('arcane_shackle','frost_bind','moonlight_bolt'),0,JSON_ARRAY(),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('暗',32,'冰',20),JSON_OBJECT('暗',22)),
     ('city_brawler_torr','破阵斗士·托尔','elite',29,39,23,49,18,38,35,1.6,.8,2,.6,1.5,1.3,JSON_ARRAY('jump_strike','heavy_strike','sweeping_slash'),0,JSON_ARRAY(),JSON_ARRAY('魔法'),JSON_ARRAY('打击'),JSON_OBJECT(),JSON_OBJECT()),
-    ('city_captain_roderick','百纳卫队长·罗德里克','elite',30,48,31,52,30,31,43,2,1.3,2.2,1.2,1.2,1.7,JSON_ARRAY('warrior_taunt','shield_counter','guard_break','sweeping_slash'),0,JSON_ARRAY(),JSON_ARRAY('暗'),JSON_ARRAY('刺击'),JSON_OBJECT('光',12),JSON_OBJECT('光',12))
+    ('city_captain_roderick','百纳卫队长·罗德里克','elite',30,48,31,52,30,31,43,2,1.3,2.2,1.2,1.2,1.7,JSON_ARRAY('warrior_taunt','shield_counter','guard_break','sweeping_slash'),0,JSON_ARRAY(),JSON_ARRAY('暗'),JSON_ARRAY('刺击'),JSON_OBJECT('光',12),JSON_OBJECT('光',12)),
+    ('city_executioner_arlen','裁决执行官·阿伦','elite',48,58,30,62,26,32,39,2.2,1.2,2.5,1,1.2,1.4,JSON_ARRAY('shield_counter','guard_break','sweeping_slash','heavy_strike'),0,JSON_ARRAY(),JSON_ARRAY('暗'),JSON_ARRAY('刺击'),JSON_OBJECT(),JSON_OBJECT()),
+    ('city_inquisitor_lynn','审判术士·琳恩','elite',47,35,64,27,70,31,52,1.2,2.5,1,2.8,1.1,2,JSON_ARRAY('arcane_shackle','frost_bind','thunder_lance','ember_burst'),0,JSON_ARRAY(),JSON_ARRAY('水'),JSON_ARRAY('暗'),JSON_OBJECT('冰',38,'雷',32),JSON_OBJECT('冰',24,'雷',22)),
+    ('city_confessor_sola','圣堂告解官·索拉','elite',46,48,72,29,58,26,44,1.8,2.8,1,2.2,.9,1.7,JSON_ARRAY('healing_prayer','blessing_aegis','mana_benediction','sanctified_bolt'),0,JSON_ARRAY(),JSON_ARRAY('暗'),JSON_ARRAY('光'),JSON_OBJECT('光',42),JSON_OBJECT('光',30)),
+    ('city_hunter_lyra','猎罪游猎者·莱拉','elite',49,34,34,55,28,62,59,1.2,1.2,2.2,1,2.4,2.2,JSON_ARRAY('wind_blade','piercing_thrust','backstab','smoke_screen'),0,JSON_ARRAY(),JSON_ARRAY('冰'),JSON_ARRAY('风'),JSON_OBJECT('风',36),JSON_OBJECT('风',26)),
+    ('city_chief_executor','首席执行官·凯尔','boss',80,84,62,88,64,55,71,3,2.3,3.2,2.4,2,2.7,JSON_ARRAY('warrior_taunt','shield_counter','guard_break','sweeping_slash','thunder_lance','blessing_aegis'),0,JSON_ARRAY(),JSON_ARRAY('暗'),JSON_ARRAY('光'),JSON_OBJECT('光',45,'雷',45),JSON_OBJECT('光',35,'雷',35))
     ON DUPLICATE KEY UPDATE name=VALUES(name),monster_class=VALUES(monster_class),level=VALUES(level),constitution=VALUES(constitution),spirit=VALUES(spirit),strength=VALUES(strength),intelligence=VALUES(intelligence),agility=VALUES(agility),perception=VALUES(perception),constitution_growth=VALUES(constitution_growth),spirit_growth=VALUES(spirit_growth),strength_growth=VALUES(strength_growth),intelligence_growth=VALUES(intelligence_growth),agility_growth=VALUES(agility_growth),perception_growth=VALUES(perception_growth),skill_sequence=VALUES(skill_sequence),experience=VALUES(experience),drops_json=VALUES(drops_json),weakness_json=VALUES(weakness_json),resistance_json=VALUES(resistance_json),element_mastery_json=VALUES(element_mastery_json),element_resistance_json=VALUES(element_resistance_json)`);
   await pool.query(`INSERT INTO city_pursuit_officers (template_id,profession,equipment_text) VALUES
     ((SELECT id FROM monster_templates WHERE code='city_guard_gareth'),'卫戍战士','精钢长剑与塔盾'),
@@ -1712,8 +1805,27 @@ export const initializeSchema = async (pool: Pool) => {
     ((SELECT id FROM monster_templates WHERE code='city_paladin_hector'),'圣盾裁决官','圣辉长剑与祝祷盾'),
     ((SELECT id FROM monster_templates WHERE code='city_hex_helena'),'咒印审查官','暗金法书与封印戒'),
     ((SELECT id FROM monster_templates WHERE code='city_brawler_torr'),'破阵斗士','拳刃与重革手甲'),
-    ((SELECT id FROM monster_templates WHERE code='city_captain_roderick'),'百纳卫队长','星钢长剑与城卫重甲')
+    ((SELECT id FROM monster_templates WHERE code='city_captain_roderick'),'百纳卫队长','星钢长剑与城卫重甲'),
+    ((SELECT id FROM monster_templates WHERE code='city_executioner_arlen'),'裁决执行官','重型裁决剑与制式板甲'),
+    ((SELECT id FROM monster_templates WHERE code='city_inquisitor_lynn'),'审判术士','封印法书与雷晶法杖'),
+    ((SELECT id FROM monster_templates WHERE code='city_confessor_sola'),'圣堂告解官','祷告法球与圣印法书'),
+    ((SELECT id FROM monster_templates WHERE code='city_hunter_lyra'),'猎罪游猎者','风弦长弓与追迹短刃'),
+    ((SELECT id FROM monster_templates WHERE code='city_chief_executor'),'首席执行官','王都裁决大剑与星金重甲')
     ON DUPLICATE KEY UPDATE profession=VALUES(profession),equipment_text=VALUES(equipment_text)`);
+  // 所有 Boss 都拥有独立的回蓝手段；同时同步仍存活的旧刷新实例，避免它们沿用旧技能组。
+  await pool.query(`UPDATE monster_templates
+    SET skill_sequence=CASE
+      WHEN JSON_CONTAINS(COALESCE(skill_sequence,JSON_ARRAY()),JSON_QUOTE('boss_mana_charge')) THEN skill_sequence
+      ELSE JSON_ARRAY_APPEND(COALESCE(skill_sequence,JSON_ARRAY()),'$', 'boss_mana_charge')
+    END
+    WHERE monster_class='boss'`);
+  await pool.query(`UPDATE monster_spawns s JOIN monster_templates t ON t.id=s.template_id
+    SET s.skill_sequence=CASE
+      WHEN s.skill_sequence IS NULL THEN t.skill_sequence
+      WHEN JSON_CONTAINS(s.skill_sequence,JSON_QUOTE('boss_mana_charge')) THEN s.skill_sequence
+      ELSE JSON_ARRAY_APPEND(s.skill_sequence,'$', 'boss_mana_charge')
+    END
+    WHERE t.monster_class='boss' AND s.defeated_at IS NULL`);
   await pool.query(`INSERT IGNORE INTO monster_encounter_texts (monster_template_id,description) VALUES
     ((SELECT id FROM monster_templates WHERE code='slime_red'),'潮湿石缝里滚出一团赤红胶质，热气在它身周嘶嘶作响。'),
     ((SELECT id FROM monster_templates WHERE code='slime_orange'),'橙色的胶团从碎石间弹起，裹挟着细砂朝你蠕动。'),

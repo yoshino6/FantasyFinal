@@ -6,6 +6,8 @@ export const realmNames = ['初心', '窥尘', '开化', '明道', '破晓', '�
 export const realmNameForStage = (stage: number) => realmNames[Math.max(0, Math.min(realmNames.length - 1, Math.floor(stage) - 1))];
 export const realmLevelCap = (stage: number) => Math.min(100, Math.max(1, Math.floor(stage)) * 10);
 export const realmEnergyDissipationText = '精纯的能量冲入你的体壳，然后向外四溢，消散在了空中。。。';
+export const staminaMaxForRealm = (stage: number) => 120 + Math.max(0, Math.floor(stage) - 1) * 30;
+export const STAMINA_RECOVERY_MS = 5 * 60 * 1000;
 
 // 索引表示当前等级；例如 Lv.10 升至 Lv.11 需要 1500 点经验。
 const levelExperienceRequirements = [

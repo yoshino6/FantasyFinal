@@ -77,19 +77,21 @@ const appendBattleState = (markdown: ReturnType<typeof Format.createMarkdown>, b
   return markdown;
 };
 const appendCombatLog = (markdown: ReturnType<typeof Format.createMarkdown>, text: string) => {
-  // QQ 会将整段引用以折叠形式呈现，避免冗长战斗过程淹没状态与结算信息。
-  // 效果日志保留在总战报引用内，但以小标题显示，视觉上比普通引用文字大一号。
-  const formatted = text.trim().split('\n').flatMap(line => {
+  // QQ 对“一个引用块内含多行和标题”的解析不稳定，会让后续内容脱离引用。
+  // 逐行构建引用，确保行动、分支与回合前效果都保持统一的战斗过程样式。
+  const lines = text.trim().split('\n').flatMap(line => {
     const matched = /^(\s*)(?:§)?([#$&])([^#$&]+)\2(.*)$/.exec(line);
     if (matched) {
-      const prefix = matched[1];
       const description = matched[4].trimStart();
-      // 效果名单独作为引用内的小标题，说明仍保持引用正文；不再显示【】或内部标记符。
-      return description ? [`${prefix}### ${matched[3].trim()}`, `${prefix}${description}`] : [`${prefix}### ${matched[3].trim()}`];
+      // 效果名单独以引用内标题显示，说明仍保留为引用正文；不显示内部标记符。
+      return description ? [`### ${matched[3].trim()}`, description] : [`### ${matched[3].trim()}`];
     }
     return [line.replaceAll('$', '\\$').replaceAll('#', '\\#').replaceAll('&', '\\&').replaceAll('§', '')];
-  }).join('\n');
-  markdown.addBlockquote(formatted).addNewline();
+  });
+  for (const line of lines) {
+    if (!line.trim()) markdown.addNewline();
+    else markdown.addBlockquote(line).addNewline();
+  }
   return markdown;
 };
 const battleFormat = (_title: string, text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => {
@@ -132,6 +134,10 @@ const isVictorySettlement = (value: unknown): value is VictorySettlement => Bool
 const victoryFormat = (settlement: VictorySettlement) => {
   const markdown = Format.createMarkdown().addTitle('战斗胜利').addNewline().addNewline();
   for (const reward of settlement.members) {
+    if (reward.staminaInsufficient) {
+      markdown.addText(`【${reward.name}】\n`).addBlockquote('体力不足，本次未参与经验与战利品结算。').addNewline().addNewline();
+      continue;
+    }
     markdown.addText(`【${reward.name}】${reward.levelText ? ` ${reward.levelText}` : ''}\n`).addBlockquote(reward.realmLocked ? realmEnergyDissipationText : `EXP+${reward.experience}`).addNewline();
     for (const drop of reward.drops) {
       markdown.addBlockquote('获得');
@@ -821,7 +827,7 @@ export const continueStoryHandler = async () => {
       }
       await message.send({ format: storyFormat }); return;
     }
-    if (story.arrivalBuilding) { await message.send({ format: buildingEncounterFormat('冒险者公会', story.arrivalBuilding, '你移动至百纳镇·猫拉瑞亚(-8, -116)') }); return; }
+    if (story.arrivalBuilding) { await message.send({ format: buildingEncounterFormat('冒险者公会', story.arrivalBuilding, '你移动至百纳镇·猫拉瑞亚(-2, -111)') }); return; }
     const panel = await movementPanel(event.current.UserId, story.text);
     const nearby = await nearbyPoints(event.current.UserId);
     await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) });
@@ -860,6 +866,12 @@ export const buildingHandler = (action: 'enter' | 'ignore' | 'leave' | 'area') =
     if (code === 'bookshop') {
       if (action === 'enter') { const { bookshopHandler } = await import('./bookshop'); await bookshopHandler(); return; }
       const panel = await movementPanel(event.current.UserId, action === 'leave' ? '你离开百味书屋，身后仍传来轻柔的翻页声。' : '你暂时没有进入百味书屋。');
+      const nearby = await nearbyPoints(event.current.UserId);
+      await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return;
+    }
+    if (code === 'baina_residence') {
+      if (action === 'enter') { const { homeShopFormat } = await import('./home-shop'); await message.send({ format: await homeShopFormat(event.current.UserId) }); return; }
+      const panel = await movementPanel(event.current.UserId, action === 'leave' ? '你离开百纳居，木料与炉火的气息渐渐淡去。' : '百纳居的店员朝你点头，示意你进门详谈。');
       const nearby = await nearbyPoints(event.current.UserId);
       await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return;
     }
@@ -1009,7 +1021,22 @@ const actionHandler = (action: 'attack' | 'skill' | 'item' | 'escape') => async 
     return;
   }
   if (!result.ended && !result.waiting) { const battle = await battleStatus(event.current.UserId); if (battle.canAct) await startAutoBattle(message, event.current.UserId); else scheduleStoryNpcBattle(message, event.current.UserId); }
-} catch (error) { try { const battle = await battleStatus(event.current.UserId); await message.send({ format: battleErrorFormat(error instanceof Error ? error.message : '操作无法完成。', battle) }); } catch { await fail(message, error, '操作失败'); } } };
+} catch (error) { try {
+  const messageText = error instanceof Error ? error.message : '操作无法完成。';
+  const battle = await battleStatus(event.current.UserId);
+  // 旧会话或并发结算可能留下“全员倒下但仍 active”的短暂状态。
+  // 不能再把玩家困在一个无法操作的战斗面板中，应立即按正常战败流程收束。
+  if (messageText === '你已失去行动能力。') {
+    if (battle.members.every(member => member.defeated)) {
+      const defeated = await forceAutoBattleDefeat(event.current.UserId, '你已倒下，战斗无法继续。');
+      await sendCombatResult(message, event.current.UserId, defeated);
+      return;
+    }
+    await message.send({ format: battleOperationFormat('你已倒下，正在等待仍可行动的队友结束战斗。', battle) });
+    return;
+  }
+  await message.send({ format: battleErrorFormat(messageText, battle) });
+} catch { await fail(message, error, '操作失败'); } } };
 export const attackHandler = actionHandler('attack'); export const skillHandler = actionHandler('skill'); export const itemHandler = actionHandler('item'); export const escapeHandler = actionHandler('escape');
 export const encounterHandler = (action: 'avoid' | 'persuade', title: string) => async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();

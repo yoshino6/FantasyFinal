@@ -55,7 +55,7 @@ export const blacksmithProgress = async (qqUserId: string) => { const pool = awa
 export const craftsmanshipEffect = async (qqUserId: string) => {
   const pool = await getPool(); const characterId = await characterIdFor(pool, qqUserId);
   const [rows] = await pool.execute<(RowDataPacket & { profession: string | null; level: number | null; learned: number })[]>(`SELECT c.secondary_profession_code AS profession,sp.level,
-    EXISTS(SELECT 1 FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=c.id AND s.code='craftsmanship') AS learned
+    EXISTS(SELECT 1 FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=c.id AND s.code='craftsmanship' AND s.category='bound') AS learned
     FROM characters c LEFT JOIN player_secondary_professions sp ON sp.character_id=c.id AND sp.profession_code=c.secondary_profession_code
     WHERE c.id=? LIMIT 1`, [characterId]);
   const row = rows[0];
@@ -132,7 +132,7 @@ export const refineWeapon = async (qqUserId: string, instanceId: number, materia
   const progress = await addBlacksmithProficiency(connection, characterId);
   return { name: weapon.name, material: material.name, oldQuality: quality, newQuality, gain, failed: false, great, progress };
 });
-const fallbackFusion = (category: string) => category === '草药' ? { hpPct: 1 } : category === '兽材' ? { physicalAttackPct: 1 } : category === '锻材' ? { physicalDefensePct: 1 } : { magicAttackPct: 1 };
+const fallbackFusion = (category: string) => category === '草药' ? { hpPct: 1 } : category === '怪材' ? { physicalAttackPct: 1 } : category === '锻材' ? { physicalDefensePct: 1 } : { magicAttackPct: 1 };
 export const fuseWeapon = async (qqUserId: string, instanceId: number, materialId: number) => withTransaction(async connection => {
   const characterId = await characterIdFor(connection, qqUserId, true);
   const profession = await blacksmithProgressFor(connection, characterId, true);

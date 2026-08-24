@@ -12,7 +12,7 @@ export default async () => {
   const [event] = useEvent(); const [message] = useMessage();
   try {
     const items = await equipment(event.current.UserId);
-    const markdown = Format.createMarkdown().addTitle('我的装备').addNewline();
+    const markdown = Format.createMarkdown().addTitle('我的装备').addText(' ').addButton('[异械]', { data: '/异械', autoEnter: false }).addNewline();
     const equippedBySlot = new Map(items.map(item => [item.slot, item]));
     for (const slot of slotOrder) {
       const item = equippedBySlot.get(slot);

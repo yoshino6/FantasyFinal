@@ -2,6 +2,7 @@ import { Format, logger, useEvent, useMessage, useRoute } from 'alemonjs';
 import { battleStatus, blockedDungeonDirections, completeTravel, movementProfile, nearbyPoints, resourceMiningStatus, resumeAction, setMapLandmarksVisible, setNearbyPlayersVisible, startRest, travelStatus, type MapLandmark, type NearbyPoint } from '../game/adventure.service';
 import { messageFormat, sendWithTextFallback } from '../game/message';
 import { autoBattleConfig } from '../game/auto-battle.service';
+import { homePanel } from '../game/home.service';
 import { durationText } from '../game/time-format';
 
 const directionText = (point: NearbyPoint, x: number, y: number) => {
@@ -104,6 +105,7 @@ export default async () => {
   const [event] = useEvent();
   const [message] = useMessage();
   try {
+    if ((await homePanel(event.current.UserId)).inHome) { const { homeFormat } = await import('./home'); await message.send({ format: await homeFormat(event.current.UserId) }); return; }
     const travel = await travelStatus(event.current.UserId);
     if (travel && travel.remaining > 0) { await message.send({ format: travelPanel(travel) }); return; }
     if (travel) await completeTravel(event.current.UserId);
@@ -133,6 +135,7 @@ export default async () => {
 };
 
 const showRestPanel = async (message: any, qqUserId: string, text: string) => {
+  if ((await homePanel(qqUserId)).inHome) { const { homeFormat } = await import('./home'); await message.send({ format: await homeFormat(qqUserId, text) }); return; }
   const [nearby, movement] = await Promise.all([nearbyPoints(qqUserId), movementProfile(qqUserId)]); const resting = nearby.character.activity_status !== 'active';
   const autoBattle = await autoBattleConfig(qqUserId);
   const blockedDirections = await blockedDungeonDirections(qqUserId);

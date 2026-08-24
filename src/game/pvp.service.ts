@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { detentionMessage } from './time-format';
+import { isInHome } from './home.service';
 
 type PvpCharacter = RowDataPacket & {
   id: number; game_id: number; name: string; current_region_id: number; pos_x: number; pos_y: number; pos_z: number;
@@ -311,11 +312,13 @@ const resolveAction = async (connection: PoolConnection, actor: PvpCharacter, ta
 export const cityPvp = async (qqUserId: string, targetGameId: number, confirmed = false) => withTransaction(async connection => {
   const attacker = await characterFor(connection, qqUserId); const town = await townRegion(connection);
   if (Number(attacker.current_region_id) !== Number(town.id)) throw new Error('只有在百纳镇内才能发起城镇 PvP。');
+  if (await isInHome(connection, Number(attacker.id))) throw new Error('你正在自己的家园中，无法主动发起 PvP。');
   if (attacker.activity_status === 'detained') throw new Error(detentionMessage(attacker.detained_until));
   const [targets] = await connection.execute<PvpCharacter[]>('SELECT * FROM characters WHERE game_id=? AND npc_code IS NULL FOR UPDATE', [targetGameId]); const target = targets[0];
   if (!target || Number(target.id) === Number(attacker.id) || Number(target.current_region_id) !== Number(town.id) || Number(target.pos_z) !== Number(attacker.pos_z) || Math.abs(Number(target.pos_x) - Number(attacker.pos_x)) + Math.abs(Number(target.pos_y) - Number(attacker.pos_y)) > 1) throw new Error('目标不在你相邻的城镇格子中。');
   if (target.activity_status === 'detained') throw new Error('目标已被守卫关押。');
   const attackerWarrant = await wanted(connection, attacker.id, Number(town.id)); const targetWarrant = await wanted(connection, target.id, Number(town.id));
+  if (await isInHome(connection, Number(target.id)) && !targetWarrant) throw new Error('目标正在自己的家园中，无法攻击或打劫。');
   // 已被本城通缉的目标可被任何玩家合法缉捕；缉捕者不会因此获得红名。
   const unlawfulAttack = !attackerWarrant && !targetWarrant;
   if (unlawfulAttack && !confirmed) {
@@ -337,12 +340,14 @@ export const cityPvp = async (qqUserId: string, targetGameId: number, confirmed 
 /** 城镇外的同地图 PvP；野外没有通缉确认，仍要求目标处于感知范围内。 */
 export const fieldPvp = async (qqUserId: string, targetGameId: number) => withTransaction(async connection => {
   const attacker = await characterFor(connection, qqUserId);
+  if (await isInHome(connection, Number(attacker.id))) throw new Error('你正在自己的家园中，无法主动发起 PvP。');
   if (attacker.activity_status === 'detained') throw new Error(detentionMessage(attacker.detained_until));
   const [targets] = await connection.execute<PvpCharacter[]>('SELECT * FROM characters WHERE game_id=? AND npc_code IS NULL FOR UPDATE', [targetGameId]);
   const target = targets[0];
   const distance = target ? Math.abs(Number(target.pos_x) - Number(attacker.pos_x)) + Math.abs(Number(target.pos_y) - Number(attacker.pos_y)) : Infinity;
   if (!target || Number(target.id) === Number(attacker.id) || Number(target.current_region_id) !== Number(attacker.current_region_id) || Number(target.pos_z) !== Number(attacker.pos_z) || distance > perceptionRange(attacker)) throw new Error('目标已经离开你的感知范围。');
   if (target.activity_status === 'detained') throw new Error('目标已被守卫关押。');
+  if (await isInHome(connection, Number(target.id))) throw new Error('目标正在自己的家园中，无法攻击或打劫。');
   const opening = await resolveAction(connection, attacker, target, await actionFor(connection, attacker, true));
   const response = !opening.defeated && Number(target.current_hp) > 1 ? await resolveAction(connection, target, attacker, await actionFor(connection, target)) : null;
   return { text: [opening.text, response?.text].filter(Boolean).join('\n') };
@@ -397,10 +402,12 @@ export const startPvpBattle = async (qqUserId: string, targetGameId: number, con
   const distance = defender ? Math.abs(Number(defender.pos_x) - Number(attacker.pos_x)) + Math.abs(Number(defender.pos_y) - Number(attacker.pos_y)) : Infinity;
   const range = regionCode === 'dark_forest_dungeon' ? 1 : perceptionRange(attacker);
   if (!defender || Number(defender.id) === Number(attacker.id) || Number(defender.current_region_id) !== Number(attacker.current_region_id) || Number(defender.pos_z) !== Number(attacker.pos_z) || distance > range) throw new Error('目标已经离开你的感知范围。');
+  if (await isInHome(connection, Number(attacker.id))) throw new Error('你正在自己的家园中，无法主动发起 PvP。');
   if (attacker.activity_status === 'detained') throw new Error(detentionMessage(attacker.detained_until));
   if (defender.activity_status === 'detained') throw new Error('目标已被守卫关押。');
   if (regionCode === 'baina_town') {
     const attackerWarrant = await wanted(connection, Number(attacker.id), Number(attacker.current_region_id)); const defenderWarrant = await wanted(connection, Number(defender.id), Number(attacker.current_region_id));
+    if (await isInHome(connection, Number(defender.id)) && !defenderWarrant) throw new Error('目标正在自己的家园中，无法攻击或打劫。');
     // 仅攻击普通市民才会触发红名；攻击当前城市的通缉者属于合法缉捕。
     const unlawfulAttack = !attackerWarrant && !defenderWarrant;
     if (unlawfulAttack && !confirmed) { await connection.execute('INSERT INTO player_pvp_attack_confirmations (attacker_character_id,target_character_id,expires_at) VALUES (?,?,DATE_ADD(NOW(),INTERVAL 1 MINUTE)) ON DUPLICATE KEY UPDATE target_character_id=VALUES(target_character_id),expires_at=VALUES(expires_at)', [attacker.id, defender.id]); return { needsConfirmation: true, target: defender.name }; }
@@ -412,7 +419,7 @@ export const startPvpBattle = async (qqUserId: string, targetGameId: number, con
       await recordWarrantSighting(connection, Number(attacker.id), Number(attacker.current_region_id), Number(attacker.pos_x), Number(attacker.pos_y));
     }
     if (!defenderWarrant) await recordWarrantVictim(connection, await wanted(connection, Number(attacker.id), Number(attacker.current_region_id)), Number(defender.id));
-  }
+  } else if (await isInHome(connection, Number(defender.id))) throw new Error('目标正在自己的家园中，无法攻击或打劫。');
   const [occupied] = await connection.execute<RowDataPacket[]>(`SELECT 1 FROM player_pvp_battle_sessions WHERE state='active' AND (attacker_character_id IN (?,?) OR defender_character_id IN (?,?)) LIMIT 1 FOR UPDATE`, [attacker.id, defender.id, attacker.id, defender.id]);
   if (occupied[0]) throw new Error('其中一方正在进行玩家对战。');
   const id = randomUUID(); await connection.execute('INSERT INTO player_pvp_battle_sessions (id,attacker_character_id,defender_character_id,attacker_hp,attacker_mp,defender_hp,defender_mp,attacker_cooldowns,defender_cooldowns) VALUES (?,?,?,?,?,?,?,JSON_OBJECT(),JSON_OBJECT())', [id, attacker.id, defender.id, attacker.current_hp, attacker.current_mp, defender.current_hp, defender.current_mp]);
@@ -555,7 +562,7 @@ export const townWarrantsFor = async (qqUserId: string, filter: '已暴露' | '�
     FROM characters c JOIN players p ON p.id=c.player_id JOIN map_regions r ON r.id=c.current_region_id WHERE p.qq_user_id=? LIMIT 1`, [qqUserId]);
   const viewer = viewerRows[0]; if (!viewer) throw new Error('请先注册角色。');
   if (viewer.region_code !== 'baina_town') throw new Error('请先前往城镇，再查看当地的通缉令。');
-  const [rows] = await pool.execute<(RowDataPacket & { id: number; name: string; region_name: string; current_region_id: number; pos_x: number; pos_y: number; last_seen_at: Date | null; last_seen_x: number | null; last_seen_y: number | null; victim_count: number; reward_copper: number; reward_items: string | null })[]>(`SELECT w.id,c.name,r.name AS region_name,c.current_region_id,c.pos_x,c.pos_y,w.last_seen_at,w.last_seen_x,w.last_seen_y,
+  const [rows] = await pool.execute<(RowDataPacket & { id: number; name: string; region_name: string; current_region_id: number; pos_x: number; pos_y: number; last_seen_at: Date | null; last_seen_x: number | null; last_seen_y: number | null; victim_count: number; pursuit_defeats: number; reward_copper: number; reward_items: string | null })[]>(`SELECT w.id,c.name,r.name AS region_name,c.current_region_id,c.pos_x,c.pos_y,w.last_seen_at,w.last_seen_x,w.last_seen_y,w.pursuit_defeats,
     COALESCE(v.victim_count,0) AS victim_count,COALESCE(rw.reward_copper,0) AS reward_copper,rw.reward_items
     FROM player_warrants w JOIN characters c ON c.id=w.wanted_character_id JOIN map_regions r ON r.id=w.city_region_id
     LEFT JOIN (SELECT warrant_id,COUNT(*) AS victim_count FROM player_warrant_victims GROUP BY warrant_id) v ON v.warrant_id=w.id
@@ -568,8 +575,10 @@ export const townWarrantsFor = async (qqUserId: string, filter: '已暴露' | '�
     const exposed = Number(row.current_region_id) === Number(viewer.region_id);
     const recent = !exposed && row.last_seen_at !== null && new Date(row.last_seen_at).getTime() >= Date.now() - 24 * 60 * 60 * 1000;
     const victims = Math.max(1, Number(row.victim_count));
-    const stars = victims >= 15 ? 5 : victims >= 10 ? 4 : victims >= 6 ? 3 : victims >= 3 ? 2 : 1;
-    return { id: Number(row.id), name: row.name, regionName: row.region_name, x: exposed ? Number(row.pos_x) : Number(row.last_seen_x ?? 0), y: exposed ? Number(row.pos_y) : Number(row.last_seen_y ?? 0), exposed, recent, stars, copper: Number(row.reward_copper), items: row.reward_items ?? '' };
+    const baseStars = victims >= 15 ? 5 : victims >= 10 ? 4 : victims >= 6 ? 3 : victims >= 3 ? 2 : 1;
+    const pursuitTier = baseStars + Number(row.pursuit_defeats);
+    const stars = Math.min(5, pursuitTier); const skulls = Math.max(0, Math.min(5, pursuitTier - 5));
+    return { id: Number(row.id), name: row.name, regionName: row.region_name, x: exposed ? Number(row.pos_x) : Number(row.last_seen_x ?? 0), y: exposed ? Number(row.pos_y) : Number(row.last_seen_y ?? 0), exposed, recent, stars, skulls, copper: Number(row.reward_copper), items: row.reward_items ?? '' };
   });
   return { regionName: viewer.region_name, warrants: filter === '全部' ? mapped : mapped.filter(warrant => filter === '已暴露' ? warrant.exposed : filter === '近期露面' ? warrant.recent : !warrant.exposed && !warrant.recent) };
 };

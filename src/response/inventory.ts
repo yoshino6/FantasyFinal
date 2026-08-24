@@ -11,7 +11,7 @@ const categories: InventoryCategory[] = ['装备', '道具', '材料'];
 const subcategories: Record<InventoryCategory, string[]> = {
   装备: ['全部', '武器', '头肩', '上装', '腰部', '下装', '脚部', '项链', '手镯', '戒指', '异械'],
   道具: ['全部', '药剂', '食物', '特殊', '地图', '图纸'],
-  材料: ['全部', '兽材', '锻材', '精兽材', '粒子', '元素尘', '基材', '构件', '炼材', '食材', '草药', '货币']
+  材料: ['全部', '怪材', '建材', '锻材', '粒子', '元素尘', '基材', '构件', '炼材', '食材', '草药', '货币']
 };
 
 const parseCategory = (value: unknown): InventoryCategory | undefined => {

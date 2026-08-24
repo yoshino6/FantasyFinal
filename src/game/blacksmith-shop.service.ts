@@ -48,7 +48,7 @@ export const blacksmithSellCatalog = async (qqUserId: string, page = 1, keyword 
       CEIL(i.trade_price*1.15) AS sell_price,pi.acquired_at
     FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id
     WHERE pi.character_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0
-      AND i.item_category IN ('兽材','精兽材','锻材','元素尘') AND i.name LIKE ?`;
+      AND i.item_category IN ('怪材','锻材','元素尘') AND i.name LIKE ?`;
   const source = `(${equipmentSql} UNION ALL ${materialSql}) AS sale_items`;
   const [countRows] = await pool.execute<(RowDataPacket & { total: number })[]>(`SELECT COUNT(*) AS total FROM ${source}`, [character.id, term, character.id, term]);
   const paging = pageInfo(page, Number(countRows[0]?.total ?? 0));
@@ -88,8 +88,8 @@ export const sellBlacksmithMaterial = async (qqUserId: string, itemId: number, q
   const [rows] = await connection.execute<(RowDataPacket & { id: number; name: string; quantity: number; sell_price: number })[]>(`SELECT i.id,i.name,pi.quantity,CEIL(i.trade_price*1.15) AS sell_price
     FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id
     WHERE pi.character_id=? AND pi.item_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0
-      AND i.item_category IN ('兽材','精兽材','锻材','元素尘') FOR UPDATE`, [character.id, itemId]);
-  const item = rows[0]; if (!item) throw new Error('小北只收购装备、兽材、锻材与元素尘。');
+      AND i.item_category IN ('怪材','锻材','元素尘') FOR UPDATE`, [character.id, itemId]);
+  const item = rows[0]; if (!item) throw new Error('小北只收购装备、怪材、锻材与元素尘。');
   if (Number(item.quantity) < amount) throw new Error(`背包数量不足，当前仅有 ${item.quantity} 个。`);
   const price = Number(item.sell_price) * amount;
   await recordPvpLootSale(connection, Number(character.id), Number(item.id), amount, price);

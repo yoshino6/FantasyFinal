@@ -92,7 +92,7 @@ export const skillCodexDetailHandler = async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
   try {
     const skill = await skillCodexDetail(event.current.UserId, Number(route.param('id')));
-    const categoryNames: Record<string, string> = { physical: '物理', magic: '魔法', utility: '辅助', passive: '被动', special: '特殊' };
+    const categoryNames: Record<string, string> = { physical: '物理', magic: '魔法', utility: '辅助', passive: '被动', bound: '绑定', special: '特殊' };
     const markdown = Format.createMarkdown().addTitle(skill.name).addNewline().addNewline()
       .addText(`【技能】${skill.name}\n图鉴ID：${skill.codex_id}\n类别：${categoryNames[skill.category] ?? '特殊'}\n种类：${skill.skill_kind}\n属性：${skill.element}\n距离：${skill.range_type}\n基础威力：${skill.power}\n基础蓝耗：${skill.mana_cost}\n基础冷却：${skill.cooldown_turns}\n基础吟咏：${skill.chant_turns}\n\n特殊效果：\n`);
     for (const effect of String(skill.effects ?? '无').split('、').filter(Boolean)) markdown.addBlockquote(effect).addNewline();

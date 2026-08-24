@@ -424,11 +424,12 @@ export const changeDungeonFloor = async (qqUserId: string, direction: 'down' | '
 });
 
 export const dungeonPlayersInRange = async (connection: Pool | PoolConnection, characterId: number, regionIdValue: number, x: number, y: number, z: number, range: number) => {
-  const [rows] = await connection.execute<(RowDataPacket & { game_id: number; name: string; pos_x: number; pos_y: number; wanted: number })[]>(`SELECT c.game_id,c.name,c.pos_x,c.pos_y,
+  const [rows] = await connection.execute<(RowDataPacket & { game_id: number; name: string; pos_x: number; pos_y: number; wanted: number; in_home: number })[]>(`SELECT c.game_id,c.name,c.pos_x,c.pos_y,hv.character_id IS NOT NULL AS in_home,
     EXISTS(SELECT 1 FROM player_warrants w WHERE w.wanted_character_id=c.id AND w.city_region_id=c.current_region_id AND w.status='active') AS wanted
-    FROM characters c
-    WHERE current_region_id=? AND pos_z=? AND id<>? AND npc_code IS NULL AND ABS(pos_x-?)+ABS(pos_y-?)<=?`, [regionIdValue, z, characterId, x, y, range]);
-  return rows.map(row => ({ gameId: Number(row.game_id), name: row.name, x: Number(row.pos_x), y: Number(row.pos_y), wanted: Boolean(row.wanted) }));
+    FROM characters c LEFT JOIN player_home_visits hv ON hv.character_id=c.id
+    WHERE c.current_region_id=? AND c.pos_z=? AND c.id<>? AND c.npc_code IS NULL AND ABS(c.pos_x-?)+ABS(c.pos_y-?)<=?
+      AND (hv.character_id IS NULL OR EXISTS(SELECT 1 FROM player_warrants w WHERE w.wanted_character_id=c.id AND w.city_region_id=? AND w.status='active'))`, [regionIdValue, z, characterId, x, y, range, regionIdValue]);
+  return rows.map(row => ({ gameId: Number(row.game_id), name: row.name, x: Number(row.pos_x), y: Number(row.pos_y), wanted: Boolean(row.wanted), inHome: Boolean(row.in_home) }));
 };
 
 type PvpAction = { type: 'attack' } | { type: 'skill'; name: string; category: 'physical' | 'magic' | 'utility'; manaCost: number; power: number } | { type: 'item'; id: number; name: string; effect: Record<string, number> };

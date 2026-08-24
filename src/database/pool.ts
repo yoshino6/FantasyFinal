@@ -29,17 +29,28 @@ export const getPool = async (): Promise<Pool> => {
   return initialization;
 };
 
+/**
+ * 角色移动、定时抵达、自动战斗等可能同时触及同一批行。
+ * InnoDB 检测到死锁会回滚其中一方；此处只对该可安全重试的数据库错误做有限重试。
+ */
 export const withTransaction = async <T>(work: (connection: PoolConnection) => Promise<T>): Promise<T> => {
-  const connection = await (await getPool()).getConnection();
-  try {
-    await connection.beginTransaction();
-    const result = await work(connection);
-    await connection.commit();
-    return result;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
+  const maxAttempts = 3;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const connection = await (await getPool()).getConnection();
+    try {
+      await connection.beginTransaction();
+      const result = await work(connection);
+      await connection.commit();
+      return result;
+    } catch (error: any) {
+      try { await connection.rollback(); } catch { /* 连接已断开时无需二次处理 */ }
+      const deadlock = error?.code === 'ER_LOCK_DEADLOCK' || Number(error?.errno) === 1213;
+      if (!deadlock || attempt === maxAttempts - 1) throw error;
+      // 很短的退避可让竞争事务先提交，避免立即重试时再次撞上同一把锁。
+      await new Promise<void>(resolve => setTimeout(resolve, 25 * (attempt + 1)));
+    } finally {
+      connection.release();
+    }
   }
+  throw new Error('事务重试次数已耗尽。');
 };

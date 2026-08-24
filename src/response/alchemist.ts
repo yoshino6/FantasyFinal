@@ -85,7 +85,7 @@ export const alchemistPurchaseHandler = async () => {
 
 export const barrierAdviceFormat = (fromGuild = false) => Format.create().addMarkdown(Format.createMarkdown().addTitle('关于 无形的禁锢').addNewline().addNewline().addBlockquote(fromGuild
   ? '莫妮卡听完你的描述，神情认真起来。\n“这种身体与能量的异常，公会不宜贸然判断。你可以去找炼金师晴儿——她对人体的各种状态颇有研究，就在糖水屋。”'
-  : '晴儿轻轻放下量杯，认真听完你的描述。\n“你不是我们这个世界的人吧。异世界来者会被这方世界压制。想打破躯体的枷锁，不能只靠堆积能量，还得去感悟这方世界，并真正融入其中。”\n“周边密林里的幽影狼王偶尔会携带一种名为天空粉尘的古老尘埃，试着去带一份回来吧。然后我会指导你如何来窥探其中的奥秘。”')).addButtonGroup(Format.createButtonGroup().addRow().addButton('前往 糖水屋', '/前往 -12 -127', { type: 'command', autoEnter: true, style: 'blue' }));
+  : '晴儿轻轻放下量杯，认真听完你的描述。\n“你不是我们这个世界的人吧。异世界来者会被这方世界压制。想打破躯体的枷锁，不能只靠堆积能量，还得去感悟这方世界，并真正融入其中。”\n“周边密林里的幽影狼王偶尔会携带一种名为天空粉尘的古老尘埃，试着去带一份回来吧。然后我会指导你如何来窥探其中的奥秘。”')).addButtonGroup(Format.createButtonGroup().addRow().addButton('前往 糖水屋', '/前往 -12 -128', { type: 'command', autoEnter: true, style: 'blue' }));
 
 export const alchemistAboutHandler = async () => {
   const [event] = useEvent(); const [message] = useMessage();
