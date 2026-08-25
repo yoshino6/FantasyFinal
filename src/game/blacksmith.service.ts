@@ -136,7 +136,7 @@ const fallbackFusion = (category: string) => category === '草药' ? { hpPct: 1 
 export const fuseWeapon = async (qqUserId: string, instanceId: number, materialId: number) => withTransaction(async connection => {
   const characterId = await characterIdFor(connection, qqUserId, true);
   const profession = await blacksmithProgressFor(connection, characterId, true);
-  const [weapons] = await connection.execute<(WeaponRow & { effect_json: unknown; original_effect_json: unknown; item_id: number })[]>(`SELECT ii.id,ii.item_id,i.name,i.item_category,ii.quality,i.rarity,i.required_level,i.effect_json AS original_effect_json,COALESCE(ii.effect_json,i.effect_json) AS effect_json,(SELECT COUNT(*) FROM equipment_fusions ef WHERE ef.instance_id=ii.id) AS fusion_count FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.id=? AND ii.character_id=? AND i.item_type='equipment' AND i.item_category<>'异械' FOR UPDATE`, [instanceId, characterId]);
+  const [weapons] = await connection.execute<(WeaponRow & { effect_json: unknown; base_effect_json: unknown; item_id: number })[]>(`SELECT ii.id,ii.item_id,i.name,i.item_category,ii.quality,i.rarity,i.required_level,i.effect_json AS effect_json,i.effect_json AS base_effect_json,(SELECT COUNT(*) FROM equipment_fusions ef WHERE ef.instance_id=ii.id) AS fusion_count FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.id=? AND ii.character_id=? AND i.item_type='equipment' AND i.item_category<>'异械' FOR UPDATE`, [instanceId, characterId]);
   const weapon = weapons[0]; if (!weapon) throw new Error('请选择自己背包中的装备。');
   const limit = fusionLimit(weapon); if (Number(weapon.fusion_count) >= limit) throw new Error(`该武器的熔铸次数已用尽（${weapon.fusion_count}/${limit}）。`);
   const [materials] = await connection.execute<(MaterialRow & { code: string })[]>(`SELECT i.id,i.code,i.name,i.item_category,pi.quantity,fe.effect_json,fe.description FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id LEFT JOIN blacksmith_fusion_material_effects fe ON fe.item_id=i.id WHERE pi.character_id=? AND i.id=? AND i.item_type='material' AND i.item_category<>'货币' FOR UPDATE`, [characterId, materialId]);
@@ -149,7 +149,11 @@ export const fuseWeapon = async (qqUserId: string, instanceId: number, materialI
     const progress = await addBlacksmithProficiency(connection, characterId);
     return { name: weapon.name, material: material.name, effect: {}, count: Number(weapon.fusion_count), limit, failed: true, success, progress };
   }
-  const current = jsonRecord(weapon.effect_json); const original = jsonRecord(weapon.original_effect_json); const merged: Record<string, number> = Object.fromEntries(Object.entries(current).map(([key, value]) => [key, Number(value ?? 0)]));
+  const current = jsonRecord(weapon.effect_json); const original = jsonRecord(weapon.base_effect_json);
+  // 实例效果中同时保存数值属性和神器标识、布尔触发器等语义效果。
+  // 旧写法把全部字段 Number 化，导致 artifact 等字符串被写成 null、布尔效果变为 1，熔铸后便像是“顶替”了原有效果。
+  const merged: Record<string, unknown> = { ...current };
+  for (const [key, value] of Object.entries(original)) if (typeof value !== 'number') merged[key] = value;
   for (const [key, value] of Object.entries(added)) merged[key] = Math.round((Number(merged[key] ?? 0) + Number(value)) * 100) / 100;
   capAdditionalEquipmentEffect(merged, original, Number(weapon.required_level), weapon.rarity);
   await connection.execute('UPDATE player_item_instances SET effect_json=? WHERE id=?', [JSON.stringify(merged), instanceId]);
@@ -205,7 +209,7 @@ const capForgeEffect = (effect: Record<string, number>, level: number, rarity: s
   return effect;
 };
 /** 熔铸仍沿用历史总额约束；打造的副词条已改为仅受各自单项上限约束。 */
-const capAdditionalEquipmentEffect = (effect: Record<string, number>, original: Record<string, unknown>, level: number, rarity: string) => {
+const capAdditionalEquipmentEffect = (effect: Record<string, unknown>, original: Record<string, unknown>, level: number, rarity: string) => {
   const caps = forgeEffectCaps(level, rarity);
   const contributions: Array<{ key: string; original: number; bonus: number; cap: number }> = [];
   for (const [key, cap] of Object.entries(caps)) {

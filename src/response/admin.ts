@@ -7,6 +7,7 @@ import { postBossBounty } from '../game/bounty.service';
 import { auditAllPlayers, auditCharacter, auditInventory, auditPlayerState, auditSkills, clearPlayerBackpack } from '../game/admin-audit.service';
 import { dungeonEvents, rebuildDungeons } from '../game/dungeon.service';
 import { adminOperationLogs, recordAdminOperation, type AdminLogFilter } from '../game/admin-log.service';
+import { accountDeletionRecords, restoreDeletedAccount, type AccountDeletionFilter } from '../game/account-deletion-record.service';
 
 const commandLink = (markdown: ReturnType<typeof Format.createMarkdown>, title: string, command: string, format: string) => markdown.addText('> ').addButton(title, { data: command, autoEnter: false }).addNewline().addBlockquote(format).addNewline();
 const textButton = (_title: string, command: string) => ({ data: command, autoEnter: false });
@@ -26,6 +27,7 @@ const adminFormat = (role: PermissionRole | null) => {
     commandLink(markdown, '[全服发放]', '管理员命令 邮件发放 全服', '格式：管理员命令 邮件发放 全服');
     markdown.addNewline().addText('玩家管理').addNewline().addText('> ').addButton('[数据核查]', textButton('玩家数据核查', '玩家数据核查')).addNewline().addBlockquote('核查并修复玩家的角色、背包、技能与状态数据。').addNewline();
     markdown.addText('> ').addButton('[玩家操作]', textButton('玩家操作', '玩家操作')).addNewline().addBlockquote('对指定玩家执行背包清理等管理操作。');
+    markdown.addNewline().addText('> ').addButton('[注销记录]', textButton('注销记录', '注销记录')).addNewline().addBlockquote('查看已注销账号的快照，并在误操作时恢复玩家资料。');
     markdown.addNewline().addNewline().addText('事件管理').addNewline().addNewline();
     markdown.addText('> ').addButton('[BOSS管理]', textButton('BOSS管理', 'BOSS管理')).addNewline().addBlockquote('查看地图中 BOSS 事件并操作。').addNewline();
     markdown.addText('> ').addButton('[迷宫管理]', textButton('迷宫管理', '迷宫管理')).addNewline().addBlockquote('查看当前地下迷宫入口、探索状态与最终 Boss。');
@@ -110,6 +112,25 @@ const adminLogFormat = async (filter: AdminLogFilter = {}) => {
     .addRow().addButton('人员', '/管理日志筛选 人员 ', { type: 'command', autoEnter: false }).addButton('操作', '/管理日志筛选 操作 ', { type: 'command', autoEnter: false }).addButton('时间', '/管理日志筛选 时间 ', { type: 'command', autoEnter: false }));
 };
 
+const accountDeletionRecordFormat = async (filter: AccountDeletionFilter = {}) => {
+  const data = await accountDeletionRecords(filter); const markdown = Format.createMarkdown().addTitle('注销记录').addNewline().addNewline();
+  if (!data.entries.length) markdown.addBlockquote('暂无符合条件的注销记录。').addNewline();
+  for (const [index, entry] of data.entries.entries()) {
+    const player = entry.characterName ? `【${entry.characterName}】` : '未创建角色';
+    const nickname = entry.qqNickname ? `｜昵称：${entry.qqNickname}` : '';
+    const status = entry.restoredAt ? `已恢复（${logTime(entry.restoredAt)}）` : '待恢复';
+    markdown.addText(`${'①②③④⑤⑥⑦⑧⑨⑩'.charAt(index)}${player} `);
+    if (!entry.restoredAt) markdown.addButton('[恢复]', textButton('恢复注销账号', `恢复注销账号 ${entry.id}`));
+    markdown.addNewline().addBlockquote(`QID：${entry.qqUserId}${nickname}\n状态：${status}\n注销时间：${logTime(entry.deletedAt)}`).addNewline();
+  }
+  markdown.addNewline().addText(`当前第（${data.page}/${data.totalPages}）页`).addNewline();
+  const previous = Math.max(1, data.page - 1); const next = Math.min(data.totalPages, data.page + 1);
+  const suffix = data.filter && data.value ? ` ${data.filter} ${data.value}` : data.keyword ? ` 搜索 ${data.keyword}` : '';
+  return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup()
+    .addRow().addButton('上一页', `/注销记录页 ${previous}${suffix}`, { type: 'command', autoEnter: true, style: data.page > 1 ? 'blue' : undefined }).addButton('搜索', '/注销记录搜索 ', { type: 'command', autoEnter: false, style: 'blue' }).addButton('下一页', `/注销记录页 ${next}${suffix}`, { type: 'command', autoEnter: true, style: data.page < data.totalPages ? 'blue' : undefined })
+    .addRow().addButton('玩家', '/注销记录筛选 玩家 ', { type: 'command', autoEnter: false }).addButton('状态', '/注销记录筛选 状态 ', { type: 'command', autoEnter: false }).addButton('时间', '/注销记录筛选 时间 ', { type: 'command', autoEnter: false }));
+};
+
 const recipientLines = (markdown: ReturnType<typeof Format.createMarkdown>, edit: MailEdit) => {
   if (edit.scope === 'global') { markdown.addText('接收人：全服').addNewline(); return; }
   markdown.addText('接收人：').addButton('[@添加]', textButton('添加收件人', '管理员邮件 添加收件人 ')).addText(' ').addButton('[昵称添加]', textButton('添加昵称', '管理员邮件 添加昵称 ')).addNewline();
@@ -162,6 +183,11 @@ export const adminLogHandler = async () => { const [event] = useEvent(); const [
 export const adminLogPageHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const filter = String(route.param('filter') ?? ''); const value = String(route.param('value') ?? ''); await message.send({ format: await adminLogFormat({ page: Number(route.param('page')), filter: filter === '人员' || filter === '操作' || filter === '时间' ? filter : undefined, value }) }); } catch (error) { await message.send({ format: messageFormat('管理日志不可用', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const adminLogSearchHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: await adminLogFormat({ keyword: String(route.param('keyword')) }) }); } catch (error) { await message.send({ format: messageFormat('管理日志不可用', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const adminLogFilterHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const filter = String(route.param('filter')) as AdminLogFilter['filter']; await message.send({ format: await adminLogFormat({ filter, value: String(route.param('value')) }) }); } catch (error) { await message.send({ format: messageFormat('管理日志不可用', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const accountDeletionRecordHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: await accountDeletionRecordFormat() }); } catch (error) { await message.send({ format: messageFormat('注销记录不可用', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const accountDeletionRecordPageHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const filter = String(route.param('filter') ?? ''); const value = String(route.param('value') ?? ''); await message.send({ format: await accountDeletionRecordFormat({ page: Number(route.param('page')), filter: filter === '玩家' || filter === '状态' || filter === '时间' ? filter : undefined, value }) }); } catch (error) { await message.send({ format: messageFormat('注销记录不可用', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const accountDeletionRecordSearchHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: await accountDeletionRecordFormat({ keyword: String(route.param('keyword')) }) }); } catch (error) { await message.send({ format: messageFormat('注销记录不可用', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const accountDeletionRecordFilterHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const filter = String(route.param('filter')) as AccountDeletionFilter['filter']; const value = String(route.param('value')); if (filter === '状态' && value !== '待恢复' && value !== '已恢复') throw new Error('状态筛选仅支持“待恢复”或“已恢复”。'); await message.send({ format: await accountDeletionRecordFormat({ filter, value }) }); } catch (error) { await message.send({ format: messageFormat('注销记录不可用', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const restoreDeletedAccountHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const result = await restoreDeletedAccount(Number(route.param('id')), event.current.UserId); await recordAdminOperation(event.current.UserId, '恢复注销账号', `恢复玩家「${result.characterName}」的注销账号数据`, result.qqUserId); await message.send({ format: messageFormat('账号数据已恢复', `已恢复【${result.characterName}】（QID：${result.qqUserId}）注销前的角色资料。`) }); } catch (error) { await message.send({ format: messageFormat('恢复账号失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 
 export const playerAuditPanelHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: playerAuditFormat() }); } catch (error) { await message.send({ format: messageFormat('数据核查失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const playerOperationPanelHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: playerOperationFormat() }); } catch (error) { await message.send({ format: messageFormat('玩家操作不可用', error instanceof Error ? error.message : '请稍后重试。') }); } };

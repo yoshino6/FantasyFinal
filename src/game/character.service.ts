@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { SESSION_TTL_MINUTES, STAMINA_RECOVERY_MS, artifactGiftSlots, calculateDerivedStats, gifts, isGiftCode, staminaMaxForRealm } from './constants';
+import { homeRestRecoveryBonus } from './home.service';
 import { attributes, type Allocation, type DerivedStats, type Growth } from './types';
 import { recordSkillPointChange } from './skill-point-ledger.service';
 
@@ -92,7 +93,7 @@ export const recalculateCharacterStats = async (connection: Pool | PoolConnectio
   await connection.execute('UPDATE characters SET hp_max=?,mp_max=?,current_hp=LEAST(current_hp,?),current_mp=LEAST(current_mp,?),physical_attack=?,magic_attack=?,physical_defense=?,magic_defense=?,accuracy=?,evasion=?,crit_rate_bp=?,crit_damage_bp=?,crit_resist_bp=?,crit_damage_reduction_bp=?,tenacity=?,speed=?,element_mastery_json=?,element_resistance_json=? WHERE id=?', [stats.hpMax, stats.mpMax, stats.hpMax, stats.mpMax, stats.physicalAttack, stats.magicAttack, stats.physicalDefense, stats.magicDefense, stats.accuracy, stats.evasion, stats.critRateBp, stats.critDamageBp, stats.critResistBp, stats.critDamageReductionBp, stats.tenacity, stats.speed, JSON.stringify(elemental.mastery), JSON.stringify(elemental.resistance), characterId]);
 };
 
-/** 体力按实际经过的完整五分钟结算；满体力时重置计时，避免积攒超出上限的恢复。 */
+/** 体力按实际经过的完整五分钟结算；在家时会获得家具提供的恢复速度加成。 */
 export const refreshCharacterStamina = async (connection: PoolConnection, characterId: number) => {
   const [rows] = await connection.execute<(RowDataPacket & { stamina: number; realm_stage: number; stamina_updated_at: Date })[]>(
     'SELECT stamina,realm_stage,stamina_updated_at FROM characters WHERE id=? FOR UPDATE', [characterId]
@@ -101,10 +102,12 @@ export const refreshCharacterStamina = async (connection: PoolConnection, charac
   const maximum = staminaMaxForRealm(Number(row.realm_stage));
   const current = Math.max(0, Math.min(maximum, Number(row.stamina ?? maximum)));
   const elapsed = Math.max(0, Date.now() - new Date(row.stamina_updated_at).getTime());
-  const restored = Math.floor(elapsed / STAMINA_RECOVERY_MS);
+  const multiplier = 1 + await homeRestRecoveryBonus(connection, characterId) / 100;
+  const restored = Math.floor(elapsed * multiplier / STAMINA_RECOVERY_MS);
   const stamina = Math.min(maximum, current + restored);
   if (stamina !== current || current !== Number(row.stamina) || stamina >= maximum) {
-    const updatedAt = stamina >= maximum ? new Date() : new Date(new Date(row.stamina_updated_at).getTime() + restored * STAMINA_RECOVERY_MS);
+    const consumedElapsed = Math.ceil(restored * STAMINA_RECOVERY_MS / multiplier);
+    const updatedAt = stamina >= maximum ? new Date() : new Date(new Date(row.stamina_updated_at).getTime() + consumedElapsed);
     await connection.execute('UPDATE characters SET stamina=?,stamina_updated_at=? WHERE id=?', [stamina, updatedAt, characterId]);
   }
   return { stamina, staminaMax: maximum };

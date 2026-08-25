@@ -1,6 +1,7 @@
 import { randomInt } from 'node:crypto';
 import type { RowDataPacket } from 'mysql2';
 import { withTransaction } from '../database/pool';
+import { archiveDeletedAccount } from './account-deletion-record.service';
 
 type PlayerRow = RowDataPacket & { id: number };
 type CharacterRow = RowDataPacket & { id: number; name: string; delete_confirmation_code: string | null; delete_confirmation_expires_at: Date | null };
@@ -35,6 +36,7 @@ export const deletePlayerAccount = async (qqUserId: string, confirmationCode: st
   if (!character?.delete_confirmation_code || !character.delete_confirmation_expires_at) throw new Error('请先发送“注销账户”获取验证码。');
   if (new Date(character.delete_confirmation_expires_at).getTime() <= Date.now()) throw new Error('注销验证码已过期，请重新发送“注销账户”。');
   if (!/^\d{6}$/.test(confirmationCode) || confirmationCode !== character.delete_confirmation_code) throw new Error('注销验证码错误，请核对后重试。');
+  await archiveDeletedAccount(connection, qqUserId);
   let endedCombats = 0; let transferredParties = 0; let disbandedParties = 0;
 
   if (character) {

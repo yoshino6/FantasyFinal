@@ -57,6 +57,12 @@ const schemaStatements = [
     target_qq_user_id VARCHAR(32) NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id), KEY idx_admin_log_created (created_at,id), KEY idx_admin_log_operator (operator_qq_user_id,id), KEY idx_admin_log_action (action_type,id)
   ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS account_deletion_records (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, qq_user_id VARCHAR(32) NOT NULL, qq_nickname VARCHAR(128) NULL, character_name VARCHAR(24) NULL,
+    snapshot_json JSON NOT NULL, deleted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    restored_at DATETIME NULL, restored_by_qq_user_id VARCHAR(32) NULL,
+    PRIMARY KEY (id), KEY idx_deletion_record_deleted (deleted_at,id), KEY idx_deletion_record_player (qq_user_id,id), KEY idx_deletion_record_name (character_name,id), KEY idx_deletion_record_restored (restored_at,id)
+  ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS registration_sessions (
     id CHAR(36) NOT NULL, player_id BIGINT UNSIGNED NOT NULL, stage ENUM('story','audience','question','destination','danger','choice') NOT NULL DEFAULT 'story',
     constitution SMALLINT UNSIGNED NOT NULL DEFAULT 0, spirit SMALLINT UNSIGNED NOT NULL DEFAULT 0, strength SMALLINT UNSIGNED NOT NULL DEFAULT 0,
@@ -407,6 +413,7 @@ const schemaStatements = [
   , `CREATE TABLE IF NOT EXISTS player_travels (
     character_id BIGINT UNSIGNED NOT NULL, region_id BIGINT UNSIGNED NOT NULL, target_x INT NOT NULL, target_y INT NOT NULL, target_z INT NOT NULL,
     activity_type ENUM('move','hunt') NOT NULL DEFAULT 'move',
+    destination_kind ENUM('normal','home') NOT NULL DEFAULT 'normal',
     started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, arrival_at DATETIME NOT NULL,
     PRIMARY KEY (character_id), CONSTRAINT fk_travel_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
     CONSTRAINT fk_travel_region FOREIGN KEY (region_id) REFERENCES map_regions(id) ON DELETE CASCADE
@@ -702,7 +709,9 @@ const schemaStatements = [
   , `CREATE TABLE IF NOT EXISTS home_furniture_definitions (
     code VARCHAR(64) NOT NULL, name VARCHAR(64) NOT NULL, description TEXT NOT NULL, effect_json JSON NOT NULL,
     required_house_level TINYINT UNSIGNED NOT NULL DEFAULT 1, max_per_floor TINYINT UNSIGNED NOT NULL DEFAULT 1,
-    floor_slot_cost TINYINT UNSIGNED NOT NULL DEFAULT 1, is_active TINYINT(1) NOT NULL DEFAULT 1, PRIMARY KEY (code)
+    floor_slot_cost TINYINT UNSIGNED NOT NULL DEFAULT 1, grid_width TINYINT UNSIGNED NOT NULL DEFAULT 1, grid_height TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    placement_rule ENUM('wall','center','corner','wall_or_center') NOT NULL DEFAULT 'wall_or_center', layer_order SMALLINT NOT NULL DEFAULT 20,
+    is_active TINYINT(1) NOT NULL DEFAULT 1, PRIMARY KEY (code)
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS home_furniture_recipes (
     furniture_code VARCHAR(64) NOT NULL, item_id BIGINT UNSIGNED NOT NULL, quantity INT UNSIGNED NOT NULL, PRIMARY KEY (furniture_code,item_id),
@@ -711,10 +720,21 @@ const schemaStatements = [
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_home_furniture (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, home_id BIGINT UNSIGNED NOT NULL, furniture_code VARCHAR(64) NOT NULL,
-    floor_no TINYINT UNSIGNED NOT NULL DEFAULT 1, slot_key VARCHAR(32) NOT NULL, placed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    floor_no TINYINT UNSIGNED NOT NULL DEFAULT 1, slot_key VARCHAR(32) NOT NULL, grid_x TINYINT UNSIGNED NULL, grid_y TINYINT UNSIGNED NULL,
+    rotation TINYINT UNSIGNED NOT NULL DEFAULT 0, layout_version SMALLINT UNSIGNED NOT NULL DEFAULT 1, placed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id), UNIQUE KEY uk_home_furniture_slot (home_id,floor_no,slot_key), KEY idx_home_furniture_floor (home_id,floor_no,furniture_code),
     CONSTRAINT fk_home_furniture_home FOREIGN KEY (home_id) REFERENCES player_homes(id) ON DELETE CASCADE,
     CONSTRAINT fk_home_furniture_definition FOREIGN KEY (furniture_code) REFERENCES home_furniture_definitions(code)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_home_furniture_cells (
+    home_id BIGINT UNSIGNED NOT NULL, floor_no TINYINT UNSIGNED NOT NULL, grid_x TINYINT UNSIGNED NOT NULL, grid_y TINYINT UNSIGNED NOT NULL,
+    furniture_id BIGINT UNSIGNED NOT NULL, PRIMARY KEY (home_id,floor_no,grid_x,grid_y), KEY idx_home_furniture_cell_instance (furniture_id),
+    CONSTRAINT fk_home_cell_furniture FOREIGN KEY (furniture_id) REFERENCES player_home_furniture(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_home_floor_renders (
+    home_id BIGINT UNSIGNED NOT NULL, floor_no TINYINT UNSIGNED NOT NULL, layout_hash CHAR(64) NOT NULL, image_path VARCHAR(255) NOT NULL,
+    rendered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (home_id,floor_no),
+    CONSTRAINT fk_home_render_home FOREIGN KEY (home_id) REFERENCES player_homes(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS home_shop_offers (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, offer_code VARCHAR(64) NOT NULL, output_item_id BIGINT UNSIGNED NOT NULL,
@@ -728,6 +748,23 @@ const schemaStatements = [
 
 export const initializeSchema = async (pool: Pool) => {
   for (const statement of schemaStatements) await pool.query(statement);
+  try { await pool.query("ALTER TABLE player_travels ADD COLUMN destination_kind ENUM('normal','home') NOT NULL DEFAULT 'normal' AFTER activity_type"); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  for (const column of [
+    'grid_width TINYINT UNSIGNED NOT NULL DEFAULT 1',
+    'grid_height TINYINT UNSIGNED NOT NULL DEFAULT 1',
+    "placement_rule ENUM('wall','center','corner','wall_or_center') NOT NULL DEFAULT 'wall_or_center'",
+    'layer_order SMALLINT NOT NULL DEFAULT 20'
+  ]) {
+    try { await pool.query(`ALTER TABLE home_furniture_definitions ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  }
+  for (const column of [
+    'grid_x TINYINT UNSIGNED NULL',
+    'grid_y TINYINT UNSIGNED NULL',
+    'rotation TINYINT UNSIGNED NOT NULL DEFAULT 0',
+    'layout_version SMALLINT UNSIGNED NOT NULL DEFAULT 1'
+  ]) {
+    try { await pool.query(`ALTER TABLE player_home_furniture ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  }
   await pool.query(`INSERT IGNORE INTO dungeon_entrances (dungeon_id,region_id,pos_x,pos_y)
     SELECT id,entrance_region_id,entrance_x,entrance_y FROM dungeon_instances`);
   try { await pool.query('ALTER TABLE dungeon_cells ADD COLUMN landmark_text TEXT NULL AFTER trap_type'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
@@ -878,6 +915,13 @@ export const initializeSchema = async (pool: Pool) => {
   await pool.query(`UPDATE item_definitions SET is_tradeable=0 WHERE item_category IN ('地图','特殊','任务','剧情') OR code='adventurer_card'`);
   await pool.query(`UPDATE item_definitions SET weapon_type=CASE code
     WHEN 'holy_sword_shirulu' THEN '长剑' WHEN 'demon_sword_aphia' THEN '长剑' WHEN 'saint_staff_istaria' THEN '法杖' WHEN 'death_dagger_azra' THEN '匕首' WHEN 'godfist_chronos' THEN '拳刃' WHEN 'oracle_grimoire_sophia' THEN '法书' WHEN 'prayer_orb_lumia' THEN '法球' WHEN 'immortal_shield_auges' THEN '盾牌' ELSE weapon_type END`);
+  // 兼容旧版熔铸：旧逻辑会把神器标识字符串 Number 化后写成 null，导致战斗与详情丢失原有效果。
+  // 神器标识只来自定义表，且熔铸材料不会修改它，启动时安全补回即可恢复已受影响的装备实例。
+  await pool.query(`UPDATE player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
+    SET ii.effect_json=JSON_SET(ii.effect_json,'$.artifact',JSON_EXTRACT(i.effect_json,'$.artifact'))
+    WHERE ii.effect_json IS NOT NULL
+      AND JSON_EXTRACT(i.effect_json,'$.artifact') IS NOT NULL
+      AND (JSON_EXTRACT(ii.effect_json,'$.artifact') IS NULL OR JSON_TYPE(JSON_EXTRACT(ii.effect_json,'$.artifact'))<>'STRING')`);
   await pool.query(`UPDATE item_definitions SET codex_id=CONCAT(CASE WHEN item_type='equipment' THEN CASE item_category WHEN '武器' THEN '11' WHEN '副手' THEN '12' WHEN '头部' THEN '13' WHEN '头肩' THEN '13' WHEN '上装' THEN '14' WHEN '腰部' THEN '15' WHEN '下装' THEN '16' WHEN '脚部' THEN '17' WHEN '项链' THEN '18' WHEN '手镯' THEN '19' WHEN '戒指' THEN '10' ELSE '19' END WHEN item_type='consumable' THEN CASE item_category WHEN '药剂' THEN '21' WHEN '食物' THEN '22' ELSE '23' END WHEN item_type='material' THEN CASE item_category WHEN '食材' THEN '31' WHEN '草药' THEN '32' ELSE '39' END ELSE '99' END, LPAD(id,5,'0')) WHERE codex_id IS NULL`);
   await pool.query(`INSERT INTO profession_definitions (code,name,description,growth_json,skill_codes_json) VALUES
     ('warrior','战士','以长剑与盾牌守住前线的职业。',JSON_OBJECT('constitution',1.2,'strength',1.2),JSON_ARRAY('longsword_mastery','shield_mastery')),
@@ -1072,25 +1116,25 @@ export const initializeSchema = async (pool: Pool) => {
     ,('demon_breaker_teleporter', '破魔传送器', '唯薇安研制的便携式传送装置。持有时可穿过地下迷宫入口的封印，也能在迷宫中借它强制脱离，回到入口之外。', '百纳镇·异工坊', 'consumable', '特殊', 0.60, 1, JSON_OBJECT('dungeonGatePass',true))
     ,('demon_breaker_teleporter_blueprint', '破魔传送器图纸', '记载破魔传送器完整回路的图纸；解构师持有后可稳定构造该装置。', '百纳镇·异工坊', 'consumable', '图纸', 0.01, 1, JSON_OBJECT('constructionBlueprint','demon_breaker_teleporter'))
     ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description), obtain_source = VALUES(obtain_source), item_category = VALUES(item_category), stackable = VALUES(stackable), effect_json = VALUES(effect_json)`);
-  await pool.query(`INSERT INTO home_furniture_definitions (code,name,description,effect_json,required_house_level,max_per_floor,floor_slot_cost,is_active) VALUES
-    ('wooden_bed','木床','朴素却结实的木床，在家休息时恢复速度 +10%。',JSON_OBJECT('restRecoveryPct',10),1,1,1,1),
-    ('slime_bed','史莱姆床','会轻轻回弹的凝胶床，在家休息时生命与魔力恢复速度 +20%。',JSON_OBJECT('restRecoveryPct',20),1,1,1,1),
-    ('storage_chest','家园储物箱','加固的木箱，让家园面板显示额外储物容量 +20。',JSON_OBJECT('storageCapacity',20),1,3,1,1),
-    ('training_dummy','训练木桩','可以反复练习发力的木桩，显示训练加成 +5%。',JSON_OBJECT('trainingBonusPct',5),1,2,1,1),
-    ('warm_hearth','暖炉','温暖炉火驱散疲惫，在家休息时恢复速度 +15%。',JSON_OBJECT('restRecoveryPct',15),2,1,2,1),
-    ('wolfhide_carpet','幽狼皮毯','由柔韧怪材制成的地毯，显示感知布置 +2。',JSON_OBJECT('homePerception',2),2,2,1,1),
-    ('alchemy_shelf','炼金陈列架','摆满瓶罐的陈列架，显示炼金氛围 +10%。',JSON_OBJECT('alchemyBonusPct',10),2,1,1,1),
-    ('moonlight_lamp','月光灯','嵌有月银碎片的灯具，在家休息时恢复速度 +8%。',JSON_OBJECT('restRecoveryPct',8),3,2,1,1)
-    ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),effect_json=VALUES(effect_json),required_house_level=VALUES(required_house_level),max_per_floor=VALUES(max_per_floor),floor_slot_cost=VALUES(floor_slot_cost),is_active=VALUES(is_active)`);
+  await pool.query(`INSERT INTO home_furniture_definitions (code,name,description,effect_json,required_house_level,max_per_floor,floor_slot_cost,grid_width,grid_height,placement_rule,layer_order,is_active) VALUES
+    ('wooden_bed','木床','朴素却结实的木床，在家休息时体力恢复速度 +5%。',JSON_OBJECT('restRecoveryPct',5),1,1,1,3,4,'wall',20,1),
+    ('slime_bed','史莱姆床','会轻轻回弹的凝胶床，在家休息时体力恢复速度 +6%。',JSON_OBJECT('restRecoveryPct',6),1,1,1,3,4,'wall',20,1),
+    ('storage_chest','小型储物箱','加固的木箱，家园内储物容量 +10。',JSON_OBJECT('storageCapacity',10),1,3,1,2,2,'wall',20,1),
+    ('training_dummy','训练木桩','可以反复练习发力的木桩，战斗技能领悟概率 +5%。',JSON_OBJECT('trainingBonusPct',5),1,2,1,2,2,'center',20,1),
+    ('warm_hearth','暖炉','温暖炉火驱散疲惫，在家休息时清除自身全部异常状态。',JSON_OBJECT('cleanseOnHomeRest',1),2,1,2,3,2,'wall',20,1),
+    ('wolfhide_carpet','幽狼皮毯','由柔韧怪材制成的地毯，战斗技能领悟概率 +6%。',JSON_OBJECT('trainingBonusPct',6),2,2,1,4,3,'center',10,1),
+    ('alchemy_shelf','炼金陈列架','摆满瓶罐的陈列架，显示炼金氛围 +10%。',JSON_OBJECT('alchemyBonusPct',10),2,1,1,3,2,'wall',20,1),
+    ('moonlight_lamp','月光灯','嵌有月银碎片的灯具，在家休息时可缓慢获取经验。',JSON_OBJECT('homeRestExperiencePerMinute',1),3,2,1,1,1,'corner',30,1)
+    ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),effect_json=VALUES(effect_json),required_house_level=VALUES(required_house_level),max_per_floor=VALUES(max_per_floor),floor_slot_cost=VALUES(floor_slot_cost),grid_width=VALUES(grid_width),grid_height=VALUES(grid_height),placement_rule=VALUES(placement_rule),layer_order=VALUES(layer_order),is_active=VALUES(is_active)`);
   await pool.query(`INSERT INTO home_furniture_recipes (furniture_code,item_id,quantity)
     SELECT recipe.furniture_code,i.id,recipe.quantity FROM (
-      SELECT 'wooden_bed' AS furniture_code,'home_wood' AS item_code,20 AS quantity UNION ALL SELECT 'wooden_bed','home_stone',4
+      SELECT 'wooden_bed' AS furniture_code,'home_wood' AS item_code,50 AS quantity UNION ALL SELECT 'wooden_bed','home_stone',18
       UNION ALL SELECT 'slime_bed','home_wood',25 UNION ALL SELECT 'slime_bed','slime_gel',15
       UNION ALL SELECT 'storage_chest','home_wood',15 UNION ALL SELECT 'storage_chest','home_metal',2
-      UNION ALL SELECT 'training_dummy','home_wood',30 UNION ALL SELECT 'training_dummy','home_metal',5
-      UNION ALL SELECT 'warm_hearth','home_stone',24 UNION ALL SELECT 'warm_hearth','home_metal',8
-      UNION ALL SELECT 'wolfhide_carpet','beast_hide',12 UNION ALL SELECT 'wolfhide_carpet','magic_wool',8
-      UNION ALL SELECT 'alchemy_shelf','home_wood',22 UNION ALL SELECT 'alchemy_shelf','beast_core',3
+      UNION ALL SELECT 'training_dummy','home_wood',40 UNION ALL SELECT 'training_dummy','home_stone',10 UNION ALL SELECT 'training_dummy','home_metal',8
+      UNION ALL SELECT 'warm_hearth','home_stone',45 UNION ALL SELECT 'warm_hearth','home_metal',16
+      UNION ALL SELECT 'wolfhide_carpet','beast_hide',20 UNION ALL SELECT 'wolfhide_carpet','magic_wool',8
+      UNION ALL SELECT 'alchemy_shelf','home_wood',35 UNION ALL SELECT 'alchemy_shelf','beast_core',3
       UNION ALL SELECT 'moonlight_lamp','home_metal',10 UNION ALL SELECT 'moonlight_lamp','moon_silver',1
     ) recipe JOIN item_definitions i ON i.code=recipe.item_code
     ON DUPLICATE KEY UPDATE quantity=VALUES(quantity)`);

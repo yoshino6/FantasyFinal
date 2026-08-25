@@ -1151,7 +1151,7 @@ export const coordinateInteraction = async (qqUserId: string, type: CoordinateIn
   return { character, kind: 'object' as const, text: target.type === '玩家' ? target.description : target.description };
 });
 
-export const moveTo = async (qqUserId: string, x: number, y: number) => {
+export const moveTo = async (qqUserId: string, x: number, y: number, options: { destinationKind?: 'normal' | 'home' } = {}) => {
   if (!Number.isInteger(x) || !Number.isInteger(y)) throw new Error('目标坐标必须为整数。');
   const carry = await inventory(qqUserId);
   return withTransaction(async connection => {
@@ -1177,8 +1177,9 @@ export const moveTo = async (qqUserId: string, x: number, y: number) => {
     const [existing] = await connection.execute<(RowDataPacket & { activity_type: 'move' | 'hunt' })[]>('SELECT activity_type FROM player_travels WHERE character_id=? FOR UPDATE', [character.id]); if (existing[0]) throw new Error(existing[0].activity_type === 'hunt' ? '你正在寻怪，请等待完成或取消寻怪。' : '你正在前往目标地点，请等待抵达或取消移动。');
     const seconds = Math.max(1, Math.ceil(distance / carry.movementSpeed));
     const [landmarks] = await connection.execute<(RowDataPacket & { name: string })[]>('SELECT name FROM map_npcs WHERE region_id=? AND pos_x=? AND pos_y=? AND pos_z=? AND interaction_kind=\'building\' LIMIT 1', [region.id, x, y, character.pos_z]);
-    await connection.execute("INSERT INTO player_travels (character_id,region_id,target_x,target_y,target_z,activity_type,arrival_at) VALUES (?,?,?,?,?,'move',DATE_ADD(NOW(),INTERVAL ? SECOND))", [character.id, region.id, x, y, character.pos_z, seconds]);
-    return { kind: 'travel' as const, regionName: region.name, destinationName: landmarks[0]?.name, x, y, seconds, remaining: seconds };
+    const destinationKind = options.destinationKind ?? 'normal';
+    await connection.execute("INSERT INTO player_travels (character_id,region_id,target_x,target_y,target_z,activity_type,destination_kind,arrival_at) VALUES (?,?,?,?,?,'move',?,DATE_ADD(NOW(),INTERVAL ? SECOND))", [character.id, region.id, x, y, character.pos_z, destinationKind, seconds]);
+    return { kind: 'travel' as const, regionName: region.name, destinationName: landmarks[0]?.name, destinationKind, x, y, seconds, remaining: seconds };
   });
 };
 
@@ -1273,7 +1274,7 @@ const affinityTag = (physicalMultiplier: number, elementalMultiplierValue: numbe
 };
 
 export const travelStatus = async (qqUserId: string) => {
-  const character = await characterFor(qqUserId); const pool = await getPool(); const [rows] = await pool.execute<(RowDataPacket & { target_x: number; target_y: number; target_z: number; activity_type: 'move' | 'hunt'; seconds: number; remaining: number; region_name: string; destination_name: string | null })[]>(`SELECT t.target_x,t.target_y,t.target_z,t.activity_type,
+  const character = await characterFor(qqUserId); const pool = await getPool(); const [rows] = await pool.execute<(RowDataPacket & { target_x: number; target_y: number; target_z: number; activity_type: 'move' | 'hunt'; destination_kind: 'normal' | 'home'; seconds: number; remaining: number; region_name: string; destination_name: string | null })[]>(`SELECT t.target_x,t.target_y,t.target_z,t.activity_type,t.destination_kind,
     GREATEST(1,TIMESTAMPDIFF(SECOND,t.started_at,t.arrival_at)) AS seconds,
     GREATEST(0,CEIL(TIMESTAMPDIFF(MICROSECOND,NOW(6),t.arrival_at)/1000000)) AS remaining,
     r.name AS region_name,n.name AS destination_name
@@ -1282,15 +1283,20 @@ export const travelStatus = async (qqUserId: string) => {
     WHERE t.character_id=?`, [character.id]); const travel = rows[0];
   if (!travel) return null; const remaining = Math.max(0, Number(travel.remaining));
   const seconds = Math.max(1, Number(travel.seconds));
-  return { x: Number(travel.target_x), y: Number(travel.target_y), z: Number(travel.target_z), activityType: travel.activity_type, regionName: travel.region_name, destinationName: travel.destination_name ?? undefined, seconds, remaining };
+  return { x: Number(travel.target_x), y: Number(travel.target_y), z: Number(travel.target_z), activityType: travel.activity_type, destinationKind: travel.destination_kind, regionName: travel.region_name, destinationName: travel.destination_name ?? undefined, seconds, remaining };
 };
 
-export const completeTravel = async (qqUserId: string) => withTransaction(async connection => {
-  const character = await characterFor(qqUserId); const [rows] = await connection.execute<(RowDataPacket & { target_x: number; target_y: number; target_z: number; activity_type: 'move' | 'hunt'; arrived: number })[]>('SELECT target_x,target_y,target_z,activity_type,arrival_at<=NOW(6) AS arrived FROM player_travels WHERE character_id=? FOR UPDATE', [character.id]); const travel = rows[0]; if (!travel || !Number(travel.arrived)) return null;
-  await connection.execute('DELETE FROM player_travels WHERE character_id=?', [character.id]);
-  const result = await moveToPosition(connection, qqUserId, Number(travel.target_x), Number(travel.target_y), false);
-  return { ...result, arrivalActivity: travel.activity_type };
-});
+export const completeTravel = async (qqUserId: string) => {
+  const completed = await withTransaction(async connection => {
+    const character = await characterFor(qqUserId); const [rows] = await connection.execute<(RowDataPacket & { target_x: number; target_y: number; target_z: number; activity_type: 'move' | 'hunt'; destination_kind: 'normal' | 'home'; arrived: number })[]>('SELECT target_x,target_y,target_z,activity_type,destination_kind,arrival_at<=NOW(6) AS arrived FROM player_travels WHERE character_id=? FOR UPDATE', [character.id]); const travel = rows[0]; if (!travel || !Number(travel.arrived)) return null;
+    await connection.execute('DELETE FROM player_travels WHERE character_id=?', [character.id]);
+    const result = await moveToPosition(connection, qqUserId, Number(travel.target_x), Number(travel.target_y), false);
+    return { ...result, arrivalActivity: travel.activity_type, destinationKind: travel.destination_kind };
+  });
+  if (!completed || completed.destinationKind !== 'home') return completed;
+  const { enterHome } = await import('./home.service');
+  return { ...completed, homeEntry: await enterHome(qqUserId) };
+};
 
 /**
  * 延时移动会保存在数据库中；这个补偿结算用于覆盖热重载、进程重启或单次计时器丢失。

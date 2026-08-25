@@ -263,7 +263,7 @@ const scheduleCompletedTravelReply = (message: any, qqUserId: string, result: an
   travelReplyTimers.add(timer);
 };
 
-const scheduleTravelCompletion = (message: any, qqUserId: string, seconds: number) => {
+export const scheduleTravelCompletion = (message: any, qqUserId: string, seconds: number) => {
   const previous = travelTimers.get(qqUserId); if (previous) clearTimeout(previous);
   let retrySeconds: number | null = null;
   let timer: ReturnType<typeof setTimeout>;
@@ -714,6 +714,13 @@ const showMoveResult = async (message: any, qqUserId: string, result: any) => {
   if (result.character?.enteredTown && wanted) {
     try { await publishWantedCityEntryNotice(wanted); }
     catch (error) { logger.warn({ err: error, qqUserId }, '到达城镇后的通缉公告发送失败'); }
+  }
+  if (result.destinationKind === 'home') {
+    const entry = result.homeEntry;
+    if (!entry) throw new Error('已抵达小屋地块，但自动进入家园失败，请再次发送“/家园回家”。');
+    const { homeFormat } = await import('./home');
+    await message.send({ format: await homeFormat(qqUserId, `你已回家。${entry.pursuit?.text ? `\n${entry.pursuit.text}` : ''}`) });
+    return;
   }
   const debtCollection = result.character?.debtCollection;
   if (debtCollection?.collected) result.text = `${result.text}\n\n城镇执法队扣除了铜币×${debtCollection.collected}，用于归还失主。${debtCollection.remaining ? `尚欠铜币×${debtCollection.remaining}。` : ''}`;
