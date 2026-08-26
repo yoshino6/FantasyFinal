@@ -112,15 +112,19 @@ const equipmentCombatNotes = (name: string, effect: Record<string, unknown>) => 
 };
 
 const activeCharacterEffects = async (connection: Pool | PoolConnection, characterId: number) => {
-  const [foodRows, battleRows, equipmentRows] = await Promise.all([
+  const [foodRows, battleRows, equipmentRows, timedRows] = await Promise.all([
     connection.execute<(RowDataPacket & { name: string; buff_json: unknown; remaining_seconds: number })[]>(`SELECT i.name,b.buff_json,GREATEST(0,TIMESTAMPDIFF(SECOND,NOW(),b.expires_at)) AS remaining_seconds FROM player_food_buffs b JOIN item_definitions i ON i.id=b.item_id WHERE b.character_id=? AND b.expires_at>NOW() ORDER BY b.expires_at`, [characterId]),
     connection.execute<(RowDataPacket & { buff_code: string; remaining_battles: number })[]>('SELECT buff_code,remaining_battles FROM player_battle_buffs WHERE character_id=? AND remaining_battles>0 ORDER BY buff_code', [characterId]),
-    connection.execute<(RowDataPacket & { name: string; effect_json: unknown })[]>(`SELECT i.name,COALESCE(ii.effect_json,i.effect_json) AS effect_json FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id WHERE pe.character_id=?`, [characterId])
+    connection.execute<(RowDataPacket & { name: string; effect_json: unknown })[]>(`SELECT i.name,COALESCE(ii.effect_json,i.effect_json) AS effect_json FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id WHERE pe.character_id=?`, [characterId]),
+    connection.execute<(RowDataPacket & { buff_code: string; remaining_seconds: number; experience_multiplier: number; all_core_attributes_multiplier: number })[]>(`SELECT buff_code,GREATEST(0,TIMESTAMPDIFF(SECOND,NOW(),expires_at)) AS remaining_seconds,experience_multiplier,all_core_attributes_multiplier FROM player_timed_buffs WHERE character_id=? AND expires_at>NOW() ORDER BY expires_at`, [characterId])
   ]);
   const activeBuffs = foodRows[0].map(row => `${row.name}：${foodBuffText(jsonRecord(row.buff_json))}｜剩余${Math.max(0, Number(row.remaining_seconds))}秒`);
   for (const row of battleRows[0]) {
     if (row.buff_code === 'minor_experience_elixir') activeBuffs.push(`经验秘药（小）：经验获取+25%｜剩余${row.remaining_battles}场战斗`);
     if (row.buff_code === 'minor_luck_elixir') activeBuffs.push(`幸运秘药（小）：队伍掉率+25%｜剩余${row.remaining_battles}场战斗`);
+  }
+  for (const row of timedRows[0]) {
+    if (row.buff_code === 'church_blessing') activeBuffs.push(`教堂祈福：经验获取+${Math.round((Number(row.experience_multiplier) - 1) * 100)}%｜全六项核心属性+${Math.round((Number(row.all_core_attributes_multiplier) - 1) * 100)}%｜剩余${Math.max(0, Number(row.remaining_seconds))}秒`);
   }
   const combatNotes = equipmentRows[0].flatMap(row => equipmentCombatNotes(row.name, jsonRecord(row.effect_json)));
   return { activeBuffs, combatNotes };
@@ -144,7 +148,11 @@ export const recalculateCharacterStats = async (connection: Pool | PoolConnectio
     JOIN item_definitions i ON i.id=pe.item_id
     WHERE pe.character_id=? AND COALESCE(i.required_level,1)>?`, [characterId, Number(character.level)]);
   await connection.execute('DELETE FROM player_food_buffs WHERE character_id=? AND expires_at<=NOW()', [characterId]);
-  const equippedStats = await withEquipmentStats(connection, characterId, calculateDerivedStats(finalAttributes(character)));
+  const [timedRows] = await connection.execute<(RowDataPacket & { all_core_attributes_multiplier: number })[]>(`SELECT all_core_attributes_multiplier FROM player_timed_buffs WHERE character_id=? AND buff_code='church_blessing' AND expires_at>NOW() LIMIT 1`, [characterId]);
+  const attributeMultiplier = Number(timedRows[0]?.all_core_attributes_multiplier ?? 1);
+  const baseAttributes = finalAttributes(character);
+  const effectiveAttributes = Object.fromEntries(attributes.map(key => [key, baseAttributes[key] * attributeMultiplier])) as Allocation;
+  const equippedStats = await withEquipmentStats(connection, characterId, calculateDerivedStats(effectiveAttributes));
   const stats = withVirtualNpcEquipment(equippedStats, Number(character.level), character.npc_code === null ? null : String(character.npc_code));
   const baseMastery = jsonRecord(character.element_base_mastery_json ?? character.element_mastery_json);
   const baseResistance = jsonRecord(character.element_base_resistance_json ?? character.element_resistance_json);
@@ -306,10 +314,17 @@ export const getCharacter = async (qqUserId: string): Promise<CharacterView | nu
   );
   const row = rows[0];
   if (!row) return null;
-  const [extraAttributes, activeEffects] = await Promise.all([equipmentExtraAttributes(pool, Number(characterRows[0].id)), activeCharacterEffects(pool, Number(characterRows[0].id))]);
+  const [extraAttributes, activeEffects, timedRows] = await Promise.all([
+    equipmentExtraAttributes(pool, Number(characterRows[0].id)),
+    activeCharacterEffects(pool, Number(characterRows[0].id)),
+    pool.execute<(RowDataPacket & { all_core_attributes_multiplier: number })[]>(`SELECT all_core_attributes_multiplier FROM player_timed_buffs WHERE character_id=? AND buff_code='church_blessing' AND expires_at>NOW() LIMIT 1`, [Number(characterRows[0].id)])
+  ]);
+  const attributeMultiplier = Number(timedRows[0][0]?.all_core_attributes_multiplier ?? 1);
+  const baseAttributes = finalAttributes(row);
+  const effectiveAttributes = Object.fromEntries(attributes.map(key => [key, baseAttributes[key] * attributeMultiplier])) as Allocation;
   return {
     ...row,
-    ...finalAttributes(row),
+    ...effectiveAttributes,
     stamina: Math.min(staminaMaxForRealm(Number(row.realmStage)), Math.max(0, Number(row.stamina))),
     staminaMax: staminaMaxForRealm(Number(row.realmStage)),
     elementMastery: typeof row.elementMastery === 'string' ? JSON.parse(row.elementMastery) : row.elementMastery ?? {},

@@ -142,10 +142,11 @@ const forgeMaterialsFormat = async (qqUserId: string, page = 1, keyword = '') =>
     const tendency = materialTendencies[material.code] ?? '已配置锻造倾向';
     markdown.addBlockquote(`${'①②③④⑤⑥⑦⑧⑨⑩'.charAt(index)}【${material.category}】${material.name}×${material.quantity}（已放入${material.selected}）｜${tendency}`).addText(' ').addButton('[放入]', { data: `/放入打造材料 ${material.id}`, autoEnter: false }).addText(' ').addButton('[取出]', { data: `/取出打造材料 ${material.id}`, autoEnter: false }).addNewline();
   }
-  markdown.addText(`当前第（${currentPage}/${totalPages}）页`).addNewline()
-    .addText('操作：').addText(' ').addButton('[开始打造]', { data: '/开始打造', autoEnter: false }).addText(' ').addButton('[重新选择]', { data: forgeCommand(state.source), autoEnter: false });
+  markdown.addText(`当前第（${currentPage}/${totalPages}）页`).addNewline();
   const previous = Math.max(1, currentPage - 1); const next = Math.min(totalPages, currentPage + 1); const pageCommand = (target: number) => `/打造材料页 ${target}${keyword ? ` ${keyword}` : ''}`;
-  return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('上一页', pageCommand(previous), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined }).addButton('搜索', '/打造材料搜索', { type: 'command', autoEnter: false }).addButton('下一页', pageCommand(next), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined }));
+  return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup()
+    .addRow().addButton('上一页', pageCommand(previous), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined }).addButton('搜索', '/打造材料搜索', { type: 'command', autoEnter: false }).addButton('下一页', pageCommand(next), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined })
+    .addRow().addButton('开始打造', '/开始打造', { type: 'command', autoEnter: true, style: 'blue' }).addButton('重新选择', forgeCommand(state.source), { type: 'command', autoEnter: true }));
 };
 const openForge = (source: 'blacksmith' | 'profession') => async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await resetForgeSession(event.current.UserId, source); await message.send({ format: await forgeFormat(source) }); } catch (error) { await message.send({ format: messageFormat('无法打造', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const forgeHandler = openForge('blacksmith');

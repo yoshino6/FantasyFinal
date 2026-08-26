@@ -1,18 +1,13 @@
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { resolvePvpVictory } from './pvp.service';
+import { recordFriendInteraction } from './social.service';
 
 const DUNGEON_REGION_CODE = 'dark_forest_dungeon';
 const FLOORS = [-10, -20, -30] as const;
 const key = (x: number, y: number) => `${x},${y}`;
 const random = <T>(items: T[]) => items[Math.floor(Math.random() * items.length)];
 const skillJson = (value: unknown) => typeof value === 'string' ? value : JSON.stringify(value ?? []);
-const interactionRange = (character: CharacterRow) => {
-  const perception = Number(character.perception) + Number(character.perception_growth) * Math.max(0, Number(character.level) - 1);
-  const statValue = 1 + Math.floor(Math.pow(Math.max(1, perception) / 7, .9));
-  const levelCap = Math.min(10, 2 + Math.floor(Math.max(1, Number(character.level)) / 5));
-  return Math.max(1, Math.min(10, levelCap, statValue));
-};
 
 type CharacterRow = RowDataPacket & { id: number; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; level: number; perception: number; perception_growth: number; hp_max: number; mp_max: number; current_hp: number; current_mp: number; physical_attack: number; magic_attack: number; physical_defense: number; magic_defense: number; accuracy: number; evasion: number; game_id: number; name: string; secondary_profession_code: string | null };
 type DungeonRow = RowDataPacket & { id: number; entrance_region_id: number; entrance_x: number; entrance_y: number; origin_x: number; origin_y: number; state: 'active' | 'cleared' | 'closed' };
@@ -478,10 +473,14 @@ export const dungeonPvP = async (qqUserId: string, targetGameId: number) => with
 export const interactDungeonPlayer = async (qqUserId: string, targetGameId: number) => withTransaction(async connection => {
   const character = await characterFor(connection, qqUserId, true);
   const [targets] = await connection.execute<CharacterRow[]>('SELECT * FROM characters WHERE game_id=? AND npc_code IS NULL FOR UPDATE', [targetGameId]); const target = targets[0];
-  const dungeonRegion = await regionId(connection, DUNGEON_REGION_CODE);
-  const range = Number(character.current_region_id) === dungeonRegion ? 1 : interactionRange(character);
-  if (!target || Number(target.id) === Number(character.id) || Number(target.current_region_id) !== Number(character.current_region_id) || Number(target.pos_z) !== Number(character.pos_z) || Math.abs(Number(target.pos_x) - Number(character.pos_x)) + Math.abs(Number(target.pos_y) - Number(character.pos_y)) > range) throw new Error('对方已经离开你的感知范围。');
-  return { name: target.name, text: `你向【${target.name}】打了个招呼。对方也朝你点了点头。` };
+
+  const range = 0;
+  if (!target || Number(target.id) === Number(character.id) || Number(target.current_region_id) !== Number(character.current_region_id) || Number(target.pos_z) !== Number(character.pos_z) || Math.abs(Number(target.pos_x) - Number(character.pos_x)) + Math.abs(Number(target.pos_y) - Number(character.pos_y)) > range) throw new Error('目标不在同一坐标。');
+  const affinity = await recordFriendInteraction(connection, Number(character.id), Number(target.id));
+  if (!affinity) return { name: target.name, isFriend: false, text: `你向【${target.name}】打了个招呼。对方也朝你点了点头。\n\n若想记录更深的同行记忆，可以先互相成为好友。` };
+  return { name: target.name, isFriend: true, text: affinity.changed
+    ? `你向【${target.name}】打了个招呼。对方也朝你点了点头。\n\n同行的默契又多了一点。好感 +5\n当前阶段：${affinity.stage.title}｜好感：${affinity.affinity}\n今日互动：${affinity.dailyInteractions}/3`
+    : `你向【${target.name}】打了个招呼。今天的互动记录次数已用完，但这份问候仍被好好收下。\n当前阶段：${affinity.stage.title}｜好感：${affinity.affinity}` };
 });
 
 /** 最终 Boss 被击败时关闭该迷宫，并在两小时后允许刷新新结构。 */
@@ -491,6 +490,7 @@ export const closeDungeonForBossSpawns = async (connection: PoolConnection, spaw
   const dungeonId = Number(rows[0]?.dungeon_id ?? 0); if (!dungeonId) return false;
   const [dungeons] = await connection.execute<DungeonRow[]>('SELECT * FROM dungeon_instances WHERE id=? AND state=\'active\' FOR UPDATE', [dungeonId]); const dungeon = dungeons[0]; if (!dungeon) return false;
   await connection.execute('UPDATE dungeon_instances SET state=\'cleared\',cleared_at=NOW(),refresh_at=DATE_ADD(NOW(),INTERVAL 2 HOUR) WHERE id=?', [dungeonId]);
+
   const dungeonRegion = await regionId(connection, DUNGEON_REGION_CODE);
   await connection.execute(`UPDATE characters c JOIN dungeon_cells dc ON dc.pos_x=c.pos_x AND dc.pos_y=c.pos_y AND dc.pos_z=c.pos_z AND dc.dungeon_id=?
     SET c.current_region_id=?,c.pos_x=?,c.pos_y=?,c.pos_z=0 WHERE c.current_region_id=?`, [dungeonId, dungeon.entrance_region_id, dungeon.entrance_x, dungeon.entrance_y, dungeonRegion]);

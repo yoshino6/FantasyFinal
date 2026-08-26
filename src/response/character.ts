@@ -54,7 +54,7 @@ const overviewFormat = (character: CharacterView) => {
   const experienceNeed = experienceRequiredForLevel(character.level);
   const markdown = Format.createMarkdown()
     .addTitle('我').addNewline().addNewline()
-    .addText(`昵称：${character.name}`).addButton('[改名]', { data: '/改名 ', autoEnter: false }).addNewline().addNewline()
+    .addText(`昵称：${character.name}`).addButton('[改名]', { data: '/角色改名 ', autoEnter: false }).addNewline().addNewline()
     .addText(`性别：${gender}`).addButton('[改性]', { data: '/改性 ', autoEnter: false }).addNewline().addNewline()
     .addText(`等级：Lv${character.level}`).addNewline().addNewline()
     .addText(`经验：${character.experience}/${experienceNeed}`).addNewline().addNewline()

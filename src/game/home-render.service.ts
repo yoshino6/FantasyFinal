@@ -39,7 +39,7 @@ import moonlightLampFront from '../assets/home/furniture/directional/moonlight-l
 import moonlightLampSide from '../assets/home/furniture/directional/moonlight-lamp-side.png';
 import moonlightLampBack from '../assets/home/furniture/directional/moonlight-lamp-back.png';
 
-const HOME_ASSET_VERSION = 'cozy-pixel-home-v12-clean-wooden-bed-side';
+const HOME_ASSET_VERSION = 'cozy-pixel-home-v13-furniture-render-insets';
 const assetPath = (asset: string) => decodeURIComponent(asset).replace(/^([a-zA-Z]):(?![\\/])/, '$1:\\');
 type HomePeriod = 'morning' | 'noon' | 'evening';
 const backgrounds: Record<1 | 2 | 3, Record<HomePeriod, string>> = {
@@ -85,19 +85,25 @@ const furnitureAssetFor = (code: string, rotation: number) => {
   const assets = furnitureAssets[code];
   if (!assets) return null;
   const edgeCleanup: FurnitureEdgeCleanup = code === 'storage_chest' ? 'detached' : 'none';
-  if (rotation === 90) return { asset: assets.side, mirror: false, edgeCleanup };
-  if (rotation === 180) return { asset: assets.back, mirror: false, edgeCleanup };
-  if (rotation === 270) return { asset: assets.side, mirror: true, edgeCleanup };
-  return { asset: assets.front, mirror: false, edgeCleanup };
+  const insetRatio = code === 'wooden_bed' && (rotation === 90 || rotation === 270) ? .052 : 0;
+  const drawShadow = !['wooden_bed', 'slime_bed', 'storage_chest', 'warm_hearth', 'alchemy_shelf'].includes(code);
+  if (rotation === 90) return { asset: assets.side, mirror: false, edgeCleanup, insetRatio, drawShadow };
+  if (rotation === 180) return { asset: assets.back, mirror: false, edgeCleanup, insetRatio, drawShadow };
+  if (rotation === 270) return { asset: assets.side, mirror: true, edgeCleanup, insetRatio, drawShadow };
+  return { asset: assets.front, mirror: false, edgeCleanup, insetRatio, drawShadow };
 };
-const cleanFurnitureAsset = async (asset: string, width: number, height: number, mirror: boolean, edgeCleanup: FurnitureEdgeCleanup) => {
+const cleanFurnitureAsset = async (asset: string, width: number, height: number, mirror: boolean, edgeCleanup: FurnitureEdgeCleanup, insetRatio: number) => {
   let source = sharp(await readFile(asset));
   if (mirror) source = source.flop();
-  const rendered = await source.resize(width, height, {
+  const insetX = Math.round(width * insetRatio); const insetY = Math.round(height * insetRatio * .75);
+  const innerWidth = Math.max(1, width - insetX * 2); const innerHeight = Math.max(1, height - insetY * 2);
+  const resized = await source.resize(innerWidth, innerHeight, {
     fit: 'contain',
     withoutEnlargement: false,
     background: { r: 0, g: 0, b: 0, alpha: 0 }
-  }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  }).ensureAlpha().png().toBuffer();
+  const rendered = await sharp({ create: { width, height, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite([{ input: resized, left: insetX, top: insetY }]).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const pixels = rendered.data; const channels = rendered.info.channels; const alphaAt = (x: number, y: number) => pixels[(y * width + x) * channels + 3];
   const clearColumn = (x: number) => { for (let y = 0; y < height; y++) pixels[(y * width + x) * channels + 3] = 0; };
   const clearRow = (y: number) => { for (let x = 0; x < width; x++) pixels[(y * width + x) * channels + 3] = 0; };
@@ -184,8 +190,8 @@ export const homeFloorImage = async (qqUserId: string, floor: number) => {
       ? left - wallBleedX
       : Number(item.grid_x) + footprint.width === room.columns ? left + wallBleedX : left;
     const renderTop = Number(item.grid_y) === 0 ? top - wallBleedY : top;
-    composites.push({ input: shadowSvg(width, height), left: renderLeft, top: renderTop });
-    composites.push({ input: await cleanFurnitureAsset(selectedAsset.asset, width, height, selectedAsset.mirror, selectedAsset.edgeCleanup), left: renderLeft, top: renderTop });
+    if (selectedAsset.drawShadow) composites.push({ input: shadowSvg(width, height), left: renderLeft, top: renderTop });
+    composites.push({ input: await cleanFurnitureAsset(selectedAsset.asset, width, height, selectedAsset.mirror, selectedAsset.edgeCleanup, selectedAsset.insetRatio), left: renderLeft, top: renderTop });
   }
   const frontWallTop = Math.max(0, Math.round(room.floorBottom - size * 0.016));
   composites.push({ input: await sharp(resizedBackground).extract({ left: 0, top: frontWallTop, width: size, height: size - frontWallTop }).png().toBuffer(), left: 0, top: frontWallTop });

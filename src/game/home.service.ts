@@ -5,7 +5,7 @@ import { backfillHomeFloorLayout, findFurniturePlacement, occupyFurnitureCells }
 
 type Db = Pool | PoolConnection;
 type Character = RowDataPacket & { id: number; player_id: number; name: string; copper_coins: number; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; activity_status: string; region_code: string };
-type Home = RowDataPacket & { id: number; character_id: number; town_region_id: number; plot_x: number; plot_y: number; plot_z: number; house_level: number; floor_count: number; status: string };
+type Home = RowDataPacket & { id: number; character_id: number; home_name: string; town_region_id: number; plot_x: number; plot_y: number; plot_z: number; house_level: number; floor_count: number; status: string };
 type Furniture = RowDataPacket & { id: number; furniture_code: string; name: string; description: string; effect_json: unknown; floor_no: number; slot_key: string; grid_x: number | null; grid_y: number | null; grid_width: number; grid_height: number; rotation: number };
 type FurnitureDefinition = RowDataPacket & { code: string; name: string; description: string; effect_json: unknown; required_house_level: number; max_per_floor: number; floor_slot_cost: number; grid_width: number; grid_height: number; placement_rule: 'wall' | 'center' | 'corner' | 'wall_or_center'; layer_order: number };
 
@@ -71,9 +71,21 @@ export const homeRestRecoveryBonus = async (connection: Db, characterId: number)
     WHERE v.character_id=?`, [characterId]);
   return Math.min(100, Number(rows[0]?.bonus ?? 0));
 };
+export const homeRestExperiencePerMinute = async (connection: Db, characterId: number) => {
+  const [rows] = await connection.execute<(RowDataPacket & { experience: number })[]>(`SELECT COALESCE(SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(d.effect_json,'$.homeRestExperiencePerMinute')) AS UNSIGNED)),0) AS experience
+    FROM player_home_visits v JOIN player_home_furniture f ON f.home_id=v.home_id JOIN home_furniture_definitions d ON d.code=f.furniture_code
+    WHERE v.character_id=?`, [characterId]);
+  return Math.max(0, Number(rows[0]?.experience ?? 0));
+};
 
 export const homePanel = async (qqUserId: string) => {
-  const pool = await getPool(); const character = await characterFor(pool, qqUserId); const home = await homeFor(pool, character.id);
+  const pool = await getPool(); let character = await characterFor(pool, qqUserId);
+  if (character.activity_status === 'resting' && await isInHome(pool, Number(character.id))) {
+    const { settleHomeRestExperience } = await import('./adventure.service');
+    await withTransaction(connection => settleHomeRestExperience(connection, Number(character.id)));
+    character = await characterFor(pool, qqUserId);
+  }
+  const home = await homeFor(pool, character.id);
   if (!home) return { character, home: null, inHome: false, furniture: [] as Furniture[], effects: {}, materials: [] as Array<{ code: string; name: string; quantity: number }> };
   const [visitResult, furnitureResult, materialResult] = await Promise.all([
     pool.execute<RowDataPacket[]>('SELECT 1 FROM player_home_visits WHERE character_id=? LIMIT 1', [character.id]),
@@ -107,7 +119,8 @@ export const purchaseHome = async (qqUserId: string) => withTransaction(async co
   const plot = await choosePlot(connection, character.current_region_id);
   const [paid] = await connection.execute<any>('UPDATE characters SET copper_coins=copper_coins-? WHERE id=? AND copper_coins>=?', [homeCosts.purchase.copper, character.id, homeCosts.purchase.copper]);
   if (!Number(paid.affectedRows)) throw new Error(`铜币不足，需要 ${homeCosts.purchase.copper} 铜币。`);
-  const [created] = await connection.execute<any>('INSERT INTO player_homes (character_id,town_region_id,plot_x,plot_y,plot_z) VALUES (?,?,?,?,?)', [character.id, character.current_region_id, plot.x, plot.y, plot.z]);
+  const homeName = `${character.name}的小屋`;
+  const [created] = await connection.execute<any>('INSERT INTO player_homes (character_id,home_name,town_region_id,plot_x,plot_y,plot_z) VALUES (?,?,?,?,?,?)', [character.id, homeName, character.current_region_id, plot.x, plot.y, plot.z]);
   await connection.execute('INSERT INTO player_events (player_id,event_type,payload) VALUES (?,\'home.purchased\',JSON_OBJECT(\'homeId\',?,\'x\',?,\'y\',?))', [character.player_id, created.insertId, plot.x, plot.y]);
   return { plot, copper: homeCosts.purchase.copper };
 });
@@ -128,11 +141,23 @@ export const enterHome = async (qqUserId: string) => withTransaction(async conne
 export const leaveHome = async (qqUserId: string) => withTransaction(async connection => {
   const character = await characterFor(connection, qqUserId, true); const home = await homeFor(connection, character.id, true);
   if (!home || !await isInHome(connection, character.id)) throw new Error('你当前不在自己的家园中。');
+  const { settleHomeRestExperience } = await import('./adventure.service');
+  await settleHomeRestExperience(connection, Number(character.id));
   await connection.execute('DELETE FROM player_home_visits WHERE character_id=?', [character.id]);
+  await connection.execute('UPDATE characters SET home_rest_experience_updated_at=NULL WHERE id=?', [character.id]);
   await connection.execute('INSERT INTO player_events (player_id,event_type,payload) VALUES (?,\'home.left\',JSON_OBJECT(\'homeId\',?))', [character.player_id, home.id]);
   return home;
 });
 
+export const renameHome = async (qqUserId: string, input: string) => withTransaction(async connection => {
+  const name = input.trim();
+  if (Array.from(name).length < 2 || Array.from(name).length > 32 || /[\r\n]/.test(name)) throw new Error('小屋名称需为 2～32 个字符，且不能包含换行。');
+  const character = await characterFor(connection, qqUserId, true); const home = await homeFor(connection, character.id, true);
+  if (!home) throw new Error('你还没有小屋。');
+  await connection.execute('UPDATE player_homes SET home_name=? WHERE id=?', [name, home.id]);
+  await connection.execute('INSERT INTO player_events (player_id,event_type,payload) VALUES (?,\'home.renamed\',JSON_OBJECT(\'homeId\',?,\'name\',?))', [character.player_id, home.id, name]);
+  return { name };
+});
 const costForUpgrade = (home: Home) => Number(home.house_level) === 1 ? homeCosts.upgrade2 : Number(home.house_level) === 2 ? homeCosts.upgrade3 : null;
 export const upgradeHome = async (qqUserId: string) => withTransaction(async connection => {
   const character = await characterFor(connection, qqUserId, true); const home = await homeFor(connection, character.id, true); if (!home) throw new Error('你还没有小屋。');
@@ -217,4 +242,55 @@ export const tradeHomeOffer = async (qqUserId: string, offerId: number, quantity
     const price = Number(offer.copper_price) * quantity; const [paid] = await connection.execute<any>('UPDATE characters SET copper_coins=copper_coins-? WHERE id=? AND copper_coins>=?', [price, character.id, price]); if (!Number(paid.affectedRows)) throw new Error(`铜币不足，需要 ${price} 铜币。`);
   }
   const gained = Number(offer.output_quantity) * quantity; await addItem(connection, character.id, Number(offer.output_item_id), gained); return { name: offer.output_name, quantity: gained };
+});
+
+export type HomeStorageScope = 'backpack' | 'storage';
+export type HomeStorageCategory = '装备' | '道具' | '材料';
+type HomeStorageStacked = { id: number; code: string; codex_id: string; name: string; item_category: string; quantity: number; weight: number; description: string };
+type HomeStorageInstance = { id: number; definition_codex_id: string; name: string; item_category: string; quality: number; durability: number; durability_max: number; description: string };
+
+const homeStorageCapacityFor = async (connection: Db, homeId: number) => {
+  const [rows] = await connection.execute<(RowDataPacket & { capacity: number })[]>(`SELECT COALESCE(SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(d.effect_json,'$.storageCapacity')) AS UNSIGNED)),0) AS capacity
+    FROM player_home_furniture f JOIN home_furniture_definitions d ON d.code=f.furniture_code WHERE f.home_id=?`, [homeId]);
+  return Math.max(0, Number(rows[0]?.capacity ?? 0));
+};
+const homeStorageWeightFor = async (connection: Db, homeId: number) => {
+  const [rows] = await connection.execute<(RowDataPacket & { weight: number })[]>(`SELECT COALESCE(SUM(weight),0) AS weight FROM (
+    SELECT hs.quantity*i.weight AS weight FROM player_home_storage_items hs JOIN item_definitions i ON i.id=hs.item_id WHERE hs.home_id=? AND hs.quantity>0
+    UNION ALL
+    SELECT i.weight AS weight FROM player_home_storage_instances hs JOIN player_item_instances ii ON ii.id=hs.instance_id JOIN item_definitions i ON i.id=ii.item_id WHERE hs.home_id=?
+  ) stored_weights`, [homeId, homeId]);
+  return Number(rows[0]?.weight ?? 0);
+};
+
+export const homeStorageView = async (qqUserId: string, scope: HomeStorageScope, category: HomeStorageCategory) => {
+  const panel = await homePanel(qqUserId); if (!panel.home) throw new Error('你还没有小屋。');
+  const capacity = Math.max(0, Number(panel.effects.storageCapacity ?? 0)); if (!capacity) throw new Error('尚未摆放储物箱，暂时没有可用仓储空间。');
+  const pool = await getPool(); const itemType = category === '装备' ? 'equipment' : category === '道具' ? 'consumable' : 'material';
+  const stackedQuery = scope === 'storage'
+    ? pool.execute<(RowDataPacket & HomeStorageStacked)[]>('SELECT i.id,i.code,i.codex_id,i.name,i.item_category,hs.quantity,i.weight,i.description FROM player_home_storage_items hs JOIN item_definitions i ON i.id=hs.item_id WHERE hs.home_id=? AND hs.quantity>0 AND i.item_type=? ORDER BY i.name', [panel.home.id, itemType])
+    : pool.execute<(RowDataPacket & HomeStorageStacked)[]>('SELECT i.id,i.code,i.codex_id,i.name,i.item_category,pi.quantity,i.weight,i.description FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.item_type=? AND i.stackable=1 ORDER BY i.name', [panel.character.id, itemType]);
+  const instanceQuery = scope === 'storage'
+    ? pool.execute<(RowDataPacket & HomeStorageInstance)[]>('SELECT ii.id,i.codex_id AS definition_codex_id,i.name,i.item_category,ii.quality,ii.durability,ii.durability_max,i.description FROM player_home_storage_instances hs JOIN player_item_instances ii ON ii.id=hs.instance_id JOIN item_definitions i ON i.id=ii.item_id WHERE hs.home_id=? AND i.item_type=? ORDER BY hs.stored_at DESC', [panel.home.id, itemType])
+    : pool.execute<(RowDataPacket & HomeStorageInstance)[]>('SELECT ii.id,i.codex_id AS definition_codex_id,i.name,i.item_category,ii.quality,ii.durability,ii.durability_max,i.description FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.character_id=? AND i.item_type=? ORDER BY ii.acquired_at DESC', [panel.character.id, itemType]);
+  const [stackedResult, instanceResult, usedWeight] = await Promise.all([stackedQuery, instanceQuery, homeStorageWeightFor(pool, Number(panel.home.id))]);
+  return {
+    capacity, usedWeight,
+    stacked: stackedResult[0].map(item => ({ ...item, id: Number(item.id), quantity: Number(item.quantity), weight: Number(item.weight) })),
+    instances: instanceResult[0].map(item => ({ ...item, id: Number(item.id), quality: Number(item.quality), durability: Number(item.durability), durability_max: Number(item.durability_max) }))
+  };
+};
+
+export const depositHomeStorage = async (qqUserId: string, itemId: number, quantity: number) => withTransaction(async connection => {
+  if (!Number.isInteger(itemId) || itemId < 1 || !Number.isInteger(quantity) || quantity < 1) throw new Error('物品编号和数量必须为正整数。');
+  const character = await characterFor(connection, qqUserId, true); const home = await homeFor(connection, Number(character.id), true); if (!home) throw new Error('你还没有小屋。');
+  const capacity = await homeStorageCapacityFor(connection, Number(home.id)); if (!capacity) throw new Error('尚未摆放储物箱，暂时没有可用仓储空间。');
+  const [rows] = await connection.execute<(RowDataPacket & { item_id: number; name: string; quantity: number; weight: number })[]>('SELECT pi.item_id,i.name,pi.quantity,i.weight FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.item_id=? AND pi.quantity>0 AND i.stackable=1 FOR UPDATE', [character.id, itemId]);
+  const item = rows[0]; if (!item) throw new Error('背包中没有可放入的该物品。'); if (Number(item.quantity) < quantity) throw new Error(`背包数量不足，当前仅有 ${item.quantity} 个。`);
+  const usedWeight = await homeStorageWeightFor(connection, Number(home.id)); const addedWeight = Number(item.weight) * quantity;
+  if (usedWeight + addedWeight > capacity + 0.000001) throw new Error(`仓储容量不足，还可放入 ${Math.max(0, capacity - usedWeight).toFixed(2)} kg。`);
+  await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [quantity, character.id, item.item_id]);
+  await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, item.item_id]);
+  await connection.execute('INSERT INTO player_home_storage_items (home_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),stored_at=NOW()', [home.id, item.item_id, quantity]);
+  return { name: item.name, quantity, usedWeight: usedWeight + addedWeight, capacity };
 });

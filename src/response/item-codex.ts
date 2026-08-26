@@ -51,6 +51,9 @@ const consumableEffects = (effectJson: unknown) => {
   if (Number(effect.restoreMp ?? 0)) lines.push(`立即恢复 ${Number(effect.restoreMp)} 点魔力。`);
   if (Number(effect.experienceBonusPct ?? 0)) lines.push(`战斗经验获取提高 ${Number(effect.experienceBonusPct)}%。`);
   if (Number(effect.partyDropBonusPct ?? 0)) lines.push(`所在队伍打怪掉率提高 ${Number(effect.partyDropBonusPct)}%。`);
+  if (Number(effect.playerAffinity ?? 0)) lines.push(`赠送给好友后，好感增加 ${Number(effect.playerAffinity)} 点。`);
+  if (Number(effect.giftDailyLimit ?? 0)) lines.push(`每日最多可用于赠礼 ${Number(effect.giftDailyLimit)} 次。`);
+  if (effect.starOathRing) lines.push('星誓仪式需要双方各准备一枚。');
   if (Number(effect.battleCount ?? 0)) lines.push(`持续 ${Number(effect.battleCount)} 场战斗。`);
   return { effect, lines };
 };

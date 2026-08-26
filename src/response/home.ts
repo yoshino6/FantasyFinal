@@ -1,5 +1,5 @@
 import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
-import { craftFurniture, enterHome, expandHome, homePanel, leaveHome, listFurniture, purchaseHome, removeFurniture, upgradeHome } from '../game/home.service';
+import { craftFurniture, enterHome, expandHome, homePanel, leaveHome, listFurniture, purchaseHome, removeFurniture, renameHome, upgradeHome } from '../game/home.service';
 import { homeFloorImage } from '../game/home-render.service';
 import { moveTo } from '../game/adventure.service';
 import { durationText } from '../game/time-format';
@@ -31,7 +31,7 @@ export const homeFormat = async (qqUserId: string, notice = '') => {
       .addButton('前往百纳居', '/前往 7 -99', { type: 'command', autoEnter: true, style: 'blue' }));
   }
   const home = panel.home;
-  markdown.addText(`**${panel.character.name}的小屋** [更名]`).addNewline().addNewline()
+  markdown.addText(`**${home.home_name || `${panel.character.name}的小屋`}** `).addButton('[更名]', { data: '/家园改名 ', autoEnter: false }).addNewline().addNewline()
     .addBlockquote(`房屋 Lv.${home.house_level}｜${home.floor_count} 层`).addNewline()
     .addBlockquote(`坐标：(${home.plot_x}, ${home.plot_y})`).addNewline().addNewline()
     .addText(panel.inHome ? '**当前：在家中**' : '**当前：在屋外**').addNewline()
@@ -41,6 +41,7 @@ export const homeFormat = async (qqUserId: string, notice = '') => {
   const buttons = Format.createButtonGroup().addRow()
     .addButton(panel.inHome ? '出门' : '回家', panel.inHome ? '/家园出门' : '/家园回家', { type: 'command', autoEnter: true, style: 'blue' })
     .addButton('家具', '/家园家具', { type: 'command', autoEnter: true, style: 'blue' });
+  if (Number(panel.effects.storageCapacity ?? 0) > 0) buttons.addButton('储物', '/家园储物', { type: 'command', autoEnter: true, style: 'blue' });
   buttons.addRow().addButton('查看一层', '/家园楼层 1', { type: 'command', autoEnter: true, style: 'blue' });
   if (Number(home.floor_count) >= 2) buttons.addButton('查看二层', '/家园楼层 2', { type: 'command', autoEnter: true, style: 'blue' });
   if (Number(home.floor_count) >= 3) buttons.addButton('查看三层', '/家园楼层 3', { type: 'command', autoEnter: true, style: 'blue' });
@@ -106,7 +107,8 @@ export const homeEnterHandler = async () => { const [event] = useEvent(); const 
   const entry = await enterHome(event.current.UserId);
   await message.send({ format: await homeFormat(event.current.UserId, `你已回家。${entry.pursuit?.text ? `\n${entry.pursuit.text}` : ''}`) });
 } catch (error) { await message.send({ format: messageFormat('无法回家', error instanceof Error ? error.message : '请稍后重试。') }); } };
-export const homeLeaveHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await leaveHome(event.current.UserId); await message.send({ format: await homeFormat(event.current.UserId, '你走出小屋，重新回到百纳镇的街道。') }); } catch (error) { await message.send({ format: messageFormat('无法出门', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const homeLeaveHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await leaveHome(event.current.UserId); await message.send({ format: messageFormat('百纳镇·我的家园', '你离开了家园。') }); } catch (error) { await message.send({ format: messageFormat('无法出门', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const homeRenameHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const result = await renameHome(event.current.UserId, String(route.param('name'))); await message.send({ format: await homeFormat(event.current.UserId, `小屋已更名为「${result.name}」。`) }); } catch (error) { await message.send({ format: messageFormat('家园改名失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const homeUpgradeHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await upgradeHome(event.current.UserId); await message.send({ format: await homeFormat(event.current.UserId, `房屋已升级至 Lv.${result.level}。`) }); } catch (error) { await message.send({ format: messageFormat('升级失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const homeExpandHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const result = await expandHome(event.current.UserId, Number(route.param('floor')) as 2 | 3); await message.send({ format: await homeFormat(event.current.UserId, `第 ${result.floor} 层扩建完成。`) }); } catch (error) { await message.send({ format: messageFormat('扩建失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const homeFloorHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try {

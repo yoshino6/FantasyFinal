@@ -12,9 +12,9 @@ import { closeDungeonForBossSpawns, dungeonArrivalEvent, dungeonCellAt, dungeonE
 import { completeDungeonSecretForLeader, discoverDungeonEntrance } from './dungeon-quest.service';
 import { collectCityDebts, recordWarrantSighting, settleCityPursuitDefeat } from './pvp.service';
 import { detentionMessage } from './time-format';
-import { homeRestRecoveryBonus, isInHome } from './home.service';
+import { homeRestExperiencePerMinute, homeRestRecoveryBonus, isInHome } from './home.service';
 
-type CharacterRow = RowDataPacket & Allocation & Record<`${keyof Allocation}_growth`, number> & { id: number; player_id: number; npc_code: string | null; name: string; level: number; experience: number; realm_stage: number; skill_points: number; stamina: number; stamina_updated_at: Date; hp_max: number; mp_max: number; current_hp: number; current_mp: number; activity_status: 'active' | 'resting' | 'unconscious' | 'detained'; rest_started_at: Date | null; detained_until: Date | null; physical_attack: number; magic_attack: number; physical_defense: number; magic_defense: number; accuracy: number; evasion: number; crit_rate_bp: number; crit_damage_bp: number; crit_resist_bp: number; crit_damage_reduction_bp: number; tenacity: number; speed: number; perception: number; spirit: number; intelligence: number; element_mastery_json: unknown; element_resistance_json: unknown; adventurer_registered: number; secondary_profession_code: string | null; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string };
+type CharacterRow = RowDataPacket & Allocation & Record<`${keyof Allocation}_growth`, number> & { id: number; player_id: number; npc_code: string | null; name: string; level: number; experience: number; realm_stage: number; skill_points: number; stamina: number; stamina_updated_at: Date; hp_max: number; mp_max: number; current_hp: number; current_mp: number; activity_status: 'active' | 'resting' | 'unconscious' | 'detained'; rest_started_at: Date | null; home_rest_experience_updated_at: Date | null; detained_until: Date | null; physical_attack: number; magic_attack: number; physical_defense: number; magic_defense: number; accuracy: number; evasion: number; crit_rate_bp: number; crit_damage_bp: number; crit_resist_bp: number; crit_damage_reduction_bp: number; tenacity: number; speed: number; perception: number; spirit: number; intelligence: number; element_mastery_json: unknown; element_resistance_json: unknown; adventurer_registered: number; secondary_profession_code: string | null; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string };
 type MonsterAttributes = Allocation & Record<`${keyof Allocation}_growth`, number>;
 type MonsterTrait = { code: string; name: string; attributeMultiplier?: number; statMultiplier?: number; hpPct?: number; mpPct?: number; physicalAttackPct?: number; magicAttackPct?: number; physicalDefensePct?: number; magicDefensePct?: number; accuracyPct?: number; evasionPct?: number; speedPct?: number; critRatePct?: number; critDamagePct?: number; critResistPct?: number; critReductionPct?: number; experiencePct?: number; dropPct?: number };
 type SpawnRow = RowDataPacket & MonsterAttributes & { id: number; template_id?: number; name: string; monster_class: string; level: number; current_hp: number; hp_max: number; attack: number; defense: number; speed: number; experience: number; drops_json: unknown; skill_sequence?: unknown; traits_json?: unknown; weakness_json?: unknown; resistance_json?: unknown; element_mastery_json?: unknown; element_resistance_json?: unknown };
@@ -121,6 +121,24 @@ const awardRealmExperience = async (connection: PoolConnection, character: Pick<
   if (gainedPoints > 0) await recordSkillPointChange(connection, character.id, gainedPoints, 'level_up', null, `角色升至 Lv.${level}`);
   return { experience: gainedExperience, level, gainedPoints, realmLocked, realmCapReached };
 };
+export const settleHomeRestExperience = async (connection: PoolConnection, characterId: number) => {
+  const [rows] = await connection.execute<(RowDataPacket & Pick<CharacterRow, 'id' | 'level' | 'experience' | 'realm_stage' | 'activity_status' | 'home_rest_experience_updated_at'>)[]>(`SELECT c.id,c.level,c.experience,c.realm_stage,c.activity_status,c.home_rest_experience_updated_at
+    FROM characters c JOIN player_home_visits v ON v.character_id=c.id
+    WHERE c.id=? AND c.activity_status='resting' FOR UPDATE`, [characterId]);
+  const character = rows[0];
+  if (!character) return { experience: 0, minutes: 0, perMinute: 0, level: 0, gainedPoints: 0, realmLocked: false, realmCapReached: false };
+  const perMinute = await homeRestExperiencePerMinute(connection, Number(character.id));
+  const now = Date.now(); const checkpoint = character.home_rest_experience_updated_at ? new Date(character.home_rest_experience_updated_at).getTime() : now;
+  const minutes = Math.max(0, Math.floor((now - checkpoint) / 60_000));
+  if (!minutes || !perMinute) {
+    if (!character.home_rest_experience_updated_at || !perMinute) await connection.execute('UPDATE characters SET home_rest_experience_updated_at=? WHERE id=?', [new Date(now), character.id]);
+    return { experience: 0, minutes: 0, perMinute, level: Number(character.level), gainedPoints: 0, realmLocked: false, realmCapReached: false };
+  }
+  const gain = await awardRealmExperience(connection, character, minutes * perMinute);
+  if (gain.gainedPoints) await recalculateCharacterStats(connection, Number(character.id));
+  await connection.execute('UPDATE characters SET home_rest_experience_updated_at=? WHERE id=?', [new Date(checkpoint + minutes * 60_000), character.id]);
+  return { ...gain, minutes, perMinute };
+};
 const randomMonsterLevel = (monsterClass: string, defaultLevel: number) => monsterClass === 'normal' ? random(1, 5) : monsterClass === 'elite' && defaultLevel >= 7 ? random(7, 9) : monsterClass === 'large' || monsterClass === 'elite' ? random(4, 9) : defaultLevel;
 const randomMonsterBaseAttributes = (template: MonsterAttributes & { monster_class: string }): Allocation => {
   const total = template.monster_class === 'normal' ? random(45, 65)
@@ -195,13 +213,19 @@ const activeSkillUpgradeCost = (level: number) => Math.floor(Math.max(1, level) 
 const weaponMasteryCodes = new Set(['longsword_mastery', 'shield_mastery', 'staff_mastery', 'spellbook_mastery', 'orb_mastery', 'dagger_mastery', 'fistblade_mastery']);
 const masteryUpgradeCost = (level: number) => Math.max(1, level) * 2;
 
-const characterFor = async (qqUserId: string): Promise<CharacterRow> => {
-  const pool = await getPool(); const [rows] = await pool.execute<CharacterRow[]>(`SELECT c.*, r.name AS region_name FROM characters c JOIN players p ON p.id=c.player_id JOIN map_regions r ON r.id=c.current_region_id WHERE p.qq_user_id=? LIMIT 1`, [qqUserId]);
+const characterFor = async (qqUserId: string, connection?: PoolConnection): Promise<CharacterRow> => {
+  const pool = connection ?? await getPool(); const [rows] = await pool.execute<CharacterRow[]>(`SELECT c.*, r.name AS region_name FROM characters c JOIN players p ON p.id=c.player_id JOIN map_regions r ON r.id=c.current_region_id WHERE p.qq_user_id=? LIMIT 1`, [qqUserId]);
   if (!rows[0]) throw new Error('请先发送“注册”创建角色。');
   const character = rows[0];
   if (character.activity_status === 'detained' && character.detained_until && new Date(character.detained_until).getTime() <= Date.now()) {
     character.activity_status = 'active'; character.detained_until = null;
     await pool.execute('UPDATE characters SET activity_status=\'active\',detained_until=NULL WHERE id=?', [character.id]);
+  }
+  let continuesHomeResting = false;
+  if (connection && character.activity_status === 'resting') {
+    const homeExperience = await settleHomeRestExperience(connection, Number(character.id));
+    continuesHomeResting = homeExperience.perMinute > 0;
+    if (homeExperience.minutes) { character.level = homeExperience.level; character.experience += homeExperience.experience; }
   }
   if ((character.activity_status === 'resting' || character.activity_status === 'unconscious') && character.rest_started_at) {
     const seconds = Math.floor((Date.now() - new Date(character.rest_started_at).getTime()) / 1000);
@@ -209,9 +233,9 @@ const characterFor = async (qqUserId: string): Promise<CharacterRow> => {
       const recoveryMultiplier = 1 + await homeRestRecoveryBonus(pool, Number(character.id)) / 100;
       character.current_hp = Math.min(Number(character.hp_max), Number(character.current_hp) + Math.max(1, Math.ceil(Number(character.hp_max) / 100 * recoveryMultiplier)) * seconds);
       character.current_mp = Math.min(Number(character.mp_max), Number(character.current_mp) + Math.max(1, Math.ceil(Number(character.mp_max) / 100 * recoveryMultiplier)) * seconds);
-      if (character.current_hp >= Number(character.hp_max) && character.current_mp >= Number(character.mp_max)) { character.activity_status = 'active'; character.rest_started_at = null; }
+      if (character.current_hp >= Number(character.hp_max) && character.current_mp >= Number(character.mp_max) && !continuesHomeResting) { character.activity_status = 'active'; character.rest_started_at = null; character.home_rest_experience_updated_at = null; }
       else character.rest_started_at = new Date();
-      await pool.execute('UPDATE characters SET current_hp=?,current_mp=?,activity_status=?,rest_started_at=? WHERE id=?', [character.current_hp, character.current_mp, character.activity_status, character.rest_started_at, character.id]);
+      await pool.execute('UPDATE characters SET current_hp=?,current_mp=?,activity_status=?,rest_started_at=?,home_rest_experience_updated_at=? WHERE id=?', [character.current_hp, character.current_mp, character.activity_status, character.rest_started_at, character.home_rest_experience_updated_at, character.id]);
     }
   }
   return character;
@@ -234,22 +258,26 @@ const ensureActionAvailable = (character: CharacterRow) => {
 };
 
 export const startRest = async (qqUserId: string) => withTransaction(async connection => {
-  const character = await characterFor(qqUserId); const [combat] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM combat_members cm JOIN combat_sessions cs ON cs.id=cm.session_id WHERE cm.character_id=? AND cs.state=\'active\' LIMIT 1 FOR UPDATE', [character.id]);
+  const character = await characterFor(qqUserId, connection); const [combat] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM combat_members cm JOIN combat_sessions cs ON cs.id=cm.session_id WHERE cm.character_id=? AND cs.state=\'active\' LIMIT 1 FOR UPDATE', [character.id]);
   if (combat[0]) throw new Error('战斗中无法休息。');
   if (character.activity_status === 'detained') throw new Error(detentionMessage(character.detained_until));
-  if (Number(character.current_hp) >= Number(character.hp_max) && Number(character.current_mp) >= Number(character.mp_max)) return { resting: false, message: '当前生命与魔力均已满，无需休息。' };
+  const homeExperiencePerMinute = await homeRestExperiencePerMinute(connection, Number(character.id));
+  if (Number(character.current_hp) >= Number(character.hp_max) && Number(character.current_mp) >= Number(character.mp_max) && !homeExperiencePerMinute) return { resting: false, message: '当前生命与魔力均已满，无需休息。' };
   const homeBonus = await homeRestRecoveryBonus(connection, Number(character.id));
-  await connection.execute('UPDATE characters SET activity_status=\'resting\',rest_started_at=NOW() WHERE id=?', [character.id]);
+  await connection.execute('UPDATE characters SET activity_status=\'resting\',rest_started_at=NOW(),home_rest_experience_updated_at=? WHERE id=?', [homeExperiencePerMinute ? new Date() : null, character.id]);
   return { resting: true, message: `你开始休息，每秒恢复 ${1 + homeBonus / 100}% 的生命与魔力。` };
 });
 
-export const resumeAction = async (qqUserId: string) => {
-  const character = await characterFor(qqUserId);
+export const resumeAction = async (qqUserId: string) => withTransaction(async connection => {
+  const character = await characterFor(qqUserId, connection);
   if (character.activity_status === 'detained') throw new Error(detentionMessage(character.detained_until));
   if (character.activity_status === 'unconscious') throw new Error('你已经昏迷，请等待生命与魔力恢复至满值。');
-  if (character.activity_status === 'resting') { const pool = await getPool(); await pool.execute('UPDATE characters SET activity_status=\'active\',rest_started_at=NULL WHERE id=?', [character.id]); return { message: '你结束休息，可以继续行动。' }; }
+  if (character.activity_status === 'resting') {
+    await connection.execute('UPDATE characters SET activity_status=\'active\',rest_started_at=NULL,home_rest_experience_updated_at=NULL WHERE id=?', [character.id]);
+    return { message: '你结束休息，可以继续行动。' };
+  }
   return { message: '你可以继续行动。' };
-};
+});
 
 const hasPassiveSkill = async (connection: Pool | PoolConnection, characterId: number, code: string) => {
   const [rows] = await connection.execute<RowDataPacket[]>(`SELECT 1 FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id
@@ -289,6 +317,7 @@ const modifiersFor = async (connection: PoolConnection, characterId: number): Pr
   const [passiveRows] = await connection.execute<(RowDataPacket & { id: number; code: string; passive_effect_json: unknown })[]>(`SELECT s.id,s.code,s.passive_effect_json FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND (s.category='bound' OR (s.category='passive' AND ps.passive_linked=1))`, [characterId]);
   const [specializationRows] = await connection.execute<(RowDataPacket & { skill_id: number; specialization: string; level: number })[]>('SELECT skill_id,specialization,level FROM player_skill_specializations WHERE character_id=?', [characterId]);
   const [battleBuffs] = await connection.execute<(RowDataPacket & { buff_code: string })[]>('SELECT buff_code FROM player_battle_buffs WHERE character_id=? AND remaining_battles>0', [characterId]);
+  const [timedBuffs] = await connection.execute<(RowDataPacket & { experience_multiplier: number })[]>(`SELECT experience_multiplier FROM player_timed_buffs WHERE character_id=? AND buff_code='church_blessing' AND expires_at>NOW() LIMIT 1`, [characterId]);
   const effect = jsonObject(rows.find(row => row.slot === 'weapon')?.effect_json);
   const passives = new Map(passiveRows.map(row => [row.code, jsonObject(row.passive_effect_json)]));
   const growth = passives.get('growth_blessing'); const lucky = passives.get('lucky_favor'); const mana = passives.get('mana_affinity');
@@ -301,7 +330,7 @@ const modifiersFor = async (connection: PoolConnection, characterId: number): Pr
   const damageBonusPct = equipmentEffect('damageBonusPct') + blessingEffect('damageBonusPct');
   const experienceElixir = battleBuffs.some(buff => buff.buff_code === 'minor_experience_elixir');
   const artifacts = rows.map(row => String(jsonObject(row.effect_json).artifact ?? '')).filter(Boolean);
-  return { weaponName: rows.find(row => row.slot === 'weapon')?.name ?? undefined, artifact: effect.artifact === 'holy_sword' || effect.artifact === 'demon_sword' ? effect.artifact : undefined, artifacts, physicalAttack: 0, magicAttack: 0, physicalAttackPct: mastery('physicalAttackPct'), magicAttackPct: mastery('magicAttackPct'), physicalDefensePct: mastery('physicalDefensePct'), magicDefensePct: mastery('magicDefensePct'), critRatePct: mastery('critRatePct') + blessingEffect('critRatePct'), critDamagePct: mastery('critDamagePct'), accuracyPct: blessingEffect('accuracyPct'), mpPct: mastery('mpPct'), chantSpeedPct: mastery('chantSpeedPct'), critRateBp: 0, ignoreDefensePct: equipmentEffect('ignoreDefensePct'), lifestealPct: equipmentEffect('lifestealPct') + blessingEffect('lifestealPct'), magicDamagePct: equipmentEffect('magicDamagePct') + blessingEffect('magicDamagePct'), damageBonusPct, manaCostReduction: equipmentEffect('manaCostReduction'), experienceMultiplier: Number(growth?.experienceMultiplier ?? 1) * (experienceElixir ? 1.25 : 1), dropBonus: (Number(lucky?.dropBonusPct ?? 0) + blessingEffect('dropBonusPct')) / 100, manaAffinity: Boolean(mana), lightSkillBonusPct: equipmentEffect('lightSkillBonusPct'), criticalDamageBonusPct: equipmentEffect('criticalDamageBonusPct'), unifyAttack: artifacts.includes('godfist'), prayerHymn: artifacts.includes('prayer_orb'), physicalDamageReductionPct: equipmentEffect('physicalDamageReductionPct'), magicDamageReductionPct: equipmentEffect('magicDamageReductionPct'), timeGuard: artifacts.includes('time_greaves'), pursuitChancePct: equipmentEffect('pursuitChancePct'), bloodForMana: artifacts.includes('fate_bracelet'), hpRegenPct: equipmentEffect('hpRegenPct'), mpRegenPct: equipmentEffect('mpRegenPct'), minimumHitRatePct: equipmentEffect('minimumHitRatePct'), actualHitRatePct: equipmentEffect('actualHitRatePct'), physicalActualHitRatePct: equipmentEffect('physicalActualHitRatePct'), physicalSkillDamagePct: equipmentEffect('physicalSkillDamagePct'), magicSkillDamagePct: equipmentEffect('magicSkillDamagePct'), magicChantBonus: equipmentEffect('magicChantBonus'), physicalForceCrit: rows.some(row => Boolean(jsonObject(row.effect_json).physicalForceCrit)), physicalCriticalFinalDamagePct: equipmentEffect('physicalCriticalFinalDamagePct') };
+  return { weaponName: rows.find(row => row.slot === 'weapon')?.name ?? undefined, artifact: effect.artifact === 'holy_sword' || effect.artifact === 'demon_sword' ? effect.artifact : undefined, artifacts, physicalAttack: 0, magicAttack: 0, physicalAttackPct: mastery('physicalAttackPct'), magicAttackPct: mastery('magicAttackPct'), physicalDefensePct: mastery('physicalDefensePct'), magicDefensePct: mastery('magicDefensePct'), critRatePct: mastery('critRatePct') + blessingEffect('critRatePct'), critDamagePct: mastery('critDamagePct'), accuracyPct: blessingEffect('accuracyPct'), mpPct: mastery('mpPct'), chantSpeedPct: mastery('chantSpeedPct'), critRateBp: 0, ignoreDefensePct: equipmentEffect('ignoreDefensePct'), lifestealPct: equipmentEffect('lifestealPct') + blessingEffect('lifestealPct'), magicDamagePct: equipmentEffect('magicDamagePct') + blessingEffect('magicDamagePct'), damageBonusPct, manaCostReduction: equipmentEffect('manaCostReduction'), experienceMultiplier: Number(growth?.experienceMultiplier ?? 1) * (experienceElixir ? 1.25 : 1) * Number(timedBuffs[0]?.experience_multiplier ?? 1), dropBonus: (Number(lucky?.dropBonusPct ?? 0) + blessingEffect('dropBonusPct')) / 100, manaAffinity: Boolean(mana), lightSkillBonusPct: equipmentEffect('lightSkillBonusPct'), criticalDamageBonusPct: equipmentEffect('criticalDamageBonusPct'), unifyAttack: artifacts.includes('godfist'), prayerHymn: artifacts.includes('prayer_orb'), physicalDamageReductionPct: equipmentEffect('physicalDamageReductionPct'), magicDamageReductionPct: equipmentEffect('magicDamageReductionPct'), timeGuard: artifacts.includes('time_greaves'), pursuitChancePct: equipmentEffect('pursuitChancePct'), bloodForMana: artifacts.includes('fate_bracelet'), hpRegenPct: equipmentEffect('hpRegenPct'), mpRegenPct: equipmentEffect('mpRegenPct'), minimumHitRatePct: equipmentEffect('minimumHitRatePct'), actualHitRatePct: equipmentEffect('actualHitRatePct'), physicalActualHitRatePct: equipmentEffect('physicalActualHitRatePct'), physicalSkillDamagePct: equipmentEffect('physicalSkillDamagePct'), magicSkillDamagePct: equipmentEffect('magicSkillDamagePct'), magicChantBonus: equipmentEffect('magicChantBonus'), physicalForceCrit: rows.some(row => Boolean(jsonObject(row.effect_json).physicalForceCrit)), physicalCriticalFinalDamagePct: equipmentEffect('physicalCriticalFinalDamagePct') };
 };
 const miningSecondsByCode: Record<string, number> = { living_wood: 15 * 60, meteor_iron: 30 * 60, star_copper: 60 * 60, moon_silver: 90 * 60, sun_gold: 120 * 60 };
 const resourceKindByCode = (code: string) => code === 'living_wood' ? '植被' as const : '矿脉' as const;

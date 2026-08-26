@@ -62,8 +62,10 @@ export const outsidePanel = (title: string, location: string, speed: number, ran
       markdown.addText(` · ${directionText(point, x, y)}${point.distance}`);
       // 同格目标的“前往”只会把玩家原地送回；建筑则可直接进入，其余目标重开对应互动。
       if (point.distance === 0 && point.interaction?.type === '建筑') markdown.addText(' ').addButton('[进入]', { data: `/建筑进入 ${point.interaction.id}`, autoEnter: false });
-      else if (point.distance === 0 && point.interaction) markdown.addText(' ').addButton('[互动]', { data: `/坐标互动 ${point.interaction.type} ${point.interaction.id}`, autoEnter: false });
-      else if (point.distance > 0 && speedLimit >= point.distance) markdown.addText(' ').addButton('[前往]', { data: `/前往 ${point.x} ${point.y}`, autoEnter: false });
+      else if (point.type === '玩家' && point.distance === 0 && point.code) markdown.addText(' ').addButton('[互动]', { data: `/玩家互动 ${point.code}`, autoEnter: false });
+      else if (point.type === '玩家' && point.distance > 0) markdown.addText(' ').addButton('[前往]', { data: `/前往 ${point.x} ${point.y}`, autoEnter: false });
+      else if (point.type !== '玩家' && point.distance === 0 && point.interaction) markdown.addText(' ').addButton('[互动]', { data: `/坐标互动 ${point.interaction.type} ${point.interaction.id}`, autoEnter: false });
+      else if (point.type !== '玩家' && point.distance > 0 && speedLimit >= point.distance) markdown.addText(' ').addButton('[前往]', { data: `/前往 ${point.x} ${point.y}`, autoEnter: false });
       if (point.type === '怪物' && point.code) markdown.addText(' ').addButton('[攻击]', { data: `/怪物攻击 ${point.code}`, autoEnter: false });
       if (point.type === '玩家' && point.code) {
         if (point.pvpAvailable) markdown.addText(' ').addButton('[攻击]', { data: `/玩家攻击 ${point.code}`, autoEnter: false });
@@ -83,8 +85,8 @@ export const panelButtons = (resting = false, _autoBattleEnabled = false, blocke
   return Format.createButtonGroup()
     .addRow().addButton(locationAction.label, locationAction.command, { type: 'command', autoEnter: true }).addButton(up.label, up.command, { type: 'command', autoEnter: true, style: up.style }).addButton('地图', '/地图', { type: 'command', autoEnter: true })
     .addRow().addButton(left.label, left.command, { type: 'command', autoEnter: true, style: left.style }).addButton(resting ? '行动' : '休息', resting ? '/行动' : '/休息', { type: 'command', autoEnter: true }).addButton(right.label, right.command, { type: 'command', autoEnter: true, style: right.style })
-    .addRow().addButton('自动战斗', '/自动战斗', { type: 'command', autoEnter: true }).addButton(down.label, down.command, { type: 'command', autoEnter: true, style: down.style }).addButton('备用', '', { type: 'command', autoEnter: false })
-    .addRow().addButton('角色', '/角色', { type: 'command', autoEnter: true }).addButton('装备', '/装备', { type: 'command', autoEnter: true }).addButton('背包', '/背包', { type: 'command', autoEnter: true }).addButton('技能', '/技能列表', { type: 'command', autoEnter: true }).addButton('队伍', '/队伍', { type: 'command', autoEnter: true })
+    .addRow().addButton('自动战斗', '/自动战斗', { type: 'command', autoEnter: true }).addButton(down.label, down.command, { type: 'command', autoEnter: true, style: down.style }).addButton('队伍', '/队伍', { type: 'command', autoEnter: true })
+    .addRow().addButton('角色', '/角色', { type: 'command', autoEnter: true }).addButton('装备', '/装备', { type: 'command', autoEnter: true }).addButton('背包', '/背包', { type: 'command', autoEnter: true }).addButton('技能', '/技能列表', { type: 'command', autoEnter: true }).addButton('好友', '/好友', { type: 'command', autoEnter: true })
     .addRow().addButton('菜单', '/菜单', { type: 'command', autoEnter: true });
 };
 
@@ -99,7 +101,7 @@ const battlePanel = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 const limitedViewButtons = (buttons: ReturnType<typeof Format.createButtonGroup>) => buttons.addRow()
-  .addButton('角色', '/角色', { type: 'command', autoEnter: true }).addButton('装备', '/装备', { type: 'command', autoEnter: true }).addButton('背包', '/背包', { type: 'command', autoEnter: true }).addButton('技能', '/技能列表', { type: 'command', autoEnter: true }).addButton('队伍', '/队伍', { type: 'command', autoEnter: true });
+  .addButton('角色', '/角色', { type: 'command', autoEnter: true }).addButton('装备', '/装备', { type: 'command', autoEnter: true }).addButton('背包', '/背包', { type: 'command', autoEnter: true }).addButton('技能', '/技能列表', { type: 'command', autoEnter: true }).addButton('好友', '/好友', { type: 'command', autoEnter: true });
 const travelPanel = (travel: NonNullable<Awaited<ReturnType<typeof travelStatus>>>) => {
   const hunting = travel.activityType === 'hunt';
   const buttons = limitedViewButtons(Format.createButtonGroup().addRow().addButton('刷新', '/刷新行动', { type: 'command', autoEnter: true, style: 'blue' }).addButton(hunting ? '取消寻怪' : '取消移动', hunting ? '/取消寻怪' : '/取消移动', { type: 'command', autoEnter: true, style: 'blue' }));
@@ -128,7 +130,7 @@ export default async () => {
       if (!(error instanceof Error) || !error.message.includes('当前不在战斗中')) throw error;
       const [nearby, autoBattle, blockedDirections, movement] = await Promise.all([nearbyPoints(event.current.UserId), autoBattleConfig(event.current.UserId), blockedDungeonDirections(event.current.UserId), movementProfile(event.current.UserId)]);
       const visiblePoints = movement.showPlayers ? nearby.points : nearby.points.filter(point => point.type !== '玩家');
-      const targets = visiblePoints.length ? `\n感知内目标：\n${visiblePoints.map(point => `${point.type} ${point.name} · ${directionText(point, Number(nearby.character.pos_x), Number(nearby.character.pos_y))}${point.distance}${point.distance === 0 && point.interaction?.type === '建筑' ? ' [进入]' : point.distance === 0 && point.interaction ? ' [互动]' : point.distance > 0 && movement.maximum >= point.distance ? ' [前往]' : ''}`).join('\n')}` : '\n感知内目标：\n空空如也';
+      const targets = visiblePoints.length ? `\n感知内目标：\n${visiblePoints.map(point => `${point.type} ${point.name} · ${directionText(point, Number(nearby.character.pos_x), Number(nearby.character.pos_y))}${point.distance}${point.distance === 0 && point.interaction?.type === '建筑' ? ' [进入]' : point.type === '玩家' && point.distance === 0 ? ' [互动]' : point.type === '玩家' && point.distance > 0 ? ' [前往]' : point.type !== '玩家' && point.distance === 0 && point.interaction ? ' [互动]' : point.type !== '玩家' && point.distance > 0 && movement.maximum >= point.distance ? ' [前往]' : ''}`).join('\n')}` : '\n感知内目标：\n空空如也';
       const x = Number(nearby.character.pos_x); const y = Number(nearby.character.pos_y);
       const location = currentLocationText(nearby.character);
       const resting = nearby.character.activity_status !== 'active';
