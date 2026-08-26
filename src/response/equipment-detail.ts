@@ -37,7 +37,7 @@ const equipmentSections = (effectJson: unknown, quality: number, primaryJson: un
   const attributeLabel = (key: string) => labels[key] ?? (key.startsWith('elementMastery_') ? `${key.slice('elementMastery_'.length)}元素精通` : key.startsWith('elementResistance_') ? `${key.slice('elementResistance_'.length)}元素抗性` : '');
   const attributes = Object.entries(effect)
     .filter(([key, value]) => attributeLabel(key) && Number(value))
-    .map(([key, value]) => { const actual = key.endsWith('Pct') ? `${(Number(value) * scale).toFixed(1)}%` : key.startsWith('element') ? (Number(value) * scale).toFixed(1) : String(Math.floor(Number(value) * scale)); const kind = primaryKeys.size ? (primaryKeys.has(key) ? '(主)' : '(副)') : ''; return `${attributeLabel(key)} ${Number(value) >= 0 ? '+' : ''}${actual}${kind}`; });
+    .map(([key, value]) => { const raw = key.endsWith('Pct') ? `${Number(value).toFixed(1)}%` : key.startsWith('element') ? Number(value).toFixed(1) : String(Math.round(Number(value))); const actual = key.endsWith('Pct') ? `${(Number(value) * scale).toFixed(1)}%` : key.startsWith('element') ? (Number(value) * scale).toFixed(1) : String(Math.floor(Number(value) * scale)); const kind = primaryKeys.size ? (primaryKeys.has(key) ? '(主)' : '(副)') : ''; return `${attributeLabel(key)} 原始+${raw}｜实际+${actual}${kind}`; });
   const effectLabels: Record<string, string> = {
     ignoreDefensePct: '无视目标物理防御', lifestealPct: '造成伤害后恢复生命', magicDamagePct: '魔法伤害提高', manaCostReduction: '技能魔力消耗降低', damageBonusPct: '造成伤害提高', minimumHitRatePct: '攻击命中率最低',
     actualHitRatePct: '实际命中率', physicalActualHitRatePct: '物理攻击实际命中率', physicalSkillDamagePct: '物理技能威力提高', magicSkillDamagePct: '魔法技能增伤', magicChantBonus: '魔法技能吟咏增加', physicalCriticalFinalDamagePct: '物理攻击暴击时最终伤害降低'
@@ -62,7 +62,7 @@ export default async () => {
       .addTitle('装备详情')
       .addNewline()
       .addNewline()
-      .addText(`[${item.item_category}]${item.name}\n装备等级：Lv.${item.required_level}\n品质：${Number(item.quality).toFixed(1)}%\n耐久：${item.durability}/${item.durability_max}\n\n装备属性：`)
+      .addText(`[${item.item_category}]${item.name}\n装备类型：${item.weapon_type ?? '通用'}\n装备等级：Lv.${item.required_level}\n品质：${Number(item.quality).toFixed(1)}%\n耐久：${item.durability}/${item.durability_max}\n\n装备属性：`)
       .addNewline();
 
     for (const attribute of sections.attributes.length ? sections.attributes : ['无']) {

@@ -18,7 +18,7 @@ export const churchFormat = async (qqUserId: string, dialogue?: string) => {
   if (nearby.npcDetailsUnlocked) markdown.addText(' ').addButton('[详情]', { data: '/NPC详情 saint_church', autoEnter: false });
   markdown.addNewline().addNewline().addBlockquote(scene);
   const buttons = Format.createButtonGroup()
-    .addRow().addButton('缔结', '', { type: 'command', autoEnter: false }).addButton('祷告', '', { type: 'command', autoEnter: false })
+    .addRow().addButton('星誓', '/星誓', { type: 'command', autoEnter: false }).addButton('祈愿台', '/星誓商店', { type: 'command', autoEnter: false })
     .addRow().addButton('闲聊', '/修女闲聊', { type: 'command', autoEnter: true, style: 'blue' }).addButton('关于 传道者', '', { type: 'command', autoEnter: false })
     .addRow().addButton('离开', `/建筑离开 ${churchCode}`, { type: 'command', autoEnter: true });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);

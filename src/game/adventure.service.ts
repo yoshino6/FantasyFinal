@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { sortMapMarkers } from './map-marker.service';
-import { calculateDerivedStats, experienceRequiredForLevel, realmEnergyDissipationText, realmLevelCap } from './constants';
+import { calculateDerivedStats, experienceRequiredForLevel, realmEnergyDissipationText, realmLevelCap, virtualEquipmentStats, type VirtualEquipmentTier } from './constants';
 import { recalculateCharacterStats, refreshCharacterStamina } from './character.service';
 import { advanceBountyProgress, refreshBounties } from './bounty.service';
 import { attributes, type Allocation } from './types';
@@ -54,7 +54,18 @@ const monsterAttributes = (monster: MonsterAttributes & { level: number; traits_
 };
 const monsterCombatStats = (monster: MonsterAttributes & { level: number; traits_json?: unknown }) => {
   const values = monsterAttributes(monster);
-  const stats = calculateDerivedStats(values);
+  const baseStats = calculateDerivedStats(values);
+  const monsterClass = String((monster as SpawnRow).monster_class ?? 'normal');
+  const tier: VirtualEquipmentTier = monsterClass === 'large' || monsterClass === 'elite' || monsterClass === 'boss' ? monsterClass : 'normal';
+  // 虚拟装备先并入词条前的派生属性；随后仍由已有怪物词条、Boss 生命倍率等规则修正。
+  const virtual = virtualEquipmentStats(Number(monster.level), tier, baseStats.physicalAttack, baseStats.magicAttack);
+  const stats = {
+    ...baseStats,
+    physicalAttack: baseStats.physicalAttack + virtual.physicalAttack,
+    magicAttack: baseStats.magicAttack + virtual.magicAttack,
+    physicalDefense: baseStats.physicalDefense + virtual.physicalDefense,
+    magicDefense: baseStats.magicDefense + virtual.magicDefense
+  };
   const traits = traitList((monster as SpawnRow).traits_json);
   const statMultiplier = traits.reduce((value, trait) => value * Number(trait.statMultiplier ?? 1), 1);
   const boss = (monster as SpawnRow).monster_class === 'boss';
@@ -510,8 +521,8 @@ export const itemCodex = async (qqUserId: string, codexId: string) => {
 
 export const equipmentDetail = async (qqUserId: string, instanceId: number) => {
   const character = await characterFor(qqUserId);
-  const [rows] = await (await getPool()).execute<(RowDataPacket & { name: string; item_category: string; required_level: number; quality: number; durability: number; durability_max: number; effect_json: unknown; forge_primary_json: unknown; description: string })[]>(`
-    SELECT i.name,i.item_category,i.required_level,ii.quality,ii.durability,ii.durability_max,COALESCE(ii.effect_json,i.effect_json) AS effect_json,ii.forge_primary_json,i.description
+  const [rows] = await (await getPool()).execute<(RowDataPacket & { name: string; item_category: string; weapon_type: string | null; required_level: number; quality: number; durability: number; durability_max: number; effect_json: unknown; forge_primary_json: unknown; description: string })[]>(`
+    SELECT i.name,i.item_category,i.weapon_type,i.required_level,ii.quality,ii.durability,ii.durability_max,COALESCE(ii.effect_json,i.effect_json) AS effect_json,ii.forge_primary_json,i.description
     FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
     WHERE ii.id=? AND ii.character_id=? AND i.item_type='equipment'
   `, [instanceId, character.id]);
@@ -1413,6 +1424,7 @@ export const forestGuideChoice = async (qqUserId: string, choice: 'join' | 'depa
   await connection.execute('INSERT INTO parties (id,leader_character_id) VALUES (?,?)', [partyId, character.id]);
   await connection.execute('INSERT INTO party_members (party_id,character_id) VALUES (?,?)', [partyId, character.id]);
   for (const companion of companions) {
+    await recalculateCharacterStats(connection, Number(companion.id));
     await connection.execute('INSERT INTO party_members (party_id,character_id) VALUES (?,?)', [partyId, companion.id]);
     await connection.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=?,pos_z=?,current_hp=hp_max,current_mp=mp_max,activity_status=\'active\' WHERE id=?', [character.current_region_id, character.pos_x, character.pos_y, character.pos_z, companion.id]);
   }

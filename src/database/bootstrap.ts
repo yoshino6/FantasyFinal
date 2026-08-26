@@ -1,5 +1,6 @@
-import type { Pool } from 'mysql2/promise';
+import type { Pool, RowDataPacket } from 'mysql2/promise';
 import { refreshShopStocks } from '../game/shop-stock.service';
+import { recalculateCharacterStats } from '../game/character.service';
 
 type BlacksmithStock = { code: string; name: string; category: string; weaponType: string | null; level: number; price: number; effect: Record<string, number | undefined> };
 type AlchemistStock = { code: string; name: string; category: '回复' | '特殊'; price: number; description: string; effect: Record<string, number | boolean> };
@@ -1695,6 +1696,8 @@ export const initializeSchema = async (pool: Pool) => {
       UNION ALL SELECT 900000002,'npc_forest_mage','伊芙',24,52,12,55,30,34,820,1150,55,185,78,120,23,16,94
       UNION ALL SELECT 900000003,'npc_forest_priest','希娅',38,55,18,38,25,32,1040,1100,72,145,115,145,21,16,82) v
     ON DUPLICATE KEY UPDATE name=VALUES(name),npc_id=VALUES(npc_id),level=VALUES(level),hp_max=VALUES(hp_max),mp_max=VALUES(mp_max),current_hp=VALUES(current_hp),current_mp=VALUES(current_mp),physical_attack=VALUES(physical_attack),magic_attack=VALUES(magic_attack),physical_defense=VALUES(physical_defense),magic_defense=VALUES(magic_defense),accuracy=VALUES(accuracy),evasion=VALUES(evasion),crit_rate_bp=VALUES(crit_rate_bp),crit_damage_bp=VALUES(crit_damage_bp),crit_resist_bp=VALUES(crit_resist_bp),crit_damage_reduction_bp=VALUES(crit_damage_reduction_bp),speed=VALUES(speed),stat_formula_version=2`);
+  const [combatNpcs] = await pool.execute<Array<RowDataPacket & { id: number }>>(`SELECT id FROM characters WHERE npc_code IN ('npc_forest_warrior','npc_forest_mage','npc_forest_priest')`);
+  for (const npc of combatNpcs) await recalculateCharacterStats(pool, Number(npc.id));
   await pool.query('ALTER TABLE characters ALTER stat_formula_version SET DEFAULT 2');
   await pool.query('UPDATE characters SET accuracy=GREATEST(1,ROUND(accuracy/5)),evasion=GREATEST(1,ROUND(evasion/5)),crit_rate_bp=GREATEST(1,ROUND(crit_rate_bp/5)),crit_damage_bp=GREATEST(1,ROUND(crit_damage_bp/5)),crit_resist_bp=GREATEST(1,ROUND(crit_resist_bp/5)),crit_damage_reduction_bp=GREATEST(1,ROUND(crit_damage_reduction_bp/5)),stat_formula_version=2 WHERE stat_formula_version<2');
   await pool.query(`INSERT IGNORE INTO player_skills (character_id,skill_id,quick_slot)

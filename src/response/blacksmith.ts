@@ -74,7 +74,7 @@ const weaponList = async (qqUserId: string, mode: 'refine' | 'fuse', page = 1, k
 };
 const materialList = async (qqUserId: string, mode: 'refine' | 'fuse', instanceId: number, page = 1, keyword = '') => {
   const weapons = mode === 'refine' ? await blacksmithWeapons(qqUserId) : await blacksmithFusionEquipment(qqUserId); const weapon = weapons.find(item => item.id === instanceId); if (!weapon) throw new Error(`未找到该${mode === 'refine' ? '武器' : '装备'}。`);
-  const allMaterials: any[] = mode === 'refine' ? await refinementMaterials(qqUserId) : await fusionMaterials(qqUserId, weapon.category);
+  const allMaterials: any[] = mode === 'refine' ? await refinementMaterials(qqUserId, weapon.requiredLevel) : await fusionMaterials(qqUserId, weapon.category);
   const materials = allMaterials.filter(material => !keyword || material.name.includes(keyword) || material.category.includes(keyword));
   const totalPages = Math.max(1, Math.ceil(materials.length / 10)); const currentPage = Math.min(Math.max(1, page), totalPages);
   const entries = materials.slice((currentPage - 1) * 10, currentPage * 10);
@@ -82,7 +82,7 @@ const materialList = async (qqUserId: string, mode: 'refine' | 'fuse', instanceI
   const markdown = Format.createMarkdown().addTitle(mode === 'refine' ? '精炼·选择材料' : '熔铸·选择材料').addNewline().addNewline().addText(`已放入：【${weapon.category}】${weapon.name}\n`).addBlockquote(`品质：${weapon.quality.toFixed(1)}%｜熔铸：${weapon.fusionCount}/${weapon.fusionLimit}${progress ? `｜成功率：${Math.min(100, 70 + progress.bonus)}%` : ''}`).addNewline().addNewline();
   if (!entries.length) markdown.addBlockquote(mode === 'refine' ? '没有符合条件的精炼材料。' : '没有符合条件的熔铸材料。').addNewline();
   for (const [index, material] of entries.entries()) {
-    const detail = mode === 'refine' ? `本次提升 ${material.minGain}%～${material.maxGain}%` : effectText(material.effect);
+    const detail = mode === 'refine' ? `本次提升 ${material.minGain}%～${material.maxGain}%` : `${effectText(material.effect)}（本次上限，实际值正态抽取）`;
     markdown.addBlockquote(`${numberMark.charAt(index)}【${material.category}】${material.name}×${material.quantity}｜${detail}`).addText(' ').addButton('[使用]', { data: mode === 'refine' ? `/精炼执行 ${instanceId} ${material.id}` : `/熔铸执行 ${instanceId} ${material.id}`, autoEnter: false }).addNewline();
   }
   markdown.addText(`当前第（${currentPage}/${totalPages}）页`).addNewline();
@@ -117,7 +117,7 @@ const forgeMaterialsFormat = async (qqUserId: string, page = 1, keyword = '') =>
   if (!state.category || !state.subtype || !state.level) throw new Error('请完成部位、类型和等级选择。');
   const requiredCodes = new Set(state.requirements.map(item => item.code));
   const auxiliary = state.materials.filter(item => item.selected > 0 && !requiredCodes.has(item.code));
-  const filtered = state.materials.filter(item => !requiredCodes.has(item.code) && (!keyword || item.name.includes(keyword) || item.category.includes(keyword)));
+  const filtered = state.materials.filter(item => !requiredCodes.has(item.code) && item.supported && (!keyword || item.name.includes(keyword) || item.category.includes(keyword)));
   const totalPages = Math.max(1, Math.ceil(filtered.length / 10));
   const currentPage = Math.min(Math.max(1, page), totalPages);
   const materials = filtered.slice((currentPage - 1) * 10, currentPage * 10);
@@ -131,7 +131,7 @@ const forgeMaterialsFormat = async (qqUserId: string, page = 1, keyword = '') =>
     markdown.addBlockquote(`${material?.name ?? materialNames[requirement.code] ?? requirement.code}（${owned}/${requirement.quantity}）${owned >= requirement.quantity ? ' 已满足' : ' 不足'}`).addNewline();
   }
   markdown.addNewline().addText('当前放入辅材：').addNewline();
-  markdown.addBlockquote('辅材只决定副属性的可达上限；\n最终数值按正态分布抽取，并受已有属性衰减影响。\n装备有额外属性上限，请酌情调整用量。').addNewline();
+  markdown.addBlockquote('每份辅材先掷基础值、再将上限翻倍，最后独立按正态分布抽取实际增量。\n装备只按每条词条上限截断，不再存在跨属性总容量或递减结算。').addNewline();
   if (!auxiliary.length) markdown.addBlockquote('无').addNewline();
   for (const material of auxiliary) {
     markdown.addBlockquote(`【${material.category}】${material.name}×${material.selected}(可放入${material.quantity - material.selected})`).addText(' ').addButton('[修改]', { data: `/修改打造材料 ${material.id}`, autoEnter: false }).addText(' ').addButton('[删除]', { data: `/删除打造材料 ${material.id}`, autoEnter: false }).addNewline();
@@ -139,7 +139,7 @@ const forgeMaterialsFormat = async (qqUserId: string, page = 1, keyword = '') =>
   markdown.addNewline().addText('背包材料：').addNewline();
   if (!materials.length) markdown.addBlockquote('没有符合条件的材料。').addNewline();
   for (const [index, material] of materials.entries()) {
-    const tendency = material.code.endsWith('_element_dust') ? `倾向于${state.category === '武器' ? '对应元素精通' : '对应元素抗性'}` : materialTendencies[material.code] ?? '倾向于随机基础属性';
+    const tendency = materialTendencies[material.code] ?? '已配置锻造倾向';
     markdown.addBlockquote(`${'①②③④⑤⑥⑦⑧⑨⑩'.charAt(index)}【${material.category}】${material.name}×${material.quantity}（已放入${material.selected}）｜${tendency}`).addText(' ').addButton('[放入]', { data: `/放入打造材料 ${material.id}`, autoEnter: false }).addText(' ').addButton('[取出]', { data: `/取出打造材料 ${material.id}`, autoEnter: false }).addNewline();
   }
   markdown.addText(`当前第（${currentPage}/${totalPages}）页`).addNewline()

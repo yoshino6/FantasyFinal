@@ -3,23 +3,12 @@ import { getPool, withTransaction } from '../database/pool';
 import { recalculateCharacterStats } from './character.service';
 import { ensureSkillPointLedger, skillPointLedgerSummary } from './skill-point-ledger.service';
 import { forgePrimaryKeys } from './blacksmith.service';
+import { forgedEquipmentCaps } from './constants';
 
 const jsonRecord = (value: unknown): Record<string, unknown> => {
   if (!value) return {};
   if (typeof value === 'object') return value as Record<string, unknown>;
   try { return JSON.parse(String(value)) as Record<string, unknown>; } catch { return {}; }
-};
-const rarityScale: Record<string, number> = { '普通': .75, '优秀': .9, '精良': 1, '稀有': 1.15, '传说': 1.35, '史诗': 1.6, '神器': 1.9 };
-const forgedCaps = (level: number, rarity: string) => {
-  const scale = rarityScale[rarity] ?? 1; const percent = 20 * scale;
-  return {
-    hpMax: level * 24 * scale, mpMax: level * 20 * scale, physicalAttack: level * 8 * scale, magicAttack: level * 8 * scale,
-    physicalDefense: level * 9 * scale, magicDefense: level * 9 * scale, accuracy: level * 8 * scale, evasion: level * 8 * scale,
-    speed: level * 4 * scale, critRateBp: level * 10 * scale, damageBonusPct: 20,
-    hpPct: percent, mpPct: percent, physicalAttackPct: percent, magicAttackPct: percent, physicalDefensePct: percent, magicDefensePct: percent,
-    accuracyPct: percent, evasionPct: percent, speedPct: percent, critRatePct: percent, critDamagePct: percent, tenacityPct: percent,
-    ...Object.fromEntries(['水', '火', '土', '木', '风', '冰', '雷', '光', '暗'].flatMap(element => [[`elementMastery_${element}`, level * 2 * scale], [`elementResistance_${element}`, level * 2 * scale]]))
-  } as Record<string, number>;
 };
 const jsonStringArray = (value: unknown): string[] => {
   const raw = typeof value === 'string' ? (() => { try { return JSON.parse(value); } catch { return []; } })() : value;
@@ -35,7 +24,7 @@ const invalidForgedEquipment = (category: string, subtype: string | null, level:
   const secondary = Object.entries(effect).filter(([key, value]) => !main.includes(key) && typeof value === 'number' && Number(value) !== 0);
   const allowedSecondary = ({ '普通': 1, '优秀': 2, '精良': 3, '稀有': 4, '传说': 5, '史诗': 5, '神器': 5 }[rarity] ?? 1);
   if (secondary.length > allowedSecondary) return true;
-  const caps = forgedCaps(level, rarity);
+  const caps = forgedEquipmentCaps(category === '武器' ? '武器' : '防具', level, rarity, main);
   return Object.entries(effect).some(([key, value]) => caps[key] !== undefined && Math.abs(Number(value)) > caps[key] + .1);
 };
 

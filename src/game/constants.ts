@@ -47,6 +47,71 @@ export const calculateDerivedStats = (value: Allocation): DerivedStats => ({
   speed: 100 + value.agility * 8
 });
 
+export const forgeRarityMultiplier: Record<string, number> = {
+  '普通': 1,
+  '优秀': 1.15,
+  '精良': 1.3,
+  '稀有': 1.5,
+  '传说': 1.7,
+  '史诗': 2
+};
+
+export const equipmentQualityMultiplier = (quality: number) => .6 + Math.max(0, Math.min(100, Number(quality))) / 250;
+
+/** 锻造不读取角色实际六维，固定以总基础 100、总成长 10 的六维均分白板为锚点。 */
+export const forgedEquipmentBase = (level: number, category: '武器' | '防具') => {
+  const normalizedLevel = Math.max(1, Math.floor(Number(level) || 1));
+  const equalAttribute = 100 / 6 + 10 / 6 * (normalizedLevel - 1);
+  const levelMultiplier = Math.pow(1.2, Math.floor(normalizedLevel / 10));
+  const physicalAttack = 8 + equalAttribute * 4.3;
+  const physicalDefense = 8 + equalAttribute * 4.25;
+  const magicDefense = 8 + equalAttribute * 4.3;
+  return (category === '武器'
+    ? (physicalAttack + physicalAttack) / 2
+    : (physicalDefense + magicDefense) / 4) * levelMultiplier;
+};
+
+const weaponHighWeightAffixes = new Set(['mpMax', 'accuracy', 'critRateBp', 'critDamageBp']);
+const armorHighWeightAffixes = new Set(['hpMax', 'evasion', 'critResistBp', 'critDamageReductionBp']);
+const standardAffixes = ['hpMax', 'mpMax', 'physicalAttack', 'magicAttack', 'physicalDefense', 'magicDefense', 'accuracy', 'evasion', 'critRateBp', 'critDamageBp', 'critResistBp', 'critDamageReductionBp', 'tenacity', 'speed'];
+
+/** 不含主词条本体的单项辅词条上限。 */
+export const forgedAffixCap = (category: '武器' | '防具', key: string, level: number, rarity: string) => {
+  const base = forgedEquipmentBase(level, category) * (forgeRarityMultiplier[rarity] ?? 1);
+  if (category === '武器') {
+    if (key === 'physicalDefense' || key === 'magicDefense') return 0;
+    if (key === 'physicalAttack' || key === 'magicAttack') return base * .5;
+    return weaponHighWeightAffixes.has(key) ? base * 2 : base;
+  }
+  if (key === 'physicalAttack' || key === 'magicAttack') return 0;
+  if (key === 'physicalDefense' || key === 'magicDefense') return base * .5;
+  return armorHighWeightAffixes.has(key) ? base * 2 : base;
+};
+
+/** 成品词条总上限；主词条可额外叠加一条同类辅词条。 */
+export const forgedEquipmentCaps = (category: '武器' | '防具', level: number, rarity: string, primaryKeys: readonly string[]) => {
+  const base = forgedEquipmentBase(level, category) * (forgeRarityMultiplier[rarity] ?? 1);
+  return Object.fromEntries(standardAffixes.map(key => {
+    const offTypeWeaponAttack = category === '武器' && (key === 'physicalAttack' || key === 'magicAttack') && !primaryKeys.includes(key);
+    return [key, (offTypeWeaponAttack ? 0 : forgedAffixCap(category, key, level, rarity)) + (primaryKeys.includes(key) ? base : 0)];
+  })) as Record<string, number>;
+};
+
+export type VirtualEquipmentTier = 'normal' | 'large' | 'elite' | 'boss';
+const virtualEquipmentMultiplier: Record<VirtualEquipmentTier, number> = { normal: .6, large: 1, elite: 1.15, boss: 1.3 };
+
+export const virtualEquipmentStats = (level: number, tier: VirtualEquipmentTier, physicalAttack: number, magicAttack: number) => {
+  const multiplier = virtualEquipmentMultiplier[tier];
+  const weapon = forgedEquipmentBase(level, '武器') * multiplier;
+  const armor = forgedEquipmentBase(level, '防具') * multiplier * 5;
+  return {
+    physicalAttack: physicalAttack >= magicAttack ? weapon : 0,
+    magicAttack: magicAttack > physicalAttack ? weapon : 0,
+    physicalDefense: armor,
+    magicDefense: armor
+  };
+};
+
 export const gifts = {
   holy_sword_shirulu: { name: '圣剑·希尔露', category: 'artifact', summary: '由星辉铸成的圣洁长剑。' },
   demon_sword_aphia: { name: '魔剑·阿菲娅', category: 'artifact', summary: '寄宿深渊意志的漆黑魔剑。' },

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
-import { SESSION_TTL_MINUTES, STAMINA_RECOVERY_MS, artifactGiftSlots, calculateDerivedStats, gifts, isGiftCode, staminaMaxForRealm } from './constants';
+import { SESSION_TTL_MINUTES, STAMINA_RECOVERY_MS, artifactGiftSlots, calculateDerivedStats, equipmentQualityMultiplier, gifts, isGiftCode, staminaMaxForRealm, virtualEquipmentStats, type VirtualEquipmentTier } from './constants';
 import { homeRestRecoveryBonus } from './home.service';
 import { attributes, type Allocation, type DerivedStats, type Growth } from './types';
 import { recordSkillPointChange } from './skill-point-ledger.service';
@@ -38,25 +38,46 @@ const jsonRecord = (value: unknown): Record<string, unknown> => {
   try { return JSON.parse(value) as Record<string, unknown>; } catch { return {}; }
 };
 
+const armorClassModifier: Record<string, { physicalDefense: number; magicDefense: number; accuracy: number; evasion: number; speed: number }> = {
+  '布甲': { physicalDefense: .2, magicDefense: .2, accuracy: 16, evasion: 12, speed: 16 },
+  '皮甲': { physicalDefense: .6, magicDefense: .6, accuracy: 8, evasion: 0, speed: 8 },
+  '轻甲': { physicalDefense: 1, magicDefense: 1, accuracy: 0, evasion: 0, speed: 0 },
+  '重甲': { physicalDefense: 2, magicDefense: 1.5, accuracy: 0, evasion: -8, speed: -8 },
+  '板甲': { physicalDefense: 2.5, magicDefense: 2.5, accuracy: -12, evasion: -16, speed: -16 }
+};
+
 const withEquipmentStats = async (connection: Pool | PoolConnection, characterId: number, base: DerivedStats): Promise<DerivedStats> => {
-  const [rows] = await connection.execute<(RowDataPacket & { effect_json: unknown; quality: number })[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json,COALESCE(ii.quality,100) AS quality
+  const [rows] = await connection.execute<(RowDataPacket & { effect_json: unknown; quality: number; item_category: string; weapon_type: string | null })[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json,COALESCE(ii.quality,100) AS quality,i.item_category,i.weapon_type
     FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
     LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
     WHERE pe.character_id=?`, [characterId]);
   const [foodRows] = await connection.execute<(RowDataPacket & { buff_json: unknown })[]>('SELECT buff_json FROM player_food_buffs WHERE character_id=? AND expires_at>NOW()', [characterId]);
-  const effects = [...rows.map(row => ({ effect: jsonRecord(row.effect_json), scale: .6 + Math.max(0, Math.min(100, Number(row.quality))) * .004 })), ...foodRows.map(row => ({ effect: jsonRecord(row.buff_json), scale: 1 }))];
-  const flat = (key: string) => effects.reduce((total, entry) => total + Number(entry.effect[key] ?? 0) * entry.scale, 0);
+  const effects = [...rows.map(row => ({ effect: jsonRecord(row.effect_json), scale: equipmentQualityMultiplier(Number(row.quality)), armor: armorClassModifier[String(row.weapon_type ?? '')] })), ...foodRows.map(row => ({ effect: jsonRecord(row.buff_json), scale: 1, armor: undefined }))];
+  const flat = (key: string) => effects.reduce((total, entry) => total + Number(entry.effect[key] ?? 0) * entry.scale * (key === 'physicalDefense' ? entry.armor?.physicalDefense ?? 1 : key === 'magicDefense' ? entry.armor?.magicDefense ?? 1 : 1), 0);
   const multiplier = (key: string) => effects.reduce((total, entry) => total * (1 + Number(entry.effect[key] ?? 0) * entry.scale / 100), 1);
   const stat = (value: number, rawKey: string, percentKey: string) => Math.max(0, Math.floor((value + flat(rawKey)) * multiplier(percentKey)));
+  const finalMultiplier = (key: 'accuracy' | 'evasion' | 'speed') => Math.max(0, 1 + rows.reduce((total, row) => total + Number(armorClassModifier[String(row.weapon_type ?? '')]?.[key] ?? 0), 0) / 100);
   return {
     hpMax: stat(base.hpMax, 'hpMax', 'hpPct'), mpMax: stat(base.mpMax, 'mpMax', 'mpPct'),
     physicalAttack: stat(base.physicalAttack, 'physicalAttack', 'physicalAttackPct'), magicAttack: stat(base.magicAttack, 'magicAttack', 'magicAttackPct'),
     physicalDefense: stat(base.physicalDefense, 'physicalDefense', 'physicalDefensePct'), magicDefense: stat(base.magicDefense, 'magicDefense', 'magicDefensePct'),
-    accuracy: stat(base.accuracy, 'accuracy', 'accuracyPct'), evasion: stat(base.evasion, 'evasion', 'evasionPct'),
     critRateBp: stat(base.critRateBp, 'critRateBp', 'critRatePct'), critDamageBp: stat(base.critDamageBp, 'critDamageBp', 'critDamagePct'),
     critResistBp: stat(base.critResistBp, 'critResistBp', 'critResistPct'), critDamageReductionBp: stat(base.critDamageReductionBp, 'critDamageReductionBp', 'critDamageReductionPct'),
-    tenacity: stat(base.tenacity, 'tenacity', 'tenacityPct'), speed: stat(base.speed, 'speed', 'speedPct')
+    tenacity: stat(base.tenacity, 'tenacity', 'tenacityPct'), speed: Math.floor(stat(base.speed, 'speed', 'speedPct') * finalMultiplier('speed')),
+    accuracy: Math.floor(stat(base.accuracy, 'accuracy', 'accuracyPct') * finalMultiplier('accuracy')),
+    evasion: Math.floor(stat(base.evasion, 'evasion', 'evasionPct') * finalMultiplier('evasion'))
   };
+};
+
+const virtualNpcTier = (npcCode: string | null): VirtualEquipmentTier | null => {
+  if (!npcCode) return null;
+  if (['npc_forest_warrior', 'npc_forest_mage', 'npc_forest_priest'].includes(npcCode)) return 'elite';
+  return 'large';
+};
+const withVirtualNpcEquipment = (stats: DerivedStats, level: number, npcCode: string | null): DerivedStats => {
+  const tier = virtualNpcTier(npcCode); if (!tier) return stats;
+  const virtual = virtualEquipmentStats(level, tier, stats.physicalAttack, stats.magicAttack);
+  return { ...stats, physicalAttack: Math.floor(stats.physicalAttack + virtual.physicalAttack), magicAttack: Math.floor(stats.magicAttack + virtual.magicAttack), physicalDefense: Math.floor(stats.physicalDefense + virtual.physicalDefense), magicDefense: Math.floor(stats.magicDefense + virtual.magicDefense) };
 };
 
 const equipmentExtraAttributes = async (connection: Pool | PoolConnection, characterId: number) => {
@@ -64,7 +85,7 @@ const equipmentExtraAttributes = async (connection: Pool | PoolConnection, chara
     FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
     LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
     WHERE pe.character_id=?`, [characterId]);
-  const damageBonusPct = rows.reduce((total, row) => total + Number(jsonRecord(row.effect_json).damageBonusPct ?? 0) * (.6 + Math.max(0, Math.min(100, Number(row.quality))) * .004), 0);
+  const damageBonusPct = rows.reduce((total, row) => total + Number(jsonRecord(row.effect_json).damageBonusPct ?? 0) * equipmentQualityMultiplier(Number(row.quality)), 0);
   return { damageBonusPct: Math.round(damageBonusPct * 10) / 10 };
 };
 
@@ -110,7 +131,7 @@ const withEquipmentElements = async (connection: Pool | PoolConnection, characte
     FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
     LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
     WHERE pe.character_id=?`, [characterId]);
-  const bonus = (prefix: 'elementMastery' | 'elementResistance', element: string) => rows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[`${prefix}_${element}`] ?? 0) * (.6 + Math.max(0, Math.min(100, Number(row.quality))) * .004), 0);
+  const bonus = (prefix: 'elementMastery' | 'elementResistance', element: string) => rows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[`${prefix}_${element}`] ?? 0) * equipmentQualityMultiplier(Number(row.quality)), 0);
   const value = (base: Record<string, unknown>, prefix: 'elementMastery' | 'elementResistance') => Object.fromEntries(elements.map(element => [element, Math.round((Number(base[element] ?? 0) + bonus(prefix, element)) * 10) / 10]));
   return { mastery: value(baseMastery, 'elementMastery'), resistance: value(baseResistance, 'elementResistance') };
 };
@@ -123,7 +144,8 @@ export const recalculateCharacterStats = async (connection: Pool | PoolConnectio
     JOIN item_definitions i ON i.id=pe.item_id
     WHERE pe.character_id=? AND COALESCE(i.required_level,1)>?`, [characterId, Number(character.level)]);
   await connection.execute('DELETE FROM player_food_buffs WHERE character_id=? AND expires_at<=NOW()', [characterId]);
-  const stats = await withEquipmentStats(connection, characterId, calculateDerivedStats(finalAttributes(character)));
+  const equippedStats = await withEquipmentStats(connection, characterId, calculateDerivedStats(finalAttributes(character)));
+  const stats = withVirtualNpcEquipment(equippedStats, Number(character.level), character.npc_code === null ? null : String(character.npc_code));
   const baseMastery = jsonRecord(character.element_base_mastery_json ?? character.element_mastery_json);
   const baseResistance = jsonRecord(character.element_base_resistance_json ?? character.element_resistance_json);
   const elemental = await withEquipmentElements(connection, characterId, baseMastery, baseResistance);

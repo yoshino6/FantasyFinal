@@ -15,7 +15,7 @@ import floor3Morning from '../assets/home/room/floor-3-morning.png';
 import floor3Noon from '../assets/home/room/floor-3-noon.png';
 import floor3Evening from '../assets/home/room/floor-3-evening.png';
 import woodenBedFront from '../assets/home/furniture/directional/wooden-bed-front.png';
-import woodenBedSide from '../assets/home/furniture/directional/wooden-bed-side.png';
+import woodenBedSide from '../assets/home/furniture/directional/wooden-bed-side-v2.png';
 import woodenBedBack from '../assets/home/furniture/directional/wooden-bed-back.png';
 import slimeBedFront from '../assets/home/furniture/directional/slime-bed-front.png';
 import slimeBedSide from '../assets/home/furniture/directional/slime-bed-side.png';
@@ -39,7 +39,7 @@ import moonlightLampFront from '../assets/home/furniture/directional/moonlight-l
 import moonlightLampSide from '../assets/home/furniture/directional/moonlight-lamp-side.png';
 import moonlightLampBack from '../assets/home/furniture/directional/moonlight-lamp-back.png';
 
-const HOME_ASSET_VERSION = 'cozy-pixel-home-v11-remove-bed-edge-seams';
+const HOME_ASSET_VERSION = 'cozy-pixel-home-v12-clean-wooden-bed-side';
 const assetPath = (asset: string) => decodeURIComponent(asset).replace(/^([a-zA-Z]):(?![\\/])/, '$1:\\');
 type HomePeriod = 'morning' | 'noon' | 'evening';
 const backgrounds: Record<1 | 2 | 3, Record<HomePeriod, string>> = {
@@ -60,7 +60,7 @@ const backgrounds: Record<1 | 2 | 3, Record<HomePeriod, string>> = {
   }
 };
 type DirectionalFurnitureAssets = { front: string; side: string; back: string };
-type FurnitureEdgeCleanup = 'none' | 'detached' | 'soft-tail';
+type FurnitureEdgeCleanup = 'none' | 'detached';
 const directionalAssets = (front: string, side: string, back: string): DirectionalFurnitureAssets => ({
   front: assetPath(front), side: assetPath(side), back: assetPath(back)
 });
@@ -84,9 +84,7 @@ const shadowSvg = (width: number, height: number) => Buffer.from(`<svg xmlns="ht
 const furnitureAssetFor = (code: string, rotation: number) => {
   const assets = furnitureAssets[code];
   if (!assets) return null;
-  const edgeCleanup: FurnitureEdgeCleanup = code === 'storage_chest'
-    ? 'detached'
-    : code === 'wooden_bed' && (rotation === 90 || rotation === 270) ? 'soft-tail' : 'none';
+  const edgeCleanup: FurnitureEdgeCleanup = code === 'storage_chest' ? 'detached' : 'none';
   if (rotation === 90) return { asset: assets.side, mirror: false, edgeCleanup };
   if (rotation === 180) return { asset: assets.back, mirror: false, edgeCleanup };
   if (rotation === 270) return { asset: assets.side, mirror: true, edgeCleanup };
@@ -130,22 +128,6 @@ const cleanFurnitureAsset = async (asset: string, width: number, height: number,
       if (edgeCleanup === 'detached') {
         for (let x = 0; x < body.start; x++) clearColumn(x);
         for (let x = body.end + 1; x < width; x++) clearColumn(x);
-      }
-      if (edgeCleanup === 'soft-tail') {
-        const denseThreshold = height * .7; const maxTail = Math.ceil(width * .08);
-        const firstDense = visibleColumns.findIndex((visible, x) => x >= body.start && x <= body.end && visible >= denseThreshold);
-        let lastDense = -1; for (let x = body.end; x >= body.start; x--) if (visibleColumns[x] >= denseThreshold) { lastDense = x; break; }
-        const clearDarkSeamPixels = (x: number) => {
-          for (let y = 0; y < height; y++) {
-            const offset = (y * width + x) * channels;
-            if (pixels[offset + 3] <= 32) continue;
-            const brightness = pixels[offset] * .299 + pixels[offset + 1] * .587 + pixels[offset + 2] * .114;
-            if (brightness >= 150) continue;
-            pixels[offset + 3] = 0;
-          }
-        };
-        if (firstDense > body.start && firstDense - body.start <= maxTail) for (let x = body.start; x < firstDense; x++) clearDarkSeamPixels(x);
-        if (lastDense >= body.start && body.end - lastDense <= maxTail) for (let x = lastDense + 1; x <= body.end; x++) clearDarkSeamPixels(x);
       }
     }
   }
