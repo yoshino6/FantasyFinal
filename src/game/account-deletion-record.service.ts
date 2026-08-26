@@ -1,6 +1,7 @@
 import type { RowDataPacket } from 'mysql2';
 import type { PoolConnection } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
+import { removePlayerAccountData } from './account-cleanup.service';
 
 type ForeignKey = RowDataPacket & { tableName: string; columnName: string; referencedTable: string; referencedColumn: string };
 type SnapshotRow = Record<string, unknown>;
@@ -8,6 +9,9 @@ type Snapshot = { version: 1; tableOrder: string[]; tables: Record<string, Snaps
 type DeletionRecordRow = RowDataPacket & { id: number; qq_user_id: string; qq_nickname: string | null; character_name: string | null; snapshot_json: Snapshot | string; deleted_at: Date; restored_at: Date | null; restored_by_qq_user_id: string | null };
 
 export type AccountDeletionFilter = { page?: number; keyword?: string; filter?: '玩家' | '状态' | '时间'; value?: string };
+export class AccountRestoreConflictError extends Error {
+  constructor() { super('该玩家已重新创建账号，无法直接覆盖；请先处理当前账号数据。'); }
+}
 
 // 这些表承载的是多人或短时战斗状态。恢复已结束会话会影响其他在线玩家，因此只恢复账号自身的持久化资料。
 const excludedTables = new Set([
@@ -69,10 +73,10 @@ export const archiveDeletedAccount = async (connection: PoolConnection, qqUserId
   const [playerRows] = await connection.query<RowDataPacket[]>('SELECT * FROM players WHERE qq_user_id=? FOR UPDATE', [qqUserId]);
   const player = playerRows[0]; if (!player) throw new Error('当前账号尚未创建游戏数据。');
   const [characterRows] = await connection.query<RowDataPacket[]>('SELECT * FROM characters WHERE player_id=? FOR UPDATE', [player.id]);
-  const character = characterRows[0]; if (!character) throw new Error('当前账号尚未创建角色。');
+  const character = characterRows[0];
   const tables: Record<string, SnapshotRow[]> = {
     players: [Object.fromEntries(Object.entries(player).map(([key, value]) => [key, snapshotValue(value)]))],
-    characters: [Object.fromEntries(Object.entries(character).map(([key, value]) => [key, snapshotValue(value)]))]
+    ...(character ? { characters: [Object.fromEntries(Object.entries(character).map(([key, value]) => [key, snapshotValue(value)]))] } : {})
   };
   const seen = new Map<string, Set<string>>();
   for (const [name, rows] of Object.entries(tables)) seen.set(name, new Set(rows.map(row => JSON.stringify(row))));
@@ -91,7 +95,7 @@ export const archiveDeletedAccount = async (connection: PoolConnection, qqUserId
     }
   }
   const snapshot: Snapshot = { version: 1, tableOrder: tableOrder(tables, keys), tables };
-  await connection.execute('INSERT INTO account_deletion_records (qq_user_id,qq_nickname,character_name,snapshot_json) VALUES (?,?,?,?)', [qqUserId, player.qq_nickname ?? null, character.name ?? null, JSON.stringify(snapshot)]);
+  await connection.execute('INSERT INTO account_deletion_records (qq_user_id,qq_nickname,character_name,snapshot_json) VALUES (?,?,?,?)', [qqUserId, player.qq_nickname ?? null, character?.name ?? null, JSON.stringify(snapshot)]);
 };
 
 export const accountDeletionRecords = async (filter: AccountDeletionFilter = {}) => {
@@ -114,12 +118,16 @@ const snapshotFrom = (value: Snapshot | string): Snapshot => {
   return snapshot;
 };
 
-export const restoreDeletedAccount = async (recordId: number, operatorQqUserId: string) => withTransaction(async connection => {
+export const restoreDeletedAccount = async (recordId: number, operatorQqUserId: string, overwrite = false) => withTransaction(async connection => {
   const [recordRows] = await connection.query<DeletionRecordRow[]>('SELECT * FROM account_deletion_records WHERE id=? FOR UPDATE', [recordId]);
   const record = recordRows[0]; if (!record) throw new Error('未找到该注销记录。');
   if (record.restored_at) throw new Error('该注销记录已经恢复过了。');
   const [currentPlayers] = await connection.query<RowDataPacket[]>('SELECT id FROM players WHERE qq_user_id=? FOR UPDATE', [record.qq_user_id]);
-  if (currentPlayers[0]) throw new Error('该玩家已重新创建账号，无法直接覆盖；请先处理当前账号数据。');
+  if (currentPlayers[0]) {
+    if (!overwrite) throw new AccountRestoreConflictError();
+    await archiveDeletedAccount(connection, record.qq_user_id);
+    await removePlayerAccountData(connection, record.qq_user_id);
+  }
   const snapshot = snapshotFrom(record.snapshot_json);
   for (const table of snapshot.tableOrder) {
     if (excludedTables.has(table)) continue;

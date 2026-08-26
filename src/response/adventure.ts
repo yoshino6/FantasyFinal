@@ -17,6 +17,7 @@ import { cityWantedAlert, pvpBattleStatus, pvpCombatAction, reserveWarrantEntryN
 import { createFormatWithoutGroupMention } from '../middleware/group-reply-mention';
 import { knownGroupChannels, rememberGroupChannel } from '../game/group-channel.service';
 import { warrantNoticeFormat } from './warrant-notice';
+import { gameAssetUrls, isPublicImageUrl } from '../config/game-assets';
 
 const pearGuideImagePath = decodeURIComponent(pearGuideImage).replace(/^([a-zA-Z]):(?![\\/])/, '$1:\\');
 const pearGuideImageBuffer = () => readFile(pearGuideImagePath);
@@ -180,9 +181,16 @@ const forestGuideChapterTexts: Record<number, string> = {
 
 const townArrivalFormat = async (stage: number, text: string, completed = false, guildStory = false) => {
   if (completed) return null;
+  const hasInlinePearImage = guildStory && stage === 1 && isPublicImageUrl(gameAssetUrls.pearGuideImageUrl);
   const markdown = Format.createMarkdown().addTitle(guildStory ? `初临·百纳镇·冒险者工会（${stage}/3）` : `初临·百纳镇（${stage}/6）`).addNewline().addNewline();
+  // 只有 Markdown 内嵌的公开图片，才能与正文和按钮作为同一条 QQ 消息发送。
+  if (hasInlinePearImage) markdown.addImage(gameAssetUrls.pearGuideImageUrl, { width: 320, height: 213 }).addNewline().addNewline();
   markdown.addText(text);
   const label = guildStory ? '继续' : stage === 4 ? '你说什么？勇者是什么意思？' : stage === 6 ? '挥手告别' : '继续';
+  if (hasInlinePearImage) {
+    markdown.addNewline().addNewline().addButton(`[${label}]`, { data: '/继续剧情', autoEnter: false });
+    return Format.create().addMarkdown(markdown);
+  }
   return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton(label, '/继续剧情', { type: 'command', autoEnter: true, style: 'blue' }));
 };
 
@@ -828,7 +836,7 @@ export const continueStoryHandler = async () => {
     const story = await continueForestArrival(event.current.UserId);
     const storyFormat = await townArrivalFormat(story.stage, story.text, story.completed, story.chapter === 'guild');
     if (storyFormat) {
-      if (story.chapter === 'guild' && story.stage === 1) {
+      if (story.chapter === 'guild' && story.stage === 1 && !isPublicImageUrl(gameAssetUrls.pearGuideImageUrl)) {
         try { await message.send({ format: Format.create().addImage(await pearGuideImageBuffer()) }); }
         catch (error) { logger.warn({ err: error, pearGuideImage: pearGuideImagePath }, 'load pear guide image failed'); }
       }
@@ -849,6 +857,12 @@ export const buildingHandler = (action: 'enter' | 'ignore' | 'leave' | 'area') =
     if (code === 'blacksmith') {
       if (action === 'enter') { const { blacksmithFormat } = await import('./blacksmith'); await message.send({ format: await blacksmithFormat(event.current.UserId) }); return; }
       const panel = await movementPanel(event.current.UserId, action === 'leave' ? '你离开了铁匠铺，炉火与锤声在身后渐远。' : '你暂时没有进入铁匠铺。');
+      const nearby = await nearbyPoints(event.current.UserId);
+      await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return;
+    }
+    if (code === 'saint_church') {
+      if (action === 'enter') { const { churchFormat } = await import('./church'); await message.send({ format: await churchFormat(event.current.UserId) }); return; }
+      const panel = await movementPanel(event.current.UserId, action === 'leave' ? '你离开圣恩教堂，晚风与街道的声响重新围拢过来。' : '你暂时没有进入圣恩教堂。');
       const nearby = await nearbyPoints(event.current.UserId);
       await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return;
     }
@@ -901,7 +915,28 @@ export const adventurerCardHandler = async () => { const [event] = useEvent(); c
   // 富媒体消息会把同一条内容中的 @ 作为图片说明发出；卡片只发送图片，不附加群聊回复 @。
   await message.send({ format: createFormatWithoutGroupMention().addImage(card.image) });
 } catch (error) { await fail(message, error, '无法查看卡片'); } };
-export const pearGuideHandler = async () => { const [message] = useMessage(); try { await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('梨子喵')) }); await message.send({ format: Format.create().addImage(await pearGuideImageBuffer()) }); } catch (error) { await fail(message, error, '无法展示梨子喵'); } };
+export const pearGuideHandler = async () => { const [message] = useMessage(); try {
+  if (isPublicImageUrl(gameAssetUrls.pearGuideImageUrl)) {
+    const markdown = Format.createMarkdown().addTitle('梨子喵').addNewline().addNewline().addImage(gameAssetUrls.pearGuideImageUrl, { width: 320, height: 213 });
+    await message.send({ format: Format.create().addMarkdown(markdown) });
+    return;
+  }
+  await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('梨子喵')) });
+  await message.send({ format: Format.create().addImage(await pearGuideImageBuffer()) });
+} catch (error) { await fail(message, error, '无法展示梨子喵'); } };
+export const pearGuidePreviewHandler = async () => {
+  const [route] = useRoute(); const [message] = useMessage();
+  try {
+    const supplied = String(route.param('url') ?? '').trim();
+    const imageUrl = supplied || gameAssetUrls.pearGuideImageUrl;
+    if (!isPublicImageUrl(imageUrl)) throw new Error('请先在 src/config/game-assets.ts 填写 pearGuideImageUrl，或发送「梨子喵预览 图片URL」进行临时测试。');
+    const markdown = Format.createMarkdown().addTitle('梨子喵·剧情图片预览').addNewline().addNewline()
+      .addImage(imageUrl, { width: 320, height: 213 }).addNewline().addNewline()
+      .addBlockquote('图片、剧情文字与蓝色操作文字均位于同一条 Markdown 消息内。').addNewline().addNewline()
+      .addButton('[测试继续]', { data: '/梨子喵预览', autoEnter: false });
+    await message.send({ format: Format.create().addMarkdown(markdown) });
+  } catch (error) { await fail(message, error, '梨子喵预览不可用'); }
+};
 const pearGuideFormat = async (qqUserId: string, text?: string, continuingChat = false) => {
   const greeting = text ?? timeGreeting(
     '清晨的百纳镇还带着薄雾。梨子喵抱着一小袋刚买的点心，耳朵轻轻一抖，笑着朝你招手。\n“早上好呀，勇者大人！又要出发了喵？今天也要精神满满喵！”',

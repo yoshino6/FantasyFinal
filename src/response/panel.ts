@@ -4,6 +4,7 @@ import { messageFormat, sendWithTextFallback } from '../game/message';
 import { autoBattleConfig } from '../game/auto-battle.service';
 import { homePanel } from '../game/home.service';
 import { durationText } from '../game/time-format';
+import { markerName, sortMapMarkers } from '../game/map-marker.service';
 
 const directionText = (point: NearbyPoint, x: number, y: number) => {
   const vertical = point.y > y ? '北' : point.y < y ? '南' : '';
@@ -25,21 +26,27 @@ export const outsidePanel = (title: string, location: string, speed: number, ran
   if (resting) markdown.addText(activityStatus === 'detained' ? '状态：关押中' : activityStatus === 'unconscious' ? '状态：昏迷中' : '状态：休息中（每秒恢复 1% 生命与魔力）').addNewline();
   markdown.addText(`移动速度：（${speed}/${speedLimit}）`).addButton('[调整移速]', { data: '/调整移速 ', autoEnter: false }).addNewline().addText(`感知范围：${range}`);
   if (perceptionObscured) markdown.addNewline().addBlockquote('压抑的黑暗干扰了你的感知').addNewline();
-  const normalLandmarks = landmarks.filter(landmark => landmark.kind !== 'bounty');
+  const normalLandmarks = sortMapMarkers(landmarks.filter(landmark => landmark.kind !== 'bounty'));
+  const entranceLandmarks = normalLandmarks.filter(landmark => landmark.code?.includes('entrance'));
+  const regularLandmarks = normalLandmarks.filter(landmark => !landmark.code?.includes('entrance'));
   const bountyLandmarks = landmarks.filter(landmark => landmark.kind === 'bounty');
   if (mapUnlocked || landmarks.length) {
     markdown.addNewline().addNewline().addText('地图标识：').addButton(showLandmarks ? '[折叠]' : '[显示]', { data: `/地图标识 ${showLandmarks ? '折叠' : '显示'}`, autoEnter: false });
     if (showLandmarks) {
       markdown.addNewline();
-      for (const landmark of normalLandmarks) {
+      for (const landmark of regularLandmarks) {
         const seconds = Math.max(1, Math.ceil((Math.abs(landmark.x - x) + Math.abs(landmark.y - y)) / speedLimit));
-        markdown.addText('> ').addButton(landmark.name, { data: `/前往 ${landmark.x} ${landmark.y}`, autoEnter: false }).addText(`（${landmark.x}, ${landmark.y}）[预计${durationText(seconds)}]`).addNewline();
+        markdown.addText('> ').addButton(markerName(landmark), { data: `/前往 ${landmark.x} ${landmark.y}`, autoEnter: false }).addText(`（${landmark.x}, ${landmark.y}）[预计${durationText(seconds)}]`).addNewline();
       }
     }
     // 悬赏／BOSS 坐标属于地图标识的一部分，且不能被普通地标的折叠开关隐藏。
     for (const landmark of bountyLandmarks) {
       const seconds = Math.max(1, Math.ceil((Math.abs(landmark.x - x) + Math.abs(landmark.y - y)) / speedLimit));
-      markdown.addText('> ').addButton(landmark.name, { data: `/前往 ${landmark.x} ${landmark.y}`, autoEnter: false }).addText(`（${landmark.x}, ${landmark.y}）[预计${durationText(seconds)}]`).addNewline();
+      markdown.addText('> ').addButton(`🎯 ${landmark.name}`, { data: `/前往 ${landmark.x} ${landmark.y}`, autoEnter: false }).addText(`（${landmark.x}, ${landmark.y}）[预计${durationText(seconds)}]`).addNewline();
+    }
+    if (showLandmarks) for (const landmark of entranceLandmarks) {
+      const seconds = Math.max(1, Math.ceil((Math.abs(landmark.x - x) + Math.abs(landmark.y - y)) / speedLimit));
+      markdown.addText('> ').addButton(markerName(landmark), { data: `/前往 ${landmark.x} ${landmark.y}`, autoEnter: false }).addText(`（${landmark.x}, ${landmark.y}）[预计${durationText(seconds)}]`).addNewline();
     }
   }
   const visiblePoints = showPlayers ? points : points.filter(point => point.type !== '玩家');
@@ -53,7 +60,10 @@ export const outsidePanel = (title: string, location: string, speed: number, ran
       markdown.addBold(point.type).addText(' ');
       markdown.addText(label);
       markdown.addText(` · ${directionText(point, x, y)}${point.distance}`);
-      if (speedLimit >= point.distance) markdown.addText(' ').addButton('[前往]', { data: `/前往 ${point.x} ${point.y}`, autoEnter: false });
+      // 同格目标的“前往”只会把玩家原地送回；建筑则可直接进入，其余目标重开对应互动。
+      if (point.distance === 0 && point.interaction?.type === '建筑') markdown.addText(' ').addButton('[进入]', { data: `/建筑进入 ${point.interaction.id}`, autoEnter: false });
+      else if (point.distance === 0 && point.interaction) markdown.addText(' ').addButton('[互动]', { data: `/坐标互动 ${point.interaction.type} ${point.interaction.id}`, autoEnter: false });
+      else if (point.distance > 0 && speedLimit >= point.distance) markdown.addText(' ').addButton('[前往]', { data: `/前往 ${point.x} ${point.y}`, autoEnter: false });
       if (point.type === '怪物' && point.code) markdown.addText(' ').addButton('[攻击]', { data: `/怪物攻击 ${point.code}`, autoEnter: false });
       if (point.type === '玩家' && point.code) {
         if (point.pvpAvailable) markdown.addText(' ').addButton('[攻击]', { data: `/玩家攻击 ${point.code}`, autoEnter: false });
@@ -118,7 +128,7 @@ export default async () => {
       if (!(error instanceof Error) || !error.message.includes('当前不在战斗中')) throw error;
       const [nearby, autoBattle, blockedDirections, movement] = await Promise.all([nearbyPoints(event.current.UserId), autoBattleConfig(event.current.UserId), blockedDungeonDirections(event.current.UserId), movementProfile(event.current.UserId)]);
       const visiblePoints = movement.showPlayers ? nearby.points : nearby.points.filter(point => point.type !== '玩家');
-      const targets = visiblePoints.length ? `\n感知内目标：\n${visiblePoints.map(point => `${point.type} ${point.name} · ${directionText(point, Number(nearby.character.pos_x), Number(nearby.character.pos_y))}${point.distance}${movement.maximum >= point.distance ? ` [前往]` : ''}`).join('\n')}` : '\n感知内目标：\n空空如也';
+      const targets = visiblePoints.length ? `\n感知内目标：\n${visiblePoints.map(point => `${point.type} ${point.name} · ${directionText(point, Number(nearby.character.pos_x), Number(nearby.character.pos_y))}${point.distance}${point.distance === 0 && point.interaction?.type === '建筑' ? ' [进入]' : point.distance === 0 && point.interaction ? ' [互动]' : point.distance > 0 && movement.maximum >= point.distance ? ' [前往]' : ''}`).join('\n')}` : '\n感知内目标：\n空空如也';
       const x = Number(nearby.character.pos_x); const y = Number(nearby.character.pos_y);
       const location = currentLocationText(nearby.character);
       const resting = nearby.character.activity_status !== 'active';

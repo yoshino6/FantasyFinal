@@ -6,9 +6,10 @@ import { messageFormat } from '../game/message';
 import type { RowDataPacket } from 'mysql2/promise';
 import { markedDungeonEntrances } from '../game/dungeon-quest.service';
 import { durationText } from '../game/time-format';
+import { markerName, sortMapMarkers } from '../game/map-marker.service';
 
 type OwnedMap = RowDataPacket & { code: string; name: string; description: string; region_code: string | null; region_name: string | null };
-type MapTarget = RowDataPacket & { code: string; name: string; x: number; y: number; target_order: number };
+type MapTarget = RowDataPacket & { code: string; name: string; x: number; y: number };
 
 const displayName = (map: OwnedMap) => map.code === 'map_baina_town' ? '百纳镇' : map.name;
 const estimateSeconds = (x: number, y: number, target: MapTarget, speed: number) => Math.max(1, Math.ceil((Math.abs(target.x - x) + Math.abs(target.y - y)) / speed));
@@ -46,32 +47,30 @@ export default async () => {
         markdown.addText('> ').addButton(map.description, { data: '/面板', autoEnter: false }).addNewline().addNewline();
         continue;
       }
-      const [targets] = await pool.execute<MapTarget[]>(`SELECT code,name,pos_x AS x,pos_y AS y,
-          CASE code WHEN 'guild_counter' THEN 1 WHEN 'pear_guide' THEN 2 WHEN 'blacksmith' THEN 3 WHEN 'alchemy_sweetshop' THEN 4 WHEN 'oddworkshop' THEN 5 WHEN 'bookshop' THEN 6 WHEN 'baina_residence' THEN 7 WHEN 'hunter_lodge' THEN 8 ELSE 99 END AS target_order
+      const [targets] = await pool.execute<MapTarget[]>(`SELECT code,name,pos_x AS x,pos_y AS y
         FROM map_npcs WHERE region_id=(SELECT id FROM map_regions WHERE code=?)
         UNION ALL
-        SELECT code,name,pos_x AS x,pos_y AS y,100 AS target_order
+        SELECT code,name,pos_x AS x,pos_y AS y
         FROM map_special_objects WHERE region_id=(SELECT id FROM map_regions WHERE code=?)
-        ORDER BY target_order,name`, [map.region_code, map.region_code]);
+        `, [map.region_code, map.region_code]);
       if (map.region_code === 'baina_town') {
-        const [homes] = await pool.execute<(RowDataPacket & MapTarget)[]>(`SELECT 'player_home' AS code,CONCAT('我的小屋·',h.house_level,'级') AS name,h.plot_x AS x,h.plot_y AS y,8 AS target_order
+        const [homes] = await pool.execute<(RowDataPacket & MapTarget)[]>(`SELECT 'player_home' AS code,CONCAT('我的小屋·',h.house_level,'级') AS name,h.plot_x AS x,h.plot_y AS y
           FROM player_homes h JOIN characters c ON c.id=h.character_id JOIN players p ON p.id=c.player_id
           WHERE p.qq_user_id=? AND h.status='active' LIMIT 1`, [event.current.UserId]);
         targets.push(...homes);
-        targets.sort((left, right) => Number(left.target_order) - Number(right.target_order) || left.name.localeCompare(right.name, 'zh-CN'));
       }
       if (!targets.length && map.region_code !== 'dark_forest') {
         markdown.addText('> ').addButton(map.description, { data: '/面板', autoEnter: false }).addNewline().addNewline();
         continue;
       }
-      for (const target of targets) {
+      for (const target of sortMapMarkers(targets)) {
         const seconds = estimateSeconds(x, y, target, bag.movementSpeed);
-        markdown.addText('> ').addButton(target.name, { data: `/前往 ${target.x} ${target.y}`, autoEnter: false }).addText(`（${target.x}, ${target.y}）[预计${durationText(seconds)}]`).addNewline();
+        markdown.addText('> ').addButton(markerName(target), { data: `/前往 ${target.x} ${target.y}`, autoEnter: false }).addText(`（${target.x}, ${target.y}）[预计${durationText(seconds)}]`).addNewline();
       }
       const entrances = await markedDungeonEntrances(event.current.UserId, map.region_code);
       for (const entrance of entrances) {
         const seconds = Math.max(1, Math.ceil((Math.abs(entrance.x - x) + Math.abs(entrance.y - y)) / bag.movementSpeed));
-        markdown.addText('> ').addButton(entrance.name, { data: `/前往 ${entrance.x} ${entrance.y}`, autoEnter: false }).addText(`（${entrance.x}, ${entrance.y}）[预计${durationText(seconds)}]`).addNewline();
+        markdown.addText('> ').addButton(markerName({ code: 'dungeon_entrance', name: entrance.name }), { data: `/前往 ${entrance.x} ${entrance.y}`, autoEnter: false }).addText(`（${entrance.x}, ${entrance.y}）[预计${durationText(seconds)}]`).addNewline();
       }
       markdown.addNewline();
     }

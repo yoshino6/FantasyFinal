@@ -50,22 +50,28 @@ export const homeFormat = async (qqUserId: string, notice = '') => {
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 
-const furnitureFormat = async (qqUserId: string, floor?: number) => {
-  const result = await listFurniture(qqUserId, floor); const targetFloor = floor ?? 1; const order = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧']; const markdown = Format.createMarkdown().addTitle('我的家园·家具').addNewline().addNewline()
-    .addBlockquote(`房屋 Lv.${result.home.house_level}｜${result.home.floor_count} 层｜每层 ${result.slots} 个槽位。制作后将自动选择合法位置，家具不会重叠、不会越出房间。`).addNewline().addNewline();
-  for (const definition of result.definitions) {
+const furnitureFormat = async (qqUserId: string, page = 1, keyword = '') => {
+  const result = await listFurniture(qqUserId); const normalizedKeyword = keyword.trim(); const matchedDefinitions = result.definitions.filter(definition => !normalizedKeyword || definition.name.includes(normalizedKeyword) || definition.description.includes(normalizedKeyword)); const pageSize = 5; const pageCount = Math.max(1, Math.ceil(matchedDefinitions.length / pageSize)); const currentPage = Math.min(pageCount, Math.max(1, Math.floor(page) || 1)); const start = (currentPage - 1) * pageSize; const definitions = matchedDefinitions.slice(start, start + pageSize); const order = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧']; const markdown = Format.createMarkdown().addTitle('我的家园·家具').addNewline().addNewline()
+    .addBlockquote(`第 ${currentPage}/${pageCount} 页｜房屋 Lv.${result.home.house_level}｜${result.home.floor_count} 层｜每层 ${result.slots} 个槽位。制作后会自动选择合法位置。`).addNewline().addNewline();
+  if (normalizedKeyword) markdown.addBlockquote(`搜索：${normalizedKeyword}｜共 ${matchedDefinitions.length} 条`).addNewline().addNewline();
+  if (!definitions.length) markdown.addBlockquote('没有找到匹配的家具。').addNewline().addNewline();
+  for (const [offset, definition] of definitions.entries()) {
     const recipe = (result.recipes.get(definition.code) ?? []).map(item => `${item.name}×${item.quantity}`).join('、') || '无需材料';
-    const index = result.definitions.indexOf(definition); const owned = result.ownedCounts.get(definition.code) ?? 0;
-    markdown.addText(`${order[index] ?? `${index + 1}.`}【${definition.name}】[制作]`).addNewline().addNewline()
+    const index = start + offset; const owned = result.ownedCounts.get(definition.code) ?? 0;
+    markdown.addText(`${order[index] ?? `${index + 1}.`}【${definition.name}】`).addButton('[制作]', { data: `/家园制作 ${definition.code} 1`, autoEnter: false }).addNewline().addNewline()
       .addBlockquote(definition.description).addNewline().addNewline()
       .addBlockquote(`占格 ${definition.grid_width}×${definition.grid_height}｜每层最多 ${definition.max_per_floor} 个`).addNewline().addNewline()
       .addBlockquote(`**已拥有：${owned}**`).addNewline().addNewline()
-      .addBlockquote(`需要：${recipe}`).addNewline()
-      .addText(`制作命令：/家园制作 ${definition.code} ${targetFloor}`).addNewline().addNewline();
+      .addBlockquote(`需要：${recipe}`).addNewline().addNewline();
   }
-  return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow()
-    .addButton('制作清单', '/家园制作清单', { type: 'command', autoEnter: true, style: 'blue' })
-    .addButton('家具摆放', '/家园家具摆放 1', { type: 'command', autoEnter: true, style: 'blue' }));
+  const pageCommand = (target: number) => `/家园制作清单 ${target}${normalizedKeyword ? ` ${normalizedKeyword}` : ''}`;
+  const buttons = Format.createButtonGroup().addRow()
+    .addButton('上一页', pageCommand(Math.max(1, currentPage - 1)), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined })
+    .addButton('搜索', '/家园家具搜索 ', { type: 'command', autoEnter: false })
+    .addButton('下一页', pageCommand(Math.min(pageCount, currentPage + 1)), { type: 'command', autoEnter: true, style: currentPage < pageCount ? 'blue' : undefined });
+  buttons.addRow().addButton('制作清单', '/家园制作清单 1', { type: 'command', autoEnter: true, style: 'blue' })
+    .addButton('家具摆放', '/家园家具摆放 1', { type: 'command', autoEnter: true, style: 'blue' });
+  return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 
 const furniturePlacementFormat = async (qqUserId: string, floor: number) => {
@@ -74,9 +80,11 @@ const furniturePlacementFormat = async (qqUserId: string, floor: number) => {
   const order = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧']; const markdown = Format.createMarkdown().addTitle('我的家园·家具摆放').addNewline().addNewline()
     .addBlockquote(`第 ${floor} 层｜已占 ${used}/${result.slots} 个槽位。选择已摆放家具可收回；制作家具会自动摆入当前指定楼层的合法位置。`).addNewline().addNewline();
   if (!result.installed.length) markdown.addBlockquote('本层暂未摆放家具。请先前往制作清单打造家具。').addNewline().addNewline();
-  result.installed.forEach((item, index) => markdown.addText(`${order[index] ?? `${index + 1}.`}【${item.name}】[收回]`).addNewline().addNewline()
-    .addBlockquote(`坐标：(${item.grid_x ?? '待定'}, ${item.grid_y ?? '待定'})｜占格 ${item.grid_width}×${item.grid_height}`).addNewline()
-    .addText(`收回命令：/家园拆除 ${item.id}`).addNewline().addNewline());
+  result.installed.forEach((item, index) => {
+    const rotated = Number(item.rotation) % 180 !== 0; const width = rotated ? item.grid_height : item.grid_width; const height = rotated ? item.grid_width : item.grid_height;
+    markdown.addText(`${order[index] ?? `${index + 1}.`}【${item.name}】`).addButton('[收回]', { data: `/家园拆除 ${item.id}`, autoEnter: false }).addNewline().addNewline()
+      .addBlockquote(`坐标：(${item.grid_x ?? '待定'}, ${item.grid_y ?? '待定'})｜占格 ${width}×${height}`).addNewline().addNewline();
+  });
   const buttons = Format.createButtonGroup().addRow().addButton('一层', '/家园家具摆放 1', { type: 'command', autoEnter: true, style: 'blue' });
   if (Number(result.home.floor_count) >= 2) buttons.addButton('二层', '/家园家具摆放 2', { type: 'command', autoEnter: true, style: 'blue' });
   if (Number(result.home.floor_count) >= 3) buttons.addButton('三层', '/家园家具摆放 3', { type: 'command', autoEnter: true, style: 'blue' });
@@ -106,13 +114,12 @@ export const homeFloorHandler = async () => { const [event] = useEvent(); const 
   await message.send({ format: Format.create().addImage(result.image) });
   await message.send({ format: await homeFormat(event.current.UserId, `已展示第 ${result.floor} 层室内图｜已摆放 ${result.furniture.length} 件家具${result.cached ? '｜已使用缓存图' : ''}。`) });
 } catch (error) { await message.send({ format: messageFormat('室内图暂不可用', error instanceof Error ? error.message : '请稍后重试。') }); } };
-export const homeFurnitureHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const raw = String(route.param('floor') ?? '').trim(); await message.send({ format: await furnitureFormat(event.current.UserId, raw ? Number(raw) : undefined) }); } catch (error) { await message.send({ format: messageFormat('家具列表不可用', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const homeFurnitureHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const raw = String(route.param('page') ?? '').trim(); const keyword = String(route.param('keyword') ?? '').trim(); await message.send({ format: await furnitureFormat(event.current.UserId, raw ? Number(raw) : 1, keyword) }); } catch (error) { await message.send({ format: messageFormat('家具列表不可用', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const homeFurnitureSearchHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await message.send({ format: await furnitureFormat(event.current.UserId, 1, String(route.param('keyword') ?? '').trim()) }); } catch (error) { await message.send({ format: messageFormat('家具搜索不可用', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const homeFurniturePlacementHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const floor = Number(route.param('floor') ?? 1); await message.send({ format: await furniturePlacementFormat(event.current.UserId, floor) }); } catch (error) { await message.send({ format: messageFormat('家具摆放不可用', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const homeCraftHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try {
   const result = await craftFurniture(event.current.UserId, String(route.param('code')), Number(route.param('floor')), String(route.param('slot') ?? ''));
   await message.send({ format: messageFormat('制作完成', `已自动摆放【${result.name}】到第 ${result.floor} 层坐标 (${result.placement.x}, ${result.placement.y})。`) });
-  try { const image = await homeFloorImage(event.current.UserId, result.floor); await message.send({ format: Format.create().addImage(image.image) }); } catch { /* 图片缓存失败不影响已经完成的制作。 */ }
-  await message.send({ format: await furnitureFormat(event.current.UserId, result.floor) });
 } catch (error) { await message.send({ format: messageFormat('制作失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const homeRemoveHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try {
   const result = await removeFurniture(event.current.UserId, Number(route.param('id')));

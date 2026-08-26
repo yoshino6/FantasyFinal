@@ -10,7 +10,7 @@ type RegistrationStage = 'story' | 'audience' | 'question' | 'destination' | 'da
 type SessionRow = RowDataPacket & { id: string; player_id: number; stage: RegistrationStage; expires_at: Date };
 type PlayerRow = RowDataPacket & { id: number; status: string };
 type RegionRow = RowDataPacket & { id: number; name: string; min_x: number; max_x: number; min_y: number; max_y: number; min_z: number; max_z: number };
-export type CharacterView = Allocation & DerivedStats & { name: string; gender: string; regionName: string; x: number; y: number; z: number; level: number; experience: number; realmStage: number; adventurerRegistered: boolean; giftName: string | null; growth: Growth; currentHp: number; currentMp: number; stamina: number; staminaMax: number; activityStatus: 'active' | 'resting' | 'unconscious' | 'detained'; elementMastery: Record<string, number>; elementResistance: Record<string, number>; extraAttributes: { damageBonusPct: number } };
+export type CharacterView = Allocation & DerivedStats & { name: string; gender: string; regionName: string; x: number; y: number; z: number; level: number; experience: number; realmStage: number; adventurerRegistered: boolean; giftName: string | null; growth: Growth; currentHp: number; currentMp: number; stamina: number; staminaMax: number; activityStatus: 'active' | 'resting' | 'unconscious' | 'detained'; elementMastery: Record<string, number>; elementResistance: Record<string, number>; extraAttributes: { damageBonusPct: number }; activeBuffs: string[]; combatNotes: string[] };
 
 const elements = ['水', '火', '土', '木', '风', '冰', '雷', '光', '暗'] as const;
 const randomBalancedElements = () => {
@@ -66,6 +66,43 @@ const equipmentExtraAttributes = async (connection: Pool | PoolConnection, chara
     WHERE pe.character_id=?`, [characterId]);
   const damageBonusPct = rows.reduce((total, row) => total + Number(jsonRecord(row.effect_json).damageBonusPct ?? 0) * (.6 + Math.max(0, Math.min(100, Number(row.quality))) * .004), 0);
   return { damageBonusPct: Math.round(damageBonusPct * 10) / 10 };
+};
+
+const foodBuffText = (effect: Record<string, unknown>) => {
+  const labels: Array<[string, string]> = [['hpPct', '生命上限'], ['mpPct', '魔力上限'], ['physicalAttackPct', '物攻'], ['magicAttackPct', '魔攻'], ['physicalDefensePct', '物防'], ['magicDefensePct', '魔防'], ['accuracyPct', '命中'], ['evasionPct', '闪避'], ['speedPct', '速度']];
+  return labels.filter(([key]) => Number(effect[key] ?? 0)).map(([key, label]) => `${label}+${Number(effect[key])}%`).join('｜') || '获得餐食增益';
+};
+
+const equipmentCombatNotes = (name: string, effect: Record<string, unknown>) => {
+  const notes: string[] = [];
+  const percent = (key: string, text: string) => { const value = Number(effect[key] ?? 0); if (value) notes.push(`${name}：${text}${value > 0 ? '+' : ''}${value}%`); };
+  // 仅列出装备后恒定生效、且不会并入角色基础属性的战斗修正。
+  // 精通、六维与详细属性加成已计入属性面板；触发型效果则只在战斗过程显示。
+  percent('damageBonusPct', '最终伤害');
+  percent('physicalDamageReductionPct', '受到物理伤害减免');
+  percent('magicDamageReductionPct', '受到魔法伤害减免');
+  percent('hpRegenPct', '每回合生命回复');
+  percent('mpRegenPct', '每回合魔力回复');
+  percent('minimumHitRatePct', '最低实际命中率');
+  percent('actualHitRatePct', '实际命中率');
+  const chantReduction = Number(effect.chantReduction ?? 0); if (chantReduction) notes.push(`${name}：所有技能吟唱-${chantReduction}`);
+  if (effect.unifyAttack) notes.push(`${name}：双攻恒取较高一方`);
+  return notes;
+};
+
+const activeCharacterEffects = async (connection: Pool | PoolConnection, characterId: number) => {
+  const [foodRows, battleRows, equipmentRows] = await Promise.all([
+    connection.execute<(RowDataPacket & { name: string; buff_json: unknown; remaining_seconds: number })[]>(`SELECT i.name,b.buff_json,GREATEST(0,TIMESTAMPDIFF(SECOND,NOW(),b.expires_at)) AS remaining_seconds FROM player_food_buffs b JOIN item_definitions i ON i.id=b.item_id WHERE b.character_id=? AND b.expires_at>NOW() ORDER BY b.expires_at`, [characterId]),
+    connection.execute<(RowDataPacket & { buff_code: string; remaining_battles: number })[]>('SELECT buff_code,remaining_battles FROM player_battle_buffs WHERE character_id=? AND remaining_battles>0 ORDER BY buff_code', [characterId]),
+    connection.execute<(RowDataPacket & { name: string; effect_json: unknown })[]>(`SELECT i.name,COALESCE(ii.effect_json,i.effect_json) AS effect_json FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id WHERE pe.character_id=?`, [characterId])
+  ]);
+  const activeBuffs = foodRows[0].map(row => `${row.name}：${foodBuffText(jsonRecord(row.buff_json))}｜剩余${Math.max(0, Number(row.remaining_seconds))}秒`);
+  for (const row of battleRows[0]) {
+    if (row.buff_code === 'minor_experience_elixir') activeBuffs.push(`经验秘药（小）：经验获取+25%｜剩余${row.remaining_battles}场战斗`);
+    if (row.buff_code === 'minor_luck_elixir') activeBuffs.push(`幸运秘药（小）：队伍掉率+25%｜剩余${row.remaining_battles}场战斗`);
+  }
+  const combatNotes = equipmentRows[0].flatMap(row => equipmentCombatNotes(row.name, jsonRecord(row.effect_json)));
+  return { activeBuffs, combatNotes };
 };
 
 const withEquipmentElements = async (connection: Pool | PoolConnection, characterId: number, baseMastery: Record<string, unknown>, baseResistance: Record<string, unknown>) => {
@@ -231,7 +268,7 @@ export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: 
   await connection.execute('UPDATE players SET status = \'active\' WHERE id = ?', [player.id]);
   await connection.execute('DELETE FROM registration_sessions WHERE id = ?', [session.id]);
   await connection.execute('INSERT INTO player_events (player_id, event_type, payload) VALUES (?, \'character.created\', ?)', [player.id, JSON.stringify({ region: region.name, x, y, z, giftCode })]);
-  return { ...allocation, ...stats, growth, name, gender: '未设定', regionName: region.name, x, y, z, level: 1, experience: 0, realmStage: 1, adventurerRegistered: false, giftName: gifts[giftCode].name, currentHp: stats.hpMax, currentMp: stats.mpMax, stamina: 120, staminaMax: 120, activityStatus: 'active', elementMastery, elementResistance, extraAttributes: { damageBonusPct: 0 } };
+  return { ...allocation, ...stats, growth, name, gender: '未设定', regionName: region.name, x, y, z, level: 1, experience: 0, realmStage: 1, adventurerRegistered: false, giftName: gifts[giftCode].name, currentHp: stats.hpMax, currentMp: stats.mpMax, stamina: 120, staminaMax: 120, activityStatus: 'active', elementMastery, elementResistance, extraAttributes: { damageBonusPct: 0 }, activeBuffs: [], combatNotes: [] };
 });
 
 export const getCharacter = async (qqUserId: string): Promise<CharacterView | null> => {
@@ -247,7 +284,7 @@ export const getCharacter = async (qqUserId: string): Promise<CharacterView | nu
   );
   const row = rows[0];
   if (!row) return null;
-  const extraAttributes = await equipmentExtraAttributes(pool, Number(characterRows[0].id));
+  const [extraAttributes, activeEffects] = await Promise.all([equipmentExtraAttributes(pool, Number(characterRows[0].id)), activeCharacterEffects(pool, Number(characterRows[0].id))]);
   return {
     ...row,
     ...finalAttributes(row),
@@ -256,6 +293,7 @@ export const getCharacter = async (qqUserId: string): Promise<CharacterView | nu
     elementMastery: typeof row.elementMastery === 'string' ? JSON.parse(row.elementMastery) : row.elementMastery ?? {},
     elementResistance: typeof row.elementResistance === 'string' ? JSON.parse(row.elementResistance) : row.elementResistance ?? {},
     extraAttributes,
+    ...activeEffects,
     growth: Object.fromEntries(attributes.map(key => [key, Number(row[`${key}Growth` as keyof typeof row])])) as Growth
   };
 };

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
+import { sortMapMarkers } from './map-marker.service';
 import { calculateDerivedStats, experienceRequiredForLevel, realmEnergyDissipationText, realmLevelCap } from './constants';
 import { recalculateCharacterStats, refreshCharacterStamina } from './character.service';
 import { advanceBountyProgress, refreshBounties } from './bounty.service';
@@ -741,9 +742,9 @@ export const explore = async (qqUserId: string) => {
   return { character, spawns, text, canViewMonsterInfo };
 };
 
-export type NearbyPoint = { type: '怪物' | '域民' | '建筑' | '地标' | '悬赏' | '矿脉' | '植被' | '地下入口' | '玩家'; name: string; x: number; y: number; distance: number; code?: string; pvpAvailable?: boolean; wanted?: boolean };
-export type MapLandmark = { name: string; x: number; y: number; kind?: 'landmark' | 'bounty' };
 export type CoordinateInteractionTarget = { type: '玩家' | 'NPC' | '建筑' | '资源' | '入口' | '地标'; id: string; name: string; code?: string; description: string; gameId?: number; interactionKind?: 'npc' | 'building'; resourceKind?: '矿脉' | '植被' };
+export type NearbyPoint = { type: '怪物' | '域民' | '建筑' | '地标' | '悬赏' | '矿脉' | '植被' | '地下入口' | '玩家'; name: string; x: number; y: number; distance: number; code?: string; interaction?: Pick<CoordinateInteractionTarget, 'type' | 'id'>; pvpAvailable?: boolean; wanted?: boolean };
+export type MapLandmark = { code?: string; name: string; x: number; y: number; kind?: 'landmark' | 'bounty' };
 
 const perceptionRange = (perception: number, level: number) => explorationScale(perception, level);
 const mapCodeByRegion: Record<string, string | undefined> = {
@@ -779,8 +780,8 @@ export const nearbyPoints = async (qqUserId: string) => {
   const [monsters] = await pool.execute<(RowDataPacket & { id: number; name: string; x: number; y: number })[]>(`SELECT s.id,t.name,s.pos_x AS x,s.pos_y AS y FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.region_id=? AND s.pos_x BETWEEN ? AND ? AND s.pos_y BETWEEN ? AND ? AND s.pos_z=? AND s.defeated_at IS NULL
     AND NOT JSON_CONTAINS(COALESCE(s.traits_json,JSON_ARRAY()),JSON_OBJECT('code','city_pursuit'))`, bounds);
   const [npcs] = await pool.execute<(RowDataPacket & { code: string; name: string; x: number; y: number; interaction_kind: 'npc' | 'building' })[]>(`SELECT code,name,interaction_kind,pos_x AS x,pos_y AS y FROM map_npcs WHERE region_id=? AND pos_x BETWEEN ? AND ? AND pos_y BETWEEN ? AND ? AND pos_z=?`, bounds);
-  const [objects] = await pool.execute<(RowDataPacket & { name: string; x: number; y: number })[]>(`SELECT name,pos_x AS x,pos_y AS y FROM map_special_objects WHERE region_id=? AND pos_x BETWEEN ? AND ? AND pos_y BETWEEN ? AND ? AND pos_z=?`, bounds);
-  const [resources] = await pool.execute<(RowDataPacket & { code: string; name: string; x: number; y: number })[]>(`SELECT i.code,i.name,rs.pos_x AS x,rs.pos_y AS y FROM resource_spawns rs JOIN item_definitions i ON i.id=rs.item_id WHERE rs.region_id=? AND rs.pos_x BETWEEN ? AND ? AND rs.pos_y BETWEEN ? AND ? AND rs.pos_z=? AND rs.mined_at IS NULL`, bounds);
+  const [objects] = await pool.execute<(RowDataPacket & { code: string; name: string; x: number; y: number })[]>(`SELECT code,name,pos_x AS x,pos_y AS y FROM map_special_objects WHERE region_id=? AND pos_x BETWEEN ? AND ? AND pos_y BETWEEN ? AND ? AND pos_z=?`, bounds);
+  const [resources] = await pool.execute<(RowDataPacket & { id: number; code: string; name: string; x: number; y: number })[]>(`SELECT rs.id,i.code,i.name,rs.pos_x AS x,rs.pos_y AS y FROM resource_spawns rs JOIN item_definitions i ON i.id=rs.item_id WHERE rs.region_id=? AND rs.pos_x BETWEEN ? AND ? AND rs.pos_y BETWEEN ? AND ? AND rs.pos_z=? AND rs.mined_at IS NULL`, bounds);
   // 入口仅作为周边感知目标显示；地图仍只读取玩家实际抵达后写入的发现标记。
   const [dungeonEntrances] = character.region_name === '幽暗密林'
     ? await pool.execute<(RowDataPacket & { id: number; x: number; y: number })[]>(`SELECT d.id,e.pos_x AS x,e.pos_y AS y FROM dungeon_entrances e
@@ -793,17 +794,18 @@ export const nearbyPoints = async (qqUserId: string) => {
   const dungeonCell = character.region_name === '地下迷宫'
     ? await dungeonCellAt(pool, Number(character.current_region_id), Number(character.pos_x), Number(character.pos_y), Number(character.pos_z))
     : null;
-  const point = (type: NearbyPoint['type'], item: { name: string; x: number; y: number; code?: string }): NearbyPoint => ({ type, name: item.name, x: Number(item.x), y: Number(item.y), distance: Math.abs(Number(item.x) - Number(character.pos_x)) + Math.abs(Number(item.y) - Number(character.pos_y)), code: item.code });
-  const points = [...monsters.map(item => point('怪物', { ...item, code: String(item.id) })), ...resources.map(item => point(resourceKindByCode(item.code), item)), ...npcs.map(item => point(item.interaction_kind === 'building' ? '建筑' : '域民', item)), ...objects.map(item => point('地标', item)), ...dungeonEntrances.map(item => point('地下入口', { ...item, name: '地下迷宫入口', code: String(item.id) })), ...nearbyPlayers.map(item => ({ ...point('玩家', { ...item, name: item.wanted ? `【红名】${item.name}` : item.name, code: String(item.gameId) }), wanted: item.wanted, pvpAvailable: true, inHome: item.inHome }))]
+  const point = (type: NearbyPoint['type'], item: { name: string; x: number; y: number; code?: string; interaction?: NearbyPoint['interaction'] }): NearbyPoint => ({ type, name: item.name, x: Number(item.x), y: Number(item.y), distance: Math.abs(Number(item.x) - Number(character.pos_x)) + Math.abs(Number(item.y) - Number(character.pos_y)), code: item.code, interaction: item.interaction });
+  const points = [...monsters.map(item => point('怪物', { ...item, code: String(item.id) })), ...resources.map(item => point(resourceKindByCode(item.code), { ...item, interaction: { type: '资源', id: String(item.id) } })), ...npcs.map(item => point(item.interaction_kind === 'building' ? '建筑' : '域民', { ...item, interaction: { type: item.interaction_kind === 'building' ? '建筑' : 'NPC', id: item.code } })), ...objects.map(item => point('地标', { ...item, interaction: { type: '地标', id: item.code } })), ...dungeonEntrances.map(item => point('地下入口', { ...item, name: '地下迷宫入口', code: String(item.id), interaction: { type: '入口', id: String(item.id) } })), ...nearbyPlayers.map(item => ({ ...point('玩家', { ...item, name: item.wanted ? `【红名】${item.name}` : item.name, code: String(item.gameId), interaction: { type: '玩家', id: String(item.gameId) } }), wanted: item.wanted, pvpAvailable: true, inHome: item.inHome }))]
     .filter(item => item.distance <= range)
     .sort((a, b) => a.type === '玩家' && b.type === '玩家' ? Number(Boolean(b.wanted)) - Number(Boolean(a.wanted)) || a.distance - b.distance || a.name.localeCompare(b.name, 'zh-CN') : a.distance - b.distance || a.name.localeCompare(b.name, 'zh-CN'));
   const mapUnlocked = await hasRegionMap(pool, Number(character.id), character.region_name);
-  const [landmarks] = mapUnlocked ? await pool.execute<(RowDataPacket & MapLandmark)[]>(`SELECT name,pos_x AS x,pos_y AS y FROM map_npcs WHERE region_id=?
-    UNION ALL SELECT name,pos_x AS x,pos_y AS y FROM map_special_objects WHERE region_id=?
-    ORDER BY name`, [character.current_region_id, character.current_region_id]) : [[] as any];
+  const [landmarks] = mapUnlocked ? await pool.execute<(RowDataPacket & MapLandmark)[]>(`SELECT code,name,pos_x AS x,pos_y AS y FROM map_npcs WHERE region_id=?
+    UNION ALL SELECT code,name,pos_x AS x,pos_y AS y FROM map_special_objects WHERE region_id=?`, [character.current_region_id, character.current_region_id]) : [[] as any];
+  const [homes] = mapUnlocked ? await pool.execute<(RowDataPacket & MapLandmark)[]>(`SELECT 'player_home' AS code,CONCAT('我的小屋·',h.house_level,'级') AS name,h.plot_x AS x,h.plot_y AS y
+    FROM player_homes h WHERE h.character_id=? AND h.town_region_id=? AND h.status='active' LIMIT 1`, [character.id, character.current_region_id]) : [[] as any];
   const [bountyTargets] = mapUnlocked ? await pool.execute<(RowDataPacket & { name: string; x: number; y: number })[]>(`SELECT t.name,s.pos_x AS x,s.pos_y AS y FROM bounty_notices b JOIN monster_spawns s ON s.id=b.source_spawn_id JOIN monster_templates t ON t.id=s.template_id
     WHERE b.is_active=1 AND b.expires_at>NOW() AND s.region_id=? AND s.defeated_at IS NULL ORDER BY b.id`, [character.current_region_id]) : [[] as any];
-  const mapMarkers = [...landmarks.map(item => ({ name: item.name, x: Number(item.x), y: Number(item.y), kind: 'landmark' as const })), ...bountyTargets.map(item => ({ name: `悬赏目标·【暴动】${item.name}`, x: Number(item.x), y: Number(item.y), kind: 'bounty' as const }))];
+  const mapMarkers = [...sortMapMarkers([...homes, ...landmarks]).map(item => ({ code: item.code, name: item.name, x: Number(item.x), y: Number(item.y), kind: 'landmark' as const })), ...bountyTargets.map(item => ({ name: `悬赏目标·【暴动】${item.name}`, x: Number(item.x), y: Number(item.y), kind: 'bounty' as const }))];
   const appraisal = await appraisalProfileFor(pool, [Number(character.id)]);
   return { character, range, perceptionObscured, points, landmarks: mapMarkers, mapUnlocked, npcDetailsUnlocked: appraisal.learned && appraisal.informationLevel >= 3, description: dungeonCell?.landmark_text ?? descriptions[0]?.description ?? '四周一片寂静，暂时没有发现异常。' };
 };
@@ -896,6 +898,7 @@ export const npcDetail = async (qqUserId: string, code: string) => {
   const affinity = Number(npc.affinity ?? 0);
   const personas: Record<string, { name: string; description: string }> = {
     guild_counter: { name: '莫妮卡', description: '百纳镇冒险者公会的前台接待员。她留着利落的黑色短发，待人阳光而专业，总能耐心为冒险者解答疑问。' },
+    saint_church: { name: '修女·伊芙琳', description: '圣恩教堂的修女。她文静端庄，信仰神明虔诚；无论来访者带着何种困惑，总会以包容、博爱而优雅的态度倾听。' },
     blacksmith: { name: '漠北', description: '镇民多叫他小北。这个九尾狐族与矮人的混血少年经营着铁匠铺，炉火与铁锤是他最熟悉的伙伴。' },
     alchemy_sweetshop: { name: '晴儿', description: '糖水屋的炼金师。她擅长草药提纯与药剂调配，言谈温和，对生命与能量的变化格外敏锐。' },
     oddworkshop: { name: '唯薇安', description: '异工坊的店主，一位有半精灵血脉的解构师。她外表像十六七岁的少女，实际已在大陆上度过数十年，热衷于将一切未知事物拆开、理解，再拼出新的可能。' },

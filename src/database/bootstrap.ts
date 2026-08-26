@@ -721,7 +721,7 @@ const schemaStatements = [
   , `CREATE TABLE IF NOT EXISTS player_home_furniture (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, home_id BIGINT UNSIGNED NOT NULL, furniture_code VARCHAR(64) NOT NULL,
     floor_no TINYINT UNSIGNED NOT NULL DEFAULT 1, slot_key VARCHAR(32) NOT NULL, grid_x TINYINT UNSIGNED NULL, grid_y TINYINT UNSIGNED NULL,
-    rotation TINYINT UNSIGNED NOT NULL DEFAULT 0, layout_version SMALLINT UNSIGNED NOT NULL DEFAULT 1, placed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    rotation SMALLINT UNSIGNED NOT NULL DEFAULT 0, layout_version SMALLINT UNSIGNED NOT NULL DEFAULT 2, placed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id), UNIQUE KEY uk_home_furniture_slot (home_id,floor_no,slot_key), KEY idx_home_furniture_floor (home_id,floor_no,furniture_code),
     CONSTRAINT fk_home_furniture_home FOREIGN KEY (home_id) REFERENCES player_homes(id) ON DELETE CASCADE,
     CONSTRAINT fk_home_furniture_definition FOREIGN KEY (furniture_code) REFERENCES home_furniture_definitions(code)
@@ -760,11 +760,13 @@ export const initializeSchema = async (pool: Pool) => {
   for (const column of [
     'grid_x TINYINT UNSIGNED NULL',
     'grid_y TINYINT UNSIGNED NULL',
-    'rotation TINYINT UNSIGNED NOT NULL DEFAULT 0',
+    'rotation SMALLINT UNSIGNED NOT NULL DEFAULT 0',
     'layout_version SMALLINT UNSIGNED NOT NULL DEFAULT 1'
   ]) {
     try { await pool.query(`ALTER TABLE player_home_furniture ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }
+  await pool.query('ALTER TABLE player_home_furniture MODIFY COLUMN rotation SMALLINT UNSIGNED NOT NULL DEFAULT 0');
+  await pool.query('ALTER TABLE player_home_furniture MODIFY COLUMN layout_version SMALLINT UNSIGNED NOT NULL DEFAULT 2');
   await pool.query(`INSERT IGNORE INTO dungeon_entrances (dungeon_id,region_id,pos_x,pos_y)
     SELECT id,entrance_region_id,entrance_x,entrance_y FROM dungeon_instances`);
   try { await pool.query('ALTER TABLE dungeon_cells ADD COLUMN landmark_text TEXT NULL AFTER trap_type'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
@@ -1652,12 +1654,13 @@ export const initializeSchema = async (pool: Pool) => {
     FROM map_regions r JOIN item_definitions i ON i.code IN ('living_wood','meteor_iron','star_copper','moon_silver')
     WHERE r.code='dark_forest_deep'
     ON DUPLICATE KEY UPDATE spawn_density=VALUES(spawn_density)`);
-  await pool.query(`DELETE n FROM map_npcs n JOIN map_regions r ON r.id=n.region_id WHERE r.code='baina_town' AND n.code NOT IN ('pear_guide','guild_counter','blacksmith','alchemy_sweetshop','oddworkshop','bookshop','baina_residence')`);
+  await pool.query(`DELETE n FROM map_npcs n JOIN map_regions r ON r.id=n.region_id WHERE r.code='baina_town' AND n.code NOT IN ('pear_guide','guild_counter','saint_church','blacksmith','alchemy_sweetshop','oddworkshop','bookshop','baina_residence')`);
   await pool.query(`DELETE n FROM map_npcs n JOIN map_regions r ON r.id=n.region_id WHERE r.code='dark_forest'`);
   await pool.query(`INSERT INTO map_npcs (region_id, code, name, description, interaction_kind, pos_x, pos_y, pos_z) VALUES
     ((SELECT id FROM map_regions WHERE code='baina_town'), 'pear_guide', '梨子喵（新人引导）', '笑容明快的猫族新手引导员，像是正专程在等你。', 'npc', -22, -128, 0),
     ((SELECT id FROM map_regions WHERE code='world_tree'), 'tree_keeper', '树守·阿鲁', '守望世界树的沉默老人。', 'npc', 0, 0, 0),
     ((SELECT id FROM map_regions WHERE code='baina_town'), 'guild_counter', '冒险者公会', '承接委托、登记冒险者与交换情报的大厅。', 'building', -2, -111, 0),
+    ((SELECT id FROM map_regions WHERE code='baina_town'), 'saint_church', '圣恩教堂', '彩窗将柔和的光投在长椅间。一位修女正安静整理祭台前的白花，向每位来客报以温雅的微笑。', 'building', -9, -103, 0),
     ((SELECT id FROM map_regions WHERE code='baina_town'), 'blacksmith', '铁匠铺', '炉火终日不熄。年轻的店主漠北正站在铁砧前，铁锤敲击声从半开的门里传来。', 'building', -17, -123, 0),
     ((SELECT id FROM map_regions WHERE code='baina_town'), 'alchemy_sweetshop', '糖水屋', '“晴空糖水屋”的门口挂着晴空色风铃，甜香与清新的草药气息一同飘出。', 'building', -12, -128, 0),
     ((SELECT id FROM map_regions WHERE code='baina_town'), 'oddworkshop', '异工坊', '异工坊的门牌歪斜地挂在墙上，屋内不时传出弹簧、齿轮与不明小玩意的清脆响动。', 'building', 6, -121, 0),

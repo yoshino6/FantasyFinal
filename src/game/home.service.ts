@@ -1,12 +1,12 @@
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { BAINA_GUILD_POSITION, BAINA_RESIDENCE_CODE, homeCosts, homePlotDistance, slotsPerFloor } from './home.constants';
-import { findFurniturePlacement, occupyFurnitureCells } from './home-layout.service';
+import { backfillHomeFloorLayout, findFurniturePlacement, occupyFurnitureCells } from './home-layout.service';
 
 type Db = Pool | PoolConnection;
 type Character = RowDataPacket & { id: number; player_id: number; name: string; copper_coins: number; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; activity_status: string; region_code: string };
 type Home = RowDataPacket & { id: number; character_id: number; town_region_id: number; plot_x: number; plot_y: number; plot_z: number; house_level: number; floor_count: number; status: string };
-type Furniture = RowDataPacket & { id: number; furniture_code: string; name: string; description: string; effect_json: unknown; floor_no: number; slot_key: string; grid_x: number | null; grid_y: number | null; grid_width: number; grid_height: number };
+type Furniture = RowDataPacket & { id: number; furniture_code: string; name: string; description: string; effect_json: unknown; floor_no: number; slot_key: string; grid_x: number | null; grid_y: number | null; grid_width: number; grid_height: number; rotation: number };
 type FurnitureDefinition = RowDataPacket & { code: string; name: string; description: string; effect_json: unknown; required_house_level: number; max_per_floor: number; floor_slot_cost: number; grid_width: number; grid_height: number; placement_rule: 'wall' | 'center' | 'corner' | 'wall_or_center'; layer_order: number };
 
 const characterFor = async (connection: Db, qqUserId: string, lock = false) => {
@@ -77,7 +77,7 @@ export const homePanel = async (qqUserId: string) => {
   if (!home) return { character, home: null, inHome: false, furniture: [] as Furniture[], effects: {}, materials: [] as Array<{ code: string; name: string; quantity: number }> };
   const [visitResult, furnitureResult, materialResult] = await Promise.all([
     pool.execute<RowDataPacket[]>('SELECT 1 FROM player_home_visits WHERE character_id=? LIMIT 1', [character.id]),
-    pool.execute<Furniture[]>(`SELECT f.id,f.furniture_code,d.name,d.description,d.effect_json,f.floor_no,f.slot_key,f.grid_x,f.grid_y,d.grid_width,d.grid_height FROM player_home_furniture f JOIN home_furniture_definitions d ON d.code=f.furniture_code WHERE f.home_id=? ORDER BY f.floor_no,f.id`, [home.id]),
+    pool.execute<Furniture[]>(`SELECT f.id,f.furniture_code,d.name,d.description,d.effect_json,f.floor_no,f.slot_key,f.grid_x,f.grid_y,f.rotation,d.grid_width,d.grid_height FROM player_home_furniture f JOIN home_furniture_definitions d ON d.code=f.furniture_code WHERE f.home_id=? ORDER BY f.floor_no,f.id`, [home.id]),
     pool.execute<(RowDataPacket & { code: string; name: string; quantity: number })[]>(`SELECT i.code,i.name,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.code IN ('home_wood','home_stone','home_metal','slime_gel') ORDER BY i.id`, [character.id])
   ]);
   const visit = visitResult[0]; const furniture = furnitureResult[0]; const materials = materialResult[0];
@@ -139,7 +139,7 @@ export const upgradeHome = async (qqUserId: string) => withTransaction(async con
   const cost = costForUpgrade(home); if (!cost) throw new Error('房屋已经达到最高等级。');
   await consumeMaterials(connection, character.id, { ...cost.materials });
   const [paid] = await connection.execute<any>('UPDATE characters SET copper_coins=copper_coins-? WHERE id=? AND copper_coins>=?', [cost.copper, character.id, cost.copper]); if (!Number(paid.affectedRows)) throw new Error(`铜币不足，需要 ${cost.copper} 铜币。`);
-  await connection.execute('UPDATE player_homes SET house_level=house_level+1 WHERE id=?', [home.id]); await connection.execute('DELETE FROM player_home_floor_renders WHERE home_id=?', [home.id]); return { level: Number(home.house_level) + 1, cost };
+  await connection.execute('UPDATE player_homes SET house_level=house_level+1 WHERE id=?', [home.id]); await connection.execute('UPDATE player_home_furniture SET layout_version=0 WHERE home_id=?', [home.id]); await connection.execute('DELETE FROM player_home_floor_renders WHERE home_id=?', [home.id]); return { level: Number(home.house_level) + 1, cost };
 });
 
 export const expandHome = async (qqUserId: string, floor: 2 | 3) => withTransaction(async connection => {
@@ -153,9 +153,10 @@ export const expandHome = async (qqUserId: string, floor: 2 | 3) => withTransact
 
 export const listFurniture = async (qqUserId: string, floor?: number) => {
   const pool = await getPool(); const character = await characterFor(pool, qqUserId); const home = await homeFor(pool, character.id); if (!home) throw new Error('你还没有小屋。');
+  if (floor) await withTransaction(connection => backfillHomeFloorLayout(connection, Number(home.id), floor, Number(home.house_level)));
   const [definitions, installed, recipes, owned] = await Promise.all([
     pool.execute<FurnitureDefinition[]>('SELECT * FROM home_furniture_definitions WHERE is_active=1 ORDER BY required_house_level,code'),
-    pool.execute<Furniture[]>(`SELECT f.id,f.furniture_code,d.name,d.description,d.effect_json,f.floor_no,f.slot_key,f.grid_x,f.grid_y,d.grid_width,d.grid_height FROM player_home_furniture f JOIN home_furniture_definitions d ON d.code=f.furniture_code WHERE f.home_id=?${floor ? ' AND f.floor_no=?' : ''} ORDER BY f.floor_no,f.id`, floor ? [home.id, floor] : [home.id]),
+    pool.execute<Furniture[]>(`SELECT f.id,f.furniture_code,d.name,d.description,d.effect_json,f.floor_no,f.slot_key,f.grid_x,f.grid_y,f.rotation,d.grid_width,d.grid_height FROM player_home_furniture f JOIN home_furniture_definitions d ON d.code=f.furniture_code WHERE f.home_id=?${floor ? ' AND f.floor_no=?' : ''} ORDER BY f.floor_no,f.id`, floor ? [home.id, floor] : [home.id]),
     pool.execute<(RowDataPacket & { furniture_code: string; name: string; quantity: number })[]>(`SELECT r.furniture_code,i.name,r.quantity FROM home_furniture_recipes r JOIN item_definitions i ON i.id=r.item_id ORDER BY r.furniture_code,i.id`),
     pool.execute<(RowDataPacket & { furniture_code: string; quantity: number })[]>('SELECT furniture_code,COUNT(*) AS quantity FROM player_home_furniture WHERE home_id=? GROUP BY furniture_code', [home.id])
   ]);
@@ -169,6 +170,7 @@ export const craftFurniture = async (qqUserId: string, code: string, floor: numb
   if (!Number.isInteger(floor) || floor < 1 || floor > Number(home.floor_count)) throw new Error('楼层不存在。');
   const [definitions] = await connection.execute<FurnitureDefinition[]>('SELECT * FROM home_furniture_definitions WHERE code=? AND is_active=1 FOR UPDATE', [code]); const definition = definitions[0];
   if (!definition || Number(definition.required_house_level) > Number(home.house_level)) throw new Error('该家具尚未解锁。');
+  await backfillHomeFloorLayout(connection, Number(home.id), floor, Number(home.house_level));
   const [[usedRows], [same]] = await Promise.all([
     connection.execute<(RowDataPacket & { floor_slot_cost: number })[]>('SELECT d.floor_slot_cost FROM player_home_furniture f JOIN home_furniture_definitions d ON d.code=f.furniture_code WHERE f.home_id=? AND f.floor_no=? FOR UPDATE', [home.id, floor]),
     connection.execute<(RowDataPacket & { count: number })[]>('SELECT COUNT(*) AS count FROM player_home_furniture WHERE home_id=? AND floor_no=? AND furniture_code=? FOR UPDATE', [home.id, floor, code])
@@ -184,15 +186,15 @@ export const craftFurniture = async (qqUserId: string, code: string, floor: numb
   }
   for (const material of recipe) { await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [material.quantity, character.id, material.item_id]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, material.item_id]); }
   const slotKey = `auto-${floor}-${placement.x}-${placement.y}-${Date.now().toString(36)}`;
-  const [created] = await connection.execute<any>('INSERT INTO player_home_furniture (home_id,furniture_code,floor_no,slot_key,grid_x,grid_y) VALUES (?,?,?,?,?,?)', [home.id, code, floor, slotKey, placement.x, placement.y]);
-  await occupyFurnitureCells(connection, Number(home.id), floor, Number(created.insertId), placement, definition);
+  const [created] = await connection.execute<any>('INSERT INTO player_home_furniture (home_id,furniture_code,floor_no,slot_key,grid_x,grid_y,rotation,layout_version) VALUES (?,?,?,?,?,?,?,2)', [home.id, code, floor, slotKey, placement.x, placement.y, placement.rotation]);
+  await occupyFurnitureCells(connection, Number(home.id), floor, Number(created.insertId), placement);
   await connection.execute('DELETE FROM player_home_floor_renders WHERE home_id=? AND floor_no=?', [home.id, floor]);
   return { id: Number(created.insertId), name: definition.name, floor, placement };
 });
 
 export const removeFurniture = async (qqUserId: string, furnitureId: number) => withTransaction(async connection => {
   const character = await characterFor(connection, qqUserId, true); const home = await homeFor(connection, character.id, true); if (!home) throw new Error('你还没有小屋。');
-  const [rows] = await connection.execute<Furniture[]>('SELECT f.id,f.furniture_code,d.name,d.description,d.effect_json,f.floor_no,f.slot_key,f.grid_x,f.grid_y,d.grid_width,d.grid_height FROM player_home_furniture f JOIN home_furniture_definitions d ON d.code=f.furniture_code WHERE f.id=? AND f.home_id=? FOR UPDATE', [furnitureId, home.id]); if (!rows[0]) throw new Error('没有找到该家具。');
+  const [rows] = await connection.execute<Furniture[]>('SELECT f.id,f.furniture_code,d.name,d.description,d.effect_json,f.floor_no,f.slot_key,f.grid_x,f.grid_y,f.rotation,d.grid_width,d.grid_height FROM player_home_furniture f JOIN home_furniture_definitions d ON d.code=f.furniture_code WHERE f.id=? AND f.home_id=? FOR UPDATE', [furnitureId, home.id]); if (!rows[0]) throw new Error('没有找到该家具。');
   await connection.execute('DELETE FROM player_home_furniture WHERE id=?', [furnitureId]); await connection.execute('DELETE FROM player_home_floor_renders WHERE home_id=? AND floor_no=?', [home.id, rows[0].floor_no]); return rows[0];
 });
 
