@@ -42,11 +42,11 @@ const jsonRecord = (value: unknown): Record<string, unknown> => {
 const armorClassModifier: Record<string, { physicalDefense: number; magicDefense: number; accuracy: number; evasion: number; speed: number }> = {
   // 双防按同级主力攻击下的承伤梯度校准：布/皮/轻/重/板约为 1/.85/.75/.65/.5。
   // 命中、闪避与速度沿用原始甲类定位，不参与本次平衡。
-  '布甲': { physicalDefense: .04, magicDefense: .05, accuracy: 16, evasion: 12, speed: 16 },
-  '皮甲': { physicalDefense: .315, magicDefense: .32, accuracy: 8, evasion: 0, speed: 8 },
-  '轻甲': { physicalDefense: .56, magicDefense: .56, accuracy: 0, evasion: 0, speed: 0 },
-  '重甲': { physicalDefense: .88, magicDefense: .87, accuracy: 0, evasion: -8, speed: -8 },
-  '板甲': { physicalDefense: 1.60, magicDefense: 1.58, accuracy: -12, evasion: -16, speed: -16 }
+  '布甲': { physicalDefense: .2, magicDefense: .2, accuracy: 16, evasion: 12, speed: 16 },
+  '皮甲': { physicalDefense: .4, magicDefense: .4, accuracy: 8, evasion: 0, speed: 8 },
+  '轻甲': { physicalDefense: 0.8, magicDefense: 0.8, accuracy: 0, evasion: 0, speed: 0 },
+  '重甲': { physicalDefense: 1.2, magicDefense: 1.0, accuracy: 0, evasion: -8, speed: -8 },
+  '板甲': { physicalDefense: 1.6, magicDefense: 1.6, accuracy: -12, evasion: -16, speed: -16 }
 };
 
 const withEquipmentStats = async (connection: Pool | PoolConnection, characterId: number, base: DerivedStats): Promise<DerivedStats> => {
