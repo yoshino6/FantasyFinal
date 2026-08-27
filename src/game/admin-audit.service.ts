@@ -14,6 +14,8 @@ const jsonStringArray = (value: unknown): string[] => {
   const raw = typeof value === 'string' ? (() => { try { return JSON.parse(value); } catch { return []; } })() : value;
   return Array.isArray(raw) ? raw.filter(item => typeof item === 'string') : [];
 };
+/** 锻造重构后，非神器装备不再允许保留任何百分比属性词条。 */
+const hasLegacyPercentAffix = (value: unknown) => Object.entries(jsonRecord(value)).some(([key, amount]) => key.endsWith('Pct') && Number(amount) !== 0);
 const invalidForgedEquipment = (category: string, subtype: string | null, level: number, rarity: string, effectJson: unknown, primaryJson: unknown) => {
   const effect = jsonRecord(effectJson);
   const expectedMain = forgePrimaryKeys(category, subtype);
@@ -67,13 +69,19 @@ export const auditInventory = async (qqUserId: string) => withTransaction(async 
     FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
     WHERE ii.character_id=? AND i.code LIKE 'crafted\\_%' FOR UPDATE`, [character.id]);
   const invalidInstances = forgedRows.filter(item => invalidForgedEquipment(item.item_category, item.weapon_type, Number(item.required_level), item.rarity, item.effect_json, item.forge_primary_json)).map(item => Number(item.id));
-  if (invalidInstances.length) {
-    await connection.execute(`DELETE FROM player_equipment WHERE character_id=? AND instance_id IN (${invalidInstances.map(() => '?').join(',')})`, [character.id, ...invalidInstances]);
-    await recalculateCharacterStats(connection, Number(character.id));
+  const [equipmentRows] = await connection.execute<(RowDataPacket & { id: number; effect_json: unknown })[]>(`SELECT ii.id,COALESCE(ii.effect_json,i.effect_json) AS effect_json FROM player_item_instances ii
+    JOIN item_definitions i ON i.id=ii.item_id WHERE ii.character_id=? AND i.item_type='equipment' AND i.rarity<>'神器' FOR UPDATE`, [character.id]);
+  const percentInstances = equipmentRows.filter(item => hasLegacyPercentAffix(item.effect_json)).map(item => Number(item.id));
+  const recycledInstances = [...new Set([...invalidInstances, ...percentInstances])];
+  if (recycledInstances.length) {
+    const marks = recycledInstances.map(() => '?').join(',');
+    await connection.execute(`DELETE FROM player_equipment WHERE character_id=? AND instance_id IN (${marks})`, [character.id, ...recycledInstances]);
+    await connection.execute(`DELETE FROM player_item_instances WHERE character_id=? AND id IN (${marks})`, [character.id, ...recycledInstances]);
   }
-  const removedCount = Number(removed.affectedRows); const quickRemovedCount = Number(quickRemoved.affectedRows); const artifactCount = excessArtifacts.length; const forgedCount = invalidInstances.length;
-  const changed = Boolean(removedCount || quickRemovedCount || artifactCount || forgedCount);
-  return { name: character.name, changed, fixed: changed ? `已清除 ${removedCount} 条异常背包记录、${quickRemovedCount} 条失效快捷道具${artifactCount ? `，并卸下 ${artifactCount} 件超额神器至背包` : ''}${forgedCount ? `，并卸下 ${forgedCount} 件不符合打造主属性或品质词条数量限制的装备至背包` : ''}。` : '背包与装备记录正常，未发现需要修正的数据。' };
+  if (invalidInstances.length || recycledInstances.length) await recalculateCharacterStats(connection, Number(character.id));
+  const removedCount = Number(removed.affectedRows); const quickRemovedCount = Number(quickRemoved.affectedRows); const artifactCount = excessArtifacts.length; const forgedCount = invalidInstances.length; const percentCount = percentInstances.filter(id => !invalidInstances.includes(id)).length; const recycledCount = recycledInstances.length;
+  const changed = Boolean(removedCount || quickRemovedCount || artifactCount || forgedCount || recycledCount);
+  return { name: character.name, changed, fixed: changed ? `已清除 ${removedCount} 条异常背包记录、${quickRemovedCount} 条失效快捷道具${artifactCount ? `，并卸下 ${artifactCount} 件超额神器至背包` : ''}${forgedCount ? `，并回收 ${forgedCount} 件超出现阶段打造或熔铸规则的装备` : ''}${percentCount ? `，并回收 ${percentCount} 件含百分比属性词条的非神器装备` : ''}。` : '背包与装备记录正常，未发现需要修正的数据。' };
 });
 
 /** 管理员定向清空背包：已装备实例保留，其余堆叠物品、装备和异械一并移除。 */

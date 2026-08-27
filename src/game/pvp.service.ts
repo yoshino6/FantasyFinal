@@ -5,12 +5,14 @@ import { detentionMessage } from './time-format';
 import { isInHome } from './home.service';
 import { isFriendRelation } from './social.service';
 import { hasCompatibleSkillWeapon, skillWeaponRequirementMessage } from './skill-weapon.service';
+import { directDamageVariance, resolveStrike } from './combat-math';
 
 type PvpCharacter = RowDataPacket & {
   id: number; game_id: number; name: string; current_region_id: number; pos_x: number; pos_y: number; pos_z: number;
   level: number; perception: number; perception_growth: number;
   hp_max: number; mp_max: number; current_hp: number; current_mp: number; physical_attack: number; magic_attack: number;
-  physical_defense: number; magic_defense: number; accuracy: number; evasion: number; activity_status: string; detained_until: Date | null;
+  physical_defense: number; magic_defense: number; accuracy: number; evasion: number; crit_rate_bp: number; crit_damage_bp: number;
+  crit_resist_bp: number; crit_damage_reduction_bp: number; speed: number; activity_status: string; detained_until: Date | null;
 };
 type PvpAction = { type: 'attack' } | { type: 'skill'; id: number; code: string; name: string; category: 'physical' | 'magic' | 'utility'; requiredWeaponType: string | null; manaCost: number; power: number; cooldown: number } | { type: 'item'; id: number; name: string; effect: Record<string, number> };
 type PvpBattleRow = RowDataPacket & { id: string; attacker_character_id: number; defender_character_id: number; turn_no: number; state: string; attacker_hp: number; attacker_mp: number; defender_hp: number; defender_mp: number; attacker_cooldowns: unknown; defender_cooldowns: unknown; ambush_spawn_id: number | null; ambush_delivery_scope: 'group' | 'c2c' | null; ambush_delivery_target_id: string | null; ambush_delivery_bot_id: string | null };
@@ -303,12 +305,13 @@ const resolveAction = async (connection: PoolConnection, actor: PvpCharacter, ta
   if (skill) { actor.current_mp = Number(actor.current_mp) - skill.manaCost; await connection.execute('UPDATE characters SET current_mp=? WHERE id=?', [actor.current_mp, actor.id]); }
   if (skill?.category === 'utility') return { text: `【${actor.name}】释放技能「${skill.name}」，但该辅助技能尚未在 PvP 对抗中形成直接伤害。`, defeated: false };
   const magic = skill?.category === 'magic'; const attack = magic ? Number(actor.magic_attack) : Number(actor.physical_attack); const defense = magic ? Number(target.magic_defense) : Number(target.physical_defense); const label = skill ? `释放技能「${skill.name}」` : '普通攻击';
-  if (Math.random() >= Number(actor.accuracy) / Math.max(1, Number(actor.accuracy) + Number(target.evasion))) return { text: `【${actor.name}】${label}，但【${target.name}】闪避了攻击。`, defeated: false };
-  const damage = Math.max(1, Math.floor(attack * attack / Math.max(1, attack + defense) * (skill ? skill.power / 100 : 1))); const hp = Math.max(0, Number(target.current_hp) - damage); const defeated = hp <= 0;
-  if (!defeated) { await connection.execute('UPDATE characters SET current_hp=? WHERE id=?', [hp, target.id]); target.current_hp = hp; return { text: `【${actor.name}】${label}，对【${target.name}】造成 ${damage} 点${magic ? '魔法' : '物理'}伤害（HP ${hp}）。`, defeated: false }; }
+  const strike = resolveStrike(attack * (skill ? skill.power / 100 : 1), defense, Number(actor.accuracy), Number(target.evasion), Number(actor.crit_rate_bp), Number(target.crit_resist_bp), Number(actor.crit_damage_bp), Number(target.crit_damage_reduction_bp));
+  if (!strike.hit) return { text: `【${actor.name}】${label}，但【${target.name}】闪避了攻击。`, defeated: false };
+  const damage = directDamageVariance(strike.damage); const hp = Math.max(0, Number(target.current_hp) - damage); const defeated = hp <= 0; const critText = strike.crit ? '暴击' : '';
+  if (!defeated) { await connection.execute('UPDATE characters SET current_hp=? WHERE id=?', [hp, target.id]); target.current_hp = hp; return { text: `【${actor.name}】${label}，对【${target.name}】造成 ${damage} 点${critText}${magic ? '魔法' : '物理'}伤害（HP ${hp}）。`, defeated: false }; }
   const settlement = await resolvePvpVictory(connection, actor.id, target.id);
   // 战斗过程只记录本次攻击；掠夺、逮捕等结果由独立结算消息展示。
-  return { text: `【${actor.name}】${label}，对【${target.name}】造成 ${damage} 点${magic ? '魔法' : '物理'}伤害。`, defeated: true, settlement: settlement.text, restitution: settlement.restitution };
+  return { text: `【${actor.name}】${label}，对【${target.name}】造成 ${damage} 点${critText}${magic ? '魔法' : '物理'}伤害。`, defeated: true, settlement: settlement.text, restitution: settlement.restitution };
 };
 
 export const cityPvp = async (qqUserId: string, targetGameId: number, confirmed = false) => withTransaction(async connection => {
@@ -377,6 +380,17 @@ const battleActionFromSlot = async (connection: PoolConnection, character: PvpCh
   return { type: 'item', id: Number(rows[0].id), name: rows[0].name, effect: record(rows[0].effect_json) };
 };
 const tickCooldowns = (value: unknown) => Object.fromEntries(Object.entries(record(value)).map(([code, turns]) => [code, Math.max(0, Number(turns) - 1)]));
+const readyBattleAction = async (connection: PoolConnection, character: PvpCharacter, action: PvpAction | null, cooldowns: Record<string, number>, automatic: boolean): Promise<PvpAction> => {
+  if (!action || action.type !== 'skill') return action ?? { type: 'attack' };
+  const usable = await hasCompatibleSkillWeapon(connection, Number(character.id), action.requiredWeaponType)
+    && Number(character.current_mp) >= action.manaCost
+    && Number(cooldowns[action.code] ?? 0) <= 0;
+  if (usable) return action;
+  if (automatic) return { type: 'attack' };
+  if (!await hasCompatibleSkillWeapon(connection, Number(character.id), action.requiredWeaponType)) throw new Error(skillWeaponRequirementMessage(action.name, String(action.requiredWeaponType)));
+  if (Number(character.current_mp) < action.manaCost) throw new Error('魔力不足，无法释放该技能。');
+  throw new Error(`「${action.name}」冷却中。`);
+};
 const actionLog = (text: string) => {
   const separator = text.indexOf('，');
   return separator < 0 ? `➤${text}` : `➤${text.slice(0, separator)}\n　➥${text.slice(separator + 1)}`;
@@ -457,18 +471,26 @@ export const pvpCombatAction = async (qqUserId: string, type: 'attack' | 'skill'
   const [fighters] = await connection.execute<PvpCharacter[]>('SELECT * FROM characters WHERE id IN (?,?) ORDER BY id FOR UPDATE', [battle.attacker_character_id, battle.defender_character_id]);
   const attacker = fighters.find(row => Number(row.id) === Number(battle.attacker_character_id)); const defender = fighters.find(row => Number(row.id) === Number(battle.defender_character_id)); if (!attacker || !defender) throw new Error('对战对象已失效。');
   attacker.current_hp = Number(battle.attacker_hp); attacker.current_mp = Number(battle.attacker_mp); defender.current_hp = Number(battle.defender_hp); defender.current_mp = Number(battle.defender_mp);
-  const cooldowns = record(battle.attacker_cooldowns); let action = await battleActionFromSlot(connection, attacker, type, slot);
-  if (action?.type === 'skill') { if (!await hasCompatibleSkillWeapon(connection, Number(attacker.id), action.requiredWeaponType)) { if (type === 'auto') action = { type: 'attack' }; else throw new Error(skillWeaponRequirementMessage(action.name, String(action.requiredWeaponType))); } else if (Number(attacker.current_mp) < action.manaCost) { if (type === 'auto') action = { type: 'attack' }; else throw new Error('魔力不足，无法释放该技能。'); } else if (Number(cooldowns[action.code] ?? 0) > 0) { if (type === 'auto') action = { type: 'attack' }; else throw new Error(`「${action.name}」冷却中。`); } }
-  const first = await resolveAction(connection, attacker, defender, action ?? { type: 'attack' }); if (action?.type === 'skill') cooldowns[action.code] = action.cooldown + 1;
-  const log = [actionLog(first.text)]; let ended = first.defeated; let winnerId: number | null = first.defeated ? Number(attacker.id) : null; let winnerName: string | null = first.defeated ? attacker.name : null; let restitutionId = first.restitution?.id; let settlement = first.defeated ? `【${attacker.name}】获得了胜利。${first.settlement ? `\n${first.settlement}` : ''}` : '';
-  const defenderCooldowns = record(battle.defender_cooldowns);
-  if (!ended) {
-    let counter = await actionFor(connection, defender); if (counter.type === 'skill' && (!(await hasCompatibleSkillWeapon(connection, Number(defender.id), counter.requiredWeaponType)) || Number(defender.current_mp) < counter.manaCost || Number(defenderCooldowns[counter.code] ?? 0) > 0)) counter = { type: 'attack' };
-    const second = await resolveAction(connection, defender, attacker, counter); if (counter.type === 'skill') defenderCooldowns[counter.code] = counter.cooldown + 1;
-    log.push(actionLog(second.text)); ended = second.defeated; if (ended) { winnerId = Number(defender.id); winnerName = defender.name; restitutionId = second.restitution?.id; settlement = `【${defender.name}】获得了胜利。${second.settlement ? `\n${second.settlement}` : ''}`; }
+  const attackerCooldowns = record(battle.attacker_cooldowns); const defenderCooldowns = record(battle.defender_cooldowns);
+  const requestedAction = await readyBattleAction(connection, attacker, await battleActionFromSlot(connection, attacker, type, slot), attackerCooldowns, type === 'auto');
+  const log: string[] = []; let ended = false; let winnerId: number | null = null; let winnerName: string | null = null; let restitutionId: string | undefined; let settlement = '';
+  const orderedTurns = Number(defender.speed) > Number(attacker.speed)
+    ? [{ actor: defender, target: attacker, cooldowns: defenderCooldowns, automatic: true }, { actor: attacker, target: defender, cooldowns: attackerCooldowns, automatic: type === 'auto' }]
+    : [{ actor: attacker, target: defender, cooldowns: attackerCooldowns, automatic: type === 'auto' }, { actor: defender, target: attacker, cooldowns: defenderCooldowns, automatic: true }];
+  for (const turn of orderedTurns) {
+    if (ended || Number(turn.actor.current_hp) <= 0 || Number(turn.target.current_hp) <= 0) break;
+    const rawAction = Number(turn.actor.id) === Number(attacker.id) ? requestedAction : await actionFor(connection, turn.actor);
+    const action = await readyBattleAction(connection, turn.actor, rawAction, turn.cooldowns, turn.automatic);
+    const result = await resolveAction(connection, turn.actor, turn.target, action);
+    if (action.type === 'skill') turn.cooldowns[action.code] = action.cooldown + 1;
+    log.push(actionLog(result.text));
+    if (result.defeated) {
+      ended = true; winnerId = Number(turn.actor.id); winnerName = turn.actor.name; restitutionId = result.restitution?.id;
+      settlement = `【${turn.actor.name}】获得了胜利。${result.settlement ? `\n${result.settlement}` : ''}`;
+    }
   }
-  const nextAttackerCooldowns = tickCooldowns(cooldowns); const nextDefenderCooldowns = tickCooldowns(defenderCooldowns);
-  await connection.execute(`UPDATE player_pvp_battle_sessions SET attacker_hp=?,attacker_mp=?,defender_hp=?,defender_mp=?,attacker_cooldowns=?,defender_cooldowns=?,turn_no=turn_no+1,state=? WHERE id=?`, [Math.max(0, Number(attacker.current_hp)), Math.max(0, Number(attacker.current_mp)), Math.max(0, Number(defender.current_hp)), Math.max(0, Number(defender.current_mp)), JSON.stringify(nextAttackerCooldowns), JSON.stringify(nextDefenderCooldowns), ended ? (first.defeated ? 'attacker_win' : 'defender_win') : 'active', battle.id]);
+  const nextAttackerCooldowns = tickCooldowns(attackerCooldowns); const nextDefenderCooldowns = tickCooldowns(defenderCooldowns);
+  await connection.execute(`UPDATE player_pvp_battle_sessions SET attacker_hp=?,attacker_mp=?,defender_hp=?,defender_mp=?,attacker_cooldowns=?,defender_cooldowns=?,turn_no=turn_no+1,state=? WHERE id=?`, [Math.max(0, Number(attacker.current_hp)), Math.max(0, Number(attacker.current_mp)), Math.max(0, Number(defender.current_hp)), Math.max(0, Number(defender.current_mp)), JSON.stringify(nextAttackerCooldowns), JSON.stringify(nextDefenderCooldowns), ended ? (winnerId === Number(attacker.id) ? 'attacker_win' : 'defender_win') : 'active', battle.id]);
   if (!ended) {
     await connection.execute('UPDATE characters SET current_hp=?,current_mp=? WHERE id=?', [Math.max(0, Number(attacker.current_hp)), Math.max(0, Number(attacker.current_mp)), attacker.id]);
     await connection.execute('UPDATE characters SET current_hp=?,current_mp=? WHERE id=?', [Math.max(0, Number(defender.current_hp)), Math.max(0, Number(defender.current_mp)), defender.id]);

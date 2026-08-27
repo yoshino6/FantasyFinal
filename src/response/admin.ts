@@ -113,7 +113,7 @@ const playerAuditFormat = () => {
   markdown.addButton('[玩家状态核查]', textButton('玩家状态核查', '玩家核查 状态 ')).addNewline();
   markdown.addButton('[全部玩家核查]', textButton('全部玩家核查', '全服玩家核查')).addNewline().addNewline();
   markdown.addBlockquote('点击对应项目后 @ 需要核查的玩家并发送。');
-  markdown.addNewline().addBlockquote('装备核查会验证打造装备的主属性、品质对应副词条数量和属性上限；异常装备将自动卸下并保留在背包。');
+  markdown.addNewline().addBlockquote('装备核查会验证现阶段打造、熔铸允许的主属性、词条数量和属性上限；超出规则的打造装备及含百分比属性词条的非神器装备都会直接回收。');
   markdown.addNewline().addBlockquote('全部玩家核查会依次核查所有已注册角色的角色、背包、技能与状态数据。');
   return Format.create().addMarkdown(markdown);
 };

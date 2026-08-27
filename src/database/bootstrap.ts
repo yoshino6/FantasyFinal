@@ -21,7 +21,7 @@ const blacksmithShopStock: BlacksmithStock[] = [5, 10, 15, 20].flatMap(level => 
   return [
     { code: `shop_longsword_${level}`, name: `${prefix}长剑`, category: '武器', weaponType: '长剑', level, price, effect: { physicalAttack: level * 4 } },
     { code: `shop_staff_${level}`, name: `${prefix}法杖`, category: '武器', weaponType: '法杖', level, price, effect: { magicAttack: level * 4 } },
-    { code: `shop_dagger_${level}`, name: `${prefix}匕首`, category: '武器', weaponType: '匕首', level, price, effect: { physicalAttack: level * 2, magicAttack: level * 2, accuracy: level * 2 } },
+    { code: `shop_dagger_${level}`, name: `${prefix}匕首`, category: '武器', weaponType: '匕首', level, price, effect: { physicalAttack: level * 3.6, magicAttack: level * 3.6, accuracy: level * 2 } },
     { code: `shop_fistblade_${level}`, name: `${prefix}拳刃`, category: '武器', weaponType: '拳刃', level, price, effect: { physicalAttack: level * 3, critRateBp: level * 3 } },
     { code: `shop_shoulder_${level}`, name: `${prefix}护肩`, category: '头肩', weaponType: null, level, price, effect: { physicalDefense: level * 3, magicDefense: level * 2 } },
     { code: `shop_upper_${level}`, name: `${prefix}胸甲`, category: '上装', weaponType: null, level, price, effect: { physicalDefense: level * 4, hpMax: level * 4 } },

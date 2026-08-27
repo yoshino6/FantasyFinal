@@ -14,6 +14,7 @@ import { collectCityDebts, recordWarrantSighting, settleCityPursuitDefeat } from
 import { detentionMessage } from './time-format';
 import { homeRestExperiencePerMinute, homeRestRecoveryBonus, isInHome } from './home.service';
 import { hasCompatibleSkillWeapon, skillWeaponRequirementMessage } from './skill-weapon.service';
+import { directDamageVariance, opposedChance, resolveStrike } from './combat-math';
 
 type CharacterRow = RowDataPacket & Allocation & Record<`${keyof Allocation}_growth`, number> & { id: number; player_id: number; npc_code: string | null; name: string; level: number; experience: number; realm_stage: number; skill_points: number; stamina: number; stamina_updated_at: Date; hp_max: number; mp_max: number; current_hp: number; current_mp: number; activity_status: 'active' | 'resting' | 'unconscious' | 'detained'; rest_started_at: Date | null; home_rest_experience_updated_at: Date | null; detained_until: Date | null; physical_attack: number; magic_attack: number; physical_defense: number; magic_defense: number; accuracy: number; evasion: number; crit_rate_bp: number; crit_damage_bp: number; crit_resist_bp: number; crit_damage_reduction_bp: number; tenacity: number; speed: number; perception: number; spirit: number; intelligence: number; element_mastery_json: unknown; element_resistance_json: unknown; adventurer_registered: number; secondary_profession_code: string | null; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string };
 type MonsterAttributes = Allocation & Record<`${keyof Allocation}_growth`, number>;
@@ -446,10 +447,13 @@ export const spawnMonsters = async ({ refreshBosses = true, trimExcess = true, r
       const [countRows] = await pool.execute<(RowDataPacket & { total: number })[]>(`SELECT COUNT(*) AS total FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.region_id=? AND s.defeated_at IS NULL AND t.code IN ('goblin_vanguard','goblin_warrior','goblin_archer','goblin_bomber','goblin_daredevil','goblin_drummer','goblin_shieldbearer','goblin_trapper','goblin_priest','goblin_mage','goblin_assassin','goblin_earthshaper','goblin_colonel')`, [region.id]);
       let deepActive = Number(countRows[0]?.total ?? 0);
       const deepLimit = Math.floor((Number(region.max_x) - Number(region.min_x) + 1) * (Number(region.max_y) - Number(region.min_y) + 1) * (Number(region.max_z) - Number(region.min_z) + 1) * 0.01);
-      while (deepActive < deepLimit) {
+      // 无编队只是不带“编队·”词条，幽暗密林深处的哥布林遭遇本身始终按小队生成。
+      while (deepActive + 2 <= deepLimit) {
         const colonelLead = Boolean(colonelTemplate) && deepActive + 4 <= deepLimit && Math.random() < 0.005;
         const goblinFormation = colonelLead || (deepActive + 2 <= deepLimit && Math.random() < .25);
-        const groupSize = colonelLead ? 4 : goblinFormation ? Math.min(random(2, 4), deepLimit - deepActive) : 1;
+        const groupRoll = Math.random();
+        const plannedGroupSize = groupRoll < .45 ? 2 : groupRoll < .85 ? 3 : 4;
+        const groupSize = colonelLead ? 4 : Math.min(plannedGroupSize, deepLimit - deepActive);
         const groupTemplates = colonelLead ? [colonelTemplate!] : [pickWeighted(deepTemplates)];
         if (colonelLead) {
           const frontline = deepTemplates.filter(template => ['goblin_vanguard', 'goblin_warrior', 'goblin_shieldbearer', 'goblin_drummer'].includes(template.code));
@@ -1987,11 +1991,6 @@ const finishVictory = async (connection: PoolConnection, character: CharacterRow
   return `胜利！${experienceGain.realmLocked ? realmEnergyDissipationText : `获得经验 ${experienceGain.experience}${modifiers.experienceMultiplier > 1 ? '（成长祝福生效）' : ''}`}${rewards.length ? `，掉落 ${rewards.join('、')}` : ''}。`;
 };
 
-const opposedChance = (offense: number, defense: number) => {
-  const x = Math.max(1, Number(offense)); const y = Math.max(1, Number(defense));
-  return x / (x + y);
-};
-
 const negotiationChance = (negotiation: number, monsterResistance: number, monsterClass: string, inDungeon: boolean) => {
   const tuning = monsterClass === 'boss' ? { resistance: 8, rate: .25, cap: .08 }
     : monsterClass === 'elite' ? { resistance: 2.8, rate: .45, cap: .28 }
@@ -2036,18 +2035,6 @@ const negotiationSuccessText = (code: string, name: string) => ({
   death_knight: '死灵骑士勒住无形缰绳，留下冷冽的注视，策马消失在回廊尽头。',
   necromancer_uz: '乌兹的笑声戛然而止；他审视着你片刻，撕开阴影，暂时放弃了这场交锋。'
 } as Record<string, string>)[code] ?? `${name} 感受到你的善意，收起敌意，转身离开了此地。`;
-
-// 仅用于直击与技能本体伤害；持续伤害、治疗、护盾等效果不经过这项随机波动。
-const directDamageVariance = (damage: number) => Math.max(1, Math.floor(damage * (.9 + Math.random() * .2)));
-
-const resolveStrike = (attack: number, defense: number, accuracy: number, evasion: number, crit: number, critResist: number, critDamage: number, critReduction: number, forceHit = false, forceCrit = false, minimumHitRatePct = 0, actualHitRatePct = 0) => {
-  const hitChance = Math.min(1, Math.max(Math.max(opposedChance(accuracy, evasion), Math.max(0, Math.min(100, minimumHitRatePct)) / 100) + actualHitRatePct / 100, 0));
-  if (!forceHit && Math.random() >= hitChance) return { hit: false, crit: false, damage: 0 };
-  let damage = Math.max(1, Math.floor(attack * attack / (attack + Math.max(1, defense))));
-  const critical = forceCrit || Math.random() < opposedChance(crit, critResist);
-  if (critical) damage = Math.max(1, Math.floor(damage * (1 + opposedChance(critDamage, critReduction))));
-  return { hit: true, crit: critical, damage };
-};
 
 // 旧会话逻辑仅保留给历史会话；新战斗统一使用下方的队伍回合实现。
 const combatRow = async (_qqUserId: string): Promise<{ character: CharacterRow; combat: any }> => { throw new Error('历史战斗会话不可继续。'); };

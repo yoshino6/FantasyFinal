@@ -213,7 +213,8 @@ const baseForgeEffect = (category: string, subtype: string, level: number): Reco
   const armorBase = forgedEquipmentBase(level, '防具');
   if (category === '武器') {
     if (subtype === '法杖' || subtype === '法书' || subtype === '法球') return { magicAttack: weaponBase };
-    if (subtype === '匕首' || subtype === '拳刃') return { physicalAttack: weaponBase * .5, magicAttack: weaponBase * .5 };
+    if (subtype === '匕首') return { physicalAttack: weaponBase * .9, magicAttack: weaponBase * .9 };
+    if (subtype === '拳刃') return { physicalAttack: weaponBase * .5, magicAttack: weaponBase * .5 };
     return { physicalAttack: weaponBase };
   }
   return { physicalDefense: armorBase, magicDefense: armorBase };
