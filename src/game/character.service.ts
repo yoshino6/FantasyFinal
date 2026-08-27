@@ -45,8 +45,8 @@ const armorClassModifier: Record<string, { physicalDefense: number; magicDefense
   '布甲': { physicalDefense: .2, magicDefense: .2, accuracy: 16, evasion: 12, speed: 16 },
   '皮甲': { physicalDefense: .4, magicDefense: .4, accuracy: 8, evasion: 0, speed: 8 },
   '轻甲': { physicalDefense: 0.8, magicDefense: 0.8, accuracy: 0, evasion: 0, speed: 0 },
-  '重甲': { physicalDefense: 1.2, magicDefense: 1.0, accuracy: 0, evasion: -8, speed: -8 },
-  '板甲': { physicalDefense: 1.6, magicDefense: 1.6, accuracy: -12, evasion: -16, speed: -16 }
+  '重甲': { physicalDefense: 1.3, magicDefense: 1.1, accuracy: 0, evasion: -8, speed: -8 },
+  '板甲': { physicalDefense: 1.8, magicDefense: 1.6, accuracy: -12, evasion: -16, speed: -16 }
 };
 
 const withEquipmentStats = async (connection: Pool | PoolConnection, characterId: number, base: DerivedStats): Promise<DerivedStats> => {
