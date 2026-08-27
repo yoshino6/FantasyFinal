@@ -65,7 +65,7 @@ export const buyBlacksmithEquipment = async (qqUserId: string, itemId: number, q
   if (Number(character.copper_coins) < totalPrice) throw new Error(`铜币不足，需要 ${totalPrice} 铜币。`);
   await connection.execute('UPDATE characters SET copper_coins=copper_coins-? WHERE id=?', [totalPrice, character.id]);
   await connection.execute('UPDATE blacksmith_shop_items SET stock_quantity=stock_quantity-? WHERE item_id=?', [amount, item.id]);
-  for (let index = 0; index < amount; index += 1) await connection.execute('INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max) VALUES (?,?,100,100,100)', [character.id, item.id]);
+  for (let index = 0; index < amount; index += 1) await connection.execute('INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max) VALUES (?,?,0,100,100)', [character.id, item.id]);
   await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [character.id, item.id]);
   return { name: item.name, quantity: amount, price: totalPrice };
 });

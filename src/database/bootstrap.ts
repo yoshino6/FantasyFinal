@@ -1,6 +1,7 @@
 import type { Pool, RowDataPacket } from 'mysql2/promise';
 import { refreshShopStocks } from '../game/shop-stock.service';
 import { recalculateCharacterStats } from '../game/character.service';
+import { forgedEquipmentBase } from '../game/constants';
 
 type BlacksmithStock = { code: string; name: string; category: string; weaponType: string | null; level: number; price: number; effect: Record<string, number | undefined> };
 type AlchemistStock = { code: string; name: string; category: '回复' | '特殊'; price: number; description: string; effect: Record<string, number | boolean> };
@@ -18,16 +19,18 @@ const alchemistShopStock: AlchemistStock[] = [
 const blacksmithShopStock: BlacksmithStock[] = [5, 10, 15, 20].flatMap(level => {
   const price = ({ 5: 200, 10: 400, 15: 1000, 20: 2000 } as Record<number, number>)[level];
   const prefix = ({ 5: '新手', 10: '硬木', 15: '黑铁', 20: '精钢' } as Record<number, string>)[level];
+  const weaponBase = forgedEquipmentBase(level, '武器');
+  const armorBase = forgedEquipmentBase(level, '防具');
   return [
-    { code: `shop_longsword_${level}`, name: `${prefix}长剑`, category: '武器', weaponType: '长剑', level, price, effect: { physicalAttack: level * 4 } },
-    { code: `shop_staff_${level}`, name: `${prefix}法杖`, category: '武器', weaponType: '法杖', level, price, effect: { magicAttack: level * 4 } },
-    { code: `shop_dagger_${level}`, name: `${prefix}匕首`, category: '武器', weaponType: '匕首', level, price, effect: { physicalAttack: level * 3.6, magicAttack: level * 3.6, accuracy: level * 2 } },
-    { code: `shop_fistblade_${level}`, name: `${prefix}拳刃`, category: '武器', weaponType: '拳刃', level, price, effect: { physicalAttack: level * 3, critRateBp: level * 3 } },
-    { code: `shop_shoulder_${level}`, name: `${prefix}护肩`, category: '头肩', weaponType: null, level, price, effect: { physicalDefense: level * 3, magicDefense: level * 2 } },
-    { code: `shop_upper_${level}`, name: `${prefix}胸甲`, category: '上装', weaponType: null, level, price, effect: { physicalDefense: level * 4, hpMax: level * 4 } },
-    { code: `shop_waist_${level}`, name: `${prefix}腰带`, category: '腰部', weaponType: null, level, price, effect: { hpMax: level * 4, magicDefense: level * 2 } },
-    { code: `shop_lower_${level}`, name: `${prefix}护腿`, category: '下装', weaponType: null, level, price, effect: { physicalDefense: level * 3, magicDefense: level * 3 } },
-    { code: `shop_feet_${level}`, name: `${prefix}长靴`, category: '脚部', weaponType: null, level, price, effect: { evasion: level * 2, speed: level } }
+    { code: `shop_longsword_${level}`, name: `${prefix}长剑`, category: '武器', weaponType: '长剑', level, price, effect: { physicalAttack: weaponBase } },
+    { code: `shop_staff_${level}`, name: `${prefix}法杖`, category: '武器', weaponType: '法杖', level, price, effect: { magicAttack: weaponBase } },
+    { code: `shop_dagger_${level}`, name: `${prefix}匕首`, category: '武器', weaponType: '匕首', level, price, effect: { physicalAttack: weaponBase * .9, magicAttack: weaponBase * .9 } },
+    { code: `shop_fistblade_${level}`, name: `${prefix}拳刃`, category: '武器', weaponType: '拳刃', level, price, effect: { physicalAttack: weaponBase * .5, magicAttack: weaponBase * .5 } },
+    { code: `shop_shoulder_${level}`, name: `${prefix}护肩`, category: '头肩', weaponType: '轻甲', level, price, effect: { physicalDefense: armorBase, magicDefense: armorBase } },
+    { code: `shop_upper_${level}`, name: `${prefix}胸甲`, category: '上装', weaponType: '轻甲', level, price, effect: { physicalDefense: armorBase, magicDefense: armorBase } },
+    { code: `shop_waist_${level}`, name: `${prefix}腰带`, category: '腰部', weaponType: '轻甲', level, price, effect: { physicalDefense: armorBase, magicDefense: armorBase } },
+    { code: `shop_lower_${level}`, name: `${prefix}护腿`, category: '下装', weaponType: '轻甲', level, price, effect: { physicalDefense: armorBase, magicDefense: armorBase } },
+    { code: `shop_feet_${level}`, name: `${prefix}长靴`, category: '脚部', weaponType: '轻甲', level, price, effect: { physicalDefense: armorBase, magicDefense: armorBase } }
   ];
 });
 
@@ -1300,11 +1303,14 @@ export const initializeSchema = async (pool: Pool) => {
   for (const item of blacksmithShopStock) {
     await pool.execute(`INSERT INTO item_definitions (code,name,description,obtain_source,item_type,item_category,weapon_type,rarity,required_level,weight,stackable,effect_json)
       VALUES (?,?,?,?,? ,?,?,?,?,?,0,?)
-      ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),item_category=VALUES(item_category),weapon_type=VALUES(weapon_type),rarity=VALUES(rarity),required_level=VALUES(required_level),stackable=0,effect_json=VALUES(effect_json)`, [item.code, item.name, `小北铁匠铺出售的普通白板装备，适合 Lv.${item.level} 的冒险者使用。`, '百纳镇·铁匠铺', 'equipment', item.category, item.weaponType, '普通', item.level, 2, JSON.stringify(item.effect)]);
+      ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),item_category=VALUES(item_category),weapon_type=VALUES(weapon_type),rarity=VALUES(rarity),required_level=VALUES(required_level),stackable=0,effect_json=VALUES(effect_json)`, [item.code, item.name, `小北铁匠铺出售的同级普通打造白板装备，初始品质固定为 0%，可通过精炼提升。`, '百纳镇·铁匠铺', 'equipment', item.category, item.weaponType, '普通', item.level, 2, JSON.stringify(item.effect)]);
     await pool.execute(`INSERT INTO blacksmith_shop_items (item_id,buy_price,sell_price,is_active)
       SELECT id,?,?,1 FROM item_definitions WHERE code=?
       ON DUPLICATE KEY UPDATE buy_price=VALUES(buy_price),sell_price=VALUES(sell_price),is_active=1`, [item.price, Math.floor(item.price / 2), item.code]);
   }
+  await pool.query(`UPDATE player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
+    SET ii.quality=0,ii.effect_json=NULL,ii.forge_primary_json=NULL
+    WHERE i.code LIKE 'shop\\_%'`);
   for (const item of alchemistShopStock) {
     await pool.execute(`INSERT INTO item_definitions (code,name,description,obtain_source,item_type,item_category,weight,stackable,effect_json)
       VALUES (?,?,?,?,?,?,?,1,?)
