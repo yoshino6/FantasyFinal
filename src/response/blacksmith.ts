@@ -25,8 +25,11 @@ const effectText = (effect: Record<string, unknown>) => {
   return Object.entries(effect).filter(([key, value]) => label(key) && Number(value)).map(([key, value]) => { const amount = key.endsWith('Pct') ? `${Number(value).toFixed(1)}%` : String(Math.round(Number(value))); return `${label(key)}${Number(value) >= 0 ? '+' : ''}${amount}`; }).join('｜') || '随机基础强化';
 };
 const materialNames: Record<string, string> = { living_wood: '活木', meteor_iron: '陨铁', star_copper: '星铜', moon_silver: '月银', sun_gold: '曜金' };
-const materialTendencies: Record<string, string> = { beast_meat: '倾向于生命', beast_bone: '倾向于物攻', beast_hide: '倾向于物防、魔防', beast_tendon: '倾向于速度', beast_core: '倾向于魔攻', magic_wool: '倾向于闪避', magic_tusk: '倾向于物攻', magic_scale: '倾向于魔防', magic_claw: '倾向于暴击', magic_heartcore: '倾向于命中', living_wood: '倾向于生命', meteor_iron: '倾向于物防', star_copper: '倾向于命中', moon_silver: '倾向于魔力', sun_gold: '倾向于双攻', riot_aura: '倾向于伤害增加' };
+const materialTendencies: Record<string, string> = { beast_meat: '倾向于生命', beast_bone: '倾向于物防', beast_hide: '倾向于魔防', beast_tendon: '倾向于速度', beast_core: '随武器主攻击类型倾向物攻或魔攻', magic_wool: '倾向于闪避', magic_tusk: '倾向于命中', magic_scale: '倾向于暴击抵抗', magic_claw: '倾向于暴击', magic_heartcore: '倾向于暴击伤害', magic_blood: '倾向于魔力', magic_eye: '倾向于暴伤减免', magic_horn: '倾向于韧性', refined_beast_bone: '倾向于物防', refined_beast_hide: '倾向于魔防', refined_beast_tendon: '倾向于速度', refined_beast_core: '随武器主攻击类型倾向物攻或魔攻', refined_magic_wool: '倾向于闪避', refined_magic_tusk: '倾向于命中', refined_magic_scale: '倾向于暴击抵抗', refined_magic_claw: '倾向于暴击', refined_magic_heartcore: '倾向于暴击伤害', living_wood: '倾向于生命', meteor_iron: '倾向于物防', star_copper: '倾向于命中', moon_silver: '倾向于魔力', sun_gold: '倾向于双攻', riot_aura: '倾向于伤害增加' };
 const numberMark = '①②③④⑤⑥⑦⑧⑨⑩';
+const elementalDustTendencies: Record<string, string> = {
+  wood_element_dust: '武器加木精通，防具加木抗性', metal_element_dust: '武器加土精通，防具加土抗性', water_element_dust: '武器加水精通，防具加水抗性', ice_element_dust: '武器加冰精通，防具加冰抗性', dark_element_dust: '武器加暗精通，防具加暗抗性', fire_element_dust: '武器加火精通，防具加火抗性', thunder_element_dust: '武器加雷精通，防具加雷抗性', light_element_dust: '武器加光精通，防具加光抗性'
+};
 export const blacksmithFormat = async (qqUserId: string, text?: string) => {
   const hour = new Date().getHours();
   const scene = text ?? (hour < 11
@@ -139,7 +142,7 @@ const forgeMaterialsFormat = async (qqUserId: string, page = 1, keyword = '') =>
   markdown.addNewline().addText('背包材料：').addNewline();
   if (!materials.length) markdown.addBlockquote('没有符合条件的材料。').addNewline();
   for (const [index, material] of materials.entries()) {
-    const tendency = materialTendencies[material.code] ?? '已配置锻造倾向';
+    const tendency = elementalDustTendencies[material.code] ?? materialTendencies[material.code] ?? '已配置锻造倾向';
     markdown.addBlockquote(`${'①②③④⑤⑥⑦⑧⑨⑩'.charAt(index)}【${material.category}】${material.name}×${material.quantity}（已放入${material.selected}）｜${tendency}`).addText(' ').addButton('[放入]', { data: `/放入打造材料 ${material.id}`, autoEnter: false }).addText(' ').addButton('[取出]', { data: `/取出打造材料 ${material.id}`, autoEnter: false }).addNewline();
   }
   markdown.addText(`当前第（${currentPage}/${totalPages}）页`).addNewline();

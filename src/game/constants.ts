@@ -74,9 +74,16 @@ export const forgedEquipmentBase = (level: number, category: '武器' | '防具'
 const weaponHighWeightAffixes = new Set(['mpMax', 'accuracy', 'critRateBp', 'critDamageBp']);
 const armorHighWeightAffixes = new Set(['hpMax', 'evasion', 'critResistBp', 'critDamageReductionBp']);
 const standardAffixes = ['hpMax', 'mpMax', 'physicalAttack', 'magicAttack', 'physicalDefense', 'magicDefense', 'accuracy', 'evasion', 'critRateBp', 'critDamageBp', 'critResistBp', 'critDamageReductionBp', 'tenacity', 'speed'];
+const elementNames = ['水', '火', '土', '木', '风', '冰', '雷', '光', '暗'];
+const elementalAffixes = elementNames.flatMap(element => [`elementMastery_${element}`, `elementResistance_${element}`]);
+const elementalAffixCap = (level: number) => Math.max(0, Math.floor(Math.max(0, Number(level)) / 5) * 11);
 
 /** 不含主词条本体的单项辅词条上限。 */
 export const forgedAffixCap = (category: '武器' | '防具', key: string, level: number, rarity: string) => {
+  if (key.startsWith('elementMastery_') || key.startsWith('elementResistance_')) {
+    const matchingKind = category === '武器' ? key.startsWith('elementMastery_') : key.startsWith('elementResistance_');
+    return matchingKind ? elementalAffixCap(level) : 0;
+  }
   const base = forgedEquipmentBase(level, category) * (forgeRarityMultiplier[rarity] ?? 1);
   if (category === '武器') {
     if (key === 'physicalDefense' || key === 'magicDefense') return 0;
@@ -91,7 +98,7 @@ export const forgedAffixCap = (category: '武器' | '防具', key: string, level
 /** 成品词条总上限；主词条可额外叠加一条同类辅词条。 */
 export const forgedEquipmentCaps = (category: '武器' | '防具', level: number, rarity: string, primaryKeys: readonly string[]) => {
   const base = forgedEquipmentBase(level, category) * (forgeRarityMultiplier[rarity] ?? 1);
-  return Object.fromEntries(standardAffixes.map(key => {
+  return Object.fromEntries([...standardAffixes, ...elementalAffixes].map(key => {
     const offTypeWeaponAttack = category === '武器' && (key === 'physicalAttack' || key === 'magicAttack') && !primaryKeys.includes(key);
     return [key, (offTypeWeaponAttack ? 0 : forgedAffixCap(category, key, level, rarity)) + (primaryKeys.includes(key) ? base : 0)];
   })) as Record<string, number>;
@@ -129,14 +136,14 @@ export const gifts = {
   oath_necklace_norn: { name: '守誓项链·诺恩', category: 'artifact', summary: '承诺会化为温热的光，护住仍愿前行的人。' },
   fate_bracelet_clotho: { name: '命运手镯·克洛托', category: 'artifact', summary: '银线缠绕腕间，仿佛能将断裂的命运重新缝合。' },
   eternal_ring_aurora: { name: '永恒戒指·奥罗拉', category: 'artifact', summary: '黎明色的微光永不熄灭，指向每一场可能的胜利。' },
-  growth_blessing: { name: '成长祝福', category: 'ability', summary: '【被动】所有获得的经验值翻倍。' },
-  mana_affinity: { name: '魔力亲和', category: 'ability', summary: '【被动】技能魔力消耗降低 30%。' },
-  lucky_favor: { name: '幸运眷顾', category: 'ability', summary: '【被动】战利品掉落概率提高 20%。' },
-  war_god_favor: { name: '战神眷顾', category: 'ability', summary: '【被动】造成的最终伤害提高 16%。' },
-  arcane_revelation: { name: '奥术启示', category: 'ability', summary: '【被动】魔法伤害提高 16%。' },
-  crimson_recovery: { name: '猩红复苏', category: 'ability', summary: '【被动】普攻与刺击伤害的 16% 转化为生命。' },
-  seer_instinct: { name: '先知直觉', category: 'ability', summary: '【被动】命中与暴击属性在战斗中提高 16%。' },
-  hunter_blessing: { name: '猎人恩典', category: 'ability', summary: '【被动】战利品掉落概率提高 35%。' }
+  growth_blessing: { name: '成长祝福', category: 'ability', summary: '【绑定】所有获得的经验值翻倍。' },
+  mana_affinity: { name: '魔力亲和', category: 'ability', summary: '【绑定】技能魔力消耗降低 30%。' },
+  lucky_favor: { name: '幸运眷顾', category: 'ability', summary: '【绑定】战利品掉落概率提高 20%。' },
+  war_god_favor: { name: '战神眷顾', category: 'ability', summary: '【绑定】造成的最终伤害提高 16%。' },
+  arcane_revelation: { name: '奥术启示', category: 'ability', summary: '【绑定】魔法伤害提高 16%。' },
+  crimson_recovery: { name: '猩红复苏', category: 'ability', summary: '【绑定】普攻与刺击伤害的 16% 转化为生命。' },
+  seer_instinct: { name: '先知直觉', category: 'ability', summary: '【绑定】命中与暴击属性在战斗中提高 16%。' },
+  hunter_blessing: { name: '猎人恩典', category: 'ability', summary: '【绑定】战利品掉落概率提高 35%。' }
 } as const;
 
 /** 初始永恒神器会直接穿戴到对应部位；永恒神器之间仍互斥。 */

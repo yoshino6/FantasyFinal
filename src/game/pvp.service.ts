@@ -3,6 +3,8 @@ import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { detentionMessage } from './time-format';
 import { isInHome } from './home.service';
+import { isFriendRelation } from './social.service';
+import { hasCompatibleSkillWeapon, skillWeaponRequirementMessage } from './skill-weapon.service';
 
 type PvpCharacter = RowDataPacket & {
   id: number; game_id: number; name: string; current_region_id: number; pos_x: number; pos_y: number; pos_z: number;
@@ -10,7 +12,7 @@ type PvpCharacter = RowDataPacket & {
   hp_max: number; mp_max: number; current_hp: number; current_mp: number; physical_attack: number; magic_attack: number;
   physical_defense: number; magic_defense: number; accuracy: number; evasion: number; activity_status: string; detained_until: Date | null;
 };
-type PvpAction = { type: 'attack' } | { type: 'skill'; id: number; code: string; name: string; category: 'physical' | 'magic' | 'utility'; manaCost: number; power: number; cooldown: number } | { type: 'item'; id: number; name: string; effect: Record<string, number> };
+type PvpAction = { type: 'attack' } | { type: 'skill'; id: number; code: string; name: string; category: 'physical' | 'magic' | 'utility'; requiredWeaponType: string | null; manaCost: number; power: number; cooldown: number } | { type: 'item'; id: number; name: string; effect: Record<string, number> };
 type PvpBattleRow = RowDataPacket & { id: string; attacker_character_id: number; defender_character_id: number; turn_no: number; state: string; attacker_hp: number; attacker_mp: number; defender_hp: number; defender_mp: number; attacker_cooldowns: unknown; defender_cooldowns: unknown; ambush_spawn_id: number | null; ambush_delivery_scope: 'group' | 'c2c' | null; ambush_delivery_target_id: string | null; ambush_delivery_bot_id: string | null };
 export type PvpAmbushDelivery = { scope: 'group' | 'c2c'; targetId: string; botId?: string };
 
@@ -67,18 +69,18 @@ const actionFor = async (connection: PoolConnection, character: PvpCharacter, ma
       const [items] = await connection.execute<(RowDataPacket & { id: number; name: string; effect_json: unknown })[]>('SELECT i.id,i.name,i.effect_json FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.item_id=? AND pi.quantity>0 AND i.item_type=\'consumable\' LIMIT 1 FOR UPDATE', [character.id, potionId]);
       if (items[0]) return { type: 'item', id: Number(items[0].id), name: items[0].name, effect: record(items[0].effect_json) };
     }
-    const [actions] = await connection.execute<(RowDataPacket & { id: number; code: string; name: string; category: 'physical' | 'magic' | 'utility'; mana_cost: number; power: number; cooldown_turns: number })[]>('SELECT s.id,s.code,s.name,s.category,s.mana_cost,s.power,s.cooldown_turns FROM player_pvp_auto_battle_actions a JOIN player_skills ps ON ps.character_id=a.character_id AND ps.skill_id=a.skill_id JOIN skill_definitions s ON s.id=a.skill_id WHERE a.character_id=? ORDER BY a.sequence_no', [character.id]);
+    const [actions] = await connection.execute<(RowDataPacket & { id: number; code: string; name: string; category: 'physical' | 'magic' | 'utility'; required_weapon_type: string | null; mana_cost: number; power: number; cooldown_turns: number })[]>('SELECT s.id,s.code,s.name,s.category,s.required_weapon_type,s.mana_cost,s.power,s.cooldown_turns FROM player_pvp_auto_battle_actions a JOIN player_skills ps ON ps.character_id=a.character_id AND ps.skill_id=a.skill_id JOIN skill_definitions s ON s.id=a.skill_id WHERE a.character_id=? ORDER BY a.sequence_no', [character.id]);
     if (actions.length) {
       const picked = actions[(Math.max(1, Number(setting.action_cursor)) - 1) % actions.length];
       await connection.execute('UPDATE player_pvp_auto_battle_settings SET action_cursor=action_cursor+1 WHERE character_id=?', [character.id]);
-      return { type: 'skill', id: Number(picked.id), code: picked.code, name: picked.name, category: picked.category, manaCost: Number(picked.mana_cost), power: Number(picked.power), cooldown: Number(picked.cooldown_turns) };
+      return { type: 'skill', id: Number(picked.id), code: picked.code, name: picked.name, category: picked.category, requiredWeaponType: picked.required_weapon_type, manaCost: Number(picked.mana_cost), power: Number(picked.power), cooldown: Number(picked.cooldown_turns) };
     }
   }
   if (manual) return { type: 'attack' };
-  const [quick] = await connection.execute<(RowDataPacket & { id: number; code: string; name: string; category: 'physical' | 'magic' | 'utility'; mana_cost: number; power: number; cooldown_turns: number })[]>('SELECT s.id,s.code,s.name,s.category,s.mana_cost,s.power,s.cooldown_turns FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.quick_slot IS NOT NULL AND s.category IN (\'physical\',\'magic\',\'utility\') ORDER BY ps.quick_slot', [character.id]);
+  const [quick] = await connection.execute<(RowDataPacket & { id: number; code: string; name: string; category: 'physical' | 'magic' | 'utility'; required_weapon_type: string | null; mana_cost: number; power: number; cooldown_turns: number })[]>('SELECT s.id,s.code,s.name,s.category,s.required_weapon_type,s.mana_cost,s.power,s.cooldown_turns FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.quick_slot IS NOT NULL AND s.category IN (\'physical\',\'magic\',\'utility\') ORDER BY ps.quick_slot', [character.id]);
   if (!quick.length) return { type: 'attack' };
   const picked = random(quick);
-  return { type: 'skill', id: Number(picked.id), code: picked.code, name: picked.name, category: picked.category, manaCost: Number(picked.mana_cost), power: Number(picked.power), cooldown: Number(picked.cooldown_turns) };
+  return { type: 'skill', id: Number(picked.id), code: picked.code, name: picked.name, category: picked.category, requiredWeaponType: picked.required_weapon_type, manaCost: Number(picked.mana_cost), power: Number(picked.power), cooldown: Number(picked.cooldown_turns) };
 };
 
 const creditItem = async (connection: PoolConnection, characterId: number, itemId: number, quantity: number) => {
@@ -363,10 +365,10 @@ const battleActionFromSlot = async (connection: PoolConnection, character: PvpCh
   if (type === 'escape') return null;
   if (type === 'auto') return actionFor(connection, character);
   if (type === 'skill') {
-    const [rows] = await connection.execute<(RowDataPacket & { id: number; code: string; name: string; category: 'physical' | 'magic' | 'utility'; mana_cost: number; power: number; cooldown_turns: number })[]>(`SELECT s.id,s.code,s.name,s.category,s.mana_cost,s.power,s.cooldown_turns
+    const [rows] = await connection.execute<(RowDataPacket & { id: number; code: string; name: string; category: 'physical' | 'magic' | 'utility'; required_weapon_type: string | null; mana_cost: number; power: number; cooldown_turns: number })[]>(`SELECT s.id,s.code,s.name,s.category,s.required_weapon_type,s.mana_cost,s.power,s.cooldown_turns
       FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.quick_slot=? LIMIT 1`, [character.id, slot ?? 0]);
     if (!rows[0]) throw new Error(`技能${'①②③④'.charAt(Math.max(0, (slot ?? 1) - 1)) || slot}未配置。`);
-    const skill = rows[0]; return { type: 'skill', id: Number(skill.id), code: skill.code, name: skill.name, category: skill.category, manaCost: Number(skill.mana_cost), power: Number(skill.power), cooldown: Number(skill.cooldown_turns) };
+    const skill = rows[0]; return { type: 'skill', id: Number(skill.id), code: skill.code, name: skill.name, category: skill.category, requiredWeaponType: skill.required_weapon_type, manaCost: Number(skill.mana_cost), power: Number(skill.power), cooldown: Number(skill.cooldown_turns) };
   }
   const [rows] = await connection.execute<(RowDataPacket & { id: number; name: string; effect_json: unknown })[]>(`SELECT i.id,i.name,i.effect_json FROM player_quick_items qi
     JOIN player_inventory pi ON pi.character_id=qi.character_id AND pi.item_id=qi.item_id AND pi.quantity>0
@@ -402,6 +404,7 @@ export const startPvpBattle = async (qqUserId: string, targetGameId: number, con
   const distance = defender ? Math.abs(Number(defender.pos_x) - Number(attacker.pos_x)) + Math.abs(Number(defender.pos_y) - Number(attacker.pos_y)) : Infinity;
   const range = regionCode === 'dark_forest_dungeon' ? 1 : perceptionRange(attacker);
   if (!defender || Number(defender.id) === Number(attacker.id) || Number(defender.current_region_id) !== Number(attacker.current_region_id) || Number(defender.pos_z) !== Number(attacker.pos_z) || distance > range) throw new Error('目标已经离开你的感知范围。');
+  if (await isFriendRelation(connection, Number(attacker.id), Number(defender.id))) throw new Error('游戏内好友之间无法互相攻击。');
   if (await isInHome(connection, Number(attacker.id))) throw new Error('你正在自己的家园中，无法主动发起 PvP。');
   if (attacker.activity_status === 'detained') throw new Error(detentionMessage(attacker.detained_until));
   if (defender.activity_status === 'detained') throw new Error('目标已被守卫关押。');
@@ -455,12 +458,12 @@ export const pvpCombatAction = async (qqUserId: string, type: 'attack' | 'skill'
   const attacker = fighters.find(row => Number(row.id) === Number(battle.attacker_character_id)); const defender = fighters.find(row => Number(row.id) === Number(battle.defender_character_id)); if (!attacker || !defender) throw new Error('对战对象已失效。');
   attacker.current_hp = Number(battle.attacker_hp); attacker.current_mp = Number(battle.attacker_mp); defender.current_hp = Number(battle.defender_hp); defender.current_mp = Number(battle.defender_mp);
   const cooldowns = record(battle.attacker_cooldowns); let action = await battleActionFromSlot(connection, attacker, type, slot);
-  if (action?.type === 'skill') { if (Number(attacker.current_mp) < action.manaCost) { if (type === 'auto') action = { type: 'attack' }; else throw new Error('魔力不足，无法释放该技能。'); } else if (Number(cooldowns[action.code] ?? 0) > 0) { if (type === 'auto') action = { type: 'attack' }; else throw new Error(`「${action.name}」冷却中。`); } }
+  if (action?.type === 'skill') { if (!await hasCompatibleSkillWeapon(connection, Number(attacker.id), action.requiredWeaponType)) { if (type === 'auto') action = { type: 'attack' }; else throw new Error(skillWeaponRequirementMessage(action.name, String(action.requiredWeaponType))); } else if (Number(attacker.current_mp) < action.manaCost) { if (type === 'auto') action = { type: 'attack' }; else throw new Error('魔力不足，无法释放该技能。'); } else if (Number(cooldowns[action.code] ?? 0) > 0) { if (type === 'auto') action = { type: 'attack' }; else throw new Error(`「${action.name}」冷却中。`); } }
   const first = await resolveAction(connection, attacker, defender, action ?? { type: 'attack' }); if (action?.type === 'skill') cooldowns[action.code] = action.cooldown + 1;
   const log = [actionLog(first.text)]; let ended = first.defeated; let winnerId: number | null = first.defeated ? Number(attacker.id) : null; let winnerName: string | null = first.defeated ? attacker.name : null; let restitutionId = first.restitution?.id; let settlement = first.defeated ? `【${attacker.name}】获得了胜利。${first.settlement ? `\n${first.settlement}` : ''}` : '';
   const defenderCooldowns = record(battle.defender_cooldowns);
   if (!ended) {
-    let counter = await actionFor(connection, defender); if (counter.type === 'skill' && (Number(defender.current_mp) < counter.manaCost || Number(defenderCooldowns[counter.code] ?? 0) > 0)) counter = { type: 'attack' };
+    let counter = await actionFor(connection, defender); if (counter.type === 'skill' && (!(await hasCompatibleSkillWeapon(connection, Number(defender.id), counter.requiredWeaponType)) || Number(defender.current_mp) < counter.manaCost || Number(defenderCooldowns[counter.code] ?? 0) > 0)) counter = { type: 'attack' };
     const second = await resolveAction(connection, defender, attacker, counter); if (counter.type === 'skill') defenderCooldowns[counter.code] = counter.cooldown + 1;
     log.push(actionLog(second.text)); ended = second.defeated; if (ended) { winnerId = Number(defender.id); winnerName = defender.name; restitutionId = second.restitution?.id; settlement = `【${defender.name}】获得了胜利。${second.settlement ? `\n${second.settlement}` : ''}`; }
   }

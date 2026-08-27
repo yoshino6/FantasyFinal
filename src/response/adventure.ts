@@ -146,6 +146,7 @@ const victoryFormat = (settlement: VictorySettlement) => {
       continue;
     }
     markdown.addText(`【${reward.name}】${reward.levelText ? ` ${reward.levelText}` : ''}\n`).addBlockquote(reward.realmLocked ? realmEnergyDissipationText : `EXP+${reward.experience}`).addNewline();
+    if (reward.staminaSpent) markdown.addBlockquote(`体力-${reward.staminaSpent}`).addNewline();
     for (const drop of reward.drops) {
       markdown.addBlockquote('获得');
       markdown.addButton(`[${drop.name}]`, { data: drop.itemType === 'equipment' && drop.instanceId ? `/装备详情 ${drop.instanceId}` : `/物品图鉴 ${drop.codexId}`, autoEnter: false }).addText(`×${drop.quantity}`).addNewline();
@@ -699,15 +700,17 @@ const playerInteractionFormat = (target: CoordinateInteractionTarget, isFriend =
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 const coordinateInteractionFormat = (_character: any, targets: CoordinateInteractionTarget[]) => {
-  if (targets.length === 1 && targets[0].type === '玩家') return playerInteractionFormat(targets[0]);
+  if (targets.length === 1 && targets[0].type === '玩家') return playerInteractionFormat(targets[0], Boolean(targets[0].isFriend));
   const markdown = Format.createMarkdown().addTitle('互动').addNewline().addNewline().addText('该位置有多个目标存在：').addNewline().addNewline();
   for (const [index, target] of targets.entries()) {
     markdown.addText(`${'①②③④⑤⑥⑦⑧⑨⑩'.charAt(index)}【${interactionTypeLabel[target.type]}】${target.name}`);
     if (target.type === '玩家') {
-      markdown.addNewline().addButton('[攻击]', { data: `/玩家攻击 ${target.gameId}`, autoEnter: false }).addText(' ')
-        .addButton('[交易]', { data: `/玩家交易 ${target.gameId}`, autoEnter: false }).addText(' ')
+      markdown.addNewline();
+      if (!target.isFriend) markdown.addButton('[攻击]', { data: `/玩家攻击 ${target.gameId}`, autoEnter: false }).addText(' ');
+      else markdown.addText('[好友] ');
+      markdown.addButton('[交易]', { data: `/玩家交易 ${target.gameId}`, autoEnter: false }).addText(' ')
         .addButton('[邀请入队]', { data: `/邀请入队 ${target.gameId}`, autoEnter: false }).addText(' ')
-        .addButton('[加好友]', { data: `/加好友 ${target.gameId}`, autoEnter: false });
+        .addButton(target.isFriend ? '[赠礼]' : '[加好友]', { data: target.isFriend ? `/好友赠礼选择 ${target.gameId}` : `/加好友 ${target.gameId}`, autoEnter: false });
     } else if (target.type === '建筑') {
       markdown.addText(' ').addButton('[进入]', { data: `/建筑进入 ${target.code}`, autoEnter: false }).addText(' ')
         .addButton('[忽略]', { data: `/建筑忽略 ${target.code}`, autoEnter: false });
@@ -1063,12 +1066,31 @@ const showRetreatArrival = async (message: any, qqUserId: string, retreatText: s
   await message.send({ format: panel.addButtonGroup(await movementButtons(qqUserId, nearby.character.activity_status !== 'active')) });
 };
 const actionHandler = (action: 'attack' | 'skill' | 'item' | 'escape') => async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try {
+  // PVE 与 PVP 共用同一组操作指令；已有怪物战斗时必须优先按当前怪物战斗处理，
+  // 避免残留或并行的 PVP 会话截获怪物战斗面板上的按钮。
+  let pveBattle: Awaited<ReturnType<typeof battleStatus>> | null = null;
+  try { pveBattle = await battleStatus(event.current.UserId); } catch { /* 当前没有怪物战斗时再尝试 PVP。 */ }
+  if (pveBattle) {
+    stopAutoBattle(event.current.UserId); let result = await combatAction(event.current.UserId, action, Number(route.param('slot')) || undefined); if (!result.ended && result.waiting) result = await resolvePartyAutoBattleActions(event.current.UserId) ?? result; await sendCombatResult(message, event.current.UserId, result);
+    if (action === 'escape' && result.ended) { await showRetreatArrival(message, event.current.UserId, '你脱离战斗，沿来路退回上一格。'); return; }
+    if (!result.ended && !result.waiting) { const battle = await battleStatus(event.current.UserId); if (battle.canAct) await startAutoBattle(message, event.current.UserId); else scheduleStoryNpcBattle(message, event.current.UserId); }
+    return;
+  }
   try {
     await pvpBattleStatus(event.current.UserId); stopPvpAutoBattle(event.current.UserId);
     const pvpResult = await pvpCombatAction(event.current.UserId, action, Number(route.param('slot')) || undefined); await sendPvpCombatResult(message, event.current.UserId, pvpResult);
     if (!pvpResult.ended) await startPvpAutoBattle(message, event.current.UserId);
     return;
-  } catch (pvpError) { if (!(pvpError instanceof Error) || !pvpError.message.includes('当前不在玩家对战中')) throw pvpError; }
+  } catch (pvpError) {
+    if (!(pvpError instanceof Error) || !pvpError.message.includes('当前不在玩家对战中')) {
+      if (pvpError instanceof Error && pvpError.message.includes('对方正在发起攻击')) {
+        const pvpBattle = await pvpBattleStatus(event.current.UserId);
+        await message.send({ format: battleFormat('玩家对战', `${pvpError.message}\n请等待对方本回合行动结束。`, pvpBattle as Awaited<ReturnType<typeof battleStatus>>) });
+        return;
+      }
+      throw pvpError;
+    }
+  }
   stopAutoBattle(event.current.UserId); let result = await combatAction(event.current.UserId, action, Number(route.param('slot')) || undefined); if (!result.ended && result.waiting) result = await resolvePartyAutoBattleActions(event.current.UserId) ?? result; await sendCombatResult(message, event.current.UserId, result);
   if (action === 'escape' && result.ended) {
     await showRetreatArrival(message, event.current.UserId, '你脱离战斗，沿来路退回上一格。');

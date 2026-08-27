@@ -3,6 +3,7 @@ import { getPool, withTransaction } from '../database/pool';
 import { recalculateCharacterStats } from './character.service';
 import { recordSkillPointChange } from './skill-point-ledger.service';
 import { forgedAffixCap, forgedEquipmentBase, forgedEquipmentCaps, forgeRarityMultiplier } from './constants';
+import { attributes } from './types';
 
 type WeaponRow = RowDataPacket & { id: number; name: string; item_category: string; quality: number; rarity: string; required_level: number; fusion_count: number };
 type MaterialRow = RowDataPacket & { id: number; name: string; item_category: string; quantity: number; min_gain?: number; max_gain?: number; effect_json?: unknown; description?: string };
@@ -97,8 +98,10 @@ export const fusionMaterials = async (qqUserId: string, _equipmentCategory = '�
   const [rows] = await pool.execute<(MaterialRow & { code: string })[]>(`SELECT i.id,i.code,i.name,i.item_category,pi.quantity,fe.effect_json,fe.description FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id LEFT JOIN blacksmith_fusion_material_effects fe ON fe.item_id=i.id WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type='material' AND i.item_category<>'货币' ORDER BY i.item_category,i.name`, [characterId]);
   return rows.flatMap(row => {
     const profile = forgeMaterialProfiles[row.code]; if (!profile) return [];
-    const upper = profile.max * 2 * (profile.tier === 'exclusive' ? 5 : 1);
-    return [{ id: Number(row.id), name: row.name, category: row.item_category, quantity: Number(row.quantity), effect: { [profile.key]: upper }, description: `本次增量上限 +${upper}，实际值按正态分布抽取。` }];
+    const upper = profile.fixedValue ?? profile.max * 2 * (profile.tier === 'exclusive' ? 5 : 1);
+    const keys = profileKeys(profile).filter(key => !key.startsWith('element') || (_equipmentCategory === '武器' ? key.startsWith('elementMastery_') : key.startsWith('elementResistance_')));
+    const elemental = keys.some(key => key.startsWith('element'));
+    return [{ id: Number(row.id), name: row.name, category: row.item_category, quantity: Number(row.quantity), effect: Object.fromEntries(keys.map(key => [key, upper])), description: `本次增量上限 +${upper}，实际值按正态分布抽取。${elemental ? '单元素上限每 5 级 +11。' : ''}` }];
   });
 };
 const refinementGain = (minimum: number, maximum: number, quality: number) => {
@@ -141,11 +144,15 @@ export const fuseWeapon = async (qqUserId: string, instanceId: number, materialI
   const material = materials[0]; if (!material || Number(material.quantity) < 1) throw new Error('请选择背包中的熔铸材料。');
   const profile = forgeMaterialProfiles[material.code];
   if (!profile) throw new Error(`熔铸材料【${material.name}】尚未配置锻造倾向。`);
+  if (material.code === 'goblin_colonel_insignia') {
+    const [usedRows] = await connection.execute<(RowDataPacket & { total: number })[]>('SELECT COUNT(*) AS total FROM equipment_fusions WHERE instance_id=? AND material_item_id=?', [instanceId, material.id]);
+    if (Number(usedRows[0]?.total ?? 0) > 0) throw new Error('同一件装备最多熔铸一枚上校军徽。');
+  }
   const primaryKeys = forgePrimaryKeys(weapon.item_category, weapon.weapon_type);
-  const offTypeWeaponAttack = weapon.item_category === '武器' && (profile.key === 'physicalAttack' || profile.key === 'magicAttack') && !primaryKeys.includes(profile.key);
-  if (offTypeWeaponAttack || (!primaryKeys.includes(profile.key) && forgedAffixCap(equipmentKind(weapon.item_category), profile.key, Number(weapon.required_level), weapon.rarity) <= 0)) throw new Error(`熔铸材料【${material.name}】不能用于${weapon.item_category}。`);
+  const usableKeys = usableMaterialKeys(profile, weapon.item_category, primaryKeys, Number(weapon.required_level), weapon.rarity);
+  if (!usableKeys.length) throw new Error(`熔铸材料【${material.name}】不能用于${weapon.item_category}。`);
   const success = Math.min(100, 70 + profession.bonus);
-  const added = { [profile.key]: materialGain(profile) };
+  const added = Object.fromEntries(usableKeys.map(key => [key, materialGain(profile)]));
   await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=?', [characterId, materialId]);
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [characterId, materialId]);
   if (Math.random() * 100 >= success) {
@@ -166,7 +173,7 @@ export const fuseWeapon = async (qqUserId: string, instanceId: number, materialI
   return { name: weapon.name, material: material.name, effect: added, count: Number(weapon.fusion_count) + 1, limit, failed: false, success, progress };
 });
 
-const forgeContribution = (code: string) => ({ living_wood: 15, meteor_iron: 25, star_copper: 35, moon_silver: 45, sun_gold: 60, beast_meat: 3, beast_bone: 7, beast_hide: 7, beast_tendon: 8, beast_core: 12, magic_wool: 15, magic_tusk: 18, magic_scale: 18, magic_claw: 18, magic_heartcore: 20, refined_beast_bone: 32, refined_beast_hide: 32, refined_beast_tendon: 34, refined_beast_core: 38, refined_magic_wool: 46, refined_magic_tusk: 48, refined_magic_scale: 48, refined_magic_claw: 50, refined_magic_heartcore: 52, riot_aura: 30 }[code] ?? 5);
+const forgeContribution = (code: string) => ({ living_wood: 15, meteor_iron: 25, star_copper: 35, moon_silver: 45, sun_gold: 60, beast_meat: 3, beast_bone: 7, beast_hide: 7, beast_tendon: 8, beast_core: 20, magic_wool: 15, magic_tusk: 18, magic_scale: 18, magic_claw: 18, magic_heartcore: 20, magic_blood: 16, magic_eye: 16, magic_horn: 16, refined_beast_bone: 32, refined_beast_hide: 32, refined_beast_tendon: 34, refined_beast_core: 52, refined_magic_wool: 46, refined_magic_tusk: 48, refined_magic_scale: 48, refined_magic_claw: 50, refined_magic_heartcore: 52, wood_element_dust: 12, metal_element_dust: 12, water_element_dust: 12, ice_element_dust: 12, dark_element_dust: 12, fire_element_dust: 12, thunder_element_dust: 12, light_element_dust: 12, riot_aura: 30, goblin_scrap_iron: 32, goblin_whetstone: 42, goblin_bowstring: 38, goblin_blast_core: 48, goblin_drumhide: 40, goblin_shadowcloth: 46, goblin_totem_shard: 52, goblin_earth_crystal: 54, goblin_command_seal: 78, goblin_colonel_insignia: 120 }[code] ?? 5);
 const forgeRequirements = (category: string, level: number) => {
   if (category !== '武器') return [{ code: level <= 10 ? 'living_wood' : level <= 20 ? 'meteor_iron' : level <= 30 ? 'star_copper' : level <= 40 ? 'moon_silver' : 'sun_gold', quantity: level }];
   return ({
@@ -211,15 +218,40 @@ const baseForgeEffect = (category: string, subtype: string, level: number): Reco
   }
   return { physicalDefense: armorBase, magicDefense: armorBase };
 };
-type ForgeMaterialProfile = { key: string; min: number; max: number; tier: 'small' | 'exclusive' };
+type ForgeMaterialProfile = { key: string; secondaryKey?: string; additionalKeys?: string[]; min: number; max: number; tier: 'small' | 'exclusive'; fixedValue?: number };
+const profileKeys = (profile: ForgeMaterialProfile) => [...new Set([profile.key, ...(profile.secondaryKey ? [profile.secondaryKey] : []), ...(profile.additionalKeys ?? [])])];
+const usableMaterialKeys = (profile: ForgeMaterialProfile, category: string, primaryKeys: readonly string[], level: number, rarity: string) => profileKeys(profile).filter(key => {
+  const offTypeWeaponAttack = category === '武器' && (key === 'physicalAttack' || key === 'magicAttack') && !primaryKeys.includes(key);
+  const coreAttribute = attributes.includes(key as (typeof attributes)[number]);
+  return !offTypeWeaponAttack && (coreAttribute || primaryKeys.includes(key) || forgedAffixCap(equipmentKind(category), key, level, rarity) > 0);
+});
 const forgeMaterialProfiles: Record<string, ForgeMaterialProfile> = {
-  beast_meat: { key: 'hpMax', min: 2, max: 4, tier: 'small' }, beast_bone: { key: 'physicalAttack', min: 1, max: 2, tier: 'small' }, beast_hide: { key: 'physicalDefense', min: 1, max: 2, tier: 'small' }, beast_tendon: { key: 'speed', min: 2, max: 4, tier: 'small' }, beast_core: { key: 'magicAttack', min: 1, max: 2, tier: 'small' },
-  magic_wool: { key: 'evasion', min: 2, max: 4, tier: 'exclusive' }, magic_tusk: { key: 'physicalAttack', min: 1, max: 2, tier: 'exclusive' }, magic_scale: { key: 'magicDefense', min: 1, max: 2, tier: 'exclusive' }, magic_claw: { key: 'critRateBp', min: 2, max: 4, tier: 'exclusive' }, magic_heartcore: { key: 'accuracy', min: 2, max: 4, tier: 'exclusive' },
-  refined_beast_bone: { key: 'physicalAttack', min: 1, max: 2, tier: 'exclusive' }, refined_beast_hide: { key: 'physicalDefense', min: 1, max: 2, tier: 'exclusive' }, refined_beast_tendon: { key: 'speed', min: 2, max: 4, tier: 'exclusive' }, refined_beast_core: { key: 'magicAttack', min: 1, max: 2, tier: 'exclusive' },
-  refined_magic_wool: { key: 'evasion', min: 2, max: 4, tier: 'exclusive' }, refined_magic_tusk: { key: 'physicalAttack', min: 1, max: 2, tier: 'exclusive' }, refined_magic_scale: { key: 'magicDefense', min: 1, max: 2, tier: 'exclusive' }, refined_magic_claw: { key: 'critRateBp', min: 2, max: 4, tier: 'exclusive' }, refined_magic_heartcore: { key: 'accuracy', min: 2, max: 4, tier: 'exclusive' },
-  living_wood: { key: 'hpMax', min: 2, max: 4, tier: 'small' }, meteor_iron: { key: 'physicalDefense', min: 1, max: 2, tier: 'small' }, star_copper: { key: 'accuracy', min: 2, max: 4, tier: 'small' }, moon_silver: { key: 'mpMax', min: 2, max: 4, tier: 'small' }, sun_gold: { key: 'physicalAttack', min: 1, max: 2, tier: 'small' }
+  beast_meat: { key: 'hpMax', min: 2, max: 4, tier: 'small' }, beast_bone: { key: 'physicalDefense', min: 1, max: 2, tier: 'small' }, beast_hide: { key: 'magicDefense', min: 1, max: 2, tier: 'small' }, beast_tendon: { key: 'speed', min: 2, max: 4, tier: 'small' }, beast_core: { key: 'physicalAttack', secondaryKey: 'magicAttack', min: 1, max: 2, tier: 'small' },
+  magic_wool: { key: 'evasion', min: 2, max: 4, tier: 'exclusive' }, magic_tusk: { key: 'accuracy', min: 2, max: 4, tier: 'exclusive' }, magic_scale: { key: 'critResistBp', min: 2, max: 4, tier: 'exclusive' }, magic_claw: { key: 'critRateBp', min: 2, max: 4, tier: 'exclusive' }, magic_heartcore: { key: 'critDamageBp', min: 2, max: 4, tier: 'exclusive' }, magic_blood: { key: 'mpMax', min: 2, max: 4, tier: 'exclusive' }, magic_eye: { key: 'critDamageReductionBp', min: 2, max: 4, tier: 'exclusive' }, magic_horn: { key: 'tenacity', min: 2, max: 4, tier: 'exclusive' },
+  refined_beast_bone: { key: 'physicalDefense', min: 1, max: 2, tier: 'exclusive' }, refined_beast_hide: { key: 'magicDefense', min: 1, max: 2, tier: 'exclusive' }, refined_beast_tendon: { key: 'speed', min: 2, max: 4, tier: 'exclusive' }, refined_beast_core: { key: 'physicalAttack', secondaryKey: 'magicAttack', min: 1, max: 2, tier: 'exclusive' },
+  refined_magic_wool: { key: 'evasion', min: 2, max: 4, tier: 'exclusive' }, refined_magic_tusk: { key: 'accuracy', min: 2, max: 4, tier: 'exclusive' }, refined_magic_scale: { key: 'critResistBp', min: 2, max: 4, tier: 'exclusive' }, refined_magic_claw: { key: 'critRateBp', min: 2, max: 4, tier: 'exclusive' }, refined_magic_heartcore: { key: 'critDamageBp', min: 2, max: 4, tier: 'exclusive' },
+  living_wood: { key: 'hpMax', min: 2, max: 4, tier: 'small' }, meteor_iron: { key: 'physicalDefense', min: 1, max: 2, tier: 'small' }, star_copper: { key: 'accuracy', min: 2, max: 4, tier: 'small' }, moon_silver: { key: 'mpMax', min: 2, max: 4, tier: 'small' }, sun_gold: { key: 'physicalAttack', min: 1, max: 2, tier: 'small' },
+  wood_element_dust: { key: 'elementMastery_木', secondaryKey: 'elementResistance_木', min: 3, max: 5, tier: 'small' },
+  goblin_scrap_iron: { key: 'physicalDefense', min: 3, max: 3, tier: 'exclusive', fixedValue: 3 },
+  goblin_whetstone: { key: 'physicalAttack', min: 16, max: 16, tier: 'exclusive', fixedValue: 16 },
+  goblin_bowstring: { key: 'accuracy', min: 14, max: 14, tier: 'exclusive', fixedValue: 14 },
+  goblin_blast_core: { key: 'critDamageBp', min: 10, max: 10, tier: 'exclusive', fixedValue: 10 },
+  goblin_drumhide: { key: 'speed', min: 12, max: 12, tier: 'exclusive', fixedValue: 12 },
+  goblin_shadowcloth: { key: 'evasion', min: 12, max: 12, tier: 'exclusive', fixedValue: 12 },
+  goblin_totem_shard: { key: 'magicAttack', min: 18, max: 18, tier: 'exclusive', fixedValue: 18 },
+  goblin_earth_crystal: { key: 'physicalDefense', min: 16, max: 16, tier: 'exclusive', fixedValue: 16 },
+  goblin_command_seal: { key: 'physicalDefense', secondaryKey: 'magicDefense', min: 8, max: 8, tier: 'exclusive', fixedValue: 8 },
+  goblin_colonel_insignia: { key: 'constitution', additionalKeys: ['spirit','strength','intelligence','agility','perception'], min: 6, max: 6, tier: 'exclusive', fixedValue: 6 },
+  metal_element_dust: { key: 'elementMastery_土', secondaryKey: 'elementResistance_土', min: 3, max: 5, tier: 'small' },
+  water_element_dust: { key: 'elementMastery_水', secondaryKey: 'elementResistance_水', min: 3, max: 5, tier: 'small' },
+  ice_element_dust: { key: 'elementMastery_冰', secondaryKey: 'elementResistance_冰', min: 3, max: 5, tier: 'small' },
+  dark_element_dust: { key: 'elementMastery_暗', secondaryKey: 'elementResistance_暗', min: 3, max: 5, tier: 'small' },
+  fire_element_dust: { key: 'elementMastery_火', secondaryKey: 'elementResistance_火', min: 3, max: 5, tier: 'small' },
+  thunder_element_dust: { key: 'elementMastery_雷', secondaryKey: 'elementResistance_雷', min: 3, max: 5, tier: 'small' },
+  light_element_dust: { key: 'elementMastery_光', secondaryKey: 'elementResistance_光', min: 3, max: 5, tier: 'small' },
 };
 const materialGain = (profile: ForgeMaterialProfile) => {
+  if (profile.fixedValue !== undefined) return profile.fixedValue;
   const upper = random(profile.min, profile.max) * 2 * (profile.tier === 'exclusive' ? 5 : 1);
   return Math.round(upper * normalForgeFactor() * 100) / 100;
 };
@@ -299,10 +331,10 @@ export const craftForgeEquipment = async (qqUserId: string, _confirmed = false) 
   for (const material of auxiliary) {
     const profile = forgeMaterialProfiles[material.code];
     if (!profile) throw new Error(`辅材【${material.name}】尚未配置锻造倾向，不能放入打造。`);
-    const offTypeWeaponAttack = session.equipment_category === '武器' && (profile.key === 'physicalAttack' || profile.key === 'magicAttack') && !primaryKeys.includes(profile.key);
-    if (offTypeWeaponAttack || (!primaryKeys.includes(profile.key) && forgedAffixCap(equipmentKind(session.equipment_category), profile.key, Number(session.target_level), '普通') <= 0)) throw new Error(`辅材【${material.name}】不能用于${session.equipment_category}。`);
+    const usableKeys = usableMaterialKeys(profile, session.equipment_category, primaryKeys, Number(session.target_level), '普通');
+    if (!usableKeys.length) throw new Error(`辅材【${material.name}】不能用于${session.equipment_category}。`);
     const materialWeight = Math.max(1, forgeContribution(material.code));
-    for (let index = 0; index < Number(material.selected_quantity); index++) propertyEntries.push({ key: profile.key, profile, weight: materialWeight });
+    for (let index = 0; index < Number(material.selected_quantity); index++) for (const key of usableKeys) propertyEntries.push({ key, profile, weight: materialWeight });
   }
   const [coins] = await connection.execute<(RowDataPacket & { copper_coins: number })[]>('SELECT copper_coins FROM characters WHERE id=? FOR UPDATE', [characterId]); if (Number(coins[0]?.copper_coins ?? 0) < 60) throw new Error('铜币不足，打造手续费需要 60 铜币。');
   for (const material of materials) await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [material.selected_quantity, characterId, material.id]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND quantity<=0', [characterId]); await connection.execute('UPDATE characters SET copper_coins=copper_coins-60 WHERE id=?', [characterId]); await connection.execute('DELETE FROM player_forge_materials WHERE character_id=?', [characterId]);

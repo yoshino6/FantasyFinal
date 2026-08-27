@@ -1,7 +1,7 @@
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { resolvePvpVictory } from './pvp.service';
-import { recordFriendInteraction } from './social.service';
+import { isFriendRelation, recordFriendInteraction } from './social.service';
 
 const DUNGEON_REGION_CODE = 'dark_forest_dungeon';
 const FLOORS = [-10, -20, -30] as const;
@@ -419,12 +419,13 @@ export const changeDungeonFloor = async (qqUserId: string, direction: 'down' | '
 });
 
 export const dungeonPlayersInRange = async (connection: Pool | PoolConnection, characterId: number, regionIdValue: number, x: number, y: number, z: number, range: number) => {
-  const [rows] = await connection.execute<(RowDataPacket & { game_id: number; name: string; pos_x: number; pos_y: number; wanted: number; in_home: number })[]>(`SELECT c.game_id,c.name,c.pos_x,c.pos_y,hv.character_id IS NOT NULL AS in_home,
+  const [rows] = await connection.execute<(RowDataPacket & { game_id: number; name: string; pos_x: number; pos_y: number; wanted: number; in_home: number; is_friend: number })[]>(`SELECT c.game_id,c.name,c.pos_x,c.pos_y,hv.character_id IS NOT NULL AS in_home,
+    EXISTS(SELECT 1 FROM player_relationships r WHERE r.character_low_id=LEAST(?,c.id) AND r.character_high_id=GREATEST(?,c.id) AND r.status IN ('friend','oath')) AS is_friend,
     EXISTS(SELECT 1 FROM player_warrants w WHERE w.wanted_character_id=c.id AND w.city_region_id=c.current_region_id AND w.status='active') AS wanted
     FROM characters c LEFT JOIN player_home_visits hv ON hv.character_id=c.id
     WHERE c.current_region_id=? AND c.pos_z=? AND c.id<>? AND c.npc_code IS NULL AND ABS(c.pos_x-?)+ABS(c.pos_y-?)<=?
-      AND (hv.character_id IS NULL OR EXISTS(SELECT 1 FROM player_warrants w WHERE w.wanted_character_id=c.id AND w.city_region_id=? AND w.status='active'))`, [regionIdValue, z, characterId, x, y, range, regionIdValue]);
-  return rows.map(row => ({ gameId: Number(row.game_id), name: row.name, x: Number(row.pos_x), y: Number(row.pos_y), wanted: Boolean(row.wanted), inHome: Boolean(row.in_home) }));
+      AND (hv.character_id IS NULL OR EXISTS(SELECT 1 FROM player_warrants w WHERE w.wanted_character_id=c.id AND w.city_region_id=? AND w.status='active'))`, [characterId, characterId, regionIdValue, z, characterId, x, y, range, regionIdValue]);
+  return rows.map(row => ({ gameId: Number(row.game_id), name: row.name, x: Number(row.pos_x), y: Number(row.pos_y), wanted: Boolean(row.wanted), inHome: Boolean(row.in_home), isFriend: Boolean(row.is_friend) }));
 };
 
 type PvpAction = { type: 'attack' } | { type: 'skill'; name: string; category: 'physical' | 'magic' | 'utility'; manaCost: number; power: number } | { type: 'item'; id: number; name: string; effect: Record<string, number> };
@@ -462,6 +463,7 @@ export const dungeonPvP = async (qqUserId: string, targetGameId: number) => with
   const dungeonRegion = await regionId(connection, DUNGEON_REGION_CODE); if (Number(attacker.current_region_id) !== dungeonRegion) throw new Error('只能在地下迷宫内进行 PvP。');
   const [targets] = await connection.execute<CharacterRow[]>('SELECT * FROM characters WHERE game_id=? AND npc_code IS NULL FOR UPDATE', [targetGameId]); const target = targets[0];
   if (!target || Number(target.id) === Number(attacker.id) || Number(target.current_region_id) !== dungeonRegion || Number(target.pos_z) !== Number(attacker.pos_z) || Math.abs(Number(target.pos_x) - Number(attacker.pos_x)) + Math.abs(Number(target.pos_y) - Number(attacker.pos_y)) > 1) throw new Error('目标不在你相邻的地下迷宫格子中。');
+  if (await isFriendRelation(connection, Number(attacker.id), Number(target.id))) throw new Error('游戏内好友之间无法互相攻击。');
   const opening = await resolvePvpAction(connection, attacker, target, await pvpActionFor(connection, attacker, true));
   const response = Number(target.current_hp) > 1 ? await resolvePvpAction(connection, target, attacker, await pvpActionFor(connection, target)) : null;
   return { text: [opening, response].filter(Boolean).join('\n') };

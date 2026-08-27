@@ -2,7 +2,7 @@ import { Router, logger, defineChildren, setCron, setInterval } from 'alemonjs';
 import expose from './expose';
 import koaRouter from 'koa-router';
 import { getPool } from './database/pool';
-import { settleDueTravels, spawnMonsters } from './game/adventure.service';
+import { settleDueTravels, settleInactiveCombatSessions, spawnMonsters } from './game/adventure.service';
 import { refreshBounties } from './game/bounty.service';
 import { refreshShopStocks } from './game/shop-stock.service';
 import { refreshDungeons } from './game/dungeon.service';
@@ -11,6 +11,8 @@ import { installGroupReplyMention } from './middleware/group-reply-mention';
 installGroupReplyMention();
 
 let settlingDueTravels = false;
+let settlingInactiveCombatSessions = false;
+const combatTimeoutSweepMs = 10_000;
 
 const r = new koaRouter({
   prefix: '/api'
@@ -82,10 +84,14 @@ appGroup.use({ path: '注销记录筛选', schema: { usage: '/注销记录筛选
 appGroup.use({ path: '恢复注销账号', schema: { usage: '/恢复注销账号 <记录编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/admin').then(module => ({ default: module.restoreDeletedAccountHandler })))
 appGroup.use({ path: '确认覆盖恢复', schema: { usage: '/确认覆盖恢复 <记录编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/admin').then(module => ({ default: module.overwriteRestoreDeletedAccountHandler })))
 appGroup.use('BOSS管理', () => import('./response/admin').then(module => ({ default: module.bossManagementHandler })))
+appGroup.use('小怪管理', () => import('./response/admin').then(module => ({ default: module.monsterManagementHandler })))
+appGroup.use('矿产管理', () => import('./response/admin').then(module => ({ default: module.resourceManagementHandler })))
 appGroup.use('迷宫管理', () => import('./response/admin').then(module => ({ default: module.dungeonManagementHandler })))
 appGroup.use('重建迷宫', () => import('./response/admin').then(module => ({ default: module.rebuildDungeonHandler })))
 appGroup.use('BOSS词条说明', () => import('./response/boss-trait'))
 appGroup.use({ path: 'BOSS刷新', schema: { usage: '/BOSS刷新 <Boss代号>', args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/admin').then(module => ({ default: module.bossSpawnHandler })))
+appGroup.use({ path: '小怪刷新', schema: { usage: '/小怪刷新 <地图代号>', args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/admin').then(module => ({ default: module.monsterRefreshHandler })))
+appGroup.use({ path: '矿产刷新', schema: { usage: '/矿产刷新 <地图代号>', args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/admin').then(module => ({ default: module.resourceRefreshHandler })))
 appGroup.use({ path: 'BOSS消灭', schema: { usage: '/BOSS消灭 <Boss代号>', args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/admin').then(module => ({ default: module.bossDefeatHandler })))
 appGroup.use({ path: 'BOSS上赏', schema: { usage: '/BOSS上赏 <Boss代号>', args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/admin').then(module => ({ default: module.bossBountyHandler })))
 appGroup.use({ path: '管理员登录', schema: { usage: '/管理员登录 <密码>', args: [{ name: 'password', rules: [{ required: true }] }] } }, () => import('./response/admin').then(module => ({ default: module.ownerLoginHandler })))
@@ -474,6 +480,14 @@ export default defineChildren({
         .catch(error => logger.warn({ err: error }, '到期移动补偿结算失败'))
         .finally(() => { settlingDueTravels = false; });
     }, 1000);
+    setInterval(() => {
+      if (settlingInactiveCombatSessions) return;
+      settlingInactiveCombatSessions = true;
+      void settleInactiveCombatSessions()
+        .then(settled => { if (settled) logger.info({ settled }, '已结算超时未回应的怪物战斗'); })
+        .catch(error => logger.warn({ err: error }, '超时怪物战斗结算失败'))
+        .finally(() => { settlingInactiveCombatSessions = false; });
+    }, combatTimeoutSweepMs);
     setCron('0 * * * *', () => void getPool().then(async pool => { await refreshShopStocks(pool); await refreshBounties(pool); await refreshDungeons(pool, { refreshMonsters: true }); await spawnMonsters(); }).catch(error => logger.error({ err: error }, '整点刷新失败')));
   }
 });

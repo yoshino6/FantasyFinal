@@ -3,6 +3,7 @@ import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { SESSION_TTL_MINUTES, STAMINA_RECOVERY_MS, artifactGiftSlots, calculateDerivedStats, equipmentQualityMultiplier, gifts, isGiftCode, staminaMaxForRealm, virtualEquipmentStats, type VirtualEquipmentTier } from './constants';
 import { homeRestRecoveryBonus } from './home.service';
+import { applyWeaponMasteryStats, weaponMasteryBonusesFor } from './weapon-mastery.service';
 import { attributes, type Allocation, type DerivedStats, type Growth } from './types';
 import { recordSkillPointChange } from './skill-point-ledger.service';
 
@@ -10,7 +11,7 @@ type RegistrationStage = 'story' | 'audience' | 'question' | 'destination' | 'da
 type SessionRow = RowDataPacket & { id: string; player_id: number; stage: RegistrationStage; expires_at: Date };
 type PlayerRow = RowDataPacket & { id: number; status: string };
 type RegionRow = RowDataPacket & { id: number; name: string; min_x: number; max_x: number; min_y: number; max_y: number; min_z: number; max_z: number };
-export type CharacterView = Allocation & DerivedStats & { name: string; gender: string; regionName: string; x: number; y: number; z: number; level: number; experience: number; realmStage: number; adventurerRegistered: boolean; giftName: string | null; growth: Growth; currentHp: number; currentMp: number; stamina: number; staminaMax: number; activityStatus: 'active' | 'resting' | 'unconscious' | 'detained'; elementMastery: Record<string, number>; elementResistance: Record<string, number>; extraAttributes: { damageBonusPct: number }; activeBuffs: string[]; combatNotes: string[] };
+export type CharacterView = Allocation & DerivedStats & { name: string; gender: string; regionName: string; x: number; y: number; z: number; level: number; experience: number; realmStage: number; adventurerRegistered: boolean; giftName: string | null; growth: Growth; currentHp: number; currentMp: number; stamina: number; staminaMax: number; activityStatus: 'active' | 'resting' | 'unconscious' | 'detained'; elementMastery: Record<string, number>; elementResistance: Record<string, number>; extraAttributes: Record<string, number>; activeBuffs: string[]; combatNotes: string[] };
 
 const elements = ['水', '火', '土', '木', '风', '冰', '雷', '光', '暗'] as const;
 const randomBalancedElements = () => {
@@ -85,8 +86,26 @@ const equipmentExtraAttributes = async (connection: Pool | PoolConnection, chara
     FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
     LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
     WHERE pe.character_id=?`, [characterId]);
-  const damageBonusPct = rows.reduce((total, row) => total + Number(jsonRecord(row.effect_json).damageBonusPct ?? 0) * equipmentQualityMultiplier(Number(row.quality)), 0);
-  return { damageBonusPct: Math.round(damageBonusPct * 10) / 10 };
+  const [deviceRows] = await connection.execute<(RowDataPacket & { effect_json: unknown; quality: number })[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json,COALESCE(ii.quality,100) AS quality
+    FROM player_active_devices ad JOIN player_item_instances ii ON ii.id=ad.instance_id AND ii.character_id=ad.character_id
+    JOIN item_definitions i ON i.id=ii.item_id WHERE ad.character_id=? AND i.item_category='异械'`, [characterId]);
+  const effects = [...rows, ...deviceRows];
+  const keys = ['damageBonusPct', 'chantReduction', 'magicChantBonus', 'manaCostReduction', 'ignoreDefensePct', 'lifestealPct', 'magicDamagePct', 'physicalDamageReductionPct', 'magicDamageReductionPct', 'hpRegenPct', 'mpRegenPct', 'minimumHitRatePct', 'actualHitRatePct', 'physicalActualHitRatePct', 'physicalSkillDamagePct', 'magicSkillDamagePct', 'lightSkillBonusPct', 'criticalDamageBonusPct', 'physicalCriticalFinalDamagePct'];
+  return Object.fromEntries(keys.map(key => [key, Math.round(effects.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)), 0) * 10) / 10]));
+};
+
+/** 角色详情与战斗结算共用六维口径：基础与成长、全属性增益、已穿戴装备的六维加成。 */
+const effectiveCharacterAttributes = async (connection: Pool | PoolConnection, character: Record<string, unknown>, characterId: number): Promise<Allocation> => {
+  const [[timedRows], [equipmentRows]] = await Promise.all([
+    connection.execute<(RowDataPacket & { all_core_attributes_multiplier: number })[]>(`SELECT all_core_attributes_multiplier FROM player_timed_buffs WHERE character_id=? AND buff_code='church_blessing' AND expires_at>NOW() LIMIT 1`, [characterId]),
+    connection.execute<(RowDataPacket & { effect_json: unknown; quality: number })[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json,COALESCE(ii.quality,100) AS quality
+      FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
+      LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
+      WHERE pe.character_id=?`, [characterId])
+  ]);
+  const multiplier = Number(timedRows[0]?.all_core_attributes_multiplier ?? 1); const base = finalAttributes(character);
+  const bonus = (key: string) => equipmentRows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)), 0);
+  return Object.fromEntries(attributes.map(key => [key, base[key] * multiplier + bonus(key)])) as Allocation;
 };
 
 const foodBuffText = (effect: Record<string, unknown>) => {
@@ -151,9 +170,15 @@ export const recalculateCharacterStats = async (connection: Pool | PoolConnectio
   const [timedRows] = await connection.execute<(RowDataPacket & { all_core_attributes_multiplier: number })[]>(`SELECT all_core_attributes_multiplier FROM player_timed_buffs WHERE character_id=? AND buff_code='church_blessing' AND expires_at>NOW() LIMIT 1`, [characterId]);
   const attributeMultiplier = Number(timedRows[0]?.all_core_attributes_multiplier ?? 1);
   const baseAttributes = finalAttributes(character);
-  const effectiveAttributes = Object.fromEntries(attributes.map(key => [key, baseAttributes[key] * attributeMultiplier])) as Allocation;
+  const [equipmentAttributeRows] = await connection.execute<(RowDataPacket & { effect_json: unknown; quality: number })[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json,COALESCE(ii.quality,100) AS quality
+    FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
+    LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
+    WHERE pe.character_id=?`, [characterId]);
+  const equipmentAttributeBonus = (key: string) => equipmentAttributeRows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)), 0);
+  const effectiveAttributes = Object.fromEntries(attributes.map(key => [key, baseAttributes[key] * attributeMultiplier + equipmentAttributeBonus(key)])) as Allocation;
   const equippedStats = await withEquipmentStats(connection, characterId, calculateDerivedStats(effectiveAttributes));
-  const stats = withVirtualNpcEquipment(equippedStats, Number(character.level), character.npc_code === null ? null : String(character.npc_code));
+  const masteryBonuses = await weaponMasteryBonusesFor(connection, characterId);
+  const stats = applyWeaponMasteryStats(withVirtualNpcEquipment(equippedStats, Number(character.level), character.npc_code === null ? null : String(character.npc_code)), masteryBonuses);
   const baseMastery = jsonRecord(character.element_base_mastery_json ?? character.element_mastery_json);
   const baseResistance = jsonRecord(character.element_base_resistance_json ?? character.element_resistance_json);
   const elemental = await withEquipmentElements(connection, characterId, baseMastery, baseResistance);
@@ -293,12 +318,12 @@ export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: 
   } else {
     await connection.execute('INSERT INTO player_blessings (character_id,code) VALUES (?,?)', [characterId, giftCode]);
     await connection.execute(`INSERT INTO player_skills (character_id,skill_id)
-      SELECT ?,id FROM skill_definitions WHERE code=? AND category='passive'`, [characterId, giftCode]);
+      SELECT ?,id FROM skill_definitions WHERE code=? AND category='bound'`, [characterId, giftCode]);
   }
   await connection.execute('UPDATE players SET status = \'active\' WHERE id = ?', [player.id]);
   await connection.execute('DELETE FROM registration_sessions WHERE id = ?', [session.id]);
   await connection.execute('INSERT INTO player_events (player_id, event_type, payload) VALUES (?, \'character.created\', ?)', [player.id, JSON.stringify({ region: region.name, x, y, z, giftCode })]);
-  return { ...allocation, ...stats, growth, name, gender: '未设定', regionName: region.name, x, y, z, level: 1, experience: 0, realmStage: 1, adventurerRegistered: false, giftName: gifts[giftCode].name, currentHp: stats.hpMax, currentMp: stats.mpMax, stamina: 120, staminaMax: 120, activityStatus: 'active', elementMastery, elementResistance, extraAttributes: { damageBonusPct: 0 }, activeBuffs: [], combatNotes: [] };
+  return { ...allocation, ...stats, growth, name, gender: '未设定', regionName: region.name, x, y, z, level: 1, experience: 0, realmStage: 1, adventurerRegistered: false, giftName: gifts[giftCode].name, currentHp: stats.hpMax, currentMp: stats.mpMax, stamina: 120, staminaMax: 120, activityStatus: 'active', elementMastery, elementResistance, extraAttributes: {}, activeBuffs: [], combatNotes: [] };
 });
 
 export const getCharacter = async (qqUserId: string): Promise<CharacterView | null> => {
@@ -314,14 +339,11 @@ export const getCharacter = async (qqUserId: string): Promise<CharacterView | nu
   );
   const row = rows[0];
   if (!row) return null;
-  const [extraAttributes, activeEffects, timedRows] = await Promise.all([
+  const [extraAttributes, activeEffects, effectiveAttributes] = await Promise.all([
     equipmentExtraAttributes(pool, Number(characterRows[0].id)),
     activeCharacterEffects(pool, Number(characterRows[0].id)),
-    pool.execute<(RowDataPacket & { all_core_attributes_multiplier: number })[]>(`SELECT all_core_attributes_multiplier FROM player_timed_buffs WHERE character_id=? AND buff_code='church_blessing' AND expires_at>NOW() LIMIT 1`, [Number(characterRows[0].id)])
+    effectiveCharacterAttributes(pool, row as unknown as Record<string, unknown>, Number(characterRows[0].id))
   ]);
-  const attributeMultiplier = Number(timedRows[0][0]?.all_core_attributes_multiplier ?? 1);
-  const baseAttributes = finalAttributes(row);
-  const effectiveAttributes = Object.fromEntries(attributes.map(key => [key, baseAttributes[key] * attributeMultiplier])) as Allocation;
   return {
     ...row,
     ...effectiveAttributes,

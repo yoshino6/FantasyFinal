@@ -6,6 +6,13 @@ import { durationText } from '../game/time-format';
 
 const elementOrder = ['水', '火', '木', '土', '风', '冰', '雷', '光', '暗'];
 const numberText = (value: number) => Number.isInteger(value) ? String(value) : value.toFixed(1);
+const extraLabels: Record<string, { name: string; unit: string; inverse?: boolean }> = {
+  damageBonusPct: { name: '伤害', unit: '%' }, magicDamagePct: { name: '魔伤', unit: '%' }, physicalSkillDamagePct: { name: '物技', unit: '%' }, magicSkillDamagePct: { name: '魔技', unit: '%' },
+  lightSkillBonusPct: { name: '光技', unit: '%' }, criticalDamageBonusPct: { name: '暴伤加', unit: '%' }, physicalCriticalFinalDamagePct: { name: '物暴伤', unit: '%' },
+  physicalDamageReductionPct: { name: '物减', unit: '%' }, magicDamageReductionPct: { name: '魔减', unit: '%' }, ignoreDefensePct: { name: '破防', unit: '%' }, lifestealPct: { name: '吸血', unit: '%' },
+  hpRegenPct: { name: '回生', unit: '%' }, mpRegenPct: { name: '回魔', unit: '%' }, minimumHitRatePct: { name: '最低命中', unit: '%' }, actualHitRatePct: { name: '实命', unit: '%' }, physicalActualHitRatePct: { name: '物实命', unit: '%' },
+  chantSpeedPct: { name: '吟速', unit: '%' }, chantReduction: { name: '吟唱', unit: '回', inverse: true }, magicChantBonus: { name: '魔吟', unit: '回' }, manaCostReduction: { name: '耗蓝', unit: '', inverse: true }
+};
 const progressBar = (current: number, maximum: number, width = 10) => {
   const filled = Math.max(0, Math.min(width, Math.floor(Math.max(0, current) / Math.max(1, maximum) * width)));
   return `${'▓'.repeat(filled)}${'░'.repeat(width - filled)}`;
@@ -36,9 +43,16 @@ const appendDetails = (markdown: ReturnType<typeof Format.createMarkdown>, chara
   appendQuotedAttributes(markdown, [['暴免', String(Math.round(character.critDamageReductionBp))], ['暴抗', String(Math.round(character.critResistBp))]]);
   appendQuotedAttributes(markdown, [['韧性', String(Math.round(character.tenacity))], ['速度', String(Math.round(character.speed))]]);
 
-  markdown.addNewline().addText('额外').addNewline();
-  appendQuotedAttributes(markdown, [['伤害增加', `${numberText(character.extraAttributes.damageBonusPct)}%`]]);
-  for (const note of [...new Set(character.combatNotes)]) markdown.addBlockquote(note).addNewline();
+  const extraAttributes: Array<[string, string]> = Object.entries(character.extraAttributes).flatMap(([key, raw]) => {
+    const label = extraLabels[key]; const value = Number(raw);
+    if (!label || !value) return [];
+    const actual = label.inverse ? -value : value;
+    return [[label.name, `${actual > 0 ? '+' : ''}${numberText(actual)}${label.unit}`] as [string, string]];
+  });
+  if (extraAttributes.length) {
+    markdown.addNewline().addText('额外').addNewline();
+    for (let index = 0; index < extraAttributes.length; index += 3) appendQuotedAttributes(markdown, extraAttributes.slice(index, index + 3));
+  }
 
   markdown.addNewline().addText('元素精通').addNewline();
   appendQuotedAttributes(markdown, elementEntries(character, 'elementMastery', 0, 5));

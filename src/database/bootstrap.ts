@@ -490,7 +490,7 @@ const schemaStatements = [
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS skill_definitions (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, code VARCHAR(64) NOT NULL, name VARCHAR(64) NOT NULL,
-    category ENUM('physical','magic','utility','passive','bound','special') NOT NULL, damage_type VARCHAR(16) NOT NULL DEFAULT '无', skill_kind VARCHAR(16) NOT NULL DEFAULT '无', element VARCHAR(16) NOT NULL DEFAULT '无', range_type VARCHAR(16) NOT NULL DEFAULT '近战', codex_id CHAR(7) NULL,
+    category ENUM('physical','magic','utility','passive','bound','special') NOT NULL, damage_type VARCHAR(16) NOT NULL DEFAULT '无', skill_kind VARCHAR(16) NOT NULL DEFAULT '无', element VARCHAR(16) NOT NULL DEFAULT '无', range_type VARCHAR(16) NOT NULL DEFAULT '近战', required_weapon_type VARCHAR(32) NULL, codex_id CHAR(7) NULL,
     mana_cost INT UNSIGNED NOT NULL DEFAULT 0, cooldown_turns TINYINT UNSIGNED NOT NULL DEFAULT 0, chant_turns TINYINT UNSIGNED NOT NULL DEFAULT 0,
     power INT UNSIGNED NOT NULL DEFAULT 100, learn_cost TINYINT UNSIGNED NOT NULL DEFAULT 1, upgrade_cost TINYINT UNSIGNED NOT NULL DEFAULT 1,
     max_level TINYINT UNSIGNED NOT NULL DEFAULT 5, power_per_level INT UNSIGNED NOT NULL DEFAULT 15, cooldown_reduction_per_level TINYINT UNSIGNED NOT NULL DEFAULT 0,
@@ -687,7 +687,8 @@ const schemaStatements = [
     id CHAR(36) NOT NULL, character_id BIGINT UNSIGNED NOT NULL, spawn_id BIGINT UNSIGNED NOT NULL,
     player_hp INT UNSIGNED NOT NULL, player_mp INT UNSIGNED NOT NULL, cooldowns JSON NOT NULL, opening_damage_bonus DECIMAL(4,2) NOT NULL DEFAULT 0,
     turn_no INT UNSIGNED NOT NULL DEFAULT 1, state ENUM('active','victory','defeat','escaped') NOT NULL DEFAULT 'active',
-    PRIMARY KEY (id), KEY idx_combat_character_state (character_id, state),
+    last_action_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id), KEY idx_combat_character_state (character_id, state), KEY idx_combat_state_activity (state,last_action_at),
     CONSTRAINT fk_combat_character FOREIGN KEY (character_id) REFERENCES characters(id), CONSTRAINT fk_combat_spawn FOREIGN KEY (spawn_id) REFERENCES monster_spawns(id)
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS combat_members (
@@ -861,6 +862,8 @@ export const initializeSchema = async (pool: Pool) => {
   try { await pool.query('ALTER TABLE combat_sessions DROP INDEX uk_active_character'); } catch (error: any) { if (error?.code !== 'ER_CANT_DROP_FIELD_OR_KEY') throw error; }
   try { await pool.query('ALTER TABLE combat_sessions ADD KEY idx_combat_character_state (character_id, state)'); } catch (error: any) { if (error?.code !== 'ER_DUP_KEYNAME') throw error; }
   try { await pool.query('ALTER TABLE combat_sessions ADD COLUMN opening_damage_bonus DECIMAL(4,2) NOT NULL DEFAULT 0'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  try { await pool.query('ALTER TABLE combat_sessions ADD COLUMN last_action_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
+  try { await pool.query('ALTER TABLE combat_sessions ADD KEY idx_combat_state_activity (state,last_action_at)'); } catch (error: any) { if (error?.code !== 'ER_DUP_KEYNAME') throw error; }
   try { await pool.query("ALTER TABLE player_homes ADD COLUMN home_name VARCHAR(32) NOT NULL DEFAULT '' AFTER character_id"); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   await pool.query("UPDATE player_homes h JOIN characters c ON c.id=h.character_id SET h.home_name=CONCAT(c.name,'的小屋') WHERE h.home_name=''");
   try { await pool.query('ALTER TABLE characters ADD COLUMN home_rest_experience_updated_at DATETIME NULL AFTER rest_started_at'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
@@ -944,6 +947,7 @@ export const initializeSchema = async (pool: Pool) => {
   for (const column of ["damage_type VARCHAR(16) NOT NULL DEFAULT '无'", "skill_kind VARCHAR(16) NOT NULL DEFAULT '无'", "element VARCHAR(16) NOT NULL DEFAULT '无'", "range_type VARCHAR(16) NOT NULL DEFAULT '近战'", 'codex_id CHAR(7) NULL']) {
     try { await pool.query(`ALTER TABLE skill_definitions ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }
+  try { await pool.query('ALTER TABLE skill_definitions ADD COLUMN required_weapon_type VARCHAR(32) NULL AFTER range_type'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   try { await pool.query('ALTER TABLE monster_skill_learn_rules ADD COLUMN source_skill_code VARCHAR(64) NULL AFTER monster_template_id'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   for (const column of ['skill_points INT UNSIGNED NOT NULL DEFAULT 1']) {
     try { await pool.query(`ALTER TABLE characters ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
@@ -1082,12 +1086,15 @@ export const initializeSchema = async (pool: Pool) => {
     ('beast_bone', '兽骨', '坚硬完整的兽骨，常用于制作与加工。', '幽暗密林怪物掉落', 'material', '怪材', 0.25, 1, NULL),
     ('beast_hide', '兽皮', '处理后可制成皮革的普通兽皮。', '幽暗密林怪物掉落', 'material', '怪材', 0.20, 1, NULL),
     ('beast_tendon', '兽筋', '韧性十足的兽筋，是常见的强化素材。', '幽暗密林怪物掉落', 'material', '怪材', 0.10, 1, NULL),
-    ('beast_core', '兽核', '凝聚着微弱魔力的兽类核心。', '幽暗密林怪物掉落', 'material', '怪材', 0.08, 1, NULL),
+    ('beast_core', '兽核', '低概率凝聚成形的兽类核心，会随武器主攻击类型转化为物攻或魔攻。', '幽暗密林兽类低概率掉落', 'material', '怪材', 0.08, 1, NULL),
     ('magic_wool', '魔力绒毛', '带有柔和魔力的兔类绒毛。', '兔类怪物掉落', 'material', '怪材', 0.05, 1, NULL),
     ('magic_tusk', '魔力獠牙', '蕴藏野性魔力的锋利獠牙。', '猪类怪物掉落', 'material', '怪材', 0.08, 1, NULL),
     ('magic_scale', '魔力鳞片', '带有自然魔力的蛇类鳞片。', '蛇类怪物掉落', 'material', '怪材', 0.05, 1, NULL),
     ('magic_claw', '魔力利爪', '由熊类巨爪凝成的锋利素材。', '熊类怪物掉落', 'material', '怪材', 0.10, 1, NULL),
     ('magic_heartcore', '魔力心核', '狼类魔力在心脏处凝聚而成的核心。', '狼类怪物掉落', 'material', '怪材', 0.08, 1, NULL),
+    ('magic_blood', '魔力血髓', '蕴含稳定魔力循环的精兽血髓，可增强装备魔力上限。', '熊类与树精掉落', 'material', '怪材', 0.07, 1, NULL),
+    ('magic_eye', '魔瞳晶核', '凝结于敏锐生物瞳孔中的晶核，可增强暴伤减免。', '兔类与狼类掉落', 'material', '怪材', 0.07, 1, NULL),
+    ('magic_horn', '魔力角质', '由野性魔物角质硬化而成，可提升韧性。', '猪类与哥布林掉落', 'material', '怪材', 0.07, 1, NULL),
     ('refined_beast_bone', '兽骨（精）', '经炼金提纯的致密兽骨，适合作为高品质锻造素材。', '炼金师提纯', 'material', '怪材', 0.12, 1, NULL),
     ('refined_beast_hide', '兽皮（精）', '经炼金提纯的柔韧兽皮，蕴含更稳定的护持力量。', '炼金师提纯', 'material', '怪材', 0.10, 1, NULL),
     ('refined_beast_tendon', '兽筋（精）', '经炼金提纯的坚韧兽筋，能将力量传递得更加流畅。', '炼金师提纯', 'material', '怪材', 0.06, 1, NULL),
@@ -1100,7 +1107,15 @@ export const initializeSchema = async (pool: Pool) => {
     ('home_wood', '木材', '适用于扩建房屋和打造家具的基础建材。', '百纳居购买与兑换', 'material', '建材', 0.20, 1, NULL),
     ('home_stone', '石料', '经过筛选的坚固石料，可用于加固房屋。', '百纳居购买与兑换', 'material', '建材', 0.35, 1, NULL),
     ('home_metal', '金属', '可用于制作耐用家具与房屋构件的金属。', '百纳居购买与兑换', 'material', '建材', 0.30, 1, NULL),
-    ('slime_gel', '史莱姆凝胶', '从史莱姆身上收集的弹性凝胶，是制作奇妙家具的怪物材料。', '各类史莱姆怪物掉落', 'material', '怪材', 0.10, 1, NULL),
+    ('slime_gel', '史莱姆凝胶', '从史莱姆身上收集的普通弹性凝胶，是制作奇妙家具的怪物材料。', '地下史莱姆 80% 掉落', 'material', '怪材', 0.10, 1, NULL),
+    ('red_slime_gel', '红色凝胶', '炽热的史莱姆凝胶，可由解构师稳定析出火元素粉尘。', '地下红色史莱姆 20% 掉落', 'material', '怪材', 0.10, 1, NULL),
+    ('orange_slime_gel', '橙色凝胶', '裹着细砂的史莱姆凝胶，可由解构师稳定析出金元素粉尘。', '地下橙色史莱姆 20% 掉落', 'material', '怪材', 0.10, 1, NULL),
+    ('yellow_slime_gel', '黄色凝胶', '跳动电光的史莱姆凝胶，可由解构师稳定析出雷元素粉尘。', '地下黄色史莱姆 20% 掉落', 'material', '怪材', 0.10, 1, NULL),
+    ('green_slime_gel', '绿色凝胶', '带有草木气息的史莱姆凝胶，可由解构师稳定析出木元素粉尘。', '地下绿色史莱姆 20% 掉落', 'material', '怪材', 0.10, 1, NULL),
+    ('cyan_slime_gel', '青色凝胶', '湿润澄澈的史莱姆凝胶，可由解构师稳定析出水元素粉尘。', '地下青色史莱姆 20% 掉落', 'material', '怪材', 0.10, 1, NULL),
+    ('blue_slime_gel', '蓝色凝胶', '带着寒意的史莱姆凝胶，可由解构师稳定析出冰元素粉尘。', '地下蓝色史莱姆 20% 掉落', 'material', '怪材', 0.10, 1, NULL),
+    ('purple_slime_gel', '紫色凝胶', '幽暗微光流转的史莱姆凝胶，可由解构师稳定析出暗元素粉尘。', '地下紫色史莱姆 5% 掉落', 'material', '怪材', 0.10, 1, NULL),
+    ('black_slime_gel', '黑暗凝胶', '如夜色般深邃的史莱姆凝胶，可由解构师稳定析出暗元素粉尘。', '地下黑暗史莱姆 5% 掉落', 'material', '怪材', 0.10, 1, NULL),
     ('blood_residue', '血肉残渣', '从兽材结构中拆出的血肉粒子，是生命药剂的基础主材。', '解构师分解', 'material', '粒子', 0.10, 1, NULL),
     ('energy_ember', '能量余烬', '从兽材魔力结构中析出的微弱能量粒子，是魔力药剂的基础主材。', '解构师分解', 'material', '粒子', 0.08, 1, NULL),
     ('magic_unit', '魔力微弧', '高级兽材分解后偶得的稳定魔力微弧，可用于调制秘药。', '解构师分解', 'material', '粒子', 0.05, 1, NULL),
@@ -1143,6 +1158,16 @@ export const initializeSchema = async (pool: Pool) => {
     ('mana_dust', '魔力粉尘', '兽核在反应中散逸后凝结的细小魔力颗粒。', '炼金师炼金', 'material', '炼材', 0.05, 1, NULL),
     ('magic_branch', '魔力枝叶', '树精枝梢上凝结的魔力叶片，仍散发着柔和的木属性气息。', '幽暗密林树精掉落', 'material', '锻材', 0.12, 1, NULL),
     ('goblin_ear', '哥布林耳', '哥布林身上留下的辨识素材。', '哥布林掉落', 'material', '怪材', 0.03, 1, NULL),
+    ('goblin_scrap_iron', '哥布林废铁', '哥布林王国兵器与盾牌上剥落的粗炼废铁。', '幽暗密林深处哥布林掉落', 'material', '怪材', 0.12, 1, NULL),
+    ('goblin_whetstone', '粗磨刃石', '沾着暗红磨屑的粗糙磨刀石，可稳定强化攻击词条。', '幽暗密林深处战士、敢死队与刺客掉落', 'material', '怪材', 0.10, 1, NULL),
+    ('goblin_bowstring', '林弦筋', '在古木湿气中仍保持韧性的弓弦筋。', '幽暗密林深处弓箭手与网罗工兵掉落', 'material', '怪材', 0.06, 1, NULL),
+    ('goblin_blast_core', '爆裂核心', '自爆兵体内不稳定的火性核心，稍有震动便发热。', '幽暗密林深处自爆兵与敢死队掉落', 'material', '怪材', 0.06, 1, NULL),
+    ('goblin_drumhide', '战鼓皮', '以兽皮与树脂绷成的战鼓皮，残留催战回响。', '幽暗密林深处战鼓手与盾卫掉落', 'material', '怪材', 0.09, 1, NULL),
+    ('goblin_shadowcloth', '暗幕布', '浸过影沼汁液的黑布，能吸收微弱的光与脚步声。', '幽暗密林深处刺客与祭司掉落', 'material', '怪材', 0.05, 1, NULL),
+    ('goblin_totem_shard', '沼影图腾片', '哥布林祭坛剥落的图腾碎片，暗属性魔力在裂纹间游走。', '幽暗密林深处祭司与法师掉落', 'material', '怪材', 0.05, 1, NULL),
+    ('goblin_earth_crystal', '土行晶', '土行者从地脉中取出的浑浊晶体，握住时会传来震动。', '幽暗密林深处土行者与网罗工兵掉落', 'material', '怪材', 0.07, 1, NULL),
+    ('goblin_command_seal', '军令残印', '哥布林军令印章的残片，仍保留着统御与护阵的力量。', '幽暗密林深处祭司与哥布林上校掉落', 'material', '怪材', 0.03, 1, NULL),
+    ('goblin_colonel_insignia', '上校军徽', '哥布林上校佩戴的精英军徽，可为装备提供全属性固定加成。', '哥布林上校极低概率掉落', 'material', '怪材', 0.02, 1, NULL),
     ('riot_aura', '暴动的气息', '从暴动怪物身上剥离的躁动气息，隐约散发着危险的魔力。', '暴动怪物额外掉落', 'material', '怪材', 0.05, 1, NULL),
     ('living_wood', '活木', '仍带着微弱生命律动的木材，可用于基础精炼。', '幽暗密林植被开采', 'material', '锻材', 0.40, 1, NULL),
     ('meteor_iron', '陨铁', '自天外坠落的沉重铁矿，杂质极少，适合打造玄铁装备。', '幽暗密林矿脉开采', 'material', '锻材', 0.60, 1, NULL),
@@ -1257,9 +1282,14 @@ export const initializeSchema = async (pool: Pool) => {
     WHEN 'refined_beast_bone' THEN 14 WHEN 'refined_beast_hide' THEN 20 WHEN 'refined_beast_tendon' THEN 28 WHEN 'refined_beast_core' THEN 75
     WHEN 'refined_magic_wool' THEN 36 WHEN 'refined_magic_tusk' THEN 42 WHEN 'refined_magic_scale' THEN 42 WHEN 'refined_magic_claw' THEN 48 WHEN 'refined_magic_heartcore' THEN 60
     WHEN 'blood_residue' THEN 2 WHEN 'energy_ember' THEN 2 WHEN 'magic_unit' THEN 10
+    WHEN 'slime_gel' THEN 1 WHEN 'red_slime_gel' THEN 3 WHEN 'orange_slime_gel' THEN 3 WHEN 'yellow_slime_gel' THEN 3 WHEN 'green_slime_gel' THEN 3 WHEN 'cyan_slime_gel' THEN 3 WHEN 'blue_slime_gel' THEN 3 WHEN 'purple_slime_gel' THEN 3 WHEN 'black_slime_gel' THEN 3
     WHEN 'wood_element_dust' THEN 3 WHEN 'metal_element_dust' THEN 3 WHEN 'water_element_dust' THEN 3 WHEN 'ice_element_dust' THEN 4 WHEN 'dark_element_dust' THEN 4 WHEN 'fire_element_dust' THEN 5 WHEN 'thunder_element_dust' THEN 5 WHEN 'light_element_dust' THEN 5
     WHEN 'herbal_extract' THEN 5 WHEN 'mana_dust' THEN 8 WHEN 'residue_life_potion' THEN 8 WHEN 'ember_mana_potion' THEN 8
     WHEN 'magic_branch' THEN 12 WHEN 'goblin_ear' THEN 5 WHEN 'riot_aura' THEN 50
+    WHEN 'goblin_scrap_iron' THEN 18 WHEN 'goblin_whetstone' THEN 24 WHEN 'goblin_bowstring' THEN 22
+    WHEN 'goblin_blast_core' THEN 32 WHEN 'goblin_drumhide' THEN 26 WHEN 'goblin_shadowcloth' THEN 35
+    WHEN 'goblin_totem_shard' THEN 38 WHEN 'goblin_earth_crystal' THEN 42 WHEN 'goblin_command_seal' THEN 75
+    WHEN 'goblin_colonel_insignia' THEN 160
     WHEN 'living_wood' THEN 6 WHEN 'meteor_iron' THEN 20 WHEN 'star_copper' THEN 40 WHEN 'moon_silver' THEN 90 WHEN 'sun_gold' THEN 200
     WHEN 'skill_book_guardian_taunt' THEN 35 WHEN 'skill_book_shield_counter' THEN 60 WHEN 'skill_book_guard_break' THEN 50
     WHEN 'skill_book_arcane_shackle' THEN 50 WHEN 'skill_book_ember_burst' THEN 65 WHEN 'skill_book_healing_prayer' THEN 75
@@ -1339,6 +1369,16 @@ export const initializeSchema = async (pool: Pool) => {
       WHEN 'refined_magic_claw' THEN JSON_OBJECT('critRatePct',6)
       WHEN 'refined_magic_heartcore' THEN JSON_OBJECT('accuracyPct',6)
       WHEN 'riot_aura' THEN JSON_OBJECT('damageBonusPct',3)
+      WHEN 'goblin_scrap_iron' THEN JSON_OBJECT('physicalDefense',3)
+      WHEN 'goblin_whetstone' THEN JSON_OBJECT('physicalAttack',16)
+      WHEN 'goblin_bowstring' THEN JSON_OBJECT('accuracy',14)
+      WHEN 'goblin_blast_core' THEN JSON_OBJECT('critDamageBp',10)
+      WHEN 'goblin_drumhide' THEN JSON_OBJECT('speed',12)
+      WHEN 'goblin_shadowcloth' THEN JSON_OBJECT('evasion',12)
+      WHEN 'goblin_totem_shard' THEN JSON_OBJECT('magicAttack',18)
+      WHEN 'goblin_earth_crystal' THEN JSON_OBJECT('physicalDefense',16)
+      WHEN 'goblin_command_seal' THEN JSON_OBJECT('physicalDefense',8,'magicDefense',8)
+      WHEN 'goblin_colonel_insignia' THEN JSON_OBJECT('constitution',6,'spirit',6,'strength',6,'intelligence',6,'agility',6,'perception',6)
       WHEN 'living_wood' THEN JSON_OBJECT('hpPct',2)
       WHEN 'meteor_iron' THEN JSON_OBJECT('physicalDefensePct',3)
       WHEN 'star_copper' THEN JSON_OBJECT('accuracyPct',3)
@@ -1352,8 +1392,8 @@ export const initializeSchema = async (pool: Pool) => {
       WHEN 'fire_element_dust' THEN JSON_OBJECT('elementMastery_火',2)
       WHEN 'thunder_element_dust' THEN JSON_OBJECT('elementMastery_雷',2)
       WHEN 'light_element_dust' THEN JSON_OBJECT('elementMastery_光',2) END,
-      CASE code WHEN 'beast_bone' THEN '物攻+2%' WHEN 'beast_hide' THEN '物防+2%' WHEN 'beast_tendon' THEN '速度+2%' WHEN 'beast_core' THEN '魔攻+2%' WHEN 'magic_wool' THEN '闪避+3%' WHEN 'magic_tusk' THEN '物攻+3%' WHEN 'magic_scale' THEN '魔防+3%' WHEN 'magic_claw' THEN '暴击+3%' WHEN 'magic_heartcore' THEN '命中+3%' WHEN 'refined_beast_bone' THEN '物攻+4%' WHEN 'refined_beast_hide' THEN '双防+4%' WHEN 'refined_beast_tendon' THEN '速度+4%' WHEN 'refined_beast_core' THEN '魔攻+4%' WHEN 'refined_magic_wool' THEN '闪避+6%' WHEN 'refined_magic_tusk' THEN '物攻+6%' WHEN 'refined_magic_scale' THEN '魔防+6%' WHEN 'refined_magic_claw' THEN '暴击+6%' WHEN 'refined_magic_heartcore' THEN '命中+6%' WHEN 'riot_aura' THEN '伤害增加3%' WHEN 'living_wood' THEN '生命上限+2%' WHEN 'meteor_iron' THEN '物防+3%' WHEN 'star_copper' THEN '命中+3%' WHEN 'moon_silver' THEN '魔力上限+3%' WHEN 'sun_gold' THEN '双攻+2%' WHEN 'wood_element_dust' THEN '武器：木元素精通+2；防具：木元素抗性+2' WHEN 'metal_element_dust' THEN '武器：土元素精通+2；防具：土元素抗性+2' WHEN 'water_element_dust' THEN '武器：水元素精通+2；防具：水元素抗性+2' WHEN 'ice_element_dust' THEN '武器：冰元素精通+2；防具：冰元素抗性+2' WHEN 'dark_element_dust' THEN '武器：暗元素精通+2；防具：暗元素抗性+2' WHEN 'fire_element_dust' THEN '武器：火元素精通+2；防具：火元素抗性+2' WHEN 'thunder_element_dust' THEN '武器：雷元素精通+2；防具：雷元素抗性+2' WHEN 'light_element_dust' THEN '武器：光元素精通+2；防具：光元素抗性+2' END
-    FROM item_definitions WHERE code IN ('beast_bone','beast_hide','beast_tendon','beast_core','magic_wool','magic_tusk','magic_scale','magic_claw','magic_heartcore','refined_beast_bone','refined_beast_hide','refined_beast_tendon','refined_beast_core','refined_magic_wool','refined_magic_tusk','refined_magic_scale','refined_magic_claw','refined_magic_heartcore','riot_aura','living_wood','meteor_iron','star_copper','moon_silver','sun_gold','wood_element_dust','metal_element_dust','water_element_dust','ice_element_dust','dark_element_dust','fire_element_dust','thunder_element_dust','light_element_dust')
+      CASE code WHEN 'beast_bone' THEN '物攻+2%' WHEN 'beast_hide' THEN '物防+2%' WHEN 'beast_tendon' THEN '速度+2%' WHEN 'beast_core' THEN '魔攻+2%' WHEN 'magic_wool' THEN '闪避+3%' WHEN 'magic_tusk' THEN '物攻+3%' WHEN 'magic_scale' THEN '魔防+3%' WHEN 'magic_claw' THEN '暴击+3%' WHEN 'magic_heartcore' THEN '命中+3%' WHEN 'refined_beast_bone' THEN '物攻+4%' WHEN 'refined_beast_hide' THEN '双防+4%' WHEN 'refined_beast_tendon' THEN '速度+4%' WHEN 'refined_beast_core' THEN '魔攻+4%' WHEN 'refined_magic_wool' THEN '闪避+6%' WHEN 'refined_magic_tusk' THEN '物攻+6%' WHEN 'refined_magic_scale' THEN '魔防+6%' WHEN 'refined_magic_claw' THEN '暴击+6%' WHEN 'refined_magic_heartcore' THEN '命中+6%' WHEN 'riot_aura' THEN '伤害增加3%' WHEN 'goblin_scrap_iron' THEN '物防+3' WHEN 'goblin_whetstone' THEN '物攻+16' WHEN 'goblin_bowstring' THEN '命中+14' WHEN 'goblin_blast_core' THEN '暴伤+10' WHEN 'goblin_drumhide' THEN '速度+12' WHEN 'goblin_shadowcloth' THEN '闪避+12' WHEN 'goblin_totem_shard' THEN '魔攻+18' WHEN 'goblin_earth_crystal' THEN '物防+16' WHEN 'goblin_command_seal' THEN '双防各+8' WHEN 'goblin_colonel_insignia' THEN '全属性各+6' WHEN 'living_wood' THEN '生命上限+2%' WHEN 'meteor_iron' THEN '物防+3%' WHEN 'star_copper' THEN '命中+3%' WHEN 'moon_silver' THEN '魔力上限+3%' WHEN 'sun_gold' THEN '双攻+2%' WHEN 'wood_element_dust' THEN '武器：木元素精通+2；防具：木元素抗性+2' WHEN 'metal_element_dust' THEN '武器：土元素精通+2；防具：土元素抗性+2' WHEN 'water_element_dust' THEN '武器：水元素精通+2；防具：水元素抗性+2' WHEN 'ice_element_dust' THEN '武器：冰元素精通+2；防具：冰元素抗性+2' WHEN 'dark_element_dust' THEN '武器：暗元素精通+2；防具：暗元素抗性+2' WHEN 'fire_element_dust' THEN '武器：火元素精通+2；防具：火元素抗性+2' WHEN 'thunder_element_dust' THEN '武器：雷元素精通+2；防具：雷元素抗性+2' WHEN 'light_element_dust' THEN '武器：光元素精通+2；防具：光元素抗性+2' END
+    FROM item_definitions WHERE code IN ('beast_bone','beast_hide','beast_tendon','beast_core','magic_wool','magic_tusk','magic_scale','magic_claw','magic_heartcore','refined_beast_bone','refined_beast_hide','refined_beast_tendon','refined_beast_core','refined_magic_wool','refined_magic_tusk','refined_magic_scale','refined_magic_claw','refined_magic_heartcore','riot_aura','goblin_scrap_iron','goblin_whetstone','goblin_bowstring','goblin_blast_core','goblin_drumhide','goblin_shadowcloth','goblin_totem_shard','goblin_earth_crystal','goblin_command_seal','goblin_colonel_insignia','living_wood','meteor_iron','star_copper','moon_silver','sun_gold','wood_element_dust','metal_element_dust','water_element_dust','ice_element_dust','dark_element_dust','fire_element_dust','thunder_element_dust','light_element_dust')
     ON DUPLICATE KEY UPDATE effect_json=VALUES(effect_json),description=VALUES(description)`);
   await pool.query(`INSERT INTO guild_shop_items (item_id,buy_price,sell_price)
     SELECT id,CASE code WHEN 'map_dark_forest' THEN 20 WHEN 'map_dark_forest_deep' THEN 1000 END,0
@@ -1443,18 +1483,18 @@ export const initializeSchema = async (pool: Pool) => {
     ('arcane_shackle', '奥术枷锁', 'magic', 55, 2, 125, '以奥术锁链束缚敌人，降低其防御与速度。'),
     ('ember_burst', '爆炎术', 'magic', 60, 2, 155, '将凝聚的火焰瞬间引爆。'),
     ('healing_prayer', '治愈祷言', 'magic', 65, 1, 0, '为生命最低的同伴恢复生命，并赋予短暂再生。'),
-    ('blessing_aegis', '守护祝福', 'magic', 75, 3, 0, '为全体同伴施加护盾与再生祝福。'),
+    ('blessing_aegis', '守护祝福', 'magic', 75, 3, 0, '为全体同伴施加减伤与再生祝福。'),
     ('mana_benediction', '灵泉祝祷', 'magic', 80, 5, 0, '为全体同伴施加回流祝福，每回合恢复最大魔力的 5%。'),
     ('sanctified_bolt', '圣辉弹', 'magic', 50, 1, 115, '以圣光轰击敌人，并为自身覆上一层守护。'),
     ('appraisal', '鉴识', 'passive', 0, 0, 0, '学会后可识别怪物词条，并解锁怪物属性查看。'),
-    ('growth_blessing', '成长祝福', 'passive', 0, 0, 0, '所有获得的经验值翻倍。'),
-    ('mana_affinity', '魔力亲和', 'passive', 0, 0, 0, '技能魔力消耗降低 30%。'),
-    ('lucky_favor', '幸运眷顾', 'passive', 0, 0, 0, '战利品掉落概率提高 20%。'),
-    ('war_god_favor', '战神眷顾', 'passive', 0, 0, 0, '造成的最终伤害提高 16%。'),
-    ('arcane_revelation', '奥术启示', 'passive', 0, 0, 0, '魔法伤害提高 16%。'),
-    ('crimson_recovery', '猩红复苏', 'passive', 0, 0, 0, '普攻与刺击伤害的 16% 转化为生命。'),
-    ('seer_instinct', '先知直觉', 'passive', 0, 0, 0, '命中与暴击属性在战斗中提高 16%。'),
-    ('hunter_blessing', '猎人恩典', 'passive', 0, 0, 0, '战利品掉落概率提高 35%。'),
+    ('growth_blessing', '成长祝福', 'bound', 0, 0, 0, '所有获得的经验值翻倍。'),
+    ('mana_affinity', '魔力亲和', 'bound', 0, 0, 0, '技能魔力消耗降低 30%。'),
+    ('lucky_favor', '幸运眷顾', 'bound', 0, 0, 0, '战利品掉落概率提高 20%。'),
+    ('war_god_favor', '战神眷顾', 'bound', 0, 0, 0, '造成的最终伤害提高 16%。'),
+    ('arcane_revelation', '奥术启示', 'bound', 0, 0, 0, '魔法伤害提高 16%。'),
+    ('crimson_recovery', '猩红复苏', 'bound', 0, 0, 0, '普攻与刺击伤害的 16% 转化为生命。'),
+    ('seer_instinct', '先知直觉', 'bound', 0, 0, 0, '命中与暴击属性在战斗中提高 16%。'),
+    ('hunter_blessing', '猎人恩典', 'bound', 0, 0, 0, '战利品掉落概率提高 35%。'),
     ('craftsmanship', '匠心', 'passive', 0, 0, 0, '随副职业等级发挥不同效果：锻造师降低耐久损耗，炼金师提高药品效果。'),
     ('boss_mana_charge', '魔力充能', 'utility', 0, 0, 0, '吸收周遭游离魔力，立即将自身魔力恢复至最大值。')
     ON DUPLICATE KEY UPDATE name=VALUES(name),mana_cost=VALUES(mana_cost),cooldown_turns=VALUES(cooldown_turns),power=VALUES(power),description=VALUES(description)`);
@@ -1523,7 +1563,7 @@ export const initializeSchema = async (pool: Pool) => {
     cooldown_reduction_per_level=CASE WHEN code IN ('warrior_taunt','shield_counter','guard_break','arcane_shackle','ember_burst','sanctified_bolt','sweeping_slash','piercing_thrust','wind_blade','thunder_lance') THEN 1 ELSE 0 END
     WHERE code IN ('warrior_taunt','shield_counter','guard_break','arcane_shackle','ember_burst','healing_prayer','blessing_aegis','mana_benediction','sanctified_bolt','sweeping_slash','piercing_thrust','wind_blade','thunder_lance')`);
   // 主动技能的基础威力与蓝耗在所有技能（含迷宫、BOSS、NPC 技能）写入后统一校准。
-  await pool.query(`UPDATE skill_definitions SET category='passive',learn_cost=99,upgrade_cost=99,max_level=1,power_per_level=0,passive_effect_json=CASE code
+  await pool.query(`UPDATE skill_definitions SET category='bound',skill_kind='绑定',range_type='自身',learn_cost=99,upgrade_cost=99,max_level=1,power_per_level=0,passive_effect_json=CASE code
     WHEN 'growth_blessing' THEN JSON_OBJECT('experienceMultiplier',2)
     WHEN 'mana_affinity' THEN JSON_OBJECT('manaCostReductionPct',30)
     WHEN 'lucky_favor' THEN JSON_OBJECT('dropBonusPct',20)
@@ -1539,7 +1579,7 @@ export const initializeSchema = async (pool: Pool) => {
   await pool.query(`UPDATE player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id SET ps.passive_linked=0,ps.quick_slot=NULL WHERE s.category='bound'`);
   await pool.query(`UPDATE skill_definitions SET codex_id=CONCAT(CASE category WHEN 'physical' THEN '41' WHEN 'magic' THEN '42' ELSE '49' END, CASE WHEN id>=100000 THEN CAST(id AS CHAR) ELSE LPAD(id,5,'0') END) WHERE codex_id IS NULL`);
   await pool.query(`INSERT IGNORE INTO player_skills (character_id,skill_id)
-    SELECT b.character_id,s.id FROM player_blessings b JOIN skill_definitions s ON s.code=b.code AND s.category='passive'`);
+    SELECT b.character_id,s.id FROM player_blessings b JOIN skill_definitions s ON s.code=b.code AND s.category='bound'`);
   await pool.query(`INSERT IGNORE INTO player_skill_discoveries (character_id,skill_id)
     SELECT c.id,s.id FROM characters c JOIN skill_definitions s ON s.code='appraisal'
     LEFT JOIN player_skills ps ON ps.character_id=c.id AND ps.skill_id=s.id WHERE ps.skill_id IS NULL`);
@@ -1626,20 +1666,20 @@ export const initializeSchema = async (pool: Pool) => {
     ,((SELECT id FROM skill_definitions WHERE code='wolfking_fang_devour'),(SELECT id FROM effect_definitions WHERE code='vulnerability'),1,10,3,'enemy','on_hit')
     ON DUPLICATE KEY UPDATE effect_level=VALUES(effect_level),value_override=VALUES(value_override),duration_override=VALUES(duration_override),target_scope=VALUES(target_scope),trigger_timing=VALUES(trigger_timing)`);
   await pool.query(`INSERT INTO monster_templates (code, name, monster_class, level, constitution, spirit, strength, intelligence, agility, perception, constitution_growth, spirit_growth, strength_growth, intelligence_growth, agility_growth, perception_growth, skill_sequence, experience, drops_json) VALUES
-    ('ball_rabbit', '球兔', 'normal', 1, 4,3,3,2,17,15, 0.3,0.2,0.3,0.2,1.0,0.8, JSON_ARRAY('hop','scratch'), 36, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',0.80,'quantity',1),JSON_OBJECT('code','beast_bone','chance',0.60,'quantity',1),JSON_OBJECT('code','beast_hide','chance',0.40,'quantity',1),JSON_OBJECT('code','beast_tendon','chance',0.20,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.05,'quantity',1),JSON_OBJECT('code','magic_wool','chance',0.10,'quantity',1))),
-    ('spike_boar', '刺猪', 'normal', 1, 17,2,18,2,4,3, 0.8,0.1,0.9,0.1,0.2,0.2, JSON_ARRAY('charge','scratch'), 54, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',0.80,'quantity',1),JSON_OBJECT('code','beast_bone','chance',0.60,'quantity',1),JSON_OBJECT('code','beast_hide','chance',0.40,'quantity',1),JSON_OBJECT('code','beast_tendon','chance',0.20,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.05,'quantity',1),JSON_OBJECT('code','magic_tusk','chance',0.10,'quantity',1))),
-    ('vine_snake', '藤蛇', 'normal', 1, 4,14,3,16,5,12, 0.2,0.9,0.2,1.0,0.3,0.8, JSON_ARRAY('bite','vine_hex','constrict'), 51, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',0.80,'quantity',1),JSON_OBJECT('code','beast_bone','chance',0.60,'quantity',1),JSON_OBJECT('code','beast_hide','chance',0.40,'quantity',1),JSON_OBJECT('code','beast_tendon','chance',0.20,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.05,'quantity',1),JSON_OBJECT('code','magic_scale','chance',0.10,'quantity',1))),
-    ('black_bear', '乌熊', 'normal', 2, 17,3,18,2,3,3, 0.9,0.2,1.0,0.1,0.2,0.2, JSON_ARRAY('maul','howl'), 78, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',0.80,'quantity',1),JSON_OBJECT('code','beast_bone','chance',0.60,'quantity',1),JSON_OBJECT('code','beast_hide','chance',0.40,'quantity',1),JSON_OBJECT('code','beast_tendon','chance',0.20,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.05,'quantity',1),JSON_OBJECT('code','magic_claw','chance',0.10,'quantity',1))),
-    ('mist_wolf', '幽狼', 'normal', 2, 4,14,5,15,8,11, 0.2,0.9,0.3,1.0,0.5,0.7, JSON_ARRAY('mist_pounce','moonbolt','bite'), 75, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',0.80,'quantity',1),JSON_OBJECT('code','beast_bone','chance',0.60,'quantity',1),JSON_OBJECT('code','beast_hide','chance',0.40,'quantity',1),JSON_OBJECT('code','beast_tendon','chance',0.20,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.05,'quantity',1),JSON_OBJECT('code','magic_heartcore','chance',0.10,'quantity',1))),
-    ('roll_rabbit', '滚兔', 'large', 3, 6,7,6,5,22,18, 0.4,0.4,0.4,0.3,1.4,1.1, JSON_ARRAY('hop','charge','scratch'), 54, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',1,'quantity',2),JSON_OBJECT('code','beast_bone','chance',0.90,'quantity',2),JSON_OBJECT('code','beast_hide','chance',0.70,'quantity',2),JSON_OBJECT('code','beast_tendon','chance',0.45,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.25,'quantity',1),JSON_OBJECT('code','magic_wool','chance',0.50,'quantity',1))),
-    ('tusk_boar', '獠猪', 'large', 4, 21,4,23,3,6,5, 1.2,0.2,1.3,0.2,0.4,0.3, JSON_ARRAY('charge','maul','scratch'), 74, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',1,'quantity',2),JSON_OBJECT('code','beast_bone','chance',0.90,'quantity',2),JSON_OBJECT('code','beast_hide','chance',0.70,'quantity',2),JSON_OBJECT('code','beast_tendon','chance',0.45,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.25,'quantity',1),JSON_OBJECT('code','magic_tusk','chance',0.50,'quantity',1))),
-    ('vine_python', '藤蚺', 'large', 4, 6,18,5,20,7,18, 0.4,1.2,0.3,1.3,0.5,1.2, JSON_ARRAY('bite','vine_hex','constrict'), 78, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',1,'quantity',2),JSON_OBJECT('code','beast_bone','chance',0.90,'quantity',2),JSON_OBJECT('code','beast_hide','chance',0.70,'quantity',2),JSON_OBJECT('code','beast_tendon','chance',0.45,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.25,'quantity',1),JSON_OBJECT('code','magic_scale','chance',0.50,'quantity',1))),
-    ('pitch_bear', '漆熊', 'large', 5, 23,6,25,4,4,7, 1.4,0.3,1.5,0.2,0.3,0.4, JSON_ARRAY('maul','howl','bite'), 108, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',1,'quantity',2),JSON_OBJECT('code','beast_bone','chance',0.90,'quantity',2),JSON_OBJECT('code','beast_hide','chance',0.70,'quantity',2),JSON_OBJECT('code','beast_tendon','chance',0.45,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.25,'quantity',1),JSON_OBJECT('code','magic_claw','chance',0.50,'quantity',1))),
-    ('shadow_wolf', '影狼', 'large', 5, 7,19,8,21,14,16, 0.5,1.2,0.5,1.4,0.9,1.0, JSON_ARRAY('mist_pounce','moonbolt','howl','bite'), 96, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',1,'quantity',2),JSON_OBJECT('code','beast_bone','chance',0.90,'quantity',2),JSON_OBJECT('code','beast_hide','chance',0.70,'quantity',2),JSON_OBJECT('code','beast_tendon','chance',0.45,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.25,'quantity',1),JSON_OBJECT('code','magic_heartcore','chance',0.50,'quantity',1))),
-    ('goblin', '哥布林', 'elite', 4, 10,13,13,16,16,15, 0.8,1.0,0.9,1.2,1.1,1.0, JSON_ARRAY('goblin_slash','goblin_fire','scratch'), 82, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',0.35,'quantity',1),JSON_OBJECT('code','beast_bone','chance',0.70,'quantity',1),JSON_OBJECT('code','beast_hide','chance',0.35,'quantity',1),JSON_OBJECT('code','beast_tendon','chance',0.20,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.25,'quantity',1),JSON_OBJECT('code','goblin_ear','chance',0.50,'quantity',1))),
-    ('tree_ent', '树精', 'elite', 7, 24,18,20,22,14,18, 1.3,1.2,1.0,1.3,0.6,1.0, JSON_ARRAY('root_bind','thorn_burst','verdant_bolt'), 180, JSON_ARRAY(JSON_OBJECT('code','magic_branch','chance',1,'quantity',1),JSON_OBJECT('code','living_wood','chance',0.50,'quantity',1))),
-    ('forest_slime', '森林史莱姆', 'boss', 8, 37,28,25,31,10,15, 1.6,1.4,1.1,1.3,0.5,0.8, JSON_ARRAY('slime_bash','acid_spray','regenerate_slime'), 260, JSON_ARRAY(JSON_OBJECT('code','healing_herb','chance',1,'min_quantity',6,'max_quantity',10))),
-    ('shadow_wolf_king', '幽影狼王', 'boss', 12, 18,12,34,10,31,30, 1.0,0.7,1.8,0.5,1.7,1.6, JSON_ARRAY('wolfking_summon_shadow_wolf','wolfking_trample','wolfking_rending_pounce','wolfking_bite','wolfking_shadow_curse','wolfking_fang_devour'), 720, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',1,'min_quantity',5,'max_quantity',8),JSON_OBJECT('code','beast_bone','chance',1,'min_quantity',4,'max_quantity',7),JSON_OBJECT('code','beast_hide','chance',0.9,'min_quantity',3,'max_quantity',5),JSON_OBJECT('code','beast_tendon','chance',0.8,'min_quantity',2,'max_quantity',4),JSON_OBJECT('code','beast_core','chance',0.65,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','magic_heartcore','chance',0.75,'quantity',1),JSON_OBJECT('code','sky_dust','chance',0.40,'quantity',1))),
+    ('ball_rabbit', '球兔', 'normal', 1, 4,3,3,2,17,15, 0.3,0.2,0.3,0.2,1.0,0.8, JSON_ARRAY('hop','scratch'), 36, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',0.70,'quantity',1),JSON_OBJECT('code','beast_hide','chance',0.50,'quantity',1),JSON_OBJECT('code','beast_tendon','chance',0.45,'quantity',1),JSON_OBJECT('code','magic_wool','chance',0.30,'quantity',1),JSON_OBJECT('code','magic_eye','chance',0.18,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.03,'quantity',1))),
+    ('spike_boar', '刺猪', 'normal', 1, 17,2,18,2,4,3, 0.8,0.1,0.9,0.1,0.2,0.2, JSON_ARRAY('charge','scratch'), 54, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',0.65,'quantity',1),JSON_OBJECT('code','beast_bone','chance',0.70,'quantity',1),JSON_OBJECT('code','beast_hide','chance',0.45,'quantity',1),JSON_OBJECT('code','magic_tusk','chance',0.30,'quantity',1),JSON_OBJECT('code','magic_horn','chance',0.25,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.03,'quantity',1))),
+    ('vine_snake', '藤蛇', 'normal', 1, 4,14,3,16,5,12, 0.2,0.9,0.2,1.0,0.3,0.8, JSON_ARRAY('bite','vine_hex','constrict'), 51, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',0.45,'quantity',1),JSON_OBJECT('code','beast_bone','chance',0.50,'quantity',1),JSON_OBJECT('code','beast_hide','chance',0.60,'quantity',1),JSON_OBJECT('code','beast_tendon','chance',0.35,'quantity',1),JSON_OBJECT('code','magic_scale','chance',0.35,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.03,'quantity',1))),
+    ('black_bear', '乌熊', 'normal', 2, 17,3,18,2,3,3, 0.9,0.2,1.0,0.1,0.2,0.2, JSON_ARRAY('maul','howl'), 78, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',0.80,'quantity',1),JSON_OBJECT('code','beast_bone','chance',0.60,'quantity',1),JSON_OBJECT('code','beast_hide','chance',0.60,'quantity',1),JSON_OBJECT('code','magic_claw','chance',0.30,'quantity',1),JSON_OBJECT('code','magic_blood','chance',0.25,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.03,'quantity',1))),
+    ('mist_wolf', '幽狼', 'normal', 2, 4,14,5,15,8,11, 0.2,0.9,0.3,1.0,0.5,0.7, JSON_ARRAY('mist_pounce','moonbolt','bite'), 75, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',0.50,'quantity',1),JSON_OBJECT('code','beast_hide','chance',0.60,'quantity',1),JSON_OBJECT('code','beast_tendon','chance',0.55,'quantity',1),JSON_OBJECT('code','magic_heartcore','chance',0.30,'quantity',1),JSON_OBJECT('code','magic_eye','chance',0.25,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.03,'quantity',1))),
+    ('roll_rabbit', '滚兔', 'large', 3, 6,7,6,5,22,18, 0.4,0.4,0.4,0.3,1.4,1.1, JSON_ARRAY('hop','charge','scratch'), 54, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',1,'quantity',2),JSON_OBJECT('code','beast_hide','chance',0.80,'quantity',2),JSON_OBJECT('code','beast_tendon','chance',0.75,'quantity',2),JSON_OBJECT('code','magic_wool','chance',0.65,'quantity',1),JSON_OBJECT('code','magic_eye','chance',0.40,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.12,'quantity',1))),
+    ('tusk_boar', '獠猪', 'large', 4, 21,4,23,3,6,5, 1.2,0.2,1.3,0.2,0.4,0.3, JSON_ARRAY('charge','maul','scratch'), 74, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',1,'quantity',2),JSON_OBJECT('code','beast_bone','chance',0.90,'quantity',2),JSON_OBJECT('code','beast_hide','chance',0.60,'quantity',2),JSON_OBJECT('code','magic_tusk','chance',0.65,'quantity',1),JSON_OBJECT('code','magic_horn','chance',0.55,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.12,'quantity',1))),
+    ('vine_python', '藤蚺', 'large', 4, 6,18,5,20,7,18, 0.4,1.2,0.3,1.3,0.5,1.2, JSON_ARRAY('bite','vine_hex','constrict'), 78, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',0.75,'quantity',2),JSON_OBJECT('code','beast_bone','chance',0.80,'quantity',2),JSON_OBJECT('code','beast_hide','chance',0.90,'quantity',2),JSON_OBJECT('code','beast_tendon','chance',0.50,'quantity',2),JSON_OBJECT('code','magic_scale','chance',0.65,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.12,'quantity',1))),
+    ('pitch_bear', '漆熊', 'large', 5, 23,6,25,4,4,7, 1.4,0.3,1.5,0.2,0.3,0.4, JSON_ARRAY('maul','howl','bite'), 108, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',1,'quantity',2),JSON_OBJECT('code','beast_bone','chance',0.80,'quantity',2),JSON_OBJECT('code','beast_hide','chance',0.80,'quantity',2),JSON_OBJECT('code','magic_claw','chance',0.65,'quantity',1),JSON_OBJECT('code','magic_blood','chance',0.55,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.12,'quantity',1))),
+    ('shadow_wolf', '影狼', 'large', 5, 7,19,8,21,14,16, 0.5,1.2,0.5,1.4,0.9,1.0, JSON_ARRAY('mist_pounce','moonbolt','howl','bite'), 96, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',0.75,'quantity',2),JSON_OBJECT('code','beast_hide','chance',0.80,'quantity',2),JSON_OBJECT('code','beast_tendon','chance',0.75,'quantity',2),JSON_OBJECT('code','magic_heartcore','chance',0.65,'quantity',1),JSON_OBJECT('code','magic_eye','chance',0.55,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.12,'quantity',1))),
+    ('goblin', '哥布林', 'elite', 4, 10,13,13,16,16,15, 0.8,1.0,0.9,1.2,1.1,1.0, JSON_ARRAY('goblin_slash','goblin_fire','scratch'), 82, JSON_ARRAY(JSON_OBJECT('code','beast_bone','chance',0.65,'quantity',1),JSON_OBJECT('code','beast_hide','chance',0.50,'quantity',1),JSON_OBJECT('code','magic_horn','chance',0.45,'quantity',1),JSON_OBJECT('code','beast_core','chance',0.15,'quantity',1),JSON_OBJECT('code','goblin_ear','chance',0.75,'quantity',1))),
+    ('tree_ent', '树精', 'elite', 7, 24,18,20,22,14,18, 1.3,1.2,1.0,1.3,0.6,1.0, JSON_ARRAY('root_bind','thorn_burst','verdant_bolt'), 180, JSON_ARRAY(JSON_OBJECT('code','magic_branch','chance',1,'quantity',1),JSON_OBJECT('code','living_wood','chance',0.70,'quantity',2),JSON_OBJECT('code','magic_blood','chance',0.55,'quantity',1),JSON_OBJECT('code','magic_scale','chance',0.40,'quantity',1))),
+    ('forest_slime', '森林史莱姆', 'boss', 8, 37,28,25,31,10,15, 1.6,1.4,1.1,1.3,0.5,0.8, JSON_ARRAY('slime_bash','acid_spray','regenerate_slime'), 260, JSON_ARRAY(JSON_OBJECT('code','healing_herb','chance',1,'min_quantity',2,'max_quantity',4),JSON_OBJECT('code','slime_gel','chance',1,'min_quantity',2,'max_quantity',4),JSON_OBJECT('code','magic_blood','chance',0.65,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','beast_core','chance',0.30,'quantity',1),JSON_OBJECT('code','living_wood','chance',0.75,'quantity',1))),
+    ('shadow_wolf_king', '幽影狼王', 'boss', 12, 18,12,34,10,31,30, 1.0,0.7,1.8,0.5,1.7,1.6, JSON_ARRAY('wolfking_summon_shadow_wolf','wolfking_trample','wolfking_rending_pounce','wolfking_bite','wolfking_shadow_curse','wolfking_fang_devour'), 720, JSON_ARRAY(JSON_OBJECT('code','beast_meat','chance',1,'min_quantity',3,'max_quantity',5),JSON_OBJECT('code','beast_bone','chance',1,'min_quantity',2,'max_quantity',4),JSON_OBJECT('code','beast_hide','chance',0.9,'min_quantity',2,'max_quantity',3),JSON_OBJECT('code','beast_tendon','chance',0.8,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','beast_core','chance',0.35,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','magic_heartcore','chance',1,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','magic_eye','chance',0.85,'quantity',1),JSON_OBJECT('code','sky_dust','chance',0.40,'quantity',1))),
     ('dungeon_raider', '地宫劫掠者', 'elite', 11, 28,16,31,14,21,18, 1.4,0.8,1.5,0.7,1.1,0.9, JSON_ARRAY('goblin_slash','shield_bash_player'), 280, JSON_ARRAY(JSON_OBJECT('code','beast_core','chance',0.35,'quantity',1),JSON_OBJECT('code','meteor_iron','chance',0.18,'quantity',1))),
     ('dungeon_wisp', '幽邃法灵', 'elite', 15, 19,36,15,39,20,28, 0.9,1.7,0.7,1.9,1.0,1.4, JSON_ARRAY('moonbolt','goblin_fire','vine_hex'), 420, JSON_ARRAY(JSON_OBJECT('code','beast_core','chance',0.45,'quantity',1),JSON_OBJECT('code','magic_heartcore','chance',0.30,'quantity',1))),
     ('dungeon_stalker', '暗影猎手', 'elite', 20, 33,27,37,26,42,36, 1.4,1.2,1.6,1.2,1.9,1.6, JSON_ARRAY('mist_pounce','moonbolt','bite'), 620, JSON_ARRAY(JSON_OBJECT('code','magic_heartcore','chance',0.45,'quantity',1),JSON_OBJECT('code','star_copper','chance',0.12,'quantity',1))),
@@ -1730,13 +1770,22 @@ export const initializeSchema = async (pool: Pool) => {
     FROM map_regions r JOIN monster_templates t ON t.code IN ('ball_rabbit','spike_boar','vine_snake','black_bear','mist_wolf','roll_rabbit','tusk_boar','vine_python','pitch_bear','shadow_wolf','goblin','tree_ent','forest_slime','shadow_wolf_king')
     WHERE r.code='dark_forest'
     ON DUPLICATE KEY UPDATE spawn_weight=VALUES(spawn_weight)`);
-  await pool.query(`INSERT INTO map_resource_pools (region_id,item_id,spawn_density)
+  await pool.query(`DELETE p FROM map_monster_pools p JOIN map_regions r ON r.id=p.region_id JOIN monster_templates t ON t.id=p.monster_template_id WHERE r.code='dark_forest_deep' AND t.code NOT IN ('goblin_vanguard','goblin_warrior','goblin_archer','goblin_bomber','goblin_daredevil','goblin_drummer','goblin_shieldbearer','goblin_trapper','goblin_priest','goblin_mage','goblin_assassin','goblin_earthshaper','goblin_colonel')`);
+  await pool.query(`INSERT INTO map_monster_pools (region_id,monster_template_id,spawn_weight)
+    SELECT r.id,t.id,CASE t.code
+      WHEN 'goblin_vanguard' THEN 22 WHEN 'goblin_warrior' THEN 18 WHEN 'goblin_archer' THEN 16 WHEN 'goblin_bomber' THEN 10
+      WHEN 'goblin_daredevil' THEN 9 WHEN 'goblin_drummer' THEN 8 WHEN 'goblin_shieldbearer' THEN 7 WHEN 'goblin_trapper' THEN 6
+      WHEN 'goblin_priest' THEN 5 WHEN 'goblin_mage' THEN 4 WHEN 'goblin_assassin' THEN 3 WHEN 'goblin_earthshaper' THEN 2
+      WHEN 'goblin_colonel' THEN 0 ELSE 0 END
+    FROM map_regions r JOIN monster_templates t ON t.code IN ('goblin_vanguard','goblin_warrior','goblin_archer','goblin_bomber','goblin_daredevil','goblin_drummer','goblin_shieldbearer','goblin_trapper','goblin_priest','goblin_mage','goblin_assassin','goblin_earthshaper','goblin_colonel')
+    WHERE r.code='dark_forest_deep'
+    ON DUPLICATE KEY UPDATE spawn_weight=VALUES(spawn_weight)`);  await pool.query(`INSERT INTO map_resource_pools (region_id,item_id,spawn_density)
     SELECT r.id,i.id,CASE i.code WHEN 'living_wood' THEN 0.01000 WHEN 'meteor_iron' THEN 0.00100 WHEN 'star_copper' THEN 0.00010 WHEN 'moon_silver' THEN 0.00001 END
     FROM map_regions r JOIN item_definitions i ON i.code IN ('living_wood','meteor_iron','star_copper','moon_silver')
     WHERE r.code='dark_forest'
     ON DUPLICATE KEY UPDATE spawn_density=VALUES(spawn_density)`);
   await pool.query(`INSERT INTO map_resource_pools (region_id,item_id,spawn_density)
-    SELECT r.id,i.id,CASE i.code WHEN 'living_wood' THEN 0.03000 WHEN 'meteor_iron' THEN 0.00500 WHEN 'star_copper' THEN 0.00050 WHEN 'moon_silver' THEN 0.00005 END
+    SELECT r.id,i.id,CASE i.code WHEN 'living_wood' THEN 0.02000 WHEN 'meteor_iron' THEN 0.01000 WHEN 'star_copper' THEN 0.00100 WHEN 'moon_silver' THEN 0.00010 END
     FROM map_regions r JOIN item_definitions i ON i.code IN ('living_wood','meteor_iron','star_copper','moon_silver')
     WHERE r.code='dark_forest_deep'
     ON DUPLICATE KEY UPDATE spawn_density=VALUES(spawn_density)`);
@@ -1826,7 +1875,36 @@ export const initializeSchema = async (pool: Pool) => {
     ('necromancer_rebirth','魂匣回响','utility','无','强化','无','自身',95,5,0,99,99,1,0,'乌兹撕开魂匣的一角，重新凝聚濒散的灵魂。'),
     ('necromancer_grave_bind','墓影禁锢','magic','暗','元素','暗','全体',78,4,102,99,99,1,0,'墓穴阴影化作锁链，压住所有敌人的身形与意识。'),
     ('necromancer_soul_drain','灵魂汲取','magic','暗','元素','暗','远程',76,3,134,99,99,1,0,'从生命最衰弱的敌人身上抽取灵魂，反哺施术者。'),
-    ('necromancer_purging_mist','亡雾涤净','utility','无','灵异','无','自身',68,5,0,99,99,1,0,'冰冷亡雾洗去自身的异常，并凝成一层短暂护盾。')
+    ('necromancer_purging_mist','亡雾涤净','utility','无','灵异','无','自身',68,5,0,99,99,1,0,'冰冷亡雾洗去自身的异常，并凝成一层短暂护盾。'),
+    ('goblin_colonel_crushing_wave','军令·裂阵镇压','physical','打击','打击','无','全体',72,3,138,99,99,1,0,'哥布林上校挥动军旗与重刃制造震荡波，对全体敌人造成范围打击，并削弱其物防与命中。'),
+    ('goblin_colonel_toxic_barrage','军令·毒焰齐射','magic','暗','元素','暗','全体',88,4,146,99,99,1,0,'哥布林上校命令弓手与术士齐射毒焰，对全体敌人造成暗属性范围伤害，并施加灼烧与迟缓。'),
+    ('goblin_crossrush','交叉突进','physical','刺击','刺击','无','近战',24,2,125,1,1,5,15,'两名哥布林交叉突进，对目标造成刺击并扰乱其站姿。'),
+    ('goblin_marking_horn','标敌号角','utility','无','强化','无','全体',28,3,0,1,1,1,0,'号角标记感知最低的敌人，令哥布林更容易命中。'),
+    ('goblin_sawtooth','锯齿横断','physical','斩击','斩击','无','近战',30,2,145,1,1,5,15,'粗重锯刃横断目标，留下难以闭合的破绽。'),
+    ('goblin_bloodrush','血沸冲锋','physical','刺击','刺击','无','近战',26,3,135,1,1,5,15,'敢死队以燃血换取冲锋力量，濒危时威力更高。'),
+    ('goblin_forest_bolt','林弦穿叶','physical','刺击','刺击','无','远程',22,2,132,1,1,5,15,'弓箭手借古木回声射出穿叶箭。'),
+    ('goblin_splitshot','三叉散射','physical','刺击','刺击','无','全体',34,3,105,1,1,5,15,'向多名敌人散射三支短矢。'),
+    ('goblin_volatile_flask','炸药投瓶','magic','火','元素','火','全体',38,3,150,1,1,5,15,'将不稳定火药瓶投向敌阵并引发爆燃。'),
+    ('goblin_death_oath','敢死誓约','utility','无','强化','无','自身',32,4,0,1,1,1,0,'以军誓压榨生命，短暂提高攻击并拒绝倒下。'),
+    ('goblin_spiked_net','荆钉网','physical','打击','打击','无','远程',25,3,115,1,1,5,15,'撒出带倒刺的粗网，限制目标移动。'),
+    ('goblin_tripwire','绊索阵','utility','无','控制','无','全体',30,4,0,1,1,1,0,'提前埋设的绊索同时绊倒敌阵。'),
+    ('goblin_dust_retreat','烟尘撤步','utility','无','强化','无','自身',18,3,0,1,1,1,0,'扬起烟尘后撤，下一次出招更难被预判。'),
+    ('goblin_shieldwall','木盾拒阵','utility','无','强化','无','全体',30,3,0,1,1,1,0,'盾卫结成木盾拒阵，保护哥布林同伴。'),
+    ('goblin_pin_down','钉地锁步','physical','打击','打击','无','近战',26,2,125,1,1,5,15,'将短矛钉入地面，锁住目标脚步。'),
+    ('goblin_war_drum','战鼓催命','utility','无','强化','无','全体',36,4,0,1,1,1,0,'战鼓加速全队的攻击节奏。'),
+    ('goblin_rally_beat','回阵鼓点','utility','无','恢复','无','全体',42,5,0,1,1,1,0,'鼓点召回溃散者，并稳定同伴的魔力。'),
+    ('goblin_bone_prayer','骨铃祷言','magic','暗','元素','暗','远程',32,2,118,1,1,5,15,'祭司摇响骨铃，以暗光灼烧敌人的意志。'),
+    ('goblin_mire_blessing','沼影赐福','utility','无','强化','暗','全体',38,4,0,1,1,1,0,'将沼影附着于全队，提升暗影战斗适应性。'),
+    ('goblin_sacrificial_return','血祭回生','utility','无','复苏','暗','全体',55,6,0,1,1,1,0,'以血祭术唤回一名倒下的哥布林。'),
+    ('goblin_mudstar','沼火流星','magic','火','元素','火','全体',48,3,168,1,1,5,15,'抛出沼火流星，在敌阵中炸开。'),
+    ('goblin_ashbind','藤灰禁线','magic','木','元素','木','远程',42,3,130,1,1,5,15,'将藤灰化作禁线，削弱目标的行动与防守。'),
+    ('goblin_soulscorch','灼魂','magic','火','元素','火','远程',46,4,142,1,1,5,15,'灼烧目标灵魂；目标已有灼烧时伤害提高。'),
+    ('goblin_silentthroat','无声割喉','physical','刺击','刺击','无','近战',38,3,175,1,1,5,15,'刺客从死角割喉，专门收割未行动的虚弱目标。'),
+    ('goblin_shadowseam','影缝','utility','无','强化','暗','自身',25,3,0,1,1,1,0,'缝合自身影子，下一次攻击更容易暴击。'),
+    ('goblin_breathsteal','夺息','physical','刺击','刺击','无','近战',30,2,128,1,1,5,15,'刺入呼吸要害并从伤口夺取生命与魔力。'),
+    ('goblin_burrow','潜地突袭','physical','打击','打击','土','近战',42,3,155,1,1,5,15,'潜入泥土后从脚下突袭，带出土属性冲击。'),
+    ('goblin_earthfang','土棱壁','utility','无','强化','土','自身',45,4,0,1,1,1,0,'召出土棱壁承受攻击，破裂时反震敌人。'),
+    ('goblin_rockfall','崩岩葬','magic','土','元素','土','全体',58,5,165,1,1,5,15,'令古树根脉下的岩层崩落，掩埋整片敌阵。')
     ON DUPLICATE KEY UPDATE name=VALUES(name),category=VALUES(category),damage_type=VALUES(damage_type),skill_kind=VALUES(skill_kind),element=VALUES(element),range_type=VALUES(range_type),mana_cost=VALUES(mana_cost),cooldown_turns=VALUES(cooldown_turns),power=VALUES(power),description=VALUES(description)`);
   // 不直接攻击或造成伤害的祝福、治疗与自我强化统一归为辅助；元素、能量、灵异仍作为辅助技能的种类保留。
   await pool.query(`UPDATE skill_definitions SET category='utility',damage_type='无',skill_kind='元素',element=CASE code
@@ -1859,6 +1937,30 @@ export const initializeSchema = async (pool: Pool) => {
     WHEN 'skeleton_guard' THEN 174 WHEN 'death_knight_aura' THEN 165 WHEN 'necromancer_raise' THEN 216
     WHEN 'necromancer_rebirth' THEN 285 WHEN 'necromancer_purging_mist' THEN 204 ELSE mana_cost END
     WHERE category='utility'`);
+  // 密林深处的领悟技能使用玩家端档位；怪物同名招式仍保留独立的高强度战斗数值。
+  await pool.query(`INSERT INTO skill_definitions (code,name,category,damage_type,skill_kind,element,range_type,mana_cost,cooldown_turns,power,learn_cost,upgrade_cost,max_level,power_per_level,description) VALUES
+    ('goblin_player_crossrush','先锋突刺','physical','刺击','刺击','无','近战',90,2,116,2,1,5,10,'领悟先锋交叉步法后施展的突刺，并短暂扰乱目标站姿。'),
+    ('goblin_player_sawtooth','锯齿战斩','physical','斩击','斩击','无','近战',90,2,116,2,1,5,10,'以锯齿般的战斩撕开目标防线。'),
+    ('goblin_player_forest_bolt','林弦穿刺','physical','刺击','刺击','无','远程',90,2,116,2,1,5,10,'借林间回声射出一支穿刺箭，暴露目标破绽。'),
+    ('goblin_player_volatile_flask','爆燃投瓶','magic','火','元素','火','全体',160,3,126,2,1,5,10,'向敌阵投出不稳定的火药瓶，造成火属性范围伤害。'),
+    ('goblin_player_bloodrush','沸血冲锋','physical','刺击','刺击','无','近战',160,3,126,2,1,5,10,'燃起血性发起冲锋，命中后短暂提升自身攻势。'),
+    ('goblin_player_spiked_net','荆钉缚网','physical','打击','打击','无','远程',160,3,126,2,1,5,10,'抛出带倒刺的粗网打击并禁锢目标。'),
+    ('goblin_player_bone_prayer','骨铃暗祷','magic','暗','元素','暗','远程',90,2,116,2,1,5,10,'摇响骨铃，以暗属性祷言动摇目标防守。'),
+    ('goblin_player_soulscorch','灼魂火印','magic','火','元素','火','远程',210,4,134,2,1,5,10,'以火焰灼烧目标灵魂，留下持续的灼伤。'),
+    ('goblin_player_silentthroat','无声处决','physical','刺击','刺击','无','近战',160,3,126,2,1,5,10,'从死角刺向要害，使目标短暂陷入脆弱。'),
+    ('goblin_player_rockfall','崩岩术','magic','土','元素','土','全体',260,5,142,2,1,5,10,'唤起根脉下的岩层崩落，对敌阵造成土属性范围伤害。')
+    ON DUPLICATE KEY UPDATE name=VALUES(name),category=VALUES(category),damage_type=VALUES(damage_type),skill_kind=VALUES(skill_kind),element=VALUES(element),range_type=VALUES(range_type),mana_cost=VALUES(mana_cost),cooldown_turns=VALUES(cooldown_turns),power=VALUES(power),learn_cost=VALUES(learn_cost),upgrade_cost=VALUES(upgrade_cost),max_level=VALUES(max_level),power_per_level=VALUES(power_per_level),description=VALUES(description)`);
+  // 玩家主动技能必须由主手或副手的对应武器施展；怪物与被动、绑定技能不设置此限制。
+  await pool.query(`UPDATE skill_definitions SET required_weapon_type=CASE code
+    WHEN 'heavy_strike' THEN '拳刃' WHEN 'jump_strike' THEN '拳刃' WHEN 'shell_breaker' THEN '拳刃' WHEN 'goblin_player_spiked_net' THEN '拳刃'
+    WHEN 'armor_break' THEN '长剑' WHEN 'bloodletting' THEN '长剑' WHEN 'bite_slash' THEN '长剑' WHEN 'mist_step_slash' THEN '长剑' WHEN 'sweeping_slash' THEN '长剑' WHEN 'goblin_player_sawtooth' THEN '长剑'
+    WHEN 'charge' THEN '匕首' WHEN 'thorn_stab' THEN '匕首' WHEN 'piercing_thrust' THEN '匕首' WHEN 'toxic_edge' THEN '匕首' WHEN 'goblin_player_crossrush' THEN '匕首' WHEN 'goblin_player_forest_bolt' THEN '匕首' WHEN 'goblin_player_bloodrush' THEN '匕首' WHEN 'goblin_player_silentthroat' THEN '匕首'
+    WHEN 'warrior_taunt' THEN '盾牌' WHEN 'shield_counter' THEN '盾牌' WHEN 'guard_break' THEN '盾牌'
+    WHEN 'arcane_bolt' THEN '法杖' WHEN 'arcane_shackle' THEN '法杖' WHEN 'ember_burst' THEN '法杖' WHEN 'fireball' THEN '法杖' WHEN 'frost_bind' THEN '法杖' WHEN 'vine_bolt' THEN '法杖' WHEN 'moonlight_bolt' THEN '法杖' WHEN 'spore_bolt' THEN '法杖' WHEN 'echo_shock' THEN '法杖' WHEN 'wind_blade' THEN '法杖' WHEN 'thunder_lance' THEN '法杖' WHEN 'goblin_player_volatile_flask' THEN '法杖' WHEN 'goblin_player_soulscorch' THEN '法杖' WHEN 'goblin_player_rockfall' THEN '法杖'
+    WHEN 'war_cry' THEN '法书'
+    WHEN 'purifying_light' THEN '法球' WHEN 'healing_prayer' THEN '法球' WHEN 'blessing_aegis' THEN '法球' WHEN 'mana_benediction' THEN '法球' WHEN 'sanctified_bolt' THEN '法球' WHEN 'goblin_player_bone_prayer' THEN '法球'
+    ELSE NULL END
+    WHERE category IN ('physical','magic','utility')`);
   await pool.query(`DELETE se FROM skill_effects se JOIN skill_definitions s ON s.id=se.skill_id WHERE s.code IN ('slime_ember_blob','slime_amber_blob','slime_spark_blob','slime_acid_blob','slime_tide_blob','slime_frost_blob','slime_dusk_blob','black_slime_wave','black_slime_mend','black_slime_bind','skeleton_command','skeleton_impale','skeleton_quake','skeleton_guard','death_knight_charge','death_knight_aura','death_knight_cleave','death_knight_lance','death_knight_prison','necromancer_curse','necromancer_storm','necromancer_rebirth','necromancer_grave_bind','necromancer_purging_mist')`);
   await pool.query(`INSERT INTO skill_effects (skill_id,effect_id,effect_level,value_override,duration_override,target_scope,trigger_timing) VALUES
     ((SELECT id FROM skill_definitions WHERE code='slime_ember_blob'),(SELECT id FROM effect_definitions WHERE code='burn'),1,2,2,'enemy','on_hit'),
@@ -1887,28 +1989,99 @@ export const initializeSchema = async (pool: Pool) => {
     ((SELECT id FROM skill_definitions WHERE code='necromancer_grave_bind'),(SELECT id FROM effect_definitions WHERE code='bind'),1,20,2,'enemy','on_hit'),
     ((SELECT id FROM skill_definitions WHERE code='necromancer_grave_bind'),(SELECT id FROM effect_definitions WHERE code='stun'),1,30,1,'enemy','on_hit'),
     ((SELECT id FROM skill_definitions WHERE code='necromancer_purging_mist'),(SELECT id FROM effect_definitions WHERE code='purify'),1,1,0,'self','on_cast'),
-    ((SELECT id FROM skill_definitions WHERE code='necromancer_purging_mist'),(SELECT id FROM effect_definitions WHERE code='barrier'),1,25,2,'self','on_cast')
+    ((SELECT id FROM skill_definitions WHERE code='necromancer_purging_mist'),(SELECT id FROM effect_definitions WHERE code='barrier'),1,25,2,'self','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_colonel_crushing_wave'),(SELECT id FROM effect_definitions WHERE code='armor_shatter'),1,12,2,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_colonel_crushing_wave'),(SELECT id FROM effect_definitions WHERE code='imbalance'),1,14,2,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_colonel_toxic_barrage'),(SELECT id FROM effect_definitions WHERE code='burn'),1,5,3,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_colonel_toxic_barrage'),(SELECT id FROM effect_definitions WHERE code='slow'),1,14,2,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_crossrush'),(SELECT id FROM effect_definitions WHERE code='imbalance'),1,12,2,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_sawtooth'),(SELECT id FROM effect_definitions WHERE code='armor_shatter'),1,12,2,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_bloodrush'),(SELECT id FROM effect_definitions WHERE code='sprint'),1,20,2,'self','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_forest_bolt'),(SELECT id FROM effect_definitions WHERE code='vulnerability'),1,8,1,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_volatile_flask'),(SELECT id FROM effect_definitions WHERE code='burn'),1,6,3,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_death_oath'),(SELECT id FROM effect_definitions WHERE code='battle_cry'),1,15,1,'self','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_spiked_net'),(SELECT id FROM effect_definitions WHERE code='bind'),1,16,2,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_tripwire'),(SELECT id FROM effect_definitions WHERE code='imbalance'),1,12,2,'enemy','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_dust_retreat'),(SELECT id FROM effect_definitions WHERE code='mist_veil'),1,20,0,'self','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_shieldwall'),(SELECT id FROM effect_definitions WHERE code='barrier'),1,18,2,'self','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_pin_down'),(SELECT id FROM effect_definitions WHERE code='slow'),1,12,2,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_war_drum'),(SELECT id FROM effect_definitions WHERE code='battle_cry'),1,12,2,'self','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_rally_beat'),(SELECT id FROM effect_definitions WHERE code='mana_regeneration'),1,6,2,'self','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_bone_prayer'),(SELECT id FROM effect_definitions WHERE code='vulnerability'),1,10,2,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_mire_blessing'),(SELECT id FROM effect_definitions WHERE code='battle_cry'),1,10,2,'self','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_mudstar'),(SELECT id FROM effect_definitions WHERE code='burn'),1,6,3,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_ashbind'),(SELECT id FROM effect_definitions WHERE code='slow'),1,18,2,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_ashbind'),(SELECT id FROM effect_definitions WHERE code='vulnerability'),1,8,2,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_soulscorch'),(SELECT id FROM effect_definitions WHERE code='burn'),1,8,3,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_silentthroat'),(SELECT id FROM effect_definitions WHERE code='vulnerability'),1,12,2,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_shadowseam'),(SELECT id FROM effect_definitions WHERE code='shadow_pierce'),1,1,0,'self','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_burrow'),(SELECT id FROM effect_definitions WHERE code='barrier'),1,12,1,'self','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_earthfang'),(SELECT id FROM effect_definitions WHERE code='barrier'),1,20,2,'self','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_rockfall'),(SELECT id FROM effect_definitions WHERE code='stun'),1,18,1,'enemy','on_hit')
+    ON DUPLICATE KEY UPDATE value_override=VALUES(value_override),duration_override=VALUES(duration_override),target_scope=VALUES(target_scope),trigger_timing=VALUES(trigger_timing)`);
+  await pool.query(`INSERT INTO skill_effects (skill_id,effect_id,effect_level,value_override,duration_override,target_scope,trigger_timing) VALUES
+    ((SELECT id FROM skill_definitions WHERE code='goblin_player_crossrush'),(SELECT id FROM effect_definitions WHERE code='imbalance'),1,8,1,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_player_sawtooth'),(SELECT id FROM effect_definitions WHERE code='armor_shatter'),1,8,1,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_player_forest_bolt'),(SELECT id FROM effect_definitions WHERE code='vulnerability'),1,6,1,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_player_volatile_flask'),(SELECT id FROM effect_definitions WHERE code='burn'),1,3,2,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_player_bloodrush'),(SELECT id FROM effect_definitions WHERE code='sprint'),1,12,1,'self','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_player_spiked_net'),(SELECT id FROM effect_definitions WHERE code='bind'),1,10,1,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_player_bone_prayer'),(SELECT id FROM effect_definitions WHERE code='vulnerability'),1,8,1,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_player_soulscorch'),(SELECT id FROM effect_definitions WHERE code='burn'),1,4,2,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_player_silentthroat'),(SELECT id FROM effect_definitions WHERE code='vulnerability'),1,10,1,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='goblin_player_rockfall'),(SELECT id FROM effect_definitions WHERE code='stun'),1,12,1,'enemy','on_hit')
     ON DUPLICATE KEY UPDATE value_override=VALUES(value_override),duration_override=VALUES(duration_override),target_scope=VALUES(target_scope),trigger_timing=VALUES(trigger_timing)`);
   await pool.query(`INSERT INTO monster_templates (code,name,monster_class,level,constitution,spirit,strength,intelligence,agility,perception,constitution_growth,spirit_growth,strength_growth,intelligence_growth,agility_growth,perception_growth,skill_sequence,experience,drops_json,weakness_json,resistance_json,element_mastery_json,element_resistance_json) VALUES
-    ('slime_red','红色史莱姆','normal',1,10,5,7,7,5,5,.7,.4,.5,.5,.3,.3,JSON_ARRAY('slime_bump','slime_ember_blob'),38,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.34,'min_quantity',2,'max_quantity',7),JSON_OBJECT('code','slime_gel','chance',.55,'min_quantity',1,'max_quantity',2)),JSON_ARRAY('冰'),JSON_ARRAY('火'),JSON_OBJECT('火',8),JSON_OBJECT('火',8)),
-    ('slime_orange','橙色史莱姆','normal',2,13,5,8,6,4,5,.8,.3,.6,.4,.2,.3,JSON_ARRAY('slime_bump','slime_amber_blob'),44,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.36,'min_quantity',3,'max_quantity',8),JSON_OBJECT('code','slime_gel','chance',.60,'min_quantity',1,'max_quantity',2)),JSON_ARRAY('水'),JSON_ARRAY('土'),JSON_OBJECT('土',8),JSON_OBJECT('土',8)),
-    ('slime_yellow','黄色史莱姆','normal',3,8,7,6,9,9,8,.5,.5,.4,.7,.7,.6,JSON_ARRAY('slime_bump','slime_spark_blob'),50,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.38,'min_quantity',3,'max_quantity',9),JSON_OBJECT('code','slime_gel','chance',.65,'min_quantity',1,'max_quantity',3)),JSON_ARRAY('土'),JSON_ARRAY('雷'),JSON_OBJECT('雷',9),JSON_OBJECT('雷',9)),
-    ('slime_green','绿色史莱姆','normal',4,12,8,7,10,5,7,.8,.6,.5,.8,.3,.5,JSON_ARRAY('slime_bump','slime_acid_blob'),57,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.40,'min_quantity',4,'max_quantity',10),JSON_OBJECT('code','slime_gel','chance',.70,'min_quantity',1,'max_quantity',3)),JSON_ARRAY('火'),JSON_ARRAY('木'),JSON_OBJECT('木',10),JSON_OBJECT('木',10)),
-    ('slime_cyan','青色史莱姆','normal',5,10,11,6,12,8,8,.6,.8,.4,.9,.6,.6,JSON_ARRAY('slime_bump','slime_tide_blob'),65,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.42,'min_quantity',4,'max_quantity',12),JSON_OBJECT('code','slime_gel','chance',.75,'min_quantity',2,'max_quantity',3)),JSON_ARRAY('雷'),JSON_ARRAY('水'),JSON_OBJECT('水',12),JSON_OBJECT('水',12)),
-    ('slime_blue','蓝色史莱姆','normal',6,15,10,8,11,4,6,1,.7,.6,.8,.3,.4,JSON_ARRAY('slime_bump','slime_frost_blob'),74,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.44,'min_quantity',5,'max_quantity',13),JSON_OBJECT('code','slime_gel','chance',.80,'min_quantity',2,'max_quantity',4)),JSON_ARRAY('火'),JSON_ARRAY('冰'),JSON_OBJECT('冰',12),JSON_OBJECT('冰',12)),
-    ('slime_purple','紫色史莱姆','normal',8,11,15,6,16,7,12,.7,1.1,.4,1.2,.5,.9,JSON_ARRAY('slime_bump','slime_dusk_blob'),92,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.46,'min_quantity',6,'max_quantity',15),JSON_OBJECT('code','slime_gel','chance',.85,'min_quantity',2,'max_quantity',4)),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('暗',15),JSON_OBJECT('暗',15)),
-    ('black_slime','黑暗史莱姆','boss',10,31,22,20,26,12,18,1.5,1.3,1.1,1.5,.6,1,JSON_ARRAY('black_slime_crush','black_slime_bind','black_slime_wave','black_slime_mend'),260,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',1,'min_quantity',30,'max_quantity',70),JSON_OBJECT('code','silver_coin','chance',.12,'quantity',1),JSON_OBJECT('code','slime_gel','chance',1,'min_quantity',10,'max_quantity',18)),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('暗',25),JSON_OBJECT('暗',25)),
+    ('slime_red','红色史莱姆','normal',1,10,5,7,7,5,5,.7,.4,.5,.5,.3,.3,JSON_ARRAY('slime_bump','slime_ember_blob'),38,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.34,'min_quantity',2,'max_quantity',7),JSON_OBJECT('code','slime_gel','chance',.8,'exclusive_group','slime_gel','min_quantity',1,'max_quantity',2),JSON_OBJECT('code','red_slime_gel','chance',.2,'exclusive_group','slime_gel','quantity',1)),JSON_ARRAY('冰'),JSON_ARRAY('火'),JSON_OBJECT('火',8),JSON_OBJECT('火',8)),
+    ('slime_orange','橙色史莱姆','normal',2,13,5,8,6,4,5,.8,.3,.6,.4,.2,.3,JSON_ARRAY('slime_bump','slime_amber_blob'),44,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.36,'min_quantity',3,'max_quantity',8),JSON_OBJECT('code','slime_gel','chance',.8,'exclusive_group','slime_gel','min_quantity',1,'max_quantity',2),JSON_OBJECT('code','orange_slime_gel','chance',.2,'exclusive_group','slime_gel','quantity',1)),JSON_ARRAY('水'),JSON_ARRAY('土'),JSON_OBJECT('土',8),JSON_OBJECT('土',8)),
+    ('slime_yellow','黄色史莱姆','normal',3,8,7,6,9,9,8,.5,.5,.4,.7,.7,.6,JSON_ARRAY('slime_bump','slime_spark_blob'),50,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.38,'min_quantity',3,'max_quantity',9),JSON_OBJECT('code','slime_gel','chance',.8,'exclusive_group','slime_gel','min_quantity',1,'max_quantity',3),JSON_OBJECT('code','yellow_slime_gel','chance',.2,'exclusive_group','slime_gel','quantity',1)),JSON_ARRAY('土'),JSON_ARRAY('雷'),JSON_OBJECT('雷',9),JSON_OBJECT('雷',9)),
+    ('slime_green','绿色史莱姆','normal',4,12,8,7,10,5,7,.8,.6,.5,.8,.3,.5,JSON_ARRAY('slime_bump','slime_acid_blob'),57,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.40,'min_quantity',4,'max_quantity',10),JSON_OBJECT('code','slime_gel','chance',.8,'exclusive_group','slime_gel','min_quantity',1,'max_quantity',3),JSON_OBJECT('code','green_slime_gel','chance',.2,'exclusive_group','slime_gel','quantity',1)),JSON_ARRAY('火'),JSON_ARRAY('木'),JSON_OBJECT('木',10),JSON_OBJECT('木',10)),
+    ('slime_cyan','青色史莱姆','normal',5,10,11,6,12,8,8,.6,.8,.4,.9,.6,.6,JSON_ARRAY('slime_bump','slime_tide_blob'),65,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.42,'min_quantity',4,'max_quantity',12),JSON_OBJECT('code','slime_gel','chance',.8,'exclusive_group','slime_gel','min_quantity',2,'max_quantity',3),JSON_OBJECT('code','cyan_slime_gel','chance',.2,'exclusive_group','slime_gel','quantity',1)),JSON_ARRAY('雷'),JSON_ARRAY('水'),JSON_OBJECT('水',12),JSON_OBJECT('水',12)),
+    ('slime_blue','蓝色史莱姆','normal',6,15,10,8,11,4,6,1,.7,.6,.8,.3,.4,JSON_ARRAY('slime_bump','slime_frost_blob'),74,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.44,'min_quantity',5,'max_quantity',13),JSON_OBJECT('code','slime_gel','chance',.8,'exclusive_group','slime_gel','min_quantity',2,'max_quantity',4),JSON_OBJECT('code','blue_slime_gel','chance',.2,'exclusive_group','slime_gel','quantity',1)),JSON_ARRAY('火'),JSON_ARRAY('冰'),JSON_OBJECT('冰',12),JSON_OBJECT('冰',12)),
+    ('slime_purple','紫色史莱姆','normal',8,11,15,6,16,7,12,.7,1.1,.4,1.2,.5,.9,JSON_ARRAY('slime_bump','slime_dusk_blob'),92,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.46,'min_quantity',6,'max_quantity',15),JSON_OBJECT('code','slime_gel','chance',.95,'exclusive_group','slime_gel','min_quantity',2,'max_quantity',4),JSON_OBJECT('code','purple_slime_gel','chance',.05,'exclusive_group','slime_gel','quantity',1)),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('暗',15),JSON_OBJECT('暗',15)),
+    ('black_slime','黑暗史莱姆','boss',10,31,22,20,26,12,18,1.5,1.3,1.1,1.5,.6,1,JSON_ARRAY('black_slime_crush','black_slime_bind','black_slime_wave','black_slime_mend'),260,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',1,'min_quantity',30,'max_quantity',70),JSON_OBJECT('code','silver_coin','chance',.12,'quantity',1),JSON_OBJECT('code','slime_gel','chance',.95,'exclusive_group','slime_gel','min_quantity',10,'max_quantity',18),JSON_OBJECT('code','black_slime_gel','chance',.05,'exclusive_group','slime_gel','min_quantity',2,'max_quantity',3)),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('暗',25),JSON_OBJECT('暗',25)),
     ('skeleton','骷髅','large',16,24,9,27,8,15,12,1.1,.4,1.3,.3,.7,.5,JSON_ARRAY('skeleton_cleave'),180,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.55,'min_quantity',8,'max_quantity',18)),JSON_ARRAY('打击','光'),JSON_ARRAY('刺击'),JSON_OBJECT(),JSON_OBJECT('暗',8)),
     ('undead','亡灵','large',17,20,22,16,26,14,23,.9,1.2,.8,1.5,.6,1.2,JSON_ARRAY('skeleton_bolt','slime_dusk_blob'),210,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.58,'min_quantity',10,'max_quantity',22),JSON_OBJECT('code','silver_coin','chance',.06,'quantity',1)),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('暗',22),JSON_OBJECT('暗',18)),
     ('skeleton_warrior','骷髅战士','elite',19,33,12,37,10,20,16,1.5,.5,1.7,.4,.9,.7,JSON_ARRAY('skeleton_cleave','skeleton_execution'),380,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.8,'min_quantity',20,'max_quantity',42),JSON_OBJECT('code','silver_coin','chance',.18,'quantity',1)),JSON_ARRAY('打击','光'),JSON_ARRAY('刺击'),JSON_OBJECT(),JSON_OBJECT('暗',12)),
     ('death_wight','死灵','elite',20,28,30,19,33,17,28,1.2,1.6,.8,1.8,.7,1.5,JSON_ARRAY('skeleton_bolt','necromancer_curse'),440,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',.85,'min_quantity',25,'max_quantity',50),JSON_OBJECT('code','silver_coin','chance',.22,'quantity',1)),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('暗',30),JSON_OBJECT('暗',25)),
     ('skeleton_general','骷髅将军','boss',22,48,21,55,18,24,25,2,.8,2.2,.7,1,.9,JSON_ARRAY('skeleton_command','skeleton_quake','skeleton_cleave','skeleton_impale','skeleton_guard','skeleton_execution'),760,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',1,'min_quantity',80,'max_quantity',160),JSON_OBJECT('code','silver_coin','chance',.45,'min_quantity',1,'max_quantity',3)),JSON_ARRAY('打击','光'),JSON_ARRAY('刺击'),JSON_OBJECT(),JSON_OBJECT('暗',18)),
     ('death_knight','死灵骑士','boss',22,44,29,49,28,31,27,1.8,1.3,2,1.2,1.4,1.1,JSON_ARRAY('death_knight_charge','death_knight_prison','death_knight_cleave','skeleton_bolt','death_knight_aura','death_knight_lance'),820,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',1,'min_quantity',85,'max_quantity',170),JSON_OBJECT('code','silver_coin','chance',.5,'min_quantity',1,'max_quantity',3)),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('暗',38),JSON_OBJECT('暗',28)),
+    ('goblin_vanguard','哥布林先锋','large',18,12,10,16,9,15,14,.95,.65,1.25,.55,1.20,1.05,JSON_ARRAY('goblin_crossrush','goblin_marking_horn','goblin_dust_retreat'),150,JSON_ARRAY(JSON_OBJECT('code','goblin_ear','chance',.80,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_scrap_iron','chance',.50,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_bowstring','chance',.18,'quantity',1)),JSON_ARRAY('暗'),JSON_ARRAY('光'),JSON_OBJECT('暗',6),JSON_OBJECT('暗',4)),
+    ('goblin_warrior','哥布林战士','large',19,18,9,21,7,11,10,1.45,.55,1.55,.35,.80,.70,JSON_ARRAY('goblin_sawtooth','goblin_crossrush','goblin_pin_down'),175,JSON_ARRAY(JSON_OBJECT('code','goblin_ear','chance',.85,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_scrap_iron','chance',.55,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_whetstone','chance',.45,'quantity',1)),JSON_ARRAY('暗'),JSON_ARRAY('光'),JSON_OBJECT('暗',7),JSON_OBJECT('暗',5)),
+    ('goblin_archer','哥布林弓箭手','large',19,10,12,13,8,22,21,.75,.80,.95,.50,1.55,1.50,JSON_ARRAY('goblin_forest_bolt','goblin_splitshot','goblin_marking_horn'),185,JSON_ARRAY(JSON_OBJECT('code','goblin_ear','chance',.70,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_bowstring','chance',.60,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_scrap_iron','chance',.25,'quantity',1)),JSON_ARRAY('土'),JSON_ARRAY('火'),JSON_OBJECT('风',8),JSON_OBJECT('风',6)),
+    ('goblin_bomber','哥布林自爆兵','large',20,20,6,20,5,8,7,1.55,.35,1.50,.25,.50,.45,JSON_ARRAY('goblin_volatile_flask','goblin_crossrush'),220,JSON_ARRAY(JSON_OBJECT('code','goblin_ear','chance',.70,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_blast_core','chance',.65,'quantity',1),JSON_OBJECT('code','goblin_scrap_iron','chance',.35,'quantity',1)),JSON_ARRAY('水'),JSON_ARRAY('火'),JSON_OBJECT('火',14),JSON_OBJECT('火',-8)),
+    ('goblin_daredevil','哥布林敢死队','large',20,16,8,23,6,17,12,1.20,.45,1.70,.35,1.10,.80,JSON_ARRAY('goblin_bloodrush','goblin_death_oath','goblin_sawtooth'),255,JSON_ARRAY(JSON_OBJECT('code','goblin_ear','chance',.80,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_blast_core','chance',.55,'quantity',1),JSON_OBJECT('code','goblin_whetstone','chance',.50,'quantity',1)),JSON_ARRAY('暗'),JSON_ARRAY('水'),JSON_OBJECT('火',10),JSON_OBJECT('火',-6)),
+    ('goblin_drummer','哥布林战鼓手','large',19,14,18,12,20,16,17,.90,1.40,.50,1.35,1.00,1.20,JSON_ARRAY('goblin_war_drum','goblin_rally_beat','goblin_marking_horn'),245,JSON_ARRAY(JSON_OBJECT('code','goblin_ear','chance',.75,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_drumhide','chance',.70,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_command_seal','chance',.08,'quantity',1)),JSON_ARRAY('刺击'),JSON_ARRAY('暗'),JSON_OBJECT('暗',12),JSON_OBJECT('暗',5)),
+    ('goblin_shieldbearer','哥布林盾卫','large',20,24,10,18,6,9,11,1.80,.55,1.30,.30,.40,.70,JSON_ARRAY('goblin_shieldwall','goblin_pin_down','goblin_sawtooth'),280,JSON_ARRAY(JSON_OBJECT('code','goblin_ear','chance',.85,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_scrap_iron','chance',.65,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_drumhide','chance',.35,'quantity',1)),JSON_ARRAY('魔法'),JSON_ARRAY('打击'),JSON_OBJECT('土',10),JSON_OBJECT('土',8)),
+    ('goblin_trapper','哥布林网罗工兵','large',19,13,16,14,18,18,22,.85,1.20,.60,1.20,1.25,1.55,JSON_ARRAY('goblin_spiked_net','goblin_tripwire','goblin_dust_retreat'),265,JSON_ARRAY(JSON_OBJECT('code','goblin_ear','chance',.75,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_bowstring','chance',.55,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_earth_crystal','chance',.55,'min_quantity',1,'max_quantity',2)),JSON_ARRAY('火'),JSON_ARRAY('土'),JSON_OBJECT('土',10),JSON_OBJECT('土',5)),
+    ('goblin_priest','哥布林祭司','elite',21,15,24,8,25,12,18,1.00,1.80,.35,1.80,.70,1.20,JSON_ARRAY('goblin_bone_prayer','goblin_mire_blessing','goblin_sacrificial_return'),330,JSON_ARRAY(JSON_OBJECT('code','goblin_ear','chance',.85,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_totem_shard','chance',.55,'quantity',1),JSON_OBJECT('code','goblin_command_seal','chance',.10,'quantity',1)),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('暗',22),JSON_OBJECT('光',12)),
+    ('goblin_mage','哥布林法师','elite',21,10,28,7,30,14,20,.70,2.00,.30,2.10,.80,1.35,JSON_ARRAY('goblin_mudstar','goblin_ashbind','goblin_soulscorch'),370,JSON_ARRAY(JSON_OBJECT('code','goblin_ear','chance',.80,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_totem_shard','chance',.60,'quantity',1),JSON_OBJECT('code','goblin_blast_core','chance',.35,'quantity',1)),JSON_ARRAY('刺击'),JSON_ARRAY('火'),JSON_OBJECT('火',22,'暗',10),JSON_OBJECT('火',10)),
+    ('goblin_assassin','哥布林刺客','elite',22,10,13,19,10,28,26,.70,.90,1.30,.55,2.00,1.80,JSON_ARRAY('goblin_silentthroat','goblin_shadowseam','goblin_breathsteal'),405,JSON_ARRAY(JSON_OBJECT('code','goblin_ear','chance',.90,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_shadowcloth','chance',.60,'quantity',1),JSON_OBJECT('code','goblin_whetstone','chance',.22,'quantity',1)),JSON_ARRAY('打击'),JSON_ARRAY('刺击'),JSON_OBJECT('暗',24),JSON_OBJECT('暗',12)),
+    ('goblin_earthshaper','哥布林土行者','elite',22,28,15,20,10,9,14,1.80,1.00,1.45,.55,.45,.90,JSON_ARRAY('goblin_burrow','goblin_earthfang','goblin_rockfall'),445,JSON_ARRAY(JSON_OBJECT('code','goblin_ear','chance',.90,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_earth_crystal','chance',.70,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_scrap_iron','chance',.45,'quantity',1)),JSON_ARRAY('水'),JSON_ARRAY('土'),JSON_OBJECT('土',28),JSON_OBJECT('土',18)),
+    ('goblin_colonel','精英·哥布林上校','elite',25,32,30,29,25,24,27,2.50,2.00,2.30,1.60,1.50,1.80,JSON_ARRAY('goblin_colonel_crushing_wave','goblin_colonel_toxic_barrage'),850,JSON_ARRAY(JSON_OBJECT('code','goblin_command_seal','chance',1,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_colonel_insignia','chance',1,'quantity',1),JSON_OBJECT('code','silver_coin','chance',.45,'min_quantity',1,'max_quantity',2)),JSON_ARRAY('打击','光'),JSON_ARRAY('刺击'),JSON_OBJECT('暗',20),JSON_OBJECT('暗',12)),
     ('necromancer_uz','死灵法师·乌兹','boss',32,52,72,28,78,34,61,2,2.8,1,3,1.2,2.1,JSON_ARRAY('necromancer_raise','necromancer_curse','necromancer_grave_bind','necromancer_bolt','necromancer_storm','necromancer_soul_drain','necromancer_rebirth','necromancer_purging_mist'),1800,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',1,'min_quantity',160,'max_quantity',340),JSON_OBJECT('code','silver_coin','chance',.75,'min_quantity',2,'max_quantity',6)),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('暗',70),JSON_OBJECT('暗',55))
     ON DUPLICATE KEY UPDATE name=VALUES(name),monster_class=VALUES(monster_class),level=VALUES(level),constitution=VALUES(constitution),spirit=VALUES(spirit),strength=VALUES(strength),intelligence=VALUES(intelligence),agility=VALUES(agility),perception=VALUES(perception),constitution_growth=VALUES(constitution_growth),spirit_growth=VALUES(spirit_growth),strength_growth=VALUES(strength_growth),intelligence_growth=VALUES(intelligence_growth),agility_growth=VALUES(agility_growth),perception_growth=VALUES(perception_growth),skill_sequence=VALUES(skill_sequence),experience=VALUES(experience),drops_json=VALUES(drops_json),weakness_json=VALUES(weakness_json),resistance_json=VALUES(resistance_json),element_mastery_json=VALUES(element_mastery_json),element_resistance_json=VALUES(element_resistance_json)`);
+  // 普通哥布林沿用 8–22 级兵种档位；编队等级只在刷新时额外覆盖。
+  await pool.query(`UPDATE monster_templates SET level=CASE code
+    WHEN 'goblin_vanguard' THEN 9 WHEN 'goblin_warrior' THEN 11 WHEN 'goblin_archer' THEN 12 WHEN 'goblin_bomber' THEN 13
+    WHEN 'goblin_daredevil' THEN 15 WHEN 'goblin_drummer' THEN 14 WHEN 'goblin_shieldbearer' THEN 16 WHEN 'goblin_trapper' THEN 14
+    WHEN 'goblin_priest' THEN 17 WHEN 'goblin_mage' THEN 18 WHEN 'goblin_assassin' THEN 19 WHEN 'goblin_earthshaper' THEN 20 ELSE level END
+    WHERE code IN ('goblin_vanguard','goblin_warrior','goblin_archer','goblin_bomber','goblin_daredevil','goblin_drummer','goblin_shieldbearer','goblin_trapper','goblin_priest','goblin_mage','goblin_assassin','goblin_earthshaper')`);
   await pool.query(`UPDATE monster_spawns s JOIN monster_templates t ON t.id=s.template_id
     SET s.skill_sequence=t.skill_sequence WHERE s.defeated_at IS NULL AND t.code IN ('black_slime','skeleton_general','death_knight','necromancer_uz')`);
   // 城镇追捕专用执法者：只在三星及以上通缉者移动时临时生成，绝不加入地图怪物池或地图 NPC。
+  await pool.query(`DELETE r FROM monster_skill_learn_rules r JOIN monster_templates t ON t.id=r.monster_template_id WHERE t.code IN ('goblin_vanguard','goblin_warrior','goblin_archer','goblin_bomber','goblin_daredevil','goblin_trapper','goblin_priest','goblin_mage','goblin_assassin','goblin_earthshaper')`);
+  await pool.query(`INSERT INTO monster_skill_learn_rules (monster_template_id,source_skill_code,skill_id,chance) VALUES
+    ((SELECT id FROM monster_templates WHERE code='goblin_vanguard'),'goblin_crossrush',(SELECT id FROM skill_definitions WHERE code='goblin_player_crossrush'),0.18000),
+    ((SELECT id FROM monster_templates WHERE code='goblin_warrior'),'goblin_sawtooth',(SELECT id FROM skill_definitions WHERE code='goblin_player_sawtooth'),0.18000),
+    ((SELECT id FROM monster_templates WHERE code='goblin_archer'),'goblin_forest_bolt',(SELECT id FROM skill_definitions WHERE code='goblin_player_forest_bolt'),0.16000),
+    ((SELECT id FROM monster_templates WHERE code='goblin_bomber'),'goblin_volatile_flask',(SELECT id FROM skill_definitions WHERE code='goblin_player_volatile_flask'),0.12000),
+    ((SELECT id FROM monster_templates WHERE code='goblin_daredevil'),'goblin_bloodrush',(SELECT id FROM skill_definitions WHERE code='goblin_player_bloodrush'),0.15000),
+    ((SELECT id FROM monster_templates WHERE code='goblin_trapper'),'goblin_spiked_net',(SELECT id FROM skill_definitions WHERE code='goblin_player_spiked_net'),0.14000),
+    ((SELECT id FROM monster_templates WHERE code='goblin_priest'),'goblin_bone_prayer',(SELECT id FROM skill_definitions WHERE code='goblin_player_bone_prayer'),0.10000),
+    ((SELECT id FROM monster_templates WHERE code='goblin_mage'),'goblin_soulscorch',(SELECT id FROM skill_definitions WHERE code='goblin_player_soulscorch'),0.12000),
+    ((SELECT id FROM monster_templates WHERE code='goblin_assassin'),'goblin_silentthroat',(SELECT id FROM skill_definitions WHERE code='goblin_player_silentthroat'),0.14000),
+    ((SELECT id FROM monster_templates WHERE code='goblin_earthshaper'),'goblin_rockfall',(SELECT id FROM skill_definitions WHERE code='goblin_player_rockfall'),0.10000)`);
   await pool.query(`INSERT INTO monster_templates (code,name,monster_class,level,constitution,spirit,strength,intelligence,agility,perception,constitution_growth,spirit_growth,strength_growth,intelligence_growth,agility_growth,perception_growth,skill_sequence,experience,drops_json,weakness_json,resistance_json,element_mastery_json,element_resistance_json) VALUES
     ('city_guard_gareth','剑盾巡卫·加雷斯','elite',20,34,18,37,17,25,28,1.4,.7,1.5,.6,1,1.1,JSON_ARRAY('shield_counter','guard_break','sweeping_slash'),0,JSON_ARRAY(),JSON_ARRAY('魔法'),JSON_ARRAY('刺击'),JSON_OBJECT(),JSON_OBJECT()),
     ('city_ranger_vera','缉捕游侠·薇拉','elite',21,23,24,27,28,38,42,.8,1,1,1.1,1.6,1.8,JSON_ARRAY('wind_blade','piercing_thrust','backstab'),0,JSON_ARRAY(),JSON_ARRAY('冰'),JSON_ARRAY('风'),JSON_OBJECT('风',18),JSON_OBJECT('风',12)),
@@ -1954,7 +2127,20 @@ export const initializeSchema = async (pool: Pool) => {
       ELSE JSON_ARRAY_APPEND(COALESCE(skill_sequence,JSON_ARRAY()),'$', 'boss_mana_charge')
     END
     WHERE monster_class='boss'`);
-  await pool.query(`UPDATE monster_spawns s JOIN monster_templates t ON t.id=s.template_id
+  await pool.query(`INSERT IGNORE INTO monster_encounter_texts (monster_template_id,description) VALUES
+    ((SELECT id FROM monster_templates WHERE code='goblin_vanguard'),'林下的号角先响了，哥布林先锋从古树根后列阵。'),
+    ((SELECT id FROM monster_templates WHERE code='goblin_warrior'),'粗制武器在树根间交错，哥布林战士封住了退路。'),
+    ((SELECT id FROM monster_templates WHERE code='goblin_archer'),'树冠缝隙里亮起一排冷硬的箭镞。'),
+    ((SELECT id FROM monster_templates WHERE code='goblin_bomber'),'一只背着爆裂罐的哥布林摇晃着冲来。'),
+    ((SELECT id FROM monster_templates WHERE code='goblin_daredevil'),'不要命的鼓噪从黑暗里逼近。'),
+    ((SELECT id FROM monster_templates WHERE code='goblin_drummer'),'沉闷的战鼓让整支小队同时抬头。'),
+    ((SELECT id FROM monster_templates WHERE code='goblin_shieldbearer'),'木盾与菌壳拼成一道低矮的墙。'),
+    ((SELECT id FROM monster_templates WHERE code='goblin_trapper'),'脚下的藤索已经被悄悄拉紧。'),
+    ((SELECT id FROM monster_templates WHERE code='goblin_priest'),'骨串与苔藓祭坛在阴影中发出低语。'),
+    ((SELECT id FROM monster_templates WHERE code='goblin_mage'),'暗绿的火星在哥布林法师掌间聚集。'),
+    ((SELECT id FROM monster_templates WHERE code='goblin_assassin'),'你只看见一闪而过的湿冷刀光。'),
+    ((SELECT id FROM monster_templates WHERE code='goblin_earthshaper'),'地面像活物一样在它脚下隆起。'),
+    ((SELECT id FROM monster_templates WHERE code='goblin_colonel'),'军靴踩碎枯叶，哥布林上校率队现身。')`);  await pool.query(`UPDATE monster_spawns s JOIN monster_templates t ON t.id=s.template_id
     SET s.skill_sequence=CASE
       WHEN s.skill_sequence IS NULL THEN t.skill_sequence
       WHEN JSON_CONTAINS(s.skill_sequence,JSON_QUOTE('boss_mana_charge')) THEN s.skill_sequence

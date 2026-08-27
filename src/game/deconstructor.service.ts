@@ -114,7 +114,8 @@ const forgeMaterialProfiles: Record<string, ForgeDeconstructionOutput[]> = {
   moon_silver: [{ code: 'metal_element_dust', decay: 0.8, limit: 9 }, { code: 'ice_element_dust', decay: 0.8, limit: 9 }, { code: 'dark_element_dust', decay: 0.25, limit: 3 }],
   sun_gold: [{ code: 'metal_element_dust', decay: 0.9, limit: 11 }, { code: 'fire_element_dust', decay: 0.9, limit: 11 }, { code: 'thunder_element_dust', decay: 0.9, limit: 11 }, { code: 'light_element_dust', decay: 0.3, limit: 5 }]
 };
-const deconstructableCodes = [...Object.keys(ordinaryProfiles), ...specialMaterials, ...Object.keys(forgeMaterialProfiles)];
+const coloredSlimeGelDust: Record<string, string> = { red_slime_gel: 'fire_element_dust', orange_slime_gel: 'metal_element_dust', yellow_slime_gel: 'thunder_element_dust', green_slime_gel: 'wood_element_dust', cyan_slime_gel: 'water_element_dust', blue_slime_gel: 'ice_element_dust', purple_slime_gel: 'dark_element_dust', black_slime_gel: 'dark_element_dust' };
+const deconstructableCodes = [...Object.keys(ordinaryProfiles), ...specialMaterials, ...Object.keys(forgeMaterialProfiles), ...Object.keys(coloredSlimeGelDust)];
 const categoryType: Record<DeconstructionCategory, string> = { 装备: 'equipment', 道具: 'consumable', 材料: 'material' };
 const requiredFor = (level: number) => level === 1 ? 10 : level === 2 ? 50 : level === 3 ? 200 : level === 4 ? 1000 : 1000 * Math.pow(5, level - 4);
 
@@ -228,8 +229,11 @@ export const deconstructItems = async (qqUserId: string, itemId: number, quantit
   const outputs = new Map<string, number>(); const add = (code: string, amount: number) => outputs.set(code, (outputs.get(code) ?? 0) + amount);
   const bonusMultiplier = 1 + progress.bonus / 100;
   for (let index = 0; index < quantity; index += 1) {
+    const slimeDust = coloredSlimeGelDust[item.code];
     const ordinary = ordinaryProfiles[item.code];
-    if (ordinary) {
+    if (slimeDust) {
+      add(slimeDust, 1); if (Math.random() < .8) add('blood_residue', 1); if (Math.random() < .4) add('energy_ember', 1);
+    } else if (ordinary) {
       add('blood_residue', chainedYield(Math.min(1, ordinary.blood * bonusMultiplier), 0.5, 3));
       add('energy_ember', chainedYield(Math.min(1, ordinary.ember * bonusMultiplier), 0.5, 3));
     } else if (forgeMaterialProfiles[item.code]) {

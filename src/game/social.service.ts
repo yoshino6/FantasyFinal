@@ -69,6 +69,11 @@ const relationshipFor = async (connection: PoolConnection, leftId: number, right
   return relationship;
 };
 
+export const isFriendRelation = async (connection: PoolConnection, leftId: number, rightId: number) => {
+  const pair = pairOf(leftId, rightId);
+  const [rows] = await connection.execute<RowDataPacket[]>(`SELECT 1 FROM player_relationships WHERE character_low_id=? AND character_high_id=? AND status IN ('friend','oath') LIMIT 1`, [pair.low, pair.high]);
+  return Boolean(rows[0]);
+};
 const eventFor = async (connection: PoolConnection, actor: CharacterRow, eventType: string, payload: Record<string, unknown>, target?: CharacterRow) => {
   await connection.execute('INSERT INTO player_events (player_id,event_type,payload) VALUES (?, ?, ?)', [actor.player_id, eventType, JSON.stringify({ ...payload, targetCharacterId: target?.id ?? null })]);
   if (target) await connection.execute('INSERT INTO player_events (player_id,event_type,payload) VALUES (?, ?, ?)', [target.player_id, eventType, JSON.stringify({ ...payload, actorCharacterId: actor.id })]);

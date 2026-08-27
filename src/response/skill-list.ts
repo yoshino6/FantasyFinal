@@ -21,7 +21,7 @@ const effectDescription = (effect: SkillEffectDetail) => {
     case 'mist_veil': return `释放后，使自身下一次攻击伤害提高${value}%。`;
     case 'shadow_pierce': return '释放后，使自身下一次攻击必定暴击。';
     case 'battle_cry': return `释放后，使全队物攻、魔攻提高${value}%${duration}。`;
-    case 'barrier': return `释放后，使目标获得${value}%最大生命值护盾${duration}。`;
+    case 'barrier': return `释放后，使目标获得${value}%伤害减免${duration}。`;
     case 'regeneration': return `释放后，使目标每回合恢复${value}%最大生命${duration}。`;
     case 'mana_regeneration': return `释放后，使目标每回合恢复${value}%最大魔力${duration}。`;
     case 'purify': return '释放后，祛除目标全部异常状态。';
@@ -183,7 +183,7 @@ export const skillDetailHandler = async () => {
       } as const;
       const category = categoryNames[skill.category] ?? '特殊';
       const markdown = Format.createMarkdown().addTitle('技能详情').addNewline().addNewline().addText(`【${skill.name}】Lv.${skill.level}\n`)
-        .addBlockquote(`类别：${category}`).addNewline().addBlockquote(`种类：${skill.skill_kind}`).addNewline().addBlockquote(`属性：${skill.element}`).addNewline().addBlockquote(`距离：${skill.range_type}`).addNewline().addBlockquote(`威力：${skill.actualPower}`).addNewline().addBlockquote(`冷却：${skill.actualCooldown}`).addNewline().addBlockquote(`蓝耗：${skill.actualManaCost}`).addNewline().addBlockquote(`吟咏：${skill.actualChant}`).addNewline().addBlockquote('效果：').addNewline();
+        .addBlockquote(`类别：${category}`).addNewline().addBlockquote(`种类：${skill.skill_kind}`).addNewline().addBlockquote(`属性：${skill.element}`).addNewline().addBlockquote(`距离：${skill.range_type}`).addNewline().addBlockquote(`适配武器：${skill.required_weapon_type ?? '无'}`).addNewline().addBlockquote(`威力：${skill.actualPower}`).addNewline().addBlockquote(`冷却：${skill.actualCooldown}`).addNewline().addBlockquote(`蓝耗：${skill.actualManaCost}`).addNewline().addBlockquote(`吟咏：${skill.actualChant}`).addNewline().addBlockquote('效果：').addNewline();
       const effects = skill.effectDetails as SkillEffectDetail[];
       if (!effects.length) markdown.addBlockquote('无').addNewline();
       else effects.forEach((effect, index) => markdown.addText(`${'①②③④⑤'.charAt(index)}${effect.name}\n`).addBlockquote(effectDescription(effect)).addNewline());
@@ -210,7 +210,7 @@ export const skillDetailHandler = async () => {
     const markdown = Format.createMarkdown().addTitle('技能详情').addNewline().addNewline().addText(`【${skill.name}】${levelText}\n${skill.description}\n\n`);
     if (skill.category === 'passive' || skill.category === 'bound') markdown.addBlockquote(`类别：${categoryNames[skill.category]}`).addNewline().addBlockquote(`${skill.category === 'bound' ? '绑定' : '被动'}效果：${skill.description}`);
     else {
-      markdown.addBlockquote(`类别：${categoryNames[skill.category] ?? '辅助'}`).addNewline().addBlockquote(`种类：${skill.skill_kind}`).addNewline().addBlockquote(`属性：${skill.element}`).addNewline().addBlockquote(`距离：${skill.range_type}`).addNewline().addBlockquote(`威力：${skill.actualPower}`).addNewline().addBlockquote(`蓝耗：${skill.actualManaCost}`).addNewline().addBlockquote(`冷却：${skill.actualCooldown}`).addNewline().addText('效果：\n');
+      markdown.addBlockquote(`类别：${categoryNames[skill.category] ?? '辅助'}`).addNewline().addBlockquote(`种类：${skill.skill_kind}`).addNewline().addBlockquote(`属性：${skill.element}`).addNewline().addBlockquote(`距离：${skill.range_type}`).addNewline().addBlockquote(`适配武器：${skill.required_weapon_type ?? '无'}`).addNewline().addBlockquote(`威力：${skill.actualPower}`).addNewline().addBlockquote(`蓝耗：${skill.actualManaCost}`).addNewline().addBlockquote(`冷却：${skill.actualCooldown}`).addNewline().addText('效果：\n');
       const effects = skill.effectDetails as SkillEffectDetail[];
       if (!effects.length) markdown.addBlockquote('无');
       else effects.forEach((effect, index) => markdown.addText(`${'①②③④⑤'.charAt(index)}${effect.name}\n`).addBlockquote(effectDescription(effect)).addNewline());

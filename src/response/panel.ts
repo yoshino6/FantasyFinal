@@ -69,6 +69,7 @@ export const outsidePanel = (title: string, location: string, speed: number, ran
       if (point.type === '怪物' && point.code) markdown.addText(' ').addButton('[攻击]', { data: `/怪物攻击 ${point.code}`, autoEnter: false });
       if (point.type === '玩家' && point.code) {
         if (point.pvpAvailable) markdown.addText(' ').addButton('[攻击]', { data: `/玩家攻击 ${point.code}`, autoEnter: false });
+        else markdown.addText(' [好友]');
       }
       markdown.addNewline();
     }
