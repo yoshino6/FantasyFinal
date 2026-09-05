@@ -6,7 +6,7 @@ export default async () => {
   const [event] = useEvent();
   const [message] = useMessage();
   try {
-    const stage = await continueRegistration(event.current.UserId);
+    const stage: string = await continueRegistration(event.current.UserId);
     await sendWithTextFallback(message, stage === 'audience' ? audienceFormat() : stage === 'question' ? questionFormat() : stage === 'destination' ? destinationFormat() : stage === 'danger' ? dangerFormat() : giftFormat(), stage === 'audience' ? audienceText : stage === 'question' ? questionText : stage === 'destination' ? destinationText : stage === 'danger' ? dangerText : giftText());
   } catch (error) {
     logger.warn({ err: error, userId: event.current.UserId }, 'continue registration rejected');

@@ -16,7 +16,7 @@ const validQuantity = (quantity: number) => {
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 999) throw new Error('数量必须是 1 至 999 之间的整数。');
   return quantity;
 };
-const workshopSellable = "pi.character_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0 AND i.item_category IN ('粒子','元素尘','基材','构件','异械') AND i.name LIKE ?";
+const workshopSellable = "pi.character_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0 AND i.item_category IN ('粒子','基材','构件','异械') AND i.name LIKE ?";
 
 export const oddWorkshopSellCatalog = async (qqUserId: string, page = 1, keyword = '') => {
   const pool = await getPool(); const character = await characterFor(pool, qqUserId); const term = `%${keyword.trim()}%`;
@@ -33,8 +33,8 @@ export const sellOddWorkshopItem = async (qqUserId: string, itemId: number, quan
   const [rows] = await connection.execute<SellRow[]>(`SELECT i.id,i.name,i.item_category,pi.quantity,CEIL(i.trade_price*1.25) AS sell_price
     FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id
     WHERE pi.character_id=? AND pi.item_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0
-      AND i.item_category IN ('粒子','元素尘','基材','构件','异械') FOR UPDATE`, [character.id, itemId]);
-  const item = rows[0]; if (!item) throw new Error('唯薇安只收购粒子、元素尘、基材、构件与异械。');
+      AND i.item_category IN ('粒子','基材','构件','异械') FOR UPDATE`, [character.id, itemId]);
+  const item = rows[0]; if (!item) throw new Error('唯薇安只收购粒子、基材、构件与异械。');
   if (Number(item.quantity) < amount) throw new Error(`背包数量不足，当前仅有 ${item.quantity} 个。`);
   const price = Number(item.sell_price) * amount;
   await recordPvpLootSale(connection, Number(character.id), Number(item.id), amount, price);

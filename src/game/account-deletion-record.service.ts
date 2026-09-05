@@ -17,7 +17,7 @@ export class AccountRestoreConflictError extends Error {
 const excludedTables = new Set([
   'account_deletion_records', 'registration_sessions', 'parties', 'party_members',
   'combat_sessions', 'combat_members', 'combat_targets', 'combat_threat', 'combat_status_effects',
-  'player_pvp_attack_confirmations', 'player_pvp_battle_sessions', 'player_pvp_auto_battle_settings', 'player_pvp_auto_battle_actions', 'player_pvp_auto_battle_quick_setup',
+  'player_pvp_attack_confirmations', 'player_pvp_attack_logs', 'player_pvp_battle_logs', 'player_pvp_battle_sessions', 'player_pvp_auto_battle_settings', 'player_pvp_auto_battle_actions', 'player_pvp_auto_battle_quick_setup',
   'player_warrants', 'player_warrant_victims', 'player_warrant_rewards', 'pvp_stolen_loot', 'player_city_debts', 'city_pursuit_tracks', 'city_pursuit_cooldowns',
   'player_home_visits', 'player_resource_mining', 'player_forge_sessions', 'player_alchemy_sessions'
 ]);

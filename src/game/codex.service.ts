@@ -52,7 +52,7 @@ export const codexList = async (qqUserId: string, kind: CodexKind, category = 'Â
 
 export const skillCodexDetail = async (qqUserId: string, skillId: number) => {
   const character = await characterFor(qqUserId); const pool = await getPool();
-  const [rows] = await pool.execute<(RowDataPacket & { id: number; code: string; codex_id: string; name: string; category: string; skill_kind: string; element: string; range_type: string; power: number; mana_cost: number; cooldown_turns: number; chant_turns: number; description: string; effects: string | null })[]>(`SELECT s.id,s.code,s.codex_id,s.name,s.category,s.skill_kind,s.element,s.range_type,s.power,s.mana_cost,s.cooldown_turns,s.chant_turns,s.description,
+  const [rows] = await pool.execute<(RowDataPacket & { id: number; code: string; codex_id: string; name: string; category: string; skill_kind: string; element: string; range_type: string; target_scope: string; power: number; mana_cost: number; cooldown_turns: number; chant_turns: number; description: string; effects: string | null })[]>(`SELECT s.id,s.code,s.codex_id,s.name,s.category,s.skill_kind,s.element,s.range_type,s.target_scope,s.power,s.mana_cost,s.cooldown_turns,s.chant_turns,s.description,
     GROUP_CONCAT(CONCAT(e.name,' Lv.',se.effect_level) ORDER BY e.id SEPARATOR '„ÄÅ') AS effects
     FROM skill_definitions s LEFT JOIN player_skills ps ON ps.skill_id=s.id AND ps.character_id=?
     LEFT JOIN player_skill_discoveries d ON d.skill_id=s.id AND d.character_id=?

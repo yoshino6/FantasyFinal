@@ -1,11 +1,11 @@
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import type { DerivedStats } from './types';
 
-type MasteryKey = 'physicalAttackPct' | 'magicAttackPct' | 'physicalDefensePct' | 'magicDefensePct' | 'critRatePct' | 'critDamagePct' | 'mpPct' | 'chantSpeedPct';
+type MasteryKey = 'physicalAttackPct' | 'magicAttackPct' | 'physicalDefensePct' | 'magicDefensePct' | 'accuracyPct' | 'critRatePct' | 'critDamagePct' | 'critResistPct' | 'critDamageReductionPct' | 'mpPct' | 'chantSpeedPct';
 type MasteryBonuses = Record<MasteryKey, number> & { details: string[] };
 
 const masteryCodes = ['longsword_mastery', 'shield_mastery', 'staff_mastery', 'spellbook_mastery', 'orb_mastery', 'dagger_mastery', 'fistblade_mastery'];
-const masteryLabels: Record<MasteryKey, string> = { physicalAttackPct: '物攻', magicAttackPct: '魔攻', physicalDefensePct: '物防', magicDefensePct: '魔防', critRatePct: '暴击', critDamagePct: '暴伤', mpPct: '魔力上限', chantSpeedPct: '吟唱速度' };
+const masteryLabels: Record<MasteryKey, string> = { physicalAttackPct: '物攻', magicAttackPct: '魔攻', physicalDefensePct: '物防', magicDefensePct: '魔防', accuracyPct: '命中', critRatePct: '暴击', critDamagePct: '暴伤', critResistPct: '暴免', critDamageReductionPct: '暴抗', mpPct: '魔力上限', chantSpeedPct: '吟唱速度' };
 const masteryKeys = Object.keys(masteryLabels) as MasteryKey[];
 const jsonRecord = (value: unknown): Record<string, unknown> => {
   if (!value) return {};
@@ -23,7 +23,7 @@ export const weaponMasteryBonusesFor = async (connection: Pool | PoolConnection,
     FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id
     WHERE ps.character_id=? AND s.code IN (${masteryCodes.map(() => '?').join(',')})
     `, [characterId, ...masteryCodes]);
-  const bonuses: MasteryBonuses = { physicalAttackPct: 0, magicAttackPct: 0, physicalDefensePct: 0, magicDefensePct: 0, critRatePct: 0, critDamagePct: 0, mpPct: 0, chantSpeedPct: 0, details: [] };
+  const bonuses: MasteryBonuses = { physicalAttackPct: 0, magicAttackPct: 0, physicalDefensePct: 0, magicDefensePct: 0, accuracyPct: 0, critRatePct: 0, critDamagePct: 0, critResistPct: 0, critDamageReductionPct: 0, mpPct: 0, chantSpeedPct: 0, details: [] };
   for (const skill of skillRows) {
     const effect = jsonRecord(skill.passive_effect_json); const weaponType = String(effect.weaponType ?? '');
     const matched = equipmentRows.find(item => item.slot === 'weapon' && item.weapon_type === weaponType) ?? equipmentRows.find(item => item.weapon_type === weaponType);
@@ -31,11 +31,12 @@ export const weaponMasteryBonusesFor = async (connection: Pool | PoolConnection,
     const proficiency = Math.min(5, Math.max(1, Number(skill.proficiency)));
     const focus = Math.min(6, Math.max(1, Number(skill.focus)));
     const scale = matched.slot === 'offhand' ? .5 + (focus - 1) * .1 : 1;
-    const active = masteryKeys.map(key => [key, Number(effect[key] ?? 0) * proficiency * scale] as const).filter(([, value]) => value);
+    const step = Number(effect.masteryStepPct ?? 0);
+    // 成长只作用于该精通本身声明的属性；例如长剑精通只提升暴击，不能把同一档成长误加到物攻、防御等全部面板。
+    const active = masteryKeys.filter(key => Number(effect[key] ?? 0) !== 0).map(key => [key, (Number(effect[key] ?? 0) + step * (proficiency - 1)) * scale] as const);
     if (!active.length) continue;
     for (const [key, value] of active) bonuses[key] += value;
-    const baseStatBonuses = active.filter(([key]) => key !== 'chantSpeedPct');
-    if (baseStatBonuses.length) bonuses.details.push(`【${skill.name}】${matched.slot === 'offhand' ? '副手' : '主手'}${weaponType}：${baseStatBonuses.map(([key, value]) => `${masteryLabels[key]}+${formatPercent(value)}%`).join('、')}`);
+    if (active.length) bonuses.details.push(`【${skill.name}】${matched.slot === 'offhand' ? '副手' : '主手'}${weaponType}：${active.map(([key, value]) => `${masteryLabels[key]}+${formatPercent(value)}%`).join('、')}`);
   }
   return bonuses;
 };
@@ -44,7 +45,8 @@ export const applyWeaponMasteryStats = (stats: DerivedStats, bonuses: MasteryBon
   const increase = (value: number, percent: number) => Math.max(0, Math.floor(value * (1 + percent / 100)));
   return { ...stats,
     mpMax: increase(stats.mpMax, bonuses.mpPct), physicalAttack: increase(stats.physicalAttack, bonuses.physicalAttackPct), magicAttack: increase(stats.magicAttack, bonuses.magicAttackPct),
-    physicalDefense: increase(stats.physicalDefense, bonuses.physicalDefensePct), magicDefense: increase(stats.magicDefense, bonuses.magicDefensePct),
-    critRateBp: increase(stats.critRateBp, bonuses.critRatePct), critDamageBp: increase(stats.critDamageBp, bonuses.critDamagePct)
+    physicalDefense: increase(stats.physicalDefense, bonuses.physicalDefensePct), magicDefense: increase(stats.magicDefense, bonuses.magicDefensePct), accuracy: increase(stats.accuracy, bonuses.accuracyPct),
+    critRateBp: increase(stats.critRateBp, bonuses.critRatePct), critDamageBp: increase(stats.critDamageBp, bonuses.critDamagePct),
+    critResistBp: increase(stats.critResistBp, bonuses.critResistPct), critDamageReductionBp: increase(stats.critDamageReductionBp, bonuses.critDamageReductionPct)
   };
 };

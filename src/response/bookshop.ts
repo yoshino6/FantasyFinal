@@ -3,7 +3,7 @@ import { addNpcAffinity, grantNpcAffinity, requireNpcAtCurrentPosition } from '.
 import { bookshopCatalog, bookshopSellCatalog, buyBookshopItem, readSkillBook, sellBookshopItem } from '../game/bookshop.service';
 import { messageFormat } from '../game/message';
 import { npcChatDialogue } from '../game/npc-dialogue.service';
-import { acceptOmniscientQuest, claimOmniscientQuest, omniscientProgress, omniscientQuest } from '../game/omniscient.service';
+import { acceptOmniscientQuest, claimOmniscientQuest, omniscientProgress, omniscientQuest, omniscientTraces } from '../game/omniscient.service';
 
 const code = 'bookshop';
 const requireBookshop = (qqUserId: string) => requireNpcAtCurrentPosition(qqUserId, code);
@@ -15,10 +15,10 @@ const scene = () => {
 };
 const bookshopFormat = (text?: string, chatting = false) => {
   const markdown = Format.createMarkdown().addTitle('百纳镇·百味书屋').addNewline().addNewline().addText('【洛文·赫斯特】').addNewline().addNewline().addBlockquote(text ?? scene());
-  if (chatting) return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('继续闲聊', '/书屋闲聊', { type: 'command', autoEnter: true, style: 'blue' }));
+  if (chatting) return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('切磋', '/切磋 bookshop', { type: 'command', autoEnter: true, style: 'blue' }).addButton('继续闲聊', '/书屋闲聊', { type: 'command', autoEnter: true, style: 'blue' }));
   return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup()
     .addRow().addButton('我要买', '/书屋购买', { type: 'command', autoEnter: true, style: 'blue' }).addButton('我要卖', '/书屋出售', { type: 'command', autoEnter: true, style: 'blue' })
-    .addRow().addButton('闲聊', '/书屋闲聊', { type: 'command', autoEnter: true, style: 'blue' }).addButton('关于 全知者', '/关于全知者', { type: 'command', autoEnter: true })
+    .addRow().addButton('切磋', '/切磋 bookshop', { type: 'command', autoEnter: true, style: 'blue' }).addButton('闲聊', '/书屋闲聊', { type: 'command', autoEnter: true, style: 'blue' }).addButton('关于 全知者', '/关于全知者', { type: 'command', autoEnter: true })
     .addRow().addButton('离开 百味书屋', '/建筑离开 bookshop', { type: 'command', autoEnter: true }));
 };
 const pageButtons = (page: number, totalPages: number, command: string, search: string, keyword = '') => Format.createButtonGroup().addRow()
@@ -99,8 +99,8 @@ export const claimOmniscientQuestHandler = async () => {
 };
 
 export const omniscientProfessionFormat = async (qqUserId: string) => {
-  const progress = await omniscientProgress(qqUserId); const filled = Math.floor(Math.max(0, Math.min(1, progress.proficiency / progress.required)) * 10);
-  const markdown = Format.createMarkdown().addTitle('副职业·全知者').addNewline().addNewline().addText(`等级：Lv.${progress.level}\n熟练度：${progress.proficiency}/${progress.required}\n${'■'.repeat(filled)}${'□'.repeat(10 - filled)}`).addNewline().addNewline()
+  const progress = await omniscientProgress(qqUserId); const maxed = progress.required === 0; const filled = maxed ? 10 : Math.floor(Math.max(0, Math.min(1, progress.proficiency / progress.required)) * 10);
+  const markdown = Format.createMarkdown().addTitle('副职业·全知者').addNewline().addNewline().addText(`等级：Lv.${maxed ? 'MAX' : progress.level}\n${maxed ? '熟练度：已达上限' : `熟练度：${progress.proficiency}/${progress.required}\n${'■'.repeat(filled)}${'□'.repeat(10 - filled)}`}`).addNewline().addNewline()
   return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow()
     .addButton('明鉴', '/全知者明鉴', { type: 'command', autoEnter: true, style: 'blue' })
     .addButton('识踪', '/全知者识踪', { type: 'command', autoEnter: true, style: 'blue' })
@@ -121,8 +121,8 @@ export const omniscientInsightHandler = async () => {
 export const omniscientTraceHandler = async () => {
   const [event] = useEvent(); const [message] = useMessage();
   try {
-    await omniscientProgress(event.current.UserId);
-    const markdown = Format.createMarkdown().addTitle('全知者·识踪').addNewline().addNewline().addBlockquote('你在地图探索时，能发现更加细致入微的痕迹。');
+    await omniscientProgress(event.current.UserId); const trace = await omniscientTraces(event.current.UserId);
+    const markdown = Format.createMarkdown().addTitle('全知者·识踪').addNewline().addNewline().addBlockquote(trace ?? '你在地图探索时，能发现更加细致入微的痕迹；当前区域尚未出现可追溯的首领踪迹。');
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('返回副职业', '/副职业', { type: 'command', autoEnter: true, style: 'blue' })) });
   } catch (error) { await message.send({ format: messageFormat('识踪失败', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
@@ -132,7 +132,7 @@ export const omniscientIngenuityHandler = async () => {
   try {
     const progress = await omniscientProgress(event.current.UserId);
     const markdown = Format.createMarkdown().addTitle('全知者·巧思').addNewline().addNewline()
-      .addBlockquote(`战斗后，自身技能领悟概率+${progress.level * 10}%。`).addNewline()
+      .addBlockquote(`战斗后，自身技能领悟概率+${progress.dropBonusPct}%。`).addNewline()
       .addBlockquote('你可以将已领悟技能贯注入技能石。');
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('返回副职业', '/副职业', { type: 'command', autoEnter: true, style: 'blue' })) });
   } catch (error) { await message.send({ format: messageFormat('巧思失败', error instanceof Error ? error.message : '请稍后重试。') }); }

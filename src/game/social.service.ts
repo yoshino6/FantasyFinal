@@ -5,6 +5,7 @@ import {
   FRIEND_INTERACTION_DAILY_LIMIT, FRUIT_DAILY_LIMIT, OATH_MEMORY_DAILY_LIMIT,
   OATH_MIN_AFFINITY, OATH_REQUEST_TTL_MINUTES, pairOf, relationshipDisplayStage, relationshipStage
 } from './social.constants';
+import { advancedProfessionByCode } from './advanced-profession.config';
 
 type CharacterRow = RowDataPacket & {
   id: number; player_id: number; game_id: number; name: string; current_region_id: number;
@@ -83,16 +84,16 @@ const ensureFriend = (relationship: RelationshipRow | null) => {
   if (!relationship || (relationship.status !== 'friend' && relationship.status !== 'oath')) throw new Error('你们还不是游戏内好友。');
 };
 
-const socialPair = async (connection: PoolConnection, qqUserId: string, targetGameId: number, lockTarget = true) => {
+const socialPair = async (connection: PoolConnection, qqUserId: string, targetGameId: number, lockTarget = true, requireSamePlace = true) => {
   const actor = await characterFor(connection, qqUserId, true); const target = await targetFor(connection, targetGameId, lockTarget);
   if (!target) throw new Error('未找到这位玩家。');
   if (Number(actor.id) === Number(target.id)) throw new Error('不能对自己发起这项互动。');
-  assertActive(actor); assertActive(target); assertSamePlace(actor, target);
+  assertActive(actor); assertActive(target); if (requireSamePlace) assertSamePlace(actor, target);
   return { actor, target };
 };
 
 export const sendFriendRequest = (qqUserId: string, targetGameId: number) => withTransaction(async connection => {
-  const { actor, target } = await socialPair(connection, qqUserId, targetGameId);
+  const { actor, target } = await socialPair(connection, qqUserId, targetGameId, true, false);
   const relationship = await relationshipFor(connection, actor.id, target.id);
   if (relationship && relationship.status !== 'ended') throw new Error('你们已经是好友，或已有进行中的星誓关系。');
   const [pending] = await connection.execute<RowDataPacket[]>(`SELECT id FROM player_friend_requests WHERE status='pending' AND expires_at>NOW()
@@ -116,7 +117,7 @@ export const acceptFriendRequest = (qqUserId: string, requestId: number) => with
   const request = requests[0]; if (!request) throw new Error('好友申请不存在或已处理。');
   if (new Date(request.expires_at).getTime() <= Date.now()) { await connection.execute(`UPDATE player_friend_requests SET status='expired',responded_at=NOW() WHERE id=?`, [requestId]); throw new Error('这条好友申请已经过期。'); }
   const requester = await characterById(connection, Number(request.requester_character_id), true); if (!requester) throw new Error('申请人角色已不存在。');
-  assertActive(actor); assertActive(requester); assertSamePlace(actor, requester);
+  assertActive(actor); assertActive(requester);
   const pair = pairOf(actor.id, requester.id); const existing = await relationshipFor(connection, actor.id, requester.id, true);
   if (!existing) await connection.execute(`INSERT INTO player_relationships (character_low_id,character_high_id,status,affinity,daily_date) VALUES (?,?, 'friend',0,?)`, [pair.low, pair.high, businessDate()]);
   else await connection.execute(`UPDATE player_relationships SET status='friend' WHERE character_low_id=? AND character_high_id=?`, [pair.low, pair.high]);
@@ -145,11 +146,11 @@ export const friendDetail = (qqUserId: string, targetGameId: number) => withTran
   const actor = await characterFor(connection, qqUserId, true); const target = await targetFor(connection, targetGameId);
   if (!target) throw new Error('未找到这位玩家。'); assertActive(actor); assertActive(target);
   const relationship = await relationshipFor(connection, actor.id, target.id); ensureFriend(relationship);
-  const [profiles] = await connection.execute<(RowDataPacket & { level: number; adventurer_rank: string; profession_name: string | null; secondary_profession_code: string | null; secondary_level: number | null })[]>(`SELECT c.level,c.adventurer_rank,p.name AS profession_name,c.secondary_profession_code,sp.level AS secondary_level FROM characters c LEFT JOIN profession_definitions p ON p.code=c.profession_code LEFT JOIN player_secondary_professions sp ON sp.character_id=c.id AND sp.profession_code=c.secondary_profession_code WHERE c.id=? LIMIT 1`, [target.id]);
+  const [profiles] = await connection.execute<(RowDataPacket & { level: number; adventurer_rank: string; profession_name: string | null; advanced_profession_code: string | null; secondary_profession_code: string | null; secondary_level: number | null })[]>(`SELECT c.level,c.adventurer_rank,p.name AS profession_name,ap.profession_code AS advanced_profession_code,c.secondary_profession_code,sp.level AS secondary_level FROM characters c LEFT JOIN profession_definitions p ON p.code=c.profession_code LEFT JOIN player_advanced_professions ap ON ap.character_id=c.id LEFT JOIN player_secondary_professions sp ON sp.character_id=c.id AND sp.profession_code=c.secondary_profession_code WHERE c.id=? LIMIT 1`, [target.id]);
   const profile = profiles[0];
   const [skills] = await connection.execute<(RowDataPacket & { name: string; level: number; category: string })[]>(`SELECT s.name,ps.level,s.category FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? ORDER BY ps.quick_slot IS NULL,ps.quick_slot,ps.learned_at,s.id LIMIT 8`, [target.id]);
   const secondaryCode = profile?.secondary_profession_code ?? null;
-  return { name: target.name, gameId: target.game_id, level: Number(profile?.level ?? 1), rank: profile?.adventurer_rank ?? 'F', profession: profile?.profession_name ?? '未选择', secondaryProfession: secondaryCode ? (secondaryProfessionNames[secondaryCode] ?? secondaryCode) : '未选择', secondaryLevel: secondaryCode ? Math.max(1, Number(profile?.secondary_level ?? 1)) : null, skills: skills.map(skill => ({ name: skill.name, level: Number(skill.level), category: skill.category })) };
+  return { name: target.name, gameId: target.game_id, level: Number(profile?.level ?? 1), rank: profile?.adventurer_rank ?? 'F', profession: advancedProfessionByCode(profile?.advanced_profession_code ?? '')?.name ?? profile?.profession_name ?? '未选择', secondaryProfession: secondaryCode ? (secondaryProfessionNames[secondaryCode] ?? secondaryCode) : '未选择', secondaryLevel: secondaryCode ? Math.max(1, Number(profile?.secondary_level ?? 1)) : null, skills: skills.map(skill => ({ name: skill.name, level: Number(skill.level), category: skill.category })) };
 });
 
 export const recordFriendInteraction = async (connection: PoolConnection, actorId: number, targetId: number) => {

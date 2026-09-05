@@ -2,12 +2,15 @@ import { Format, useEvent, useMention, useMessage, useRoute } from 'alemonjs';
 import { addMailAttachment, addMailRecipientByName, addMailRecipientByQq, discardMailEdit, getMailEdit, openMailEdit, previewMailEdit, removeMailAttachment, removeMailRecipient, sendMailEdit, stashMailEdit, switchMailEditToGlobal, updateMailAttachmentQuantity, updateMailContent, updateMailTitle, type MailEdit } from '../game/admin-mail-edit.service';
 import { grantAdministrator, loginAsOwner, permissionFor, permissionList, requireAdministrator, requireOwner, revokeAdministrator, type PermissionRole } from '../game/permission.service';
 import { messageFormat } from '../game/message';
-import { adminDefeatBoss, adminRefreshMonsters, adminRefreshResources, adminSpawnBoss, bossEvents, monsterManagementEvents, resourceManagementEvents } from '../game/adventure.service';
-import { postBossBounty } from '../game/bounty.service';
+import { adminDefeatBoss, adminLeaveBossTest, adminRefreshMonsters, adminRefreshResources, adminSpawnBoss, adminStartBossTest, bossEvents, monsterManagementEvents, resourceManagementEvents, spawnMonsters } from '../game/adventure.service';
+import { postBossBounty, refreshBounties } from '../game/bounty.service';
+import { getPool } from '../database/pool';
 import { auditAllPlayers, auditCharacter, auditInventory, auditPlayerState, auditSkills, clearPlayerBackpack } from '../game/admin-audit.service';
 import { dungeonEvents, rebuildDungeons } from '../game/dungeon.service';
 import { adminOperationLogs, recordAdminOperation, type AdminLogFilter } from '../game/admin-log.service';
 import { AccountRestoreConflictError, accountDeletionRecords, restoreDeletedAccount, type AccountDeletionFilter } from '../game/account-deletion-record.service';
+import { dismantleOwnerLegendaryTestEquipment, grantOwnerLegendaryTestEquipment } from '../game/owner-test-equipment.service';
+import { globalSettings, managedMaps, setGlobalMultiplier, setManagedMapEnabled, type GlobalMultiplierKey } from '../game/global-management.service';
 
 const commandLink = (markdown: ReturnType<typeof Format.createMarkdown>, title: string, command: string, format: string) => markdown.addText('> ').addButton(title, { data: command, autoEnter: false }).addNewline().addBlockquote(format).addNewline();
 const textButton = (_title: string, command: string) => ({ data: command, autoEnter: false });
@@ -25,9 +28,14 @@ const adminFormat = (role: PermissionRole | null) => {
     markdown.addNewline().addText('邮件发放物品').addNewline();
     commandLink(markdown, '[个人发放]', '管理员命令 邮件发放 个人', '格式：管理员命令 邮件发放 个人');
     commandLink(markdown, '[全服发放]', '管理员命令 邮件发放 全服', '格式：管理员命令 邮件发放 全服');
+    markdown.addNewline().addText('全局管理').addNewline();
+    markdown.addText('> ').addButton('[全局设置]', textButton('全局设置', '全局设置')).addNewline().addBlockquote('调整全服经验、物品掉落与铜币掉落倍率。').addNewline();
+    markdown.addText('> ').addButton('[地图开关]', textButton('地图开关', '地图开关')).addNewline().addBlockquote('发布或关闭后续地图；关闭会迁出玩家并清理该地图生态与悬赏。').addNewline();
     markdown.addNewline().addText('玩家管理').addNewline().addText('> ').addButton('[数据核查]', textButton('玩家数据核查', '玩家数据核查')).addNewline().addBlockquote('核查并修复玩家的角色、背包、技能与状态数据。').addNewline();
     markdown.addText('> ').addButton('[玩家操作]', textButton('玩家操作', '玩家操作')).addNewline().addBlockquote('对指定玩家执行背包清理等管理操作。');
     markdown.addNewline().addText('> ').addButton('[注销记录]', textButton('注销记录', '注销记录')).addNewline().addBlockquote('查看已注销账号的快照，并在误操作时恢复玩家资料。');
+    markdown.addNewline().addNewline().addText('世界生态').addNewline().addNewline();
+    markdown.addText('> ').addButton('[世界生态管理]', textButton('世界生态管理', '世界生态管理')).addNewline().addBlockquote('查看区域独立天气、世界线、巡游实体、常驻地点和可审计事件账本。').addNewline();
     markdown.addNewline().addNewline().addText('事件管理').addNewline().addNewline();
     markdown.addText('> ').addButton('[BOSS管理]', textButton('BOSS管理', 'BOSS管理')).addNewline().addBlockquote('查看地图中 BOSS 事件并操作。').addNewline();
     markdown.addText('> ').addButton('[小怪管理]', textButton('小怪管理', '小怪管理')).addNewline().addBlockquote('查看各地图小怪数量、组成并按地图刷新。').addNewline();
@@ -39,7 +47,7 @@ const adminFormat = (role: PermissionRole | null) => {
   return format;
 };
 
-const bossManagementFormat = async () => {
+const bossManagementFormat = async (isOwner = false) => {
   const events = await bossEvents(); const markdown = Format.createMarkdown();
   const groups = new Map<string, typeof events>();
   for (const event of events) {
@@ -49,11 +57,16 @@ const bossManagementFormat = async () => {
   for (const group of groups.values()) {
     markdown.addTitle(`【${group[0].regionName}】`).addNewline().addNewline();
     for (const [index, event] of group.entries()) {
-      markdown.addText(`${'①②③④⑤⑥⑦⑧⑨⑩'[index] ?? `${index + 1}.`}${event.bossName}`).addButton('[刷新]', textButton('刷新Boss', `BOSS刷新 ${event.bossCode}`)).addButton('[消灭]', textButton('消灭Boss', `BOSS消灭 ${event.bossCode}`)).addButton('[上赏]', textButton('Boss上赏', `BOSS上赏 ${event.bossCode}`)).addNewline();
+      markdown.addText(`${'①②③④⑤⑥⑦⑧⑨⑩'[index] ?? `${index + 1}.`}${event.bossName}`).addButton('[刷新]', textButton('刷新Boss', `BOSS刷新 ${event.bossCode}`)).addButton('[消灭]', textButton('消灭Boss', `BOSS消灭 ${event.bossCode}`)).addButton('[上赏]', textButton('Boss上赏', `BOSS上赏 ${event.bossCode}`));
+      if (isOwner) markdown.addButton('[测试]', textButton('测试Boss', `BOSS测试 ${event.bossCode} `));
+      markdown.addNewline();
+      markdown.addBlockquote(`指定词条：BOSS刷新 ${event.bossCode} 普通｜梦幻`).addNewline();
+      if (isOwner) markdown.addBlockquote(`测试词条：BOSS测试 ${event.bossCode} 普通｜梦幻（只对你与当前队伍可见）`).addNewline();
       if (event.x === null) markdown.addBlockquote('未刷新').addNewline().addNewline();
       else markdown.addText('> 当前坐标：').addButton(`(${event.x}, ${event.y}, ${event.z})`, textButton('前往Boss坐标', `前往 ${event.x} ${event.y}`)).addNewline().addBlockquote(`当前词条：${event.traits.join('、') || '无'}`).addNewline().addNewline();
     }
   }
+  if (isOwner) markdown.addNewline().addText('> ').addButton('[离开测试场]', textButton('离开首领测试场', 'BOSS测试离开')).addNewline().addBlockquote('结束当前测试并将测试队伍送回进入前的位置。测试首领不会掉落经验、材料或图鉴收益。');
   return Format.create().addMarkdown(markdown);
 };
 
@@ -102,6 +115,28 @@ const resourceManagementFormat = async () => {
   }
   markdown.addBlockquote('刷新会替换未开采资源；正在被玩家开采的资源会保留。稀有资源仍按设定概率重新判定，可能不出现。');
   return Format.create().addMarkdown(markdown);
+};
+
+const multiplierLabels: Record<GlobalMultiplierKey, string> = { experience_multiplier: '经验倍率', drop_multiplier: '物品掉落倍率', copper_multiplier: '铜币掉落倍率' };
+const multiplierKeyFor = (value: string): GlobalMultiplierKey | null => ({ 经验: 'experience_multiplier', 物品掉落: 'drop_multiplier', 铜币: 'copper_multiplier' } as Record<string, GlobalMultiplierKey>)[value] ?? null;
+const globalSettingsFormat = async () => {
+  const settings = await globalSettings(); const markdown = Format.createMarkdown().addTitle('全局设置').addNewline().addNewline();
+  for (const key of Object.keys(multiplierLabels) as GlobalMultiplierKey[]) {
+    markdown.addText(`${multiplierLabels[key]}：${settings[key].toFixed(2)} `).addButton('[设置]', textButton('设置全局倍率', `全局倍率 ${key === 'experience_multiplier' ? '经验' : key === 'drop_multiplier' ? '物品掉落' : '铜币'} `)).addNewline();
+  }
+  markdown.addNewline().addBlockquote('默认值均为 1.00；可设置 0.00～20.00。经验倍率作用于全部经验结算，物品与铜币倍率作用于战斗掉落。');
+  return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('返回管理', '/管理', { type: 'command', autoEnter: true }));
+};
+
+const mapSwitchFormat = async () => {
+  const maps = await managedMaps(); const markdown = Format.createMarkdown().addTitle('地图开关').addNewline().addNewline();
+  if (!maps.length) markdown.addBlockquote('暂无可由发布开关控制的后续地图。');
+  for (const map of maps) {
+    const action = map.enabled ? '关闭' : '开放';
+    markdown.addText(`【${map.name}】${map.enabled ? '已开放' : '未开放'} `).addButton(`[${action}]`, textButton(`${action}地图`, `地图切换 ${map.code} ${action}`)).addNewline().addBlockquote(map.description).addNewline().addNewline();
+  }
+  markdown.addBlockquote('关闭地图会终止该地图中的遭遇、清理怪物、资源与相关悬赏，并将图内玩家送回百纳镇。');
+  return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('返回管理', '/管理', { type: 'command', autoEnter: true }));
 };
 
 const playerAuditFormat = () => {
@@ -241,6 +276,10 @@ export const overwriteRestoreDeletedAccountHandler = async () => { const [event]
 
 export const playerAuditPanelHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: playerAuditFormat() }); } catch (error) { await message.send({ format: messageFormat('数据核查失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const playerOperationPanelHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: playerOperationFormat() }); } catch (error) { await message.send({ format: messageFormat('玩家操作不可用', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const globalSettingsHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: await globalSettingsFormat() }); } catch (error) { await message.send({ format: messageFormat('全局设置不可用', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const globalMultiplierHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const key = multiplierKeyFor(String(route.param('type'))); if (!key) throw new Error('仅支持设置经验、物品掉落或铜币倍率。'); const value = await setGlobalMultiplier(key, Number(route.param('value'))); await recordAdminOperation(event.current.UserId, '设置全局倍率', `${multiplierLabels[key]}调整为 ${value.toFixed(2)}`); await message.send({ format: messageFormat('全局倍率已更新', `${multiplierLabels[key]}：${value.toFixed(2)}`) }); await message.send({ format: await globalSettingsFormat() }); } catch (error) { await message.send({ format: messageFormat('设置倍率失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const mapSwitchHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: await mapSwitchFormat() }); } catch (error) { await message.send({ format: messageFormat('地图开关不可用', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const mapToggleHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const code = String(route.param('code')); const enabled = String(route.param('action')) === '开放'; const result = await setManagedMapEnabled(code, enabled); if (enabled) { await spawnMonsters({ regionCode: code }); await refreshBounties(await getPool(), true); } await recordAdminOperation(event.current.UserId, enabled ? '开放地图' : '关闭地图', `${result.name}${enabled ? '已开放' : `已关闭，迁出 ${result.moved} 名玩家并清理 ${result.removed} 个怪物`}`); await message.send({ format: messageFormat(enabled ? '地图已开放' : '地图已关闭', enabled ? `【${result.name}】已开放，怪物、资源与相关悬赏已同步刷新。` : `【${result.name}】已关闭。已迁出 ${result.moved} 名玩家，清理 ${result.removed} 个怪物、资源与相关悬赏。`) }); await message.send({ format: await mapSwitchFormat() }); } catch (error) { await message.send({ format: messageFormat('地图切换失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const playerAuditHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const target = await mentionedUserId(); const type = String(route.param('type')); const result = type === '角色' ? await auditCharacter(target) : type === '背包' || type === '装备' ? await auditInventory(target) : type === '状态' ? await auditPlayerState(target) : await auditSkills(target); await recordAdminOperation(event.current.UserId, '玩家核查', `核查玩家「${result.name}」的${type}数据：${result.fixed}`, target); await message.send({ format: messageFormat('玩家数据核查', `目标：${result.name}\n${result.fixed}`) }); } catch (error) { await message.send({ format: messageFormat('数据核查失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const clearPlayerBackpackHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const target = await mentionedUserId(); const result = await clearPlayerBackpack(target); await recordAdminOperation(event.current.UserId, '清空背包', `清空玩家「${result.name}」背包：移除 ${result.stacked} 条堆叠物品、${result.instances} 件未装备物品`, target); await message.send({ format: messageFormat('背包已清空', `已清空【${result.name}】的背包。\n移除堆叠物品：${result.stacked} 条\n移除未装备物品：${result.instances} 件\n已装备物品已保留。`) }); } catch (error) { await message.send({ format: messageFormat('清空背包失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const allPlayersAuditHandler = async () => {
@@ -260,12 +299,16 @@ export const allPlayersAuditHandler = async () => {
   } catch (error) { await message.send({ format: messageFormat('全服数据核查失败', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
 
-export const bossManagementHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: await bossManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('BOSS管理失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const bossManagementHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const role = await requireAdministrator(event.current.UserId); await message.send({ format: await bossManagementFormat(role === 'owner') }); } catch (error) { await message.send({ format: messageFormat('BOSS管理失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const monsterManagementHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: await monsterManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('小怪管理失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const resourceManagementHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: await resourceManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('矿产管理失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const dungeonManagementHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: await dungeonManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('迷宫管理失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const rebuildDungeonHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const result = await rebuildDungeons(); await recordAdminOperation(event.current.UserId, '重建迷宫', `重建地下迷宫，撤离 ${result.moved} 名探索者`); await message.send({ format: messageFormat('地下迷宫已重建', `已强制撤离 ${result.moved} 名探索者，并重建地下迷宫。`) }); await message.send({ format: await dungeonManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('重建迷宫失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
-export const bossSpawnHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const code = String(route.param('code')); const result = await adminSpawnBoss(code); await recordAdminOperation(event.current.UserId, '刷新BOSS', `刷新 BOSS：${result?.bossName ?? code}`); await message.send({ format: messageFormat('BOSS已刷新', result?.x === null ? '未能找到可用刷新坐标。' : `${result?.bossName ?? 'BOSS'} 已刷新至 (${result?.x}, ${result?.y}, ${result?.z})。`) }); await message.send({ format: await bossManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('BOSS刷新失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const bossSpawnHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const code = String(route.param('code')); const trait = String(route.param('trait') ?? '').trim() || undefined; const result = await adminSpawnBoss(code, trait); await recordAdminOperation(event.current.UserId, '刷新BOSS', `刷新 BOSS：${result?.bossName ?? code}${trait ? `（${trait}）` : ''}`); await message.send({ format: messageFormat('BOSS已刷新', result?.x === null ? '未能找到可用刷新坐标。' : `${result?.bossName ?? 'BOSS'}${trait ? `（指定词条：${trait}）` : ''}已刷新至 (${result?.x}, ${result?.y}, ${result?.z})。`) }); await message.send({ format: await bossManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('BOSS刷新失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const bossTestHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireOwner(event.current.UserId); const code = String(route.param('code')); const trait = String(route.param('trait') ?? '').trim() || undefined; const result = await adminStartBossTest(event.current.UserId, code, trait); await recordAdminOperation(event.current.UserId, 'BOSS测试', `测试 ${result.bossName} Lv.${result.level}${trait ? `（${trait}）` : '（普通）'}，队伍：${result.participants.join('、')}`); await message.send({ format: messageFormat('首领测试已准备', `已调整你至 Lv.${result.level}，所有技能已重置为 Lv.1，并补齐全部 ${result.skillCount} 个技能；已按等级发放 ${result.skillPoints} 点技能点。\n\n已换装同等级 100% 品质普通皮甲、职业武器与副手。${result.bossName}（${result.trait}）已在首领测试场 (${result.x}, ${result.y}) 生成，仅你与当前队伍可见。请在面板中移动一次以触发遭遇；战斗结束后使用“BOSS测试离开”返回。\n\n测试战斗不发放经验、材料、图鉴或技能领悟。`) }); } catch (error) { await message.send({ format: messageFormat('首领测试失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const bossTestLeaveHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireOwner(event.current.UserId); const result = await adminLeaveBossTest(event.current.UserId); await recordAdminOperation(event.current.UserId, '结束BOSS测试', `结束首领测试并送回 ${result.participants} 名队员${result.combatCount ? `，强制结束 ${result.combatCount} 场战斗` : ''}`); await message.send({ format: messageFormat('已离开首领测试场', `已将 ${result.participants} 名测试队员送回进入前的位置。${result.combatCount ? `已强制结束 ${result.combatCount} 场进行中的测试战斗。` : ''}`) }); } catch (error) { await message.send({ format: messageFormat('离开测试场失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const ownerTestLegendaryEquipmentHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireOwner(event.current.UserId); const result = await grantOwnerLegendaryTestEquipment(event.current.UserId); await recordAdminOperation(event.current.UserId, '测试神装', `装备 Lv.${result.level} 传说 100% 测试套装（${result.count} 件）`); await message.send({ format: messageFormat('测试神装已装备', `已覆盖常规装备槽并记录原装备，获得 ${result.count} 件 Lv.${result.level}、100% 品质的传说测试装备。主手与副手均为该职业的攻击类精通武器；副词条按打造规则随机。\n\n使用“测试 解体”可移除测试神装并恢复原装备。`) }); } catch (error) { await message.send({ format: messageFormat('测试神装失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const ownerTestDismantleHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireOwner(event.current.UserId); const result = await dismantleOwnerLegendaryTestEquipment(event.current.UserId); await recordAdminOperation(event.current.UserId, '测试解体', `解体 ${result.dismantled} 件测试神装，恢复 ${result.restored} 件原装备`); await message.send({ format: messageFormat('测试神装已解体', `已移除 ${result.dismantled} 件测试装备，并恢复 ${result.restored} 件原装备。`) }); } catch (error) { await message.send({ format: messageFormat('测试解体失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const monsterRefreshHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const result = await adminRefreshMonsters(String(route.param('code'))); await recordAdminOperation(event.current.UserId, '刷新小怪', `刷新地图「${result.regionName}」的小怪，替换 ${result.refreshed} 只未参战小怪`); await message.send({ format: messageFormat('小怪已刷新', `【${result.regionName}】已替换 ${result.refreshed} 只未参战小怪，并按当前规则补齐。正在战斗的小怪已保留。`) }); await message.send({ format: await monsterManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('小怪刷新失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const resourceRefreshHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const result = await adminRefreshResources(String(route.param('code'))); await recordAdminOperation(event.current.UserId, '刷新矿产', `刷新地图「${result.regionName}」的矿产，替换 ${result.refreshed} 处未开采资源`); await message.send({ format: messageFormat('矿产已刷新', `【${result.regionName}】已替换 ${result.refreshed} 处未开采资源，并按当前矿产概率重新生成。正在开采的资源已保留。`) }); await message.send({ format: await resourceManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('矿产刷新失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const bossDefeatHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const code = String(route.param('code')); const defeated = await adminDefeatBoss(code); await recordAdminOperation(event.current.UserId, '消灭BOSS', `尝试消灭 BOSS：${code}`); await message.send({ format: messageFormat(defeated ? 'BOSS已消灭' : 'BOSS未刷新', defeated ? '当前地图中的该 Boss 已被移除。' : '当前没有可消灭的该 Boss。') }); await message.send({ format: await bossManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('BOSS消灭失败', error instanceof Error ? error.message : '请稍后重试。') }); } };

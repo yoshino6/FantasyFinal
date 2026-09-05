@@ -23,7 +23,9 @@ export default async () => {
         markdown.addText(' ').addButton('[卸下]', { data: `/卸下装备 ${slot}`, autoEnter: false }).addText(' ').addButton('[切换]', { data: `/选择装备 ${slot}`, autoEnter: false });
       } else markdown.addText('无 ').addButton('[装备]', { data: `/选择装备 ${slot}`, autoEnter: false });
     }
-    await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('操作面板', '/面板', { type: 'command', autoEnter: true, style: 'blue' })) });
+    await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow()
+      .addButton('装备详情', '/已装备详情', { type: 'command', autoEnter: true, style: 'blue' })
+      .addButton('操作面板', '/面板', { type: 'command', autoEnter: true, style: 'blue' })) });
   } catch (error) { await message.send({ format: messageFormat('装备不可用', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
 

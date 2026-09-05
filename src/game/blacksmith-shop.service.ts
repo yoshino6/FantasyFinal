@@ -4,7 +4,7 @@ import { recordPvpLootSale } from './pvp.service';
 
 const PAGE_SIZE = 5;
 type CharacterRow = RowDataPacket & { id: number; copper_coins: number };
-type StockRow = RowDataPacket & { id: number; codex_id: string; name: string; item_category: string; required_level: number; description: string; buy_price: number; stock_quantity: number; owned_quantity: number };
+type StockRow = RowDataPacket & { id: number; codex_id: string; name: string; item_category: string; weapon_type: string | null; required_level: number; description: string; buy_price: number; stock_quantity: number; owned_quantity: number };
 type SellRow = RowDataPacket & { instance_id: number; name: string; item_category: string; required_level: number; quality: number; sell_price: number };
 type SaleRow = RowDataPacket & { sale_kind: 'equipment' | 'material'; sale_id: number; name: string; item_category: string; required_level: number; quality: number | null; quantity: number; sell_price: number };
 
@@ -23,17 +23,29 @@ const validMaterialQuantity = (quantity: number) => {
   return quantity;
 };
 
+const weaponShopTypes = ['长剑', '法杖', '法书', '法球', '匕首', '拳刃', '盾牌'];
+const armorShopCategories = ['头肩', '上装', '腰部', '下装', '脚部'];
+const armorShopTypes = ['布甲', '皮甲', '轻甲', '重甲', '板甲'];
+const shopCategoryFilter = (category: string) => {
+  if (weaponShopTypes.includes(category)) return { selected: category, filter: " AND i.item_category IN ('武器','副手') AND i.weapon_type=?", values: [category] };
+  if (armorShopCategories.includes(category)) return { selected: category, filter: ' AND i.item_category=?', values: [category] };
+  if (armorShopTypes.includes(category)) return { selected: category, filter: ` AND i.item_category IN (${armorShopCategories.map(() => '?').join(',')}) AND i.weapon_type=?`, values: [...armorShopCategories, category] };
+  if (category === '防具') return { selected: category, filter: ` AND i.item_category IN (${armorShopCategories.map(() => '?').join(',')})`, values: armorShopCategories };
+  if (category === '武器') return { selected: category, filter: " AND i.item_category IN ('武器','副手')", values: [] as string[] };
+  return { selected: '全部', filter: '', values: [] as string[] };
+};
+
 export const blacksmithShopCatalog = async (qqUserId: string, page = 1, category = '全部', keyword = '') => {
-  const pool = await getPool(); const character = await characterFor(pool, qqUserId); const term = `%${keyword.trim()}%`; const selected = ['头肩', '上装', '腰部', '下装', '脚部'].includes(category) ? category : '全部'; const filter = selected === '全部' ? '' : ' AND i.item_category=?'; const values = selected === '全部' ? [term] : [term, selected];
-  const [countRows] = await pool.execute<(RowDataPacket & { total: number })[]>(`SELECT COUNT(*) AS total FROM blacksmith_shop_items si JOIN item_definitions i ON i.id=si.item_id WHERE si.is_active=1 AND i.name LIKE ?${filter}`, values);
+  const pool = await getPool(); const character = await characterFor(pool, qqUserId); const term = `%${keyword.trim()}%`; const categoryFilter = shopCategoryFilter(category); const values = [term, ...categoryFilter.values];
+  const [countRows] = await pool.execute<(RowDataPacket & { total: number })[]>(`SELECT COUNT(*) AS total FROM blacksmith_shop_items si JOIN item_definitions i ON i.id=si.item_id WHERE si.is_active=1 AND i.name LIKE ?${categoryFilter.filter}`, values);
   const paging = pageInfo(page, Number(countRows[0]?.total ?? 0));
-  const [rows] = await pool.execute<StockRow[]>(`SELECT i.id,i.codex_id,i.name,i.item_category,i.required_level,i.description,si.buy_price,si.stock_quantity,COUNT(ii.id) AS owned_quantity
+  const [rows] = await pool.execute<StockRow[]>(`SELECT i.id,i.codex_id,i.name,i.item_category,i.weapon_type,i.required_level,i.description,si.buy_price,si.stock_quantity,COUNT(ii.id) AS owned_quantity
     FROM blacksmith_shop_items si JOIN item_definitions i ON i.id=si.item_id
     LEFT JOIN player_item_instances ii ON ii.item_id=i.id AND ii.character_id=?
-    WHERE si.is_active=1 AND i.name LIKE ?${filter}
-    GROUP BY i.id,i.codex_id,i.name,i.item_category,i.required_level,i.description,si.buy_price,si.stock_quantity
+    WHERE si.is_active=1 AND i.name LIKE ?${categoryFilter.filter}
+    GROUP BY i.id,i.codex_id,i.name,i.item_category,i.weapon_type,i.required_level,i.description,si.buy_price,si.stock_quantity
     ORDER BY i.required_level,i.item_category,i.id LIMIT ? OFFSET ?`, [character.id, ...values, PAGE_SIZE, (paging.page - 1) * PAGE_SIZE]);
-  return { items: rows.map(row => ({ id: Number(row.id), codexId: row.codex_id, name: row.name, category: row.item_category, level: Number(row.required_level), description: row.description, price: Number(row.buy_price), stockQuantity: Number(row.stock_quantity), ownedQuantity: Number(row.owned_quantity) })), ...paging, category: selected, keyword: keyword.trim(), copper: Number(character.copper_coins) };
+  return { items: rows.map(row => ({ id: Number(row.id), codexId: row.codex_id, name: row.name, category: row.item_category, weaponType: row.weapon_type, level: Number(row.required_level), description: row.description, price: Number(row.buy_price), stockQuantity: Number(row.stock_quantity), ownedQuantity: Number(row.owned_quantity) })), ...paging, category: categoryFilter.selected, keyword: keyword.trim(), copper: Number(character.copper_coins) };
 };
 
 export const blacksmithSellCatalog = async (qqUserId: string, page = 1, keyword = '') => {
@@ -48,7 +60,7 @@ export const blacksmithSellCatalog = async (qqUserId: string, page = 1, keyword 
       CEIL(i.trade_price*1.15) AS sell_price,pi.acquired_at
     FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id
     WHERE pi.character_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0
-      AND i.item_category IN ('怪材','锻材','元素尘') AND i.name LIKE ?`;
+      AND i.item_category IN ('怪材','锻材','粒子') AND i.name LIKE ?`;
   const source = `(${equipmentSql} UNION ALL ${materialSql}) AS sale_items`;
   const [countRows] = await pool.execute<(RowDataPacket & { total: number })[]>(`SELECT COUNT(*) AS total FROM ${source}`, [character.id, term, character.id, term]);
   const paging = pageInfo(page, Number(countRows[0]?.total ?? 0));
@@ -88,8 +100,8 @@ export const sellBlacksmithMaterial = async (qqUserId: string, itemId: number, q
   const [rows] = await connection.execute<(RowDataPacket & { id: number; name: string; quantity: number; sell_price: number })[]>(`SELECT i.id,i.name,pi.quantity,CEIL(i.trade_price*1.15) AS sell_price
     FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id
     WHERE pi.character_id=? AND pi.item_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0
-      AND i.item_category IN ('怪材','锻材','元素尘') FOR UPDATE`, [character.id, itemId]);
-  const item = rows[0]; if (!item) throw new Error('小北只收购装备、怪材、锻材与元素尘。');
+      AND i.item_category IN ('怪材','锻材','粒子') FOR UPDATE`, [character.id, itemId]);
+  const item = rows[0]; if (!item) throw new Error('小北只收购装备、怪材、锻材与粒子。');
   if (Number(item.quantity) < amount) throw new Error(`背包数量不足，当前仅有 ${item.quantity} 个。`);
   const price = Number(item.sell_price) * amount;
   await recordPvpLootSale(connection, Number(character.id), Number(item.id), amount, price);

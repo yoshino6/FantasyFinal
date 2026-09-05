@@ -1,20 +1,28 @@
 import { randomUUID } from 'node:crypto';
+import { skillSpecialization, type SkillSpecializationResult } from './skill-specialization';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { detentionMessage } from './time-format';
 import { isInHome } from './home.service';
 import { isFriendRelation } from './social.service';
-import { hasCompatibleSkillWeapon, skillWeaponRequirementMessage } from './skill-weapon.service';
 import { directDamageVariance, resolveStrike } from './combat-math';
+import { createPvpCombatRules } from './pvp-combat-rule-adapter';
+import { ruleStatusSummary, maskRuleBattleLog, readRuleState } from './combat-rule-registry';
+import { residentSkillByCode } from './resident-skill.config';
+import { activeDeviceSkillByCode, combatDeviceSlotsFor, initializeCombatDeviceEnergy, restoreCombatDeviceEnergy, type ActiveDeviceSkill } from './device.service';
 
 type PvpCharacter = RowDataPacket & {
   id: number; game_id: number; name: string; current_region_id: number; pos_x: number; pos_y: number; pos_z: number;
   level: number; perception: number; perception_growth: number;
   hp_max: number; mp_max: number; current_hp: number; current_mp: number; physical_attack: number; magic_attack: number;
   physical_defense: number; magic_defense: number; accuracy: number; evasion: number; crit_rate_bp: number; crit_damage_bp: number;
-  crit_resist_bp: number; crit_damage_reduction_bp: number; speed: number; activity_status: string; detained_until: Date | null;
+  crit_resist_bp: number; crit_damage_reduction_bp: number; speed: number; secondary_profession_code: string | null; activity_status: string; detained_until: Date | null;
 };
-type PvpAction = { type: 'attack' } | { type: 'skill'; id: number; code: string; name: string; category: 'physical' | 'magic' | 'utility'; requiredWeaponType: string | null; manaCost: number; power: number; cooldown: number } | { type: 'item'; id: number; name: string; effect: Record<string, number> };
+type PvpAction = { type: 'attack' }
+  | { type: 'skill'; id: number; code: string; name: string; category: 'physical' | 'magic' | 'utility'; requiredWeaponType: string | null; manaCost: number; power: number; cooldown: number; chant?: number; specialized?: SkillSpecializationResult }
+  | { type: 'item'; id: number; name: string; effect: Record<string, number> }
+  | { type: 'device'; instanceId: number; deviceCode: string; deviceName: string; skill: ActiveDeviceSkill; target: 'self' | 'enemy' }
+  | { type: 'device_charge'; instanceId: number; deviceName: string };
 type PvpBattleRow = RowDataPacket & { id: string; attacker_character_id: number; defender_character_id: number; turn_no: number; state: string; attacker_hp: number; attacker_mp: number; defender_hp: number; defender_mp: number; attacker_cooldowns: unknown; defender_cooldowns: unknown; ambush_spawn_id: number | null; ambush_delivery_scope: 'group' | 'c2c' | null; ambush_delivery_target_id: string | null; ambush_delivery_bot_id: string | null };
 export type PvpAmbushDelivery = { scope: 'group' | 'c2c'; targetId: string; botId?: string };
 
@@ -25,10 +33,17 @@ const perceptionRange = (character: PvpCharacter) => {
   const levelCap = Math.min(10, 2 + Math.floor(Math.max(1, Number(character.level)) / 5));
   return Math.max(1, Math.min(10, levelCap, statValue));
 };
-const record = (value: unknown): Record<string, number> => {
+const record = (value: unknown): Record<string, any> => {
   if (!value) return {};
   if (typeof value === 'object') return value as Record<string, number>;
   try { return JSON.parse(String(value)) as Record<string, number>; } catch { return {}; }
+};
+type PvpDeviceState = Record<string, any>;
+const activeDeviceCodesFor = async (connection: PoolConnection, characterId: number) => {
+  const [rows] = await connection.execute<(RowDataPacket & { code: string })[]>(`SELECT i.code FROM player_active_devices ad
+    JOIN player_item_instances ii ON ii.id=ad.instance_id JOIN item_definitions i ON i.id=ii.item_id
+    WHERE ad.character_id=?`, [characterId]);
+  return new Set(rows.map(row => row.code));
 };
 const characterFor = async (connection: PoolConnection, qqUserId: string) => {
   const [rows] = await connection.execute<PvpCharacter[]>('SELECT c.* FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE', [qqUserId]);
@@ -47,6 +62,75 @@ const wanted = async (connection: PoolConnection, characterId: number, regionId:
 const activeWarrants = async (connection: PoolConnection, characterId: number) => {
   const [rows] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM player_warrants WHERE wanted_character_id=? AND status=\'active\' FOR UPDATE', [characterId]);
   return rows.map(row => Number(row.id));
+};
+
+/** 战败者在自己下一条游戏指令前不会再次成为 PvP 目标。 */
+export const assertPvpDefeatUnprotected = async (connection: PoolConnection, characterId: number) => {
+  await connection.execute('DELETE FROM player_pvp_defeat_protections WHERE character_id=? AND expires_at<=NOW()', [characterId]);
+  const [rows] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_pvp_defeat_protections WHERE character_id=? AND expires_at>NOW() FOR UPDATE', [characterId]);
+  if (rows[0]) throw new Error('目标正处于战败保护中，需等待对方下一次游戏指令后才能再次攻击。');
+};
+
+/** 任意消息首次触发时，领取并标记战败结算通知；保护本身不受此影响。 */
+export const takePvpDefeatNotice = async (qqUserId: string) => withTransaction(async connection => {
+  const [characters] = await connection.execute<(RowDataPacket & { id: number })[]>(`SELECT c.id FROM characters c
+    JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE`, [qqUserId]);
+  const character = characters[0];
+  if (!character) return null;
+  await connection.execute('DELETE FROM player_pvp_defeat_protections WHERE character_id=? AND expires_at<=NOW()', [character.id]);
+  const [protections] = await connection.execute<(RowDataPacket & { attacker_name: string; notice_text: string; defeated_at: Date })[]>(`SELECT attacker_name,notice_text,defeated_at
+    FROM player_pvp_defeat_protections WHERE character_id=? AND expires_at>NOW() AND notice_delivered_at IS NULL FOR UPDATE`, [character.id]);
+  const protection = protections[0];
+  if (!protection) return null;
+  await connection.execute('UPDATE player_pvp_defeat_protections SET notice_delivered_at=NOW() WHERE character_id=?', [character.id]);
+  return { attackerName: protection.attacker_name, notice: protection.notice_text, defeatedAt: protection.defeated_at };
+});
+
+/** 下一次游戏指令结束后解除对应的战败保护。 */
+export const completePvpDefeatProtection = async (qqUserId: string) => withTransaction(async connection => {
+  const [characters] = await connection.execute<(RowDataPacket & { id: number })[]>(`SELECT c.id FROM characters c
+    JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE`, [qqUserId]);
+  const character = characters[0];
+  if (!character) return;
+  await connection.execute('DELETE FROM player_pvp_defeat_protections WHERE character_id=?', [character.id]);
+});
+
+type PvpAttackLogOutcome = 'hit' | 'miss' | 'defeat' | 'utility';
+type PvpBattleLog = RowDataPacket & { id: string; attacker_character_id: number; defender_character_id: number; attacker_name: string; defender_name: string; battle_type: string; outcome: string; winner_character_id: number | null; winner_name: string | null; loot_text: string | null; started_at: Date; ended_at: Date | null };
+
+/** 所有 PvP 攻击统一写入双方可见的战报。 */
+export const recordPvpAttack = async (connection: PoolConnection, attacker: Pick<PvpCharacter, 'id' | 'name'>, defender: Pick<PvpCharacter, 'id' | 'name'>, actionName: string, damage: number, outcome: PvpAttackLogOutcome, lootText: string | null = null) => {
+  await connection.execute(`INSERT INTO player_pvp_attack_logs
+    (attacker_character_id,defender_character_id,attacker_name,defender_name,action_name,damage,outcome,loot_text)
+    VALUES (?,?,?,?,?,?,?,?)`, [attacker.id, defender.id, attacker.name, defender.name, actionName, Math.max(0, Math.floor(damage)), outcome, lootText]);
+};
+
+export const createPvpBattleLog = async (connection: PoolConnection, attacker: Pick<PvpCharacter, 'id' | 'name'>, defender: Pick<PvpCharacter, 'id' | 'name'>, battleType: string, id = randomUUID()) => {
+  await connection.execute(`INSERT INTO player_pvp_battle_logs
+    (id,attacker_character_id,defender_character_id,attacker_name,defender_name,battle_type)
+    VALUES (?,?,?,?,?,?)`, [id, attacker.id, defender.id, attacker.name, defender.name, battleType]);
+  return id;
+};
+
+export const finishPvpBattleLog = async (connection: PoolConnection, id: string, outcome: 'attacker_win' | 'defender_win' | 'draw' | 'escaped', winner: Pick<PvpCharacter, 'id' | 'name'> | null = null, lootText: string | null = null) => {
+  await connection.execute(`UPDATE player_pvp_battle_logs SET outcome=?,winner_character_id=?,winner_name=?,loot_text=?,ended_at=NOW() WHERE id=?`, [outcome, winner?.id ?? null, winner?.name ?? null, lootText, id]);
+};
+
+/** 查询自己发起与受到的 PvP 攻击战报。 */
+export const pvpBattleHistory = async (qqUserId: string, page = 1, filter: '全部' | '进攻方' | '防守方' = '全部', keyword = '') => {
+  const pool = await getPool();
+  const [characters] = await pool.execute<(RowDataPacket & { id: number })[]>('SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1', [qqUserId]);
+  const character = characters[0]; if (!character) throw new Error('请先注册角色。');
+  const where = filter === '进攻方' ? 'attacker_character_id=?' : filter === '防守方' ? 'defender_character_id=?' : '(attacker_character_id=? OR defender_character_id=?)';
+  const values: Array<number | string> = filter === '全部' ? [character.id, character.id] : [character.id];
+  const search = keyword.trim() ? ' AND (attacker_name LIKE ? OR defender_name LIKE ? OR battle_type LIKE ? OR outcome LIKE ?)' : '';
+  if (keyword.trim()) values.push(`%${keyword.trim()}%`, `%${keyword.trim()}%`, `%${keyword.trim()}%`, `%${keyword.trim()}%`);
+  const [countRows] = await pool.execute<(RowDataPacket & { total: number })[]>(`SELECT COUNT(*) AS total FROM player_pvp_battle_logs WHERE ${where}${search}`, values);
+  const total = Number(countRows[0]?.total ?? 0); const totalPages = Math.max(1, Math.ceil(total / 5)); const currentPage = Math.min(Math.max(1, page), totalPages);
+  const [rows] = await pool.execute<PvpBattleLog[]>(`SELECT * FROM player_pvp_battle_logs WHERE ${where}${search} ORDER BY started_at DESC,id DESC LIMIT 5 OFFSET ?`, [...values, (currentPage - 1) * 5]);
+  return { page: currentPage, totalPages, total, entries: rows.map(row => ({
+    attacker: row.attacker_name, defender: row.defender_name, type: row.battle_type, outcome: row.outcome, winner: row.winner_name, loot: row.loot_text, startedAt: row.started_at, endedAt: row.ended_at
+  })), filter, keyword: keyword.trim() };
 };
 
 /** 通缉者在对应城镇留下最后一次可追踪的行踪。 */
@@ -71,11 +155,19 @@ const actionFor = async (connection: PoolConnection, character: PvpCharacter, ma
       const [items] = await connection.execute<(RowDataPacket & { id: number; name: string; effect_json: unknown })[]>('SELECT i.id,i.name,i.effect_json FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.item_id=? AND pi.quantity>0 AND i.item_type=\'consumable\' LIMIT 1 FOR UPDATE', [character.id, potionId]);
       if (items[0]) return { type: 'item', id: Number(items[0].id), name: items[0].name, effect: record(items[0].effect_json) };
     }
-    const [actions] = await connection.execute<(RowDataPacket & { id: number; code: string; name: string; category: 'physical' | 'magic' | 'utility'; required_weapon_type: string | null; mana_cost: number; power: number; cooldown_turns: number })[]>('SELECT s.id,s.code,s.name,s.category,s.required_weapon_type,s.mana_cost,s.power,s.cooldown_turns FROM player_pvp_auto_battle_actions a JOIN player_skills ps ON ps.character_id=a.character_id AND ps.skill_id=a.skill_id JOIN skill_definitions s ON s.id=a.skill_id WHERE a.character_id=? ORDER BY a.sequence_no', [character.id]);
+    const [actions] = await connection.execute<(RowDataPacket & { skill_id: number | null; active_skill_id: number | null; code: string | null; name: string | null; category: 'physical' | 'magic' | 'utility' | null; required_weapon_type: string | null; mana_cost: number | null; power: number | null; cooldown_turns: number | null })[]>(`SELECT a.skill_id,
+      CASE WHEN ps.skill_id IS NOT NULL AND s.id IS NOT NULL THEN s.id ELSE NULL END AS active_skill_id,
+      s.code,s.name,s.category,s.required_weapon_type,s.mana_cost,s.power,s.cooldown_turns
+    FROM player_pvp_auto_battle_actions a
+    LEFT JOIN player_skills ps ON ps.character_id=a.character_id AND ps.skill_id=a.skill_id
+    LEFT JOIN skill_definitions s ON s.id=a.skill_id AND s.category IN ('physical','magic','utility')
+    WHERE a.character_id=? ORDER BY a.sequence_no`, [character.id]);
     if (actions.length) {
       const picked = actions[(Math.max(1, Number(setting.action_cursor)) - 1) % actions.length];
       await connection.execute('UPDATE player_pvp_auto_battle_settings SET action_cursor=action_cursor+1 WHERE character_id=?', [character.id]);
-      return { type: 'skill', id: Number(picked.id), code: picked.code, name: picked.name, category: picked.category, requiredWeaponType: picked.required_weapon_type, manaCost: Number(picked.mana_cost), power: Number(picked.power), cooldown: Number(picked.cooldown_turns) };
+      // 每个保存的栏位都占用一次轮转；技能失效时只让这个栏位临时普攻，不能跳过、压缩或改写配置。
+      if (picked.skill_id === null || picked.active_skill_id === null || !picked.code || !picked.name || !picked.category) return { type: 'attack' };
+      return { type: 'skill', id: Number(picked.active_skill_id), code: picked.code, name: picked.name, category: picked.category, requiredWeaponType: picked.required_weapon_type, manaCost: Number(picked.mana_cost), power: Number(picked.power), cooldown: Number(picked.cooldown_turns) };
     }
   }
   if (manual) return { type: 'attack' };
@@ -289,29 +381,131 @@ export const resolvePvpVictory = async (connection: PoolConnection, winnerId: nu
   const settlement = await settlePvpDefeat(connection, winnerId, loserId);
   // 缉捕红名时优先没收并返还赃物，不再从被关押者身上制造新的掠夺记录。
   const loot = settlement.captured ? [] : await stealFromLoser(connection, winner, loser);
-  return { text: `${settlement.text}${loot.length ? ` 获得${loot.join('、')}。` : ''}`, restitution: settlement.restitution };
+  const lossText = settlement.captured
+    ? settlement.text
+    : loot.length ? `掉落${loot.join('、')}。` : '没有可被掠夺的物品或铜币。';
+  await connection.execute(`INSERT INTO player_pvp_defeat_protections (character_id,attacker_name,notice_text,expires_at)
+    VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL 1 HOUR)) ON DUPLICATE KEY UPDATE attacker_name=VALUES(attacker_name),notice_text=VALUES(notice_text),defeated_at=NOW(),expires_at=VALUES(expires_at)`, [
+    loser.id,
+    winner.name,
+    `你被【${winner.name}】击败，生命降至 1，并已自动进入休息恢复。${lossText}`
+  ]);
+  return { text: `${settlement.text}${loot.length ? ` 获得${loot.join('、')}。` : ''}`, restitution: settlement.restitution, lootText: lossText };
 };
 
-const resolveAction = async (connection: PoolConnection, actor: PvpCharacter, target: PvpCharacter, action: PvpAction) => {
+const resolveAction = async (connection: PoolConnection, actor: PvpCharacter, target: PvpCharacter, action: PvpAction, sessionId?: string, targetCooldowns?: PvpDeviceState, actorCooldowns?: PvpDeviceState, actorDevices = new Set<string>(), targetDevices = new Set<string>(), context?: Awaited<ReturnType<typeof createPvpCombatRules>>) => {
+  if (action.type === 'device_charge') {
+    if (!sessionId) return { text: `【${actor.name}】尝试为【${action.deviceName}】充能，但当前不在可充能战斗中。`, defeated: false };
+    const [rows] = await connection.execute<(RowDataPacket & { current_energy: number; max_energy: number })[]>(`SELECT current_energy,max_energy FROM combat_device_energy
+      WHERE battle_kind='pvp' AND session_id=? AND character_id=? AND instance_id=? FOR UPDATE`, [sessionId, actor.id, action.instanceId]);
+    const energy = rows[0]; if (!energy) return { text: `【${actor.name}】尝试为【${action.deviceName}】充能，但该异械未在本场生效。`, defeated: false };
+    const next = Math.min(Number(energy.max_energy), Number(energy.current_energy) + 30);
+    await connection.execute("UPDATE combat_device_energy SET current_energy=? WHERE battle_kind='pvp' AND session_id=? AND character_id=? AND instance_id=?", [next, sessionId, actor.id, action.instanceId]);
+    return { text: `【${actor.name}】为【${action.deviceName}】充能，${energy.current_energy}→${next}/${energy.max_energy}。`, defeated: false };
+  }
+  if (action.type === 'device') {
+    if (!sessionId) return { text: `【${actor.name}】启动【${action.deviceName}】失败。`, defeated: false };
+    const configured = activeDeviceSkillByCode.get(action.skill.code);
+    if (!configured || configured.deviceCode !== action.deviceCode) return { text: `【${actor.name}】启动【${action.deviceName}】失败：回路配置无效。`, defeated: false };
+    await connection.execute("UPDATE combat_device_energy SET current_energy=current_energy-? WHERE battle_kind='pvp' AND session_id=? AND character_id=? AND instance_id=? AND current_energy>=?", [action.skill.energyCost, sessionId, actor.id, action.instanceId, action.skill.energyCost]);
+    const recipient = action.target === 'self' ? actor : target;
+    const recipientCooldowns = action.target === 'self' ? actorCooldowns : targetCooldowns;
+    const heal = (ratio: number) => {
+      const before = Number(recipient.current_hp); recipient.current_hp = Math.min(Number(recipient.hp_max), before + Math.floor(Number(recipient.hp_max) * ratio));
+      return `【${recipient.name}】HP ${before}→${recipient.current_hp}`;
+    };
+    if (action.skill.effect === 'recycling_reflux') {
+      const restored = await restoreCombatDeviceEnergy(connection, sessionId, Number(actor.id), 20, action.instanceId, 'pvp');
+      return { text: `【${actor.name}】启动【${action.deviceName}】·回收回流，其余 ${restored} 件主动异械各恢复至多 20 点充能。`, defeated: false };
+    }
+    if (action.skill.effect === 'weave_repair') { for (const code of ['device_slow', 'device_exposed', 'device_bind', 'device_stun', 'device_burn', 'device_poison']) delete recipientCooldowns?.[code]; return { text: `【${actor.name}】启动【${action.deviceName}】·缝补程序，${heal(.18)}，并净化 1 个负面状态。`, defeated: false }; }
+    if (action.skill.effect === 'autonomous_repair') { const restored = Number(recipientCooldowns?.device_barrier ?? 0) > 0 ? await restoreCombatDeviceEnergy(connection, sessionId, Number(recipient.id), 20, undefined, 'pvp') : 0; return { text: `【${actor.name}】启动【${action.deviceName}】·应急重构，${heal(.30)}${restored ? `，并为 ${restored} 件异械各恢复至多 20 点充能` : ''}。`, defeated: false }; }
+    if (action.skill.effect === 'reactor_thermal_share') {
+      const restored = await restoreCombatDeviceEnergy(connection, sessionId, Number(recipient.id), 10, undefined, 'pvp');
+      recipientCooldowns!.device_battle_cry = 2;
+      return { text: `【${actor.name}】启动【${action.deviceName}】·热能转供，【${recipient.name}】伤害提高 20%，异械各恢复至多 10 点充能（${restored} 件）。`, defeated: false };
+    }
+    if (action.skill.effect === 'physical_evade_once') return { text: `【${actor.name}】启动【${action.deviceName}】，获得一次物理闪避。`, defeated: false };
+    if (action.skill.effect === 'easter_egg') {
+      const pool = ['device_precision_aim', 'device_battle_cry', 'device_rocket_boost', 'device_barrier', 'device_regeneration', 'device_mana_regeneration', 'device_slow', 'device_exposed', 'device_bind', 'device_burn', 'device_poison', 'device_evasion_down'];
+      const picked = [...pool].sort(() => Math.random() - .5).slice(0, 5); for (const code of picked) recipientCooldowns![code] = code === 'device_rocket_boost' ? Math.min(100, Number(recipientCooldowns![code] ?? 0) + 30) : 3;
+      return { text: `【${actor.name}】启动【${action.deviceName}】·彩蛋投掷，【${recipient.name}】随机获得 5 种效果。`, defeated: false };
+    }
+    if (action.skill.effect === 'precision_aim') { recipientCooldowns!.device_precision_aim = 99; return { text: `【${actor.name}】启动【${action.deviceName}】·精准瞄准，【${recipient.name}】获得命中与暴击提升，直到下次受击。`, defeated: false }; }
+    if (action.skill.effect === 'gravity_tether') { recipientCooldowns!.device_slow = 2; recipientCooldowns!.device_evasion_down = 2; return { text: `【${actor.name}】启动【${action.deviceName}】·引力牵引，【${recipient.name}】速度、闪避降低 30%。`, defeated: false }; }
+    if (action.skill.effect === 'fold_barrier') { recipientCooldowns!.device_barrier = actorDevices.has('fold_barrier_generator') ? 3 : 2; return { text: `【${actor.name}】启动【${action.deviceName}】·折叠壁垒，【${recipient.name}】获得 15% 减伤。`, defeated: false }; }
+    if (action.skill.effect === 'phase_decoy') { recipientCooldowns!.device_phase_decoy = 99; return { text: `【${actor.name}】启动【${action.deviceName}】·相位替身，【${recipient.name}】的下次直接伤害降低 80%。`, defeated: false }; }
+    if (action.skill.effect === 'counter_spider') {
+      const removable = ['device_precision_aim', 'device_battle_cry', 'device_barrier', 'device_phase_decoy'].find(code => Number(recipientCooldowns?.[code] ?? 0) > 0);
+      if (removable) { delete recipientCooldowns![removable]; return { text: `【${actor.name}】启动【${action.deviceName}】·拆解射线，移除了【${recipient.name}】的一项正面状态。`, defeated: false }; }
+      recipientCooldowns!.device_exposed = 2; return { text: `【${actor.name}】启动【${action.deviceName}】·拆解射线，【${recipient.name}】获得易伤 15%。`, defeated: false };
+    }
+    if (action.skill.effect === 'reactor_overcharge') actor.current_hp = Math.max(1, Number(actor.current_hp) - Math.floor(Number(actor.current_hp) * .15));
+    const magic = action.skill.effect === 'frost_pulse' || action.skill.effect === 'reactor_overcharge';
+    const pseudo: PvpAction = { type: 'skill', id: 0, code: `device_${action.skill.code}`, name: `${action.deviceName}·${action.skill.name}`, category: magic ? 'magic' : 'physical', requiredWeaponType: null, manaCost: 0, power: Number(action.skill.power ?? 100), cooldown: 0 };
+    const result = await resolveAction(connection, actor, target, pseudo, sessionId, targetCooldowns, actorCooldowns, actorDevices, targetDevices, context);
+    if (!result.defeated && action.skill.effect === 'shock_pile' && Math.random() < .65) targetCooldowns!.device_stun = 2;
+    if (!result.defeated && action.skill.effect === 'frost_pulse') targetCooldowns!.device_slow = 2;
+    if (!result.defeated && (action.skill.effect === 'coil_cannon')) targetCooldowns!.device_exposed = 2;
+    return result;
+  }
   if (action.type === 'item') {
     const oldHp = Number(actor.current_hp); const oldMp = Number(actor.current_mp);
-    const hp = Math.min(Number(actor.hp_max), oldHp + Number(action.effect.heal ?? 0)); const mp = Math.min(Number(actor.mp_max), oldMp + Number(action.effect.restoreMp ?? 0));
+    const hp = Math.min(Number(actor.hp_max), oldHp + Number(action.effect.heal ?? 0) + Math.floor(Number(actor.hp_max) * Math.max(0, Number(action.effect.healPct ?? 0)) / 100)); const mp = Math.min(Number(actor.mp_max), oldMp + Number(action.effect.restoreMp ?? 0) + Math.floor(Number(actor.mp_max) * Math.max(0, Number(action.effect.restoreMpPct ?? 0)) / 100));
     await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=? AND quantity>0', [actor.id, action.id]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [actor.id, action.id]);
     await connection.execute('UPDATE characters SET current_hp=?,current_mp=? WHERE id=?', [hp, mp, actor.id]); actor.current_hp = hp; actor.current_mp = mp;
     return { text: `【${actor.name}】使用【${action.name}】，HP ${oldHp}→${hp}｜MP ${oldMp}→${mp}。`, defeated: false };
   }
   const skill = action.type === 'skill' && Number(actor.current_mp) >= action.manaCost ? action : null;
-  if (action.type === 'skill' && !skill) return resolveAction(connection, actor, target, { type: 'attack' });
+  if (action.type === 'skill' && !skill) return resolveAction(connection, actor, target, { type: 'attack' }, sessionId, targetCooldowns, actorCooldowns, actorDevices, targetDevices, context);
   if (skill) { actor.current_mp = Number(actor.current_mp) - skill.manaCost; await connection.execute('UPDATE characters SET current_mp=? WHERE id=?', [actor.current_mp, actor.id]); }
-  if (skill?.category === 'utility') return { text: `【${actor.name}】释放技能「${skill.name}」，但该辅助技能尚未在 PvP 对抗中形成直接伤害。`, defeated: false };
-  const magic = skill?.category === 'magic'; const attack = magic ? Number(actor.magic_attack) : Number(actor.physical_attack); const defense = magic ? Number(target.magic_defense) : Number(target.physical_defense); const label = skill ? `释放技能「${skill.name}」` : '普通攻击';
-  const strike = resolveStrike(attack * (skill ? skill.power / 100 : 1), defense, Number(actor.accuracy), Number(target.evasion), Number(actor.crit_rate_bp), Number(target.crit_resist_bp), Number(actor.crit_damage_bp), Number(target.crit_damage_reduction_bp));
-  if (!strike.hit) return { text: `【${actor.name}】${label}，但【${target.name}】闪避了攻击。`, defeated: false };
-  const damage = directDamageVariance(strike.damage); const hp = Math.max(0, Number(target.current_hp) - damage); const defeated = hp <= 0; const critText = strike.crit ? '暴击' : '';
-  if (!defeated) { await connection.execute('UPDATE characters SET current_hp=? WHERE id=?', [hp, target.id]); target.current_hp = hp; return { text: `【${actor.name}】${label}，对【${target.name}】造成 ${damage} 点${critText}${magic ? '魔法' : '物理'}伤害（HP ${hp}）。`, defeated: false }; }
+  if (skill?.code === 'machine_echo' && sessionId) {
+    const restored = await restoreCombatDeviceEnergy(connection, sessionId, Number(actor.id), 25, undefined, 'pvp');
+    await recordPvpAttack(connection, actor, target, '技能「万机回响」', 0, 'utility');
+    return { text: `【${actor.name}】释放技能「万机回响」，为自身 ${restored} 件已生效主动异械各恢复至多 25 点充能。`, defeated: false };
+  }
+  if (skill?.category === 'utility') { await recordPvpAttack(connection, actor, target, `技能「${skill.name}」`, 0, 'utility'); return { text: `【${actor.name}】释放技能「${skill.name}」，但该辅助技能尚未在 PvP 对抗中形成直接伤害。`, defeated: false }; }
+  const sourceUnit = context?.get(Number(actor.id)); let targetUnit = context?.get(Number(target.id));
+  if (sourceUnit && targetUnit) {
+    const redirected = context!.rule.redirect(sourceUnit, targetUnit, true);
+    if (redirected.key === sourceUnit.key) { target = actor; targetCooldowns = actorCooldowns; targetDevices = actorDevices; targetUnit = sourceUnit; }
+  }
+  const magic = skill?.category === 'magic'; let attack = magic ? Number(actor.magic_attack) : Number(actor.physical_attack); let defense = magic ? Number(target.magic_defense) : Number(target.physical_defense); const label = skill ? `释放技能「${skill.name}」` : '普通攻击';
+  if (sourceUnit && targetUnit) {
+    if (context!.rule.passive(sourceUnit, 'G01')) attack = Math.max(sourceUnit.attack, sourceUnit.magic);
+    const swap = skill && await context!.rule.consume(sourceUnit, magic ? 'swap_magic' : 'swap_physical');
+    if (swap) attack = magic ? Math.min(sourceUnit.attack, sourceUnit.magic) : Math.max(sourceUnit.attack, sourceUnit.magic);
+    attack *= 1 + (context!.rule.value(sourceUnit, magic ? 'magic' : 'attack') - context!.rule.value(sourceUnit, magic ? 'magic_down' : 'attack_down')) / 100;
+    defense *= (1 - Math.min(80, context!.rule.value(targetUnit, magic ? 'magic_shatter' : 'armor_shatter')) / 100) * (1 + context!.rule.value(targetUnit, magic ? 'magic_defense' : 'defense') / 100);
+  }
+  // 精准瞄准在“下次受到攻击”时失效；命中、暴击仅影响状态拥有者在这之前的出手。
+  delete targetCooldowns?.device_precision_aim;
+  if (!magic && Number(targetCooldowns?.device_physical_evasion ?? 0) > 0) {
+    delete targetCooldowns!.device_physical_evasion;
+    await recordPvpAttack(connection, actor, target, skill ? `技能「${skill.name}」` : '普通攻击', 0, 'miss');
+    return { text: `【${actor.name}】${skill ? `释放技能「${skill.name}」` : '普通攻击'}，但【${target.name}】以异械闪避了物理攻击。`, defeated: false };
+  }
+  const isDeviceDamage = Boolean(skill?.code.startsWith('device_'));
+  const deviceDamageBonus = isDeviceDamage ? (actorDevices.has('rail_stabilizer') ? 12 : 0) + (skill?.code === 'device_electromagnetic_coil_fire' && actorDevices.has('electromagnetic_coil_cannon') ? 12 : 0) : 0;
+  const battleCryBonus = Number(actorCooldowns?.device_battle_cry ?? 0) > 0 ? 20 : 0;
+  const accuracy = Number(actor.accuracy) * (1 + (Number(actorCooldowns?.device_precision_aim ?? 0) > 0 ? 100 : 0) / 100) * (1 + (isDeviceDamage && actorDevices.has('precision_scope') ? .1 : 0));
+  const evasion = Number(target.evasion) * (1 - (Number(targetCooldowns?.device_evasion_down ?? 0) > 0 ? .3 : 0));
+  const critRate = Math.max(Number(actor.crit_rate_bp), Number(actorCooldowns?.device_precision_aim ?? 0) > 0 ? 10000 : 0, !magic && actorDevices.has('critical_glove') ? 10000 : 0);
+  const setup = sourceUnit && targetUnit ? await context!.rule.attackSetup(sourceUnit, targetUnit, Boolean(magic), Boolean(skill)) : { forceHit: false, powerFactor: 1, hitBonus: 0, hitFactor: 1 };
+  const strike = resolveStrike(attack * (skill ? skill.power / 100 : 1) * (1 + (deviceDamageBonus + battleCryBonus) / 100), defense, accuracy, evasion, critRate, Number(target.crit_resist_bp), Number(actor.crit_damage_bp), Number(target.crit_damage_reduction_bp), setup.forceHit, false, 0, setup.hitBonus * 100, setup.hitFactor);
+  if (!strike.hit) { await recordPvpAttack(connection, actor, target, label, 0, 'miss'); return { text: `【${actor.name}】${label}，但【${target.name}】闪避了攻击。`, defeated: false }; }
+  const exposed = Number(targetCooldowns?.device_exposed ?? 0) > 0 ? .15 : 0; const barrier = Number(targetCooldowns?.device_barrier ?? 0) > 0 ? .15 : 0; const phase = Number(targetCooldowns?.device_phase_decoy ?? 0) > 0 ? .8 : 0;
+  if (phase) delete targetCooldowns!.device_phase_decoy;
+  let damage = directDamageVariance(Math.max(1, Math.floor(strike.damage * (skill?.specialized?.damageFactor ?? 1) * (1 + exposed) * (1 - barrier) * (1 - phase) * setup.powerFactor)));
+  if (sourceUnit && targetUnit) { damage = await context!.rule.incoming(sourceUnit, targetUnit, damage, '无', Boolean(magic), Boolean(skill), true, true); const absorbed = await context!.rule.take(targetUnit, damage); await context!.rule.afterHit(sourceUnit, targetUnit, damage - absorbed, '无', Boolean(skill), absorbed, Boolean(actorCooldowns?.__extraTurn)); }
+  const hp = targetUnit ? targetUnit.hp : Math.max(0, Number(target.current_hp) - damage); const defeated = hp <= 0; const critText = strike.crit ? '暴击' : '';
+  if (context && (defeated || Number(actor.current_hp) <= 0)) { target.current_hp = hp; await recordPvpAttack(connection, actor, target, label, damage, 'defeat'); return { text: `【${actor.name}】${label}，造成 ${damage} 点伤害。`, defeated: true }; }
+  if (!defeated && targetDevices.has('inverse_buffer') && Number(targetCooldowns?.device_inverse_triggered ?? 0) <= 0 && hp * 100 <= Number(target.hp_max) * 30) { targetCooldowns!.device_inverse_triggered = 1; targetCooldowns!.device_barrier = Math.max(Number(targetCooldowns!.device_barrier ?? 0), 2); }
+  if (!defeated) { await connection.execute('UPDATE characters SET current_hp=? WHERE id=?', [hp, target.id]); target.current_hp = hp; await recordPvpAttack(connection, actor, target, label, damage, 'hit'); return { text: `【${actor.name}】${label}，对【${target.name}】造成 ${damage} 点${critText}${magic ? '魔法' : '物理'}伤害（HP ${hp}）。`, defeated: false }; }
   const settlement = await resolvePvpVictory(connection, actor.id, target.id);
+  await recordPvpAttack(connection, actor, target, label, damage, 'defeat', settlement.lootText);
   // 战斗过程只记录本次攻击；掠夺、逮捕等结果由独立结算消息展示。
-  return { text: `【${actor.name}】${label}，对【${target.name}】造成 ${damage} 点${critText}${magic ? '魔法' : '物理'}伤害。`, defeated: true, settlement: settlement.text, restitution: settlement.restitution };
+  return { text: `【${actor.name}】${label}，对【${target.name}】造成 ${damage} 点${critText}${magic ? '魔法' : '物理'}伤害。`, defeated: true, settlement: settlement.text, restitution: settlement.restitution, lootText: settlement.lootText };
 };
 
 export const cityPvp = async (qqUserId: string, targetGameId: number, confirmed = false) => withTransaction(async connection => {
@@ -321,6 +515,7 @@ export const cityPvp = async (qqUserId: string, targetGameId: number, confirmed 
   if (attacker.activity_status === 'detained') throw new Error(detentionMessage(attacker.detained_until));
   const [targets] = await connection.execute<PvpCharacter[]>('SELECT * FROM characters WHERE game_id=? AND npc_code IS NULL FOR UPDATE', [targetGameId]); const target = targets[0];
   if (!target || Number(target.id) === Number(attacker.id) || Number(target.current_region_id) !== Number(town.id) || Number(target.pos_z) !== Number(attacker.pos_z) || Math.abs(Number(target.pos_x) - Number(attacker.pos_x)) + Math.abs(Number(target.pos_y) - Number(attacker.pos_y)) > 1) throw new Error('目标不在你相邻的城镇格子中。');
+  await assertPvpDefeatUnprotected(connection, Number(target.id));
   if (target.activity_status === 'detained') throw new Error('目标已被守卫关押。');
   const attackerWarrant = await wanted(connection, attacker.id, Number(town.id)); const targetWarrant = await wanted(connection, target.id, Number(town.id));
   if (await isInHome(connection, Number(target.id)) && !targetWarrant) throw new Error('目标正在自己的家园中，无法攻击或打劫。');
@@ -337,8 +532,11 @@ export const cityPvp = async (qqUserId: string, targetGameId: number, confirmed 
   }
   if (unlawfulAttack) { await connection.execute('INSERT INTO player_warrants (wanted_character_id,city_region_id,status) VALUES (?,?,\'active\')', [attacker.id, town.id]); await recordWarrantSighting(connection, Number(attacker.id), Number(town.id), Number(attacker.pos_x), Number(attacker.pos_y)); }
   if (!targetWarrant) await recordWarrantVictim(connection, await wanted(connection, Number(attacker.id), Number(town.id)), Number(target.id));
+  const battleLogId = await createPvpBattleLog(connection, attacker, target, '城镇');
   const opening = await resolveAction(connection, attacker, target, await actionFor(connection, attacker, true));
   const response = !opening.defeated && Number(target.current_hp) > 1 ? await resolveAction(connection, target, attacker, await actionFor(connection, target)) : null;
+  const winner = opening.defeated ? attacker : response?.defeated ? target : null;
+  await finishPvpBattleLog(connection, battleLogId, winner === attacker ? 'attacker_win' : winner === target ? 'defender_win' : 'draw', winner, opening.lootText ?? response?.lootText ?? null);
   return { needsConfirmation: false, target: target.name, text: [opening.text, response?.text].filter(Boolean).join('\n') };
 });
 
@@ -351,10 +549,14 @@ export const fieldPvp = async (qqUserId: string, targetGameId: number) => withTr
   const target = targets[0];
   const distance = target ? Math.abs(Number(target.pos_x) - Number(attacker.pos_x)) + Math.abs(Number(target.pos_y) - Number(attacker.pos_y)) : Infinity;
   if (!target || Number(target.id) === Number(attacker.id) || Number(target.current_region_id) !== Number(attacker.current_region_id) || Number(target.pos_z) !== Number(attacker.pos_z) || distance > perceptionRange(attacker)) throw new Error('目标已经离开你的感知范围。');
+  await assertPvpDefeatUnprotected(connection, Number(target.id));
   if (target.activity_status === 'detained') throw new Error('目标已被守卫关押。');
   if (await isInHome(connection, Number(target.id))) throw new Error('目标正在自己的家园中，无法攻击或打劫。');
+  const battleLogId = await createPvpBattleLog(connection, attacker, target, '野外');
   const opening = await resolveAction(connection, attacker, target, await actionFor(connection, attacker, true));
   const response = !opening.defeated && Number(target.current_hp) > 1 ? await resolveAction(connection, target, attacker, await actionFor(connection, target)) : null;
+  const winner = opening.defeated ? attacker : response?.defeated ? target : null;
+  await finishPvpBattleLog(connection, battleLogId, winner === attacker ? 'attacker_win' : winner === target ? 'defender_win' : 'draw', winner, opening.lootText ?? response?.lootText ?? null);
   return { text: [opening.text, response?.text].filter(Boolean).join('\n') };
 });
 
@@ -379,15 +581,31 @@ const battleActionFromSlot = async (connection: PoolConnection, character: PvpCh
   if (!rows[0]) throw new Error(`道具${'①②③④'.charAt(Math.max(0, (slot ?? 1) - 1)) || slot}未配置。`);
   return { type: 'item', id: Number(rows[0].id), name: rows[0].name, effect: record(rows[0].effect_json) };
 };
-const tickCooldowns = (value: unknown) => Object.fromEntries(Object.entries(record(value)).map(([code, turns]) => [code, Math.max(0, Number(turns) - 1)]));
-const readyBattleAction = async (connection: PoolConnection, character: PvpCharacter, action: PvpAction | null, cooldowns: Record<string, number>, automatic: boolean): Promise<PvpAction> => {
+const deviceActionFromSlot = async (connection: PoolConnection, sessionId: string, character: PvpCharacter, cooldowns: PvpDeviceState, slot: number, skillCode?: string, targetKind?: 'member' | 'target'): Promise<PvpAction> => {
+  const devices = await combatDeviceSlotsFor(connection, sessionId, Number(character.id), true, 'pvp');
+  const device = devices.find(candidate => candidate.slot === slot);
+  if (!device) throw new Error(`异械${'①②③④'.charAt(slot - 1) || slot}未配置或尚未生效。`);
+  const skill = skillCode ? device.skills.find(candidate => candidate.code === skillCode) : device.skills[0];
+  if (!skill) throw new Error('请选择该异械的可用技能。');
+  const cooldownKey = `device_${device.instanceId}_${skill.code}`;
+  if (Number(cooldowns[cooldownKey] ?? 0) > 0) throw new Error(`【${skill.name}】冷却中，还需${cooldowns[cooldownKey]}回合。`);
+  if (device.currentEnergy < skill.energyCost) return { type: 'device_charge', instanceId: device.instanceId, deviceName: device.deviceName };
+  const target = skill.targetScope === 'self' || skill.targetScope === 'ally' || skill.targetScope === 'all_allies'
+    ? 'self'
+    : skill.targetScope === 'any' && targetKind === 'member' ? 'self' : 'enemy';
+  return { type: 'device', instanceId: device.instanceId, deviceCode: device.deviceCode, deviceName: device.deviceName, skill, target };
+};
+const tickCooldowns = (value: unknown) => Object.fromEntries(Object.entries(record(value)).map(([code, turns]) => {
+  if (code.startsWith('__')) return [code, turns];
+  if (code === 'device_rocket_boost' || code === 'device_inverse_triggered') return [code, Number(turns)];
+  return [code, Math.max(0, Number(turns) - 1)];
+}));
+const readyBattleAction = async (_connection: PoolConnection, character: PvpCharacter, action: PvpAction | null, cooldowns: Record<string, number>, automatic: boolean): Promise<PvpAction> => {
   if (!action || action.type !== 'skill') return action ?? { type: 'attack' };
-  const usable = await hasCompatibleSkillWeapon(connection, Number(character.id), action.requiredWeaponType)
-    && Number(character.current_mp) >= action.manaCost
+  const usable = Number(character.current_mp) >= action.manaCost
     && Number(cooldowns[action.code] ?? 0) <= 0;
   if (usable) return action;
   if (automatic) return { type: 'attack' };
-  if (!await hasCompatibleSkillWeapon(connection, Number(character.id), action.requiredWeaponType)) throw new Error(skillWeaponRequirementMessage(action.name, String(action.requiredWeaponType)));
   if (Number(character.current_mp) < action.manaCost) throw new Error('魔力不足，无法释放该技能。');
   throw new Error(`「${action.name}」冷却中。`);
 };
@@ -401,13 +619,15 @@ const sessionView = async (connection: PoolConnection, battle: PvpBattleRow, cha
   const enemyId = ownAttacker ? Number(battle.defender_character_id) : attackerId;
   const [others] = await connection.execute<PvpCharacter[]>('SELECT * FROM characters WHERE id=? LIMIT 1', [enemyId]); const enemy = others[0];
   const enemyHp = ownAttacker ? Number(battle.defender_hp) : Number(battle.attacker_hp); const enemyMp = ownAttacker ? Number(battle.defender_mp) : Number(battle.attacker_mp);
+  const enemyState = readRuleState(record(ownAttacker ? battle.defender_cooldowns : battle.attacker_cooldowns).__rules); const hidden = enemyState.statuses.some(e => e.code === 'nightmare' && e.until >= Number(battle.turn_no));
   const cooldowns = ownAttacker ? record(battle.attacker_cooldowns) : record(battle.defender_cooldowns);
   const [skills] = await connection.execute<(RowDataPacket & { quick_slot: number; code: string })[]>('SELECT ps.quick_slot,s.code FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.quick_slot IS NOT NULL', [character.id]);
   const [items] = await connection.execute<(RowDataPacket & { quick_slot: number })[]>('SELECT qi.quick_slot FROM player_quick_items qi JOIN player_inventory pi ON pi.character_id=qi.character_id AND pi.item_id=qi.item_id AND pi.quantity>0 WHERE qi.character_id=?', [character.id]);
-  return { sessionId: battle.id, characterId: Number(character.id), turn: Number(battle.turn_no), playerHp: ownHp, playerHpMax: Number(character.hp_max), playerMp: ownMp, playerMpMax: Number(character.mp_max), selectedTargetId: enemyId,
-    canAct: ownAttacker && ownHp > 0, skillSlots: skills.map(row => Number(row.quick_slot)), readySkillSlots: skills.filter(row => Number(cooldowns[row.code] ?? 0) <= 0).map(row => Number(row.quick_slot)), itemSlots: items.map(row => Number(row.quick_slot)), appraisal: { learned: false, rangeLevel: 0, informationLevel: 0 },
-    members: [{ id: Number(character.id), name: character.name, hp: ownHp, hpMax: Number(character.hp_max), mp: ownMp, mpMax: Number(character.mp_max), defeated: ownHp <= 0, pending: false }],
-    targets: enemy ? [{ id: enemyId, name: enemy.name, level: Number(enemy.level), hp: enemyHp, hpMax: Number(enemy.hp_max), mp: enemyMp, mpMax: Number(enemy.mp_max), defeated: enemyHp <= 0, identified: true }] : []
+  const deviceSlots = await combatDeviceSlotsFor(connection, battle.id, Number(character.id), false, 'pvp');
+  return { sessionId: battle.id, mode: 'pvp', selectedAllyId: Number(cooldowns.__selectedAlly) || null, canEnchant: skills.some(s => s.code === 'resident_a02'), enchantElement: String(cooldowns.__enchantElement ?? '风'), characterId: Number(character.id), turn: Number(battle.turn_no), playerHp: ownHp, playerHpMax: Number(character.hp_max), playerMp: ownMp, playerMpMax: Number(character.mp_max), selectedTargetId: enemyId,
+    canAct: ownAttacker && ownHp > 0 && !readRuleState(cooldowns.__rules).cast, resource: null, skillSlots: skills.map(row => Number(row.quick_slot)), readySkillSlots: skills.filter(row => Number(cooldowns[row.code] ?? 0) <= 0).map(row => Number(row.quick_slot)), itemSlots: items.map(row => Number(row.quick_slot)), appraisal: { learned: false, rangeLevel: 0, informationLevel: 0 },
+    members: [{ statusText: ruleStatusSummary(readRuleState(cooldowns.__rules), Number(battle.turn_no)), id: Number(character.id), name: character.name, hp: ownHp, hpMax: Number(character.hp_max), mp: ownMp, mpMax: Number(character.mp_max), resource: null, defeated: ownHp <= 0, pending: false, chanting: residentSkillByCode(readRuleState(cooldowns.__rules).cast?.code ?? '')?.name ?? null, extraAction: Boolean(cooldowns.__bonusAction) }], spirits: [], deviceSlots: deviceSlots.map(device => ({ ...device, skills: device.skills.map(skill => ({ ...skill, ready: Number(cooldowns[`device_${device.instanceId}_${skill.code}`] ?? 0) <= 0 })) })), environment: null,
+    targets: enemy ? [{ statusText: hidden ? '信息被雾遮蔽' : ruleStatusSummary(enemyState, Number(battle.turn_no), false), id: enemyId, name: hidden ? '信息被雾遮蔽' : enemy.name, level: Number(enemy.level), hp: hidden ? '???' : enemyHp, hpMax: hidden ? '???' : Number(enemy.hp_max), mp: hidden ? '???' : enemyMp, mpMax: hidden ? '???' : Number(enemy.mp_max), defeated: enemyHp <= 0, identified: !hidden }] : []
   };
 };
 
@@ -418,6 +638,7 @@ export const startPvpBattle = async (qqUserId: string, targetGameId: number, con
   const distance = defender ? Math.abs(Number(defender.pos_x) - Number(attacker.pos_x)) + Math.abs(Number(defender.pos_y) - Number(attacker.pos_y)) : Infinity;
   const range = regionCode === 'dark_forest_dungeon' ? 1 : perceptionRange(attacker);
   if (!defender || Number(defender.id) === Number(attacker.id) || Number(defender.current_region_id) !== Number(attacker.current_region_id) || Number(defender.pos_z) !== Number(attacker.pos_z) || distance > range) throw new Error('目标已经离开你的感知范围。');
+  await assertPvpDefeatUnprotected(connection, Number(defender.id));
   if (await isFriendRelation(connection, Number(attacker.id), Number(defender.id))) throw new Error('游戏内好友之间无法互相攻击。');
   if (await isInHome(connection, Number(attacker.id))) throw new Error('你正在自己的家园中，无法主动发起 PvP。');
   if (attacker.activity_status === 'detained') throw new Error(detentionMessage(attacker.detained_until));
@@ -440,6 +661,8 @@ export const startPvpBattle = async (qqUserId: string, targetGameId: number, con
   const [occupied] = await connection.execute<RowDataPacket[]>(`SELECT 1 FROM player_pvp_battle_sessions WHERE state='active' AND (attacker_character_id IN (?,?) OR defender_character_id IN (?,?)) LIMIT 1 FOR UPDATE`, [attacker.id, defender.id, attacker.id, defender.id]);
   if (occupied[0]) throw new Error('其中一方正在进行玩家对战。');
   const id = randomUUID(); await connection.execute('INSERT INTO player_pvp_battle_sessions (id,attacker_character_id,defender_character_id,attacker_hp,attacker_mp,defender_hp,defender_mp,attacker_cooldowns,defender_cooldowns) VALUES (?,?,?,?,?,?,?,JSON_OBJECT(),JSON_OBJECT())', [id, attacker.id, defender.id, attacker.current_hp, attacker.current_mp, defender.current_hp, defender.current_mp]);
+  await initializeCombatDeviceEnergy(connection, id, Number(attacker.id), 'pvp'); await initializeCombatDeviceEnergy(connection, id, Number(defender.id), 'pvp');
+  await createPvpBattleLog(connection, attacker, defender, regionCode === 'baina_town' ? '城镇' : '野外', id);
   return { needsConfirmation: false, target: defender.name };
 });
 
@@ -449,6 +672,7 @@ export const startAmbushPvpBattle = async (attackerCharacterId: number, defender
   const attacker = fighters.find(row => Number(row.id) === Number(attackerCharacterId));
   const defender = fighters.find(row => Number(row.id) === Number(defenderCharacterId));
   if (!attacker || !defender || Number(attacker.id) === Number(defender.id)) throw new Error('伏击目标已经离开战场。');
+  await assertPvpDefeatUnprotected(connection, Number(defender.id));
   if (attacker.activity_status !== 'active' || defender.activity_status !== 'active') throw new Error('伏击条件已失效，战场中的一方无法继续战斗。');
   const [occupied] = await connection.execute<RowDataPacket[]>(`SELECT 1 FROM player_pvp_battle_sessions
     WHERE state='active' AND (attacker_character_id IN (?,?) OR defender_character_id IN (?,?)) LIMIT 1 FOR UPDATE`, [attacker.id, defender.id, attacker.id, defender.id]);
@@ -457,6 +681,8 @@ export const startAmbushPvpBattle = async (attackerCharacterId: number, defender
   await connection.execute(`INSERT INTO player_pvp_battle_sessions
     (id,attacker_character_id,defender_character_id,attacker_hp,attacker_mp,defender_hp,defender_mp,attacker_cooldowns,defender_cooldowns,ambush_spawn_id,ambush_delivery_scope,ambush_delivery_target_id,ambush_delivery_bot_id)
     VALUES (?,?,?,?,?,?,?,JSON_OBJECT(),JSON_OBJECT(),?,?,?,?)`, [id, attacker.id, defender.id, attacker.current_hp, attacker.current_mp, defender.current_hp, defender.current_mp, spawnId, delivery.scope, delivery.targetId, delivery.botId ?? null]);
+  await initializeCombatDeviceEnergy(connection, id, Number(attacker.id), 'pvp'); await initializeCombatDeviceEnergy(connection, id, Number(defender.id), 'pvp');
+  await createPvpBattleLog(connection, attacker, defender, '伏击', id);
   return { target: defender.name };
 });
 
@@ -464,40 +690,137 @@ export const pvpBattleStatus = async (qqUserId: string) => withTransaction(async
   const character = await characterFor(connection, qqUserId); const battle = await activePvpBattle(connection, Number(character.id), true); if (!battle) throw new Error('当前不在玩家对战中。'); return sessionView(connection, battle, character);
 });
 
-export const pvpCombatAction = async (qqUserId: string, type: 'attack' | 'skill' | 'item' | 'escape' | 'auto', slot?: number) => withTransaction(async connection => {
+export const selectPvpBattleOption = async (qqUserId: string, option: { element?: string; targetId?: number; side?: 'member' | 'target' }) => withTransaction(async connection => {
+  const character = await characterFor(connection, qqUserId); const battle = await activePvpBattle(connection, Number(character.id), true);
+  if (!battle) throw new Error('当前不在玩家对战中。');
+  const ownAttacker = Number(character.id) === Number(battle.attacker_character_id);
+  const column = ownAttacker ? 'attacker_cooldowns' : 'defender_cooldowns';
+  const cooldowns = record(battle[column]);
+  if (option.element) {
+    if (!['风', '雷', '火'].includes(option.element)) throw new Error('附锋元素只能选择风、雷或火。');
+    cooldowns.__enchantElement = option.element;
+  }
+  if (option.targetId !== undefined) {
+    const expected = option.side === 'member' ? Number(character.id) : Number(ownAttacker ? battle.defender_character_id : battle.attacker_character_id);
+    if (option.targetId !== expected) throw new Error('该目标不在本场对战中。');
+    if (option.side === 'member') cooldowns.__selectedAlly = expected; else delete cooldowns.__selectedAlly;
+  }
+  await connection.execute(`UPDATE player_pvp_battle_sessions SET ${column}=? WHERE id=?`, [JSON.stringify(cooldowns), battle.id]);
+  battle[column] = cooldowns; return sessionView(connection, battle, character);
+});
+
+/** 已付费的吟唱自动推进，不读取或修改发起者的自动战斗设置。 */
+export const continuePvpChant = async (qqUserId: string) => {
+  const pool = await getPool();
+  const [rows] = await pool.execute<RowDataPacket[]>(`SELECT b.attacker_cooldowns FROM player_pvp_battle_sessions b JOIN characters c ON c.id=b.attacker_character_id JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? AND b.state='active' LIMIT 1`, [qqUserId]);
+  if (!readRuleState(record(rows[0]?.attacker_cooldowns).__rules).cast) return null;
+  return pvpCombatAction(qqUserId, 'auto', undefined, undefined, undefined, true);
+};
+
+export const pvpCombatAction = async (qqUserId: string, type: 'attack' | 'skill' | 'item' | 'escape' | 'auto' | 'device', slot?: number, deviceSkillCode?: string, targetKind?: 'member' | 'target', automaticChant = false) => withTransaction(async connection => {
   const requester = await characterFor(connection, qqUserId); const battle = await activePvpBattle(connection, Number(requester.id), true); if (!battle) throw new Error('当前不在玩家对战中。');
   if (Number(requester.id) !== Number(battle.attacker_character_id)) throw new Error('对方正在发起攻击，你会按 PVP 自动战斗配置进行反击。');
-  if (type === 'escape') { await connection.execute("UPDATE player_pvp_battle_sessions SET state='escaped' WHERE id=?", [battle.id]); return { ended: true, log: `战斗<${battle.turn_no}>回合\n➤【${requester.name}】撤离了战斗。`, settlement: '你脱离了玩家对战。', requesterId: Number(requester.id), winnerId: null, winnerName: null }; }
+  if (type === 'escape') { await connection.execute("UPDATE player_pvp_battle_sessions SET state='escaped' WHERE id=?", [battle.id]); await finishPvpBattleLog(connection, battle.id, 'escaped'); return { ended: true, log: `战斗<${battle.turn_no}>回合\n➤【${requester.name}】撤离了战斗。`, settlement: '你脱离了玩家对战。', requesterId: Number(requester.id), winnerId: null, winnerName: null }; }
   const [fighters] = await connection.execute<PvpCharacter[]>('SELECT * FROM characters WHERE id IN (?,?) ORDER BY id FOR UPDATE', [battle.attacker_character_id, battle.defender_character_id]);
   const attacker = fighters.find(row => Number(row.id) === Number(battle.attacker_character_id)); const defender = fighters.find(row => Number(row.id) === Number(battle.defender_character_id)); if (!attacker || !defender) throw new Error('对战对象已失效。');
   attacker.current_hp = Number(battle.attacker_hp); attacker.current_mp = Number(battle.attacker_mp); defender.current_hp = Number(battle.defender_hp); defender.current_mp = Number(battle.defender_mp);
   const attackerCooldowns = record(battle.attacker_cooldowns); const defenderCooldowns = record(battle.defender_cooldowns);
-  const requestedAction = await readyBattleAction(connection, attacker, await battleActionFromSlot(connection, attacker, type, slot), attackerCooldowns, type === 'auto');
-  const log: string[] = []; let ended = false; let winnerId: number | null = null; let winnerName: string | null = null; let restitutionId: string | undefined; let settlement = '';
-  const orderedTurns = Number(defender.speed) > Number(attacker.speed)
-    ? [{ actor: defender, target: attacker, cooldowns: defenderCooldowns, automatic: true }, { actor: attacker, target: defender, cooldowns: attackerCooldowns, automatic: type === 'auto' }]
-    : [{ actor: attacker, target: defender, cooldowns: attackerCooldowns, automatic: type === 'auto' }, { actor: defender, target: attacker, cooldowns: defenderCooldowns, automatic: true }];
+  const [attackerDevices, defenderDevices] = await Promise.all([activeDeviceCodesFor(connection, Number(attacker.id)), activeDeviceCodesFor(connection, Number(defender.id))]);
+  const bonusPhase = Boolean(attackerCooldowns.__bonusPhase);
+  const ownCasting = readRuleState(attackerCooldowns.__rules).cast;
+  const queuedChants = new Set([attacker, defender].filter(f => readRuleState((Number(f.id) === Number(attacker.id) ? attackerCooldowns : defenderCooldowns).__rules).cast).map(f => Number(f.id)));
+  if (ownCasting && !automaticChant && type !== 'auto') throw new Error('你正在吟唱，技能将自动释放。');
+  if (!bonusPhase && attackerDevices.has('rocket_propeller')) attackerCooldowns.device_rocket_boost = Math.min(100, Number(attackerCooldowns.device_rocket_boost ?? 0) + 10);
+  if (!bonusPhase && defenderDevices.has('rocket_propeller')) defenderCooldowns.device_rocket_boost = Math.min(100, Number(defenderCooldowns.device_rocket_boost ?? 0) + 10);
+  const log: string[] = []; let ended = false; let winnerId: number | null = null; let winnerName: string | null = null; let restitutionId: string | undefined; let settlement = ''; let lootText: string | null = null;
+  const context = await createPvpCombatRules(connection, [attacker, defender], [attackerCooldowns, defenderCooldowns], Number(battle.turn_no), log, unit => { if (!bonusPhase) unit.cooldowns.__bonusAction = 1; });
+  const frozenAction = (id: number): PvpAction | undefined => {
+    const cast = context.get(id).state.cast; const skill = cast && residentSkillByCode(cast.code);
+    if (cast?.action) return { ...(cast.action as Extract<PvpAction, { type: 'skill' }>), manaCost: 0 };
+    return skill && cast ? { type: 'skill', id: cast.skillId, code: skill.code, name: skill.name, category: skill.category as 'physical' | 'magic' | 'utility', requiredWeaponType: null, manaCost: 0, power: skill.power, cooldown: cast.cooldown } : undefined;
+  };
+  const requestedAction = frozenAction(Number(attacker.id)) ?? (type === 'device'
+    ? await deviceActionFromSlot(connection, battle.id, attacker, attackerCooldowns, Number(slot), deviceSkillCode, targetKind)
+    : await battleActionFromSlot(connection, attacker, type, slot));
+  const effectiveSpeed = (fighter: PvpCharacter, state: PvpDeviceState) => context.rule.speed(context.get(Number(fighter.id))) * (1 + Number(state.device_rocket_boost ?? 0) / 100) * (1 - (Number(state.device_slow ?? 0) > 0 ? .3 : 0));
+  const orderedTurns = [
+    { actor: attacker, target: defender, cooldowns: attackerCooldowns, targetCooldowns: defenderCooldowns, devices: attackerDevices, targetDevices: defenderDevices, automatic: type === 'auto', extra: bonusPhase },
+    { actor: defender, target: attacker, cooldowns: defenderCooldowns, targetCooldowns: attackerCooldowns, devices: defenderDevices, targetDevices: attackerDevices, automatic: true, extra: false }
+  ].filter(turn => !bonusPhase || Number(turn.actor.id) === Number(attacker.id)).sort((a, b) => effectiveSpeed(b.actor, b.cooldowns) - effectiveSpeed(a.actor, a.cooldowns));
   for (const turn of orderedTurns) {
     if (ended || Number(turn.actor.current_hp) <= 0 || Number(turn.target.current_hp) <= 0) break;
-    const rawAction = Number(turn.actor.id) === Number(attacker.id) ? requestedAction : await actionFor(connection, turn.actor);
-    const action = await readyBattleAction(connection, turn.actor, rawAction, turn.cooldowns, turn.automatic);
-    const result = await resolveAction(connection, turn.actor, turn.target, action);
-    if (action.type === 'skill') turn.cooldowns[action.code] = action.cooldown + 1;
-    log.push(actionLog(result.text));
-    if (result.defeated) {
-      ended = true; winnerId = Number(turn.actor.id); winnerName = turn.actor.name; restitutionId = result.restitution?.id;
-      settlement = `【${turn.actor.name}】获得了胜利。${result.settlement ? `\n${result.settlement}` : ''}`;
+    const unit = context.get(Number(turn.actor.id)); const target = context.get(Number(turn.target.id));
+    if (turn.extra) { delete turn.cooldowns.__bonusAction; turn.cooldowns.__extraTurn = 1; } else delete turn.cooldowns.__extraTurn;
+    for (const fighter of context.rule.units) fighter.castSpecialization = undefined;
+    if (!await context.rule.beforeAction(unit)) continue;
+    if (Number(turn.cooldowns.device_stun ?? 0) > 0) { log.push(actionLog(`【${turn.actor.name}】被眩晕，无法行动。`)); continue; }
+    const casting = unit.state.cast;
+    if (queuedChants.has(Number(turn.actor.id)) && !casting) { queuedChants.delete(Number(turn.actor.id)); log.push(`➤【${unit.name}】的吟唱已被打断，本次行动结束。`); continue; }
+    queuedChants.delete(Number(turn.actor.id));
+    let rawAction = frozenAction(Number(turn.actor.id)) ?? (Number(turn.actor.id) === Number(attacker.id) ? requestedAction : await actionFor(connection, turn.actor));
+    if (rawAction?.type === 'skill' && !casting) {
+      const [definitions] = await connection.execute<RowDataPacket[]>('SELECT code,category,tier,power,mana_cost,cooldown_turns,chant_turns FROM skill_definitions WHERE id=?', [rawAction.id]);
+      const [levels] = await connection.execute<RowDataPacket[]>('SELECT specialization,level FROM player_skill_specializations WHERE character_id=? AND skill_id=?', [turn.actor.id, rawAction.id]);
+      const row = definitions[0];
+      if (row) {
+        const specialized = skillSpecialization({ code: String(row.code), category: String(row.category), tier: String(row.tier), power: Number(row.power), mana_cost: Number(row.mana_cost), cooldown_turns: Number(row.cooldown_turns), chant_turns: Number(row.chant_turns) }, Object.fromEntries(levels.map(level => [level.specialization, Number(level.level)])));
+        rawAction = { ...rawAction, power: specialized.power, manaCost: specialized.mana, cooldown: specialized.cooldown, chant: specialized.chant, specialized };
+      }
+      const blocked = context.rule.status(unit, 'silence') || residentSkillByCode(rawAction.code)?.category === 'passive';
+      if (blocked) { if (!turn.automatic) throw new Error('沉默期间不能使用技能，或所选技能为被动。'); rawAction = { type: 'attack' }; }
+      else rawAction = { ...rawAction, manaCost: context.rule.manaCost(unit, Math.ceil(rawAction.manaCost * (unit.state.memory.debtSkill === rawAction.code ? 1.4 : 1))) };
     }
+    const action = await readyBattleAction(connection, turn.actor, rawAction, turn.cooldowns, turn.automatic);
+    if (action.type === 'skill') {
+      const resident = residentSkillByCode(action.code);
+      if (resident && ['D01', 'C06', 'F04', 'I04'].includes(resident.id)) { if (turn.automatic) { log.push('➤【' + unit.name + '】缺少可支援队友，放弃本次辅助。'); continue; } throw new Error('这项技能需要另一名存活友方，不能在单挑中使用。'); }
+      const paid = casting?.paid ?? action.manaCost;
+      const cooldown = casting?.cooldown ?? action.cooldown + (unit.state.memory.debtSkill === action.code ? 2 : 0);
+      if (!casting) { unit.mp -= paid; await context.rule.paid(unit, paid, { category: action.category, cooldown }); delete unit.state.memory.debtSkill; }
+      const chant = action.chant ?? resident?.chant ?? 0;
+      if (chant && !casting) { unit.state.cast = { code: action.code, skillId: action.id, paid, target: target.key, cooldown, releaseTurn: Number(battle.turn_no) + chant, action }; log.push('【' + unit.name + '】开始了' + action.name + '技能吟唱。。。'); continue; }
+      if (casting && casting.releaseTurn > Number(battle.turn_no)) { log.push('【' + unit.name + '】继续吟唱。。。'); continue; }
+      delete unit.state.cast; turn.cooldowns[action.code] = cooldown + 1;
+      unit.castSpecialization = action.specialized;
+      if (resident) {
+        const hpBefore = target.hp;
+        await context.rule.cast(unit, ['ally', 'self', 'allies'].includes(resident.scope) ? unit : target, resident, paid, String(turn.cooldowns.__enchantElement ?? '风'), turn.extra);
+        await recordPvpAttack(connection, turn.actor, turn.target, '技能「' + resident.name + '」', Math.max(0, hpBefore - target.hp), target.hp <= 0 ? 'defeat' : 'utility');
+      } else {
+        const result = await resolveAction(connection, turn.actor, turn.target, { ...action, manaCost: 0 }, battle.id, turn.targetCooldowns, turn.cooldowns, turn.devices, turn.targetDevices, context);
+        log.push(actionLog(result.text));
+      }
+    } else {
+      if (action.type === 'device' && action.skill.effect === 'physical_evade_once') turn.cooldowns.device_physical_evasion = 2;
+      const result = await resolveAction(connection, turn.actor, turn.target, action, battle.id, turn.targetCooldowns, turn.cooldowns, turn.devices, turn.targetDevices, context);
+      if (action.type === 'device') turn.cooldowns[`device_${action.instanceId}_${action.skill.code}`] = action.skill.cooldownTurns + 1;
+      log.push(actionLog(result.text));
+    }
+    if (Number(attacker.current_hp) <= 0 || Number(defender.current_hp) <= 0) {
+      const winner = Number(attacker.current_hp) <= 0 ? defender : attacker; const loser = winner === attacker ? defender : attacker;
+      // 反射/混乱可能击倒出手者，因此胜者不能按当前行动者推断。
+      winner.current_hp = Math.max(1, Number(winner.current_hp));
+      const result = await resolvePvpVictory(connection, winner.id, loser.id);
+      ended = true; winnerId = Number(winner.id); winnerName = winner.name; restitutionId = result.restitution?.id;
+      settlement = `【${winner.name}】获得了胜利。\n${result.text}`; lootText = result.lootText ?? null;
+    }
+    if (!turn.extra && Number(turn.actor.id) === Number(defender.id) && turn.cooldowns.__bonusAction) orderedTurns.push({ ...turn, extra: true });
   }
-  const nextAttackerCooldowns = tickCooldowns(attackerCooldowns); const nextDefenderCooldowns = tickCooldowns(defenderCooldowns);
-  await connection.execute(`UPDATE player_pvp_battle_sessions SET attacker_hp=?,attacker_mp=?,defender_hp=?,defender_mp=?,attacker_cooldowns=?,defender_cooldowns=?,turn_no=turn_no+1,state=? WHERE id=?`, [Math.max(0, Number(attacker.current_hp)), Math.max(0, Number(attacker.current_mp)), Math.max(0, Number(defender.current_hp)), Math.max(0, Number(defender.current_mp)), JSON.stringify(nextAttackerCooldowns), JSON.stringify(nextDefenderCooldowns), ended ? (winnerId === Number(attacker.id) ? 'attacker_win' : 'defender_win') : 'active', battle.id]);
+  const awaitingBonus = !ended && Boolean(attackerCooldowns.__bonusAction);
+  if (awaitingBonus) { attackerCooldowns.__bonusPhase = 1; log.push('【' + attacker.name + '】获得额外行动，请选择一次普攻或技能。'); }
+  else { delete attackerCooldowns.__bonusPhase; context.rule.end(); }
+  const nextAttackerCooldowns = awaitingBonus ? attackerCooldowns : tickCooldowns(attackerCooldowns); const nextDefenderCooldowns = awaitingBonus ? defenderCooldowns : tickCooldowns(defenderCooldowns);
+  await connection.execute(`UPDATE player_pvp_battle_sessions SET attacker_hp=?,attacker_mp=?,defender_hp=?,defender_mp=?,attacker_cooldowns=?,defender_cooldowns=?,turn_no=turn_no+?,state=? WHERE id=?`, [Math.max(0, Number(attacker.current_hp)), Math.max(0, Number(attacker.current_mp)), Math.max(0, Number(defender.current_hp)), Math.max(0, Number(defender.current_mp)), JSON.stringify(nextAttackerCooldowns), JSON.stringify(nextDefenderCooldowns), awaitingBonus ? 0 : 1, ended ? (winnerId === Number(attacker.id) ? 'attacker_win' : 'defender_win') : 'active', battle.id]);
   if (!ended) {
     await connection.execute('UPDATE characters SET current_hp=?,current_mp=? WHERE id=?', [Math.max(0, Number(attacker.current_hp)), Math.max(0, Number(attacker.current_mp)), attacker.id]);
     await connection.execute('UPDATE characters SET current_hp=?,current_mp=? WHERE id=?', [Math.max(0, Number(defender.current_hp)), Math.max(0, Number(defender.current_mp)), defender.id]);
   }
   else if (winnerId === Number(attacker.id)) await connection.execute('UPDATE characters SET current_hp=?,current_mp=? WHERE id=?', [Math.max(1, Number(attacker.current_hp)), Math.max(0, Number(attacker.current_mp)), attacker.id]);
   else if (winnerId === Number(defender.id)) await connection.execute('UPDATE characters SET current_hp=?,current_mp=? WHERE id=?', [Math.max(1, Number(defender.current_hp)), Math.max(0, Number(defender.current_mp)), defender.id]);
+  if (ended) await finishPvpBattleLog(connection, battle.id, winnerId === Number(attacker.id) ? 'attacker_win' : 'defender_win', winnerId === Number(attacker.id) ? attacker : defender, lootText);
   const ambushDelivery = battle.ambush_spawn_id ? { scope: battle.ambush_delivery_scope === 'group' ? 'group' as const : 'c2c' as const, targetId: battle.ambush_delivery_target_id || '', botId: battle.ambush_delivery_bot_id || undefined } : undefined;
+  const hiddenNames = context.rule.units.filter(unit => Number(unit.key.split(':')[1]) !== Number(requester.id) && unit.state.memory.hiddenLogTurn === Number(battle.turn_no)).map(unit => unit.name);
+  log.splice(0, log.length, ...maskRuleBattleLog(log, hiddenNames, [requester.name]));
   return { ended, log: `战斗<${battle.turn_no}>回合\n${log.join('\n————————\n')}`, settlement, restitutionId, requesterId: Number(requester.id), winnerId, winnerName, ambushSpawnId: battle.ambush_spawn_id ? Number(battle.ambush_spawn_id) : undefined, ambushDelivery };
 });
 
@@ -567,6 +890,39 @@ export const playerPvpStatus = async (qqUserId: string) => {
     FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1`, [qqUserId]);
   const row = rows[0];
   return { wanted: Boolean(row?.wanted), detainedUntil: row?.detained_until ?? null };
+};
+
+/** PvP 面板只展示当前玩家自身涉及的城镇通缉。 */
+export const personalPvpPanel = async (qqUserId: string) => {
+  const pool = await getPool();
+  const [characters] = await pool.execute<(RowDataPacket & { id: number; name: string; game_id: number; detained_until: Date | null })[]>(`SELECT c.id,c.name,c.game_id,c.detained_until
+    FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1`, [qqUserId]);
+  const character = characters[0]; if (!character) throw new Error('请先注册角色。');
+  const [warrants] = await pool.execute<(RowDataPacket & { id: number; region_name: string; created_at: Date; victim_count: number })[]>(`SELECT w.id,r.name AS region_name,w.created_at,
+    (SELECT COUNT(*) FROM player_warrant_victims v WHERE v.warrant_id=w.id) AS victim_count
+    FROM player_warrants w JOIN map_regions r ON r.id=w.city_region_id
+    WHERE w.wanted_character_id=? AND w.status='active' ORDER BY w.created_at DESC`, [character.id]);
+  const [battles] = await pool.execute<(RowDataPacket & { total: number })[]>('SELECT COUNT(*) AS total FROM player_pvp_battle_logs WHERE attacker_character_id=? OR defender_character_id=?', [character.id, character.id]);
+  return { name: character.name, gameId: Number(character.game_id), detainedUntil: character.detained_until, battleCount: Number(battles[0]?.total ?? 0), warrants: warrants.map(row => ({ id: Number(row.id), regionName: row.region_name, createdAt: row.created_at, victims: Number(row.victim_count) })) };
+};
+
+/** 仅列出直接攻击过自己、且仍持有未被正义执行返还赃物的玩家。 */
+export const personalPvpEnemies = async (qqUserId: string) => {
+  const pool = await getPool();
+  const [characters] = await pool.execute<(RowDataPacket & { id: number })[]>('SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1', [qqUserId]);
+  const character = characters[0]; if (!character) throw new Error('请先注册角色。');
+  const [rows] = await pool.execute<(RowDataPacket & { holder_id: number; holder_name: string; holder_game_id: number; attack_count: number; loot_text: string; warrant_id: number | null; warrant_cities: string | null })[]>(`SELECT holder.id AS holder_id,holder.name AS holder_name,holder.game_id AS holder_game_id,
+    (SELECT COUNT(*) FROM player_pvp_attack_logs al WHERE al.attacker_character_id=holder.id AND al.defender_character_id=?) AS attack_count,
+    GROUP_CONCAT(DISTINCT CASE WHEN sl.item_id IS NULL THEN CONCAT('铜币×',sl.copper_amount+sl.sale_copper_amount) ELSE CONCAT('【',i.name,'】×',sl.quantity) END ORDER BY sl.id SEPARATOR '、') AS loot_text,
+    MAX(w.id) AS warrant_id,GROUP_CONCAT(DISTINCT region.name ORDER BY region.name SEPARATOR '、') AS warrant_cities
+    FROM pvp_stolen_loot sl JOIN characters holder ON holder.id=sl.holder_character_id
+    LEFT JOIN item_definitions i ON i.id=sl.item_id
+    LEFT JOIN player_warrants w ON w.wanted_character_id=holder.id AND w.status='active'
+    LEFT JOIN map_regions region ON region.id=w.city_region_id
+    WHERE sl.original_owner_character_id=? AND sl.returned_at IS NULL
+      AND EXISTS (SELECT 1 FROM player_pvp_attack_logs al WHERE al.attacker_character_id=holder.id AND al.defender_character_id=?)
+    GROUP BY holder.id,holder.name,holder.game_id ORDER BY attack_count DESC,holder.id`, [character.id, character.id, character.id]);
+  return rows.map(row => ({ id: Number(row.holder_id), name: row.holder_name, gameId: Number(row.holder_game_id), attacks: Number(row.attack_count), loot: row.loot_text, warrantId: row.warrant_id === null ? null : Number(row.warrant_id), warrantCities: row.warrant_cities }));
 };
 
 export const warrantsFor = async () => {

@@ -1,55 +1,18 @@
 import { Format, useMessage } from 'alemonjs';
+import { menuCardImage } from '../game/menu-card.service';
 
-export default async () => {
+const sendMenu = async (page: 1 | 2) => {
   const [message] = useMessage();
-  const menu = Format.createMarkdown()
-    .addTitle('幻想次元·菜单')
-    .addNewline().addNewline()
-    .addSubtitle('角色与成长')
-    .addButton('/注册', { data: '/注册', autoEnter: false }).addText(' 创建或继续角色\n')
-    .addButton('/角色', { data: '/角色', autoEnter: false }).addText(' 查看等级、属性、恩赐与当前位置\n')
-    .addButton('/背包', { data: '/背包', autoEnter: false }).addText(' 查看装备、道具、材料与快捷道具\n')
-    .addButton('/装备', { data: '/装备', autoEnter: false }).addText(' 查看、切换或卸下已穿戴装备\n')
-    .addButton('/技能列表', { data: '/技能列表', autoEnter: false }).addText(' 学习、升级与配置技能快捷栏\n')
-    .addButton('/副职业', { data: '/副职业', autoEnter: false }).addText(' 查看副职业等级与专属能力\n')
-    .addButton('/图鉴', { data: '/图鉴', autoEnter: false }).addText(' 查看已解锁的物品、怪物与技能资料\n')
-    .addButton('/卡片', { data: '/卡片', autoEnter: false }).addText(' 查看冒险者资历卡片\n')
-    .addSubtitle('世界与行动')
-    .addButton('/面板', { data: '/面板', autoEnter: false }).addText(' 查看当前位置、周边目标与行动按键\n')
-    .addButton('/地图', { data: '/地图', autoEnter: false }).addText(' 查看已解锁地图与地点标识\n')
-    .addButton('/前往 坐标', { data: '/前往 ', autoEnter: false }).addText(' 前往已解锁地图内的指定坐标\n')
-    .addButton('/移动 方向', { data: '/移动 ', autoEnter: false }).addText(' 单步移动：上、下、左、右\n')
-    .addButton('/寻怪', { data: '/寻怪', autoEnter: false }).addText(' 寻找最近的怪物\n')
-    .addButton('/休息', { data: '/休息', autoEnter: false }).addText(' 原地休息，持续恢复生命与魔力\n')
-    .addButton('/行动', { data: '/行动', autoEnter: false }).addText(' 结束主动休息并恢复行动\n')
-    .addButton('/任务', { data: '/任务', autoEnter: false }).addText(' 查看主线、支线、悬赏与委托\n')
-    .addSubtitle('战斗与自动战斗')
-    .addButton('/战斗信息', { data: '/战斗信息', autoEnter: false }).addText(' 查看当前敌我状态\n')
-    .addButton('/攻击', { data: '/攻击', autoEnter: false }).addText(' 使用普通攻击\n')
-    .addButton('/技能 栏位', { data: '/技能 ', autoEnter: false }).addText(' 使用技能①至技能④\n')
-    .addButton('/道具 栏位', { data: '/道具 ', autoEnter: false }).addText(' 使用道具①至道具④\n')
-    .addButton('/鉴识', { data: '/鉴识', autoEnter: false }).addText(' 查看可鉴识的敌我资料\n')
-    .addButton('/逃跑', { data: '/逃跑', autoEnter: false }).addText(' 尝试脱离战斗\n')
-    .addButton('/自动战斗 配置', { data: '/自动战斗 配置', autoEnter: false }).addText(' 设置循环出招与自动嗑药\n')
-    .addSubtitle('队伍与社交')
-    .addButton('/队伍', { data: '/队伍', autoEnter: false }).addText(' 查看我的队伍与成员信息\n')
-    .addButton('/好友', { data: '/好友', autoEnter: false }).addText(' 查看好友、好感阶段与赠礼入口\n')
-    .addButton('/星誓', { data: '/星誓', autoEnter: false }).addText(' 查看星誓同行记录与教堂纪念\n')
-    .addButton('/祈福', { data: '/祈福', autoEnter: false }).addText(' 每日领取一次自身祈福增益\n')
-    .addButton('/组队 创建', { data: '/组队 创建', autoEnter: false }).addText(' 创建最多四人的队伍\n')
-    .addButton('/队伍列表', { data: '/队伍列表', autoEnter: false }).addText(' 查看可加入的队伍\n')
-    .addButton('/通缉', { data: '/通缉', autoEnter: false }).addText(' 查看已进入被通缉城镇、行踪暴露的红名\n')
-    .addButton('/通缉令', { data: '/通缉令', autoEnter: false }).addText(' 查看全部通缉令与逮捕赏金\n')
-    .addButton('/邮件', { data: '/邮件', autoEnter: false }).addText(' 查看邮件与领取附件\n')
-    .addSubtitle('城镇服务')
-    .addButton('/悬赏板', { data: '/悬赏板', autoEnter: false }).addText(' 查看并接取怪物悬赏\n')
-    .addButton('/工会商店', { data: '/工会商店', autoEnter: false }).addText(' 购买地图与基础物资\n')
-    .addButton('/餐厅', { data: '/餐厅', autoEnter: false }).addText(' 制作并享用带增益的食物\n')
-    .addButton('/铁匠铺', { data: '/铁匠铺', autoEnter: false }).addText(' 打造、精炼、熔铸与装备交易\n')
-    .addButton('/糖水屋', { data: '/糖水屋', autoEnter: false }).addText(' 购买药剂与进行炼金\n')
-    .addButton('/异工坊', { data: '/异工坊', autoEnter: false }).addText(' 与唯薇安交流解构师相关事务\n')
-    .addNewline().addText('参数类命令点击后会填入输入框，请补全坐标、栏位、编号或关键词。');
-  const buttons = Format.createButtonGroup().addRow()
-    .addButton('注销账户', '/注销账户', { type: 'command', autoEnter: true });
-  await message.send({ format: Format.create().addMarkdown(menu).addButtonGroup(buttons) });
+  const buttons = Format.createButtonGroup()
+    .addRow()
+    .addButton('核心功能', '/菜单', { type: 'command', autoEnter: true, style: page === 1 ? 'blue' : undefined })
+    .addButton('进阶功能', '/菜单 进阶', { type: 'command', autoEnter: true, style: page === 2 ? 'blue' : undefined })
+    .addButton('面板', '/面板', { type: 'command', autoEnter: true })
+    .addButton('角色', '/角色', { type: 'command', autoEnter: true })
+    .addButton('任务', '/任务', { type: 'command', autoEnter: true });
+  await message.send({ format: Format.create().addImage(await menuCardImage(page)).addButtonGroup(buttons) });
 };
+
+export default async () => sendMenu(1);
+
+export const advancedMenuHandler = async () => sendMenu(2);

@@ -23,6 +23,7 @@
     "app": "node index.js",
     "build": "lvy build",
     "dev": "lvy app.ts",
+    "test:world": "npx tsx --test test/world-dynamics.integration.test.ts",
     "review": "npx alemonc start",
     "view": "lvy app.ts --jsxp"
   },

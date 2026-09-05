@@ -28,7 +28,7 @@ export const homeFormat = async (qqUserId: string, notice = '') => {
       .addText('简陋木屋：**铜币×500**').addNewline().addText('购买后可在百纳居查看地块，并前往地块回家。');
     return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow()
       .addButton('购买小屋', '/家园购买', { type: 'command', autoEnter: true, style: 'blue' })
-      .addButton('前往百纳居', '/前往 7 -99', { type: 'command', autoEnter: true, style: 'blue' }));
+      .addButton('前往百纳居', '/前往 7 -166', { type: 'command', autoEnter: true, style: 'blue' }));
   }
   const home = panel.home;
   markdown.addText(`**${home.home_name || `${panel.character.name}的小屋`}** `).addButton('[更名]', { data: '/家园改名 ', autoEnter: false }).addNewline().addNewline()
@@ -98,7 +98,7 @@ export const homePurchaseHandler = async () => { const [event] = useEvent(); con
 export const homeEnterHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try {
   const panel = await homePanel(event.current.UserId); if (!panel.home) throw new Error('你还没有小屋，请先在百纳居购买。');
   if (panel.inHome) { await message.send({ format: await homeFormat(event.current.UserId, '你已经在家中。') }); return; }
-  const result = await moveTo(event.current.UserId, Number(panel.home.plot_x), Number(panel.home.plot_y), { destinationKind: 'home' });
+  const result = await moveTo(event.current.UserId, Number(panel.home.plot_x), Number(panel.home.plot_y), { destinationKind: 'home', destinationRegionId: Number(panel.home.town_region_id) });
   if (result.kind === 'travel') {
     await message.send({ format: homeTravelFormat(result.regionName, result.x, result.y, result.seconds, result.remaining) });
     scheduleTravelCompletion(message, event.current.UserId, result.remaining);

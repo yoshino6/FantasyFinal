@@ -1,5 +1,5 @@
 export const BAINA_RESIDENCE_CODE = 'baina_residence';
-export const BAINA_GUILD_POSITION = { x: -2, y: -111, z: 0 };
+export const BAINA_GUILD_POSITION = { x: -2, y: -161, z: 0 };
 
 export const homeCosts = {
   purchase: { copper: 500, materials: {} },

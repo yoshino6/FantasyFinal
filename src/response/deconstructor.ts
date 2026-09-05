@@ -1,16 +1,17 @@
 import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
 import { addNpcAffinity, grantNpcAffinity, nearbyPoints, requireNpcAtCurrentPosition } from '../game/adventure.service';
-import { acceptDeconstructorQuest, claimDeconstructorQuest, constructItem, constructionRecipesFor, deconstructItems, deconstructionItems, deconstructorProgress, deconstructorQuest, type ConstructionCategory } from '../game/deconstructor.service';
+import { acceptDeconstructorQuest, claimDeconstructorQuest, claimVivianCourseBlueprints, constructItem, constructionRecipesFor, deconstructItems, deconstructionItems, deconstructorProgress, deconstructorQuest, type ConstructionCategory } from '../game/deconstructor.service';
 import { oddWorkshopSellCatalog, sellOddWorkshopItem } from '../game/oddworkshop-shop.service';
 import { messageFormat } from '../game/message';
 import { npcChatDialogue } from '../game/npc-dialogue.service';
 import { dungeonSecretProgress } from '../game/dungeon-quest.service';
+import { currentMainQuest } from '../game/main-quest.service';
 
 const workshopCode = 'oddworkshop';
 const requireWorkshop = (qqUserId: string) => requireNpcAtCurrentPosition(qqUserId, workshopCode);
 
 export const oddWorkshopFormat = async (qqUserId: string, dialogue?: string) => {
-  const [nearby, dungeonSecret] = await Promise.all([nearbyPoints(qqUserId), dungeonSecretProgress(qqUserId)]);
+  const [nearby, dungeonSecret, mainQuest] = await Promise.all([nearbyPoints(qqUserId), dungeonSecretProgress(qqUserId), currentMainQuest(qqUserId)]);
   const hour = new Date().getHours();
   const scene = dialogue ?? (hour < 11
     ? '清晨的异工坊已经响起叮叮当当的声音。唯薇安正踩着小凳子，把一盏会自己转向的魔石灯装到架上。'
@@ -18,13 +19,15 @@ export const oddWorkshopFormat = async (qqUserId: string, dialogue?: string) => 
       ? '阳光透过异工坊散乱的玻璃窗，照亮满桌齿轮、弹簧与来历不明的零件。唯薇安从零件堆后探出脑袋，笑得灿烂。'
       : '夜色落下，异工坊仍亮着温暖的灯。唯薇安捧着一只冒泡的金属盒，兴奋地邀请你看看她刚完成的“绝对安全”试作。');
   const markdown = Format.createMarkdown().addTitle('百纳镇·异工坊').addNewline().addNewline().addText('【唯薇安】');
-  if (nearby.npcDetailsUnlocked) markdown.addText(' ').addButton('[详情]', { data: '/NPC详情 oddworkshop', autoEnter: false });
+  if (nearby.npcDetailsUnlocked) markdown.addText(' ').addButton('[详情]', { data: '/域民详情 oddworkshop', autoEnter: false });
   markdown.addNewline().addNewline().addBlockquote(scene);
   const buttons = Format.createButtonGroup()
     .addRow().addButton('我要买', '/异工坊购买', { type: 'command', autoEnter: true, style: 'blue' }).addButton('我要卖', '/异工坊出售', { type: 'command', autoEnter: true, style: 'blue' })
-    .addRow().addButton('闲聊', '/唯薇安闲聊', { type: 'command', autoEnter: true, style: 'blue' }).addButton('关于 解构师', '/关于解构师', { type: 'command', autoEnter: true, style: 'blue' })
+    .addRow().addButton('切磋', '/切磋 oddworkshop', { type: 'command', autoEnter: true, style: 'blue' }).addButton('闲聊', '/唯薇安闲聊', { type: 'command', autoEnter: true, style: 'blue' }).addButton('关于 解构师', '/关于解构师', { type: 'command', autoEnter: true, style: 'blue' })
     .addRow().addButton('离开', `/建筑离开 ${workshopCode}`, { type: 'command', autoEnter: true });
   if (dungeonSecret.stage === 2) buttons.addRow().addButton('关于 地下的秘密', '/异工坊 地下的秘密', { type: 'command', autoEnter: true, style: 'blue' });
+  if (mainQuest.title === '【主线·失踪的少女】' && mainQuest.description.startsWith('公会的人手')) buttons.addRow().addButton('询问 天位制裁仪', '/唯薇安 天位制裁仪', { type: 'command', autoEnter: true, style: 'blue' });
+  if (mainQuest.title === '【主线·失踪的少女】' && mainQuest.description.startsWith('唯薇安确认')) buttons.addRow().addButton('购买 天位制裁仪（200铜币）', '/购买天位制裁仪', { type: 'command', autoEnter: true, style: 'blue' });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 
@@ -39,9 +42,16 @@ export const oddWorkshopChatHandler = async () => {
   try {
     await requireWorkshop(event.current.UserId);
     const { affinity, rank } = await addNpcAffinity(event.current.UserId, workshopCode, 'chat');
+    const course = await claimVivianCourseBlueprints(event.current.UserId);
     const detailsUnlocked = (await nearbyPoints(event.current.UserId)).npcDetailsUnlocked;
     const markdown = Format.createMarkdown().addTitle('百纳镇·异工坊').addNewline().addNewline().addText('【唯薇安】').addNewline().addNewline()
       .addBlockquote(npcChatDialogue(workshopCode, affinity));
+    if (course.highestLevel) {
+      const highest = course.awarded[course.awarded.length - 1]!;
+      markdown.addNewline().addNewline().addBlockquote(`唯薇安把螺帽弹到掌心，笑得像自己也过了考核。“瞧，你已不只会照图拆东西，连回路为什么这样绕都能说清。${highest.level}级的课，我还想多卖会儿关子呢！”她把【${highest.name}图纸】塞给你，认真眨眼：“会拆、会想、也会拼好——这才是解构师。继续长大吧，我等着看你难倒老古董。”`);
+      markdown.addNewline().addNewline().addText(`获得课程图纸：${course.awarded.map(item => `【${item.name}】`).join('、')}`);
+    }
+    if (course.affinityAwarded.length) markdown.addNewline().addNewline().addText(`唯薇安另交给你：${course.affinityAwarded.map(name => `【${name}图纸】`).join('、')}`);
     if (detailsUnlocked) markdown.addNewline().addNewline().addText(`好感：${affinity}｜${rank.title}`);
     const buttons = Format.createButtonGroup().addRow().addButton('继续闲聊', '/唯薇安闲聊', { type: 'command', autoEnter: true, style: 'blue' });
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) });
@@ -63,7 +73,7 @@ const oddWorkshopSellButtons = (page: number, totalPages: number, keyword = '') 
 const oddWorkshopSellFormat = async (qqUserId: string, page = 1, keyword = '') => {
   const shop = await oddWorkshopSellCatalog(qqUserId, page, keyword);
   const markdown = Format.createMarkdown().addTitle('异工坊·出售').addNewline().addNewline()
-    .addBlockquote(keyword ? `唯薇安翻出与「${keyword}」有关的收购记录。` : '唯薇安戴上放大镜，兴奋地拍了拍工作台。“粒子、元素尘、构件或异械都可以交给我！完整的魔力结构最有研究价值。”').addNewline().addNewline();
+    .addBlockquote(keyword ? `唯薇安翻出与「${keyword}」有关的收购记录。` : '唯薇安戴上放大镜，兴奋地拍了拍工作台。“粒子、构件或异械都可以交给我！完整的魔力结构最有研究价值。”').addNewline().addNewline();
   if (!shop.items.length) markdown.addText('背包中没有唯薇安会收购的物品。');
   shop.items.forEach((item, index) => markdown.addText(`${'①②③④⑤'[index]}【${item.category}】${item.name}×${item.quantity} `).addButton('[出售]', { data: `/出售异工坊物品 ${item.id} `, autoEnter: false }).addNewline().addBlockquote(`收购价：铜币×${item.price}`).addNewline().addNewline());
   markdown.addText(`当前第(${shop.page}/${shop.totalPages})页｜持有铜币：${shop.copper}`);
@@ -140,14 +150,15 @@ export const claimDeconstructorQuestHandler = async () => {
 
 export const deconstructorProfessionFormat = async (qqUserId: string) => {
   const progress = await deconstructorProgress(qqUserId);
-  const filled = Math.round(Math.max(0, Math.min(1, progress.proficiency / progress.required)) * 10);
+  const maxed = progress.required === 0;
+  const filled = maxed ? 10 : Math.round(Math.max(0, Math.min(1, progress.proficiency / progress.required)) * 10);
   const markdown = Format.createMarkdown().addTitle('副职业·解构师').addNewline().addNewline()
-    .addText(`等级：Lv.${progress.level}\n熟练度：${progress.proficiency}/${progress.required}\n${'■'.repeat(filled)}${'□'.repeat(10 - filled)}`).addNewline().addNewline()
-    .addBlockquote(`分解加成+${Math.max(0, progress.level - 1) * 12}%`).addNewline()
-    .addBlockquote(`构造成功率+${Math.max(0, progress.level - 1) * 6}%`);
+    .addText(`等级：Lv.${maxed ? 'MAX' : progress.level}\n${maxed ? '熟练度：已达上限' : `熟练度：${progress.proficiency}/${progress.required}\n${'■'.repeat(filled)}${'□'.repeat(10 - filled)}`}`).addNewline().addNewline()
+    .addBlockquote(`分解产出+${progress.bonus}%`).addNewline()
+    .addBlockquote('构造成功率由构造物推荐等级与当前解构师等级差决定；失败会返还部分全部投入材料。');
   return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup()
     .addRow().addButton('分解', '/分解', { type: 'command', autoEnter: true, style: 'blue' }).addButton('构造', '/构造', { type: 'command', autoEnter: true, style: 'blue' })
-    .addRow().addButton('前往 异工坊', '/前往 6 -121', { type: 'command', autoEnter: true, style: 'blue' }));
+    .addRow().addButton('前往 异工坊', '/前往 6 -189', { type: 'command', autoEnter: true, style: 'blue' }));
 };
 
 type DeconstructionCategory = '装备' | '道具' | '材料';
@@ -162,6 +173,7 @@ const deconstructionFormat = async (qqUserId: string, category: DeconstructionCa
     .addButton('[装备]', { data: '/分解页 装备 1', autoEnter: false }).addText(' ')
     .addButton('[道具]', { data: '/分解页 道具 1', autoEnter: false }).addText(' ')
     .addButton('[材料]', { data: '/分解页 材料 1', autoEnter: false }).addNewline().addNewline()
+    .addBlockquote('专属怪材可直接分解：普通/大型/精英/Boss 分别析出 1/2/3/4 份基础粒子；怪物每跨 10 级，产值按 1.2 倍累乘。').addNewline().addNewline()
     .addText('玩家物品：').addNewline();
   if (!entries.length) markdown.addBlockquote('当前分类没有可分解的物品。').addNewline();
   for (const [index, item] of entries.entries()) markdown.addBlockquote(`${numberMark.charAt(index)}【${item.category}】${item.name}×${item.quantity} `).addButton('[分解]', { data: `/分解物品 ${item.id} `, autoEnter: false }).addText('+数量').addNewline();
@@ -175,7 +187,7 @@ const deconstructionFormat = async (qqUserId: string, category: DeconstructionCa
 
 const constructionFormat = async (qqUserId: string, category: ConstructionCategory = '基材', page = 1, keyword = '') => {
   const recipes = await constructionRecipesFor(qqUserId);
-  const filtered = recipes.filter(recipe => recipe.constructionCategory === category && (!keyword || recipe.name.includes(keyword)));
+  const filtered = recipes.filter(recipe => recipe.constructionCategory === category && recipe.unlocked && (!keyword || recipe.name.includes(keyword)));
   const totalPages = Math.max(1, Math.ceil(filtered.length / 10)); const currentPage = Math.min(Math.max(1, page), totalPages);
   const entries = filtered.slice((currentPage - 1) * 10, currentPage * 10);
   const markdown = Format.createMarkdown().addTitle('解构师·构造').addNewline().addNewline().addText('分类：').addText(' ')
@@ -183,7 +195,7 @@ const constructionFormat = async (qqUserId: string, category: ConstructionCatego
     .addButton('[构件]', { data: '/构造页 构件 1', autoEnter: false }).addText(' ')
     .addButton('[异械]', { data: '/构造页 异械 1', autoEnter: false }).addNewline().addNewline()
     .addText(`${category}：`).addNewline();
-  if (!entries.length) markdown.addBlockquote('当前分类没有匹配的构造配方。').addNewline();
+  if (!entries.length) markdown.addBlockquote('当前分类没有已掌握图纸的构造配方。').addNewline();
   for (const [index, recipe] of entries.entries()) {
     markdown.addText(`${numberMark.charAt(index)}【${recipe.name}】 `);
     if (recipe.unlocked && recipe.codexId) markdown.addButton('[详情]', { data: `/物品图鉴 ${recipe.codexId}`, autoEnter: false });
@@ -195,12 +207,10 @@ const constructionFormat = async (qqUserId: string, category: ConstructionCatego
       markdown.addText(` ${ingredient.owned}/${ingredient.quantity} `);
     }
     markdown.addNewline();
-    if (recipe.blueprintName) {
-      markdown.addText(`图纸：【${recipe.blueprintName}】`);
-      markdown.addText(recipe.blueprintOwned ? '（已持有）' : '（未持有）').addNewline();
-    }
+    if (recipe.blueprintName) markdown.addText(`图纸：【${recipe.blueprintName}】（已持有）`).addNewline();
+    else markdown.addText('构造链：已随异械图纸解锁（基材与构件无需图纸）').addNewline();
     const equipmentText = recipe.outputType === 'equipment' ? `装备部位：${recipe.itemCategory}｜` : '';
-    markdown.addBlockquote(`${equipmentText}构造成功率：${recipe.successRate.toFixed(1)}%`).addNewline().addNewline();
+    markdown.addBlockquote(`${equipmentText}推荐解构师等级：Lv.${recipe.recommendedSecondaryLevel}｜等级差：${recipe.gap}｜构造成功率：${recipe.successRate.toFixed(1)}%｜失败返还：${recipe.gap > 0 ? `${Math.round(recipe.refundRate * 100)}%（每份材料独立判定）` : '—（当前等级必定成功）'}`).addNewline().addNewline();
   }
   markdown.addText(`当前第（${currentPage}/${totalPages}）页`);
   const previous = Math.max(1, currentPage - 1); const next = Math.min(totalPages, currentPage + 1);
@@ -249,7 +259,7 @@ export const deconstructItemHandler = async () => {
   try {
     const result = await deconstructItems(event.current.UserId, Number(route.param('id')), Number(route.param('quantity') ?? 1));
     const gained = result.results.length ? result.results.map(item => `获得【${item.name}】×${item.quantity}`).join('\n') : '本次分解未留下可用粒子。';
-    await message.send({ format: messageFormat(result.results.length ? '分解完成' : '分解失败', `消耗【${result.inputName}】×${result.inputQuantity}\n${gained}`) });
+    await message.send({ format: messageFormat(result.results.length ? '分解完成' : '分解失败', `消耗【${result.inputName}】×${result.inputQuantity}\n${gained}\n熟练度：+${result.proficiencyGain}`) });
     await message.send({ format: await deconstructionFormat(event.current.UserId) });
   } catch (error) { await message.send({ format: messageFormat('无法分解', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
@@ -259,8 +269,8 @@ export const constructItemHandler = async () => {
   try {
     const result = await constructItem(event.current.UserId, String(route.param('code')));
     const body = result.success
-      ? `消耗构造材料后，成功制作【${result.outputName}】。\n构造成功率：${result.successRate.toFixed(1)}%`
-      : `构造过程失去稳定，投入的材料化作无用残渣。\n构造成功率：${result.successRate.toFixed(1)}%`;
+      ? `消耗构造材料后，成功制作【${result.outputName}】。\n熟练度：+${result.proficiencyGain}\n构造成功率：${result.successRate.toFixed(1)}%`
+      : `构造过程失去稳定，已按 ${Math.round(result.refundRate * 100)}% 概率逐份返还全部投入材料。${result.refunded.length ? `\n返还：${result.refunded.map(item => `【${item.name}】×${item.quantity}`).join('、')}` : '\n本次未能回收材料。'}\n熟练度：+${result.proficiencyGain}\n构造成功率：${result.successRate.toFixed(1)}%`;
     await message.send({ format: messageFormat(result.success ? '构造完成' : '构造失败', body) });
     await message.send({ format: await constructionFormat(event.current.UserId, result.recipe.constructionCategory) });
   } catch (error) { await message.send({ format: messageFormat('无法构造', error instanceof Error ? error.message : '请稍后重试。') }); }

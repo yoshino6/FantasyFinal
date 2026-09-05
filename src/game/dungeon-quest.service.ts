@@ -1,14 +1,15 @@
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
+import { blindBoxBlueprints, blueprintRecipeCode, constructionBlueprintCodes } from './deconstructor-catalog';
 
 const questCode = 'dungeon_secret';
 const passCode = 'demon_breaker_teleporter';
 
-type CharacterRow = RowDataPacket & { id: number; name: string; level: number; copper_coins: number; current_region_id: number; pos_x: number; pos_y: number; pos_z: number };
+type CharacterRow = RowDataPacket & { id: number; name: string; level: number; copper_coins: number; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; secondary_profession_code: string | null };
 type ProgressRow = RowDataPacket & { stage: number; dungeon_id: number | null; status: 'accepted' | 'completed' | 'claimed' | null };
 
 const characterFor = async (connection: PoolConnection | Awaited<ReturnType<typeof getPool>>, qqUserId: string, lock = false) => {
-  const [rows] = await connection.execute<CharacterRow[]>(`SELECT c.id,c.name,c.level,c.copper_coins,c.current_region_id,c.pos_x,c.pos_y,c.pos_z
+  const [rows] = await connection.execute<CharacterRow[]>(`SELECT c.id,c.name,c.level,c.copper_coins,c.current_region_id,c.pos_x,c.pos_y,c.pos_z,c.secondary_profession_code
     FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1${lock ? ' FOR UPDATE' : ''}`, [qqUserId]);
   if (!rows[0]) throw new Error('请先注册角色。');
   return rows[0];
@@ -66,7 +67,7 @@ export const discoverDungeonEntrance = async (connection: PoolConnection, charac
 export const dungeonSecretProgress = async (qqUserId: string) => {
   const pool = await getPool(); const character = await characterFor(pool, qqUserId); const progress = await syncOwnedPassProgress(pool, character.id, await progressFor(pool, character.id));
   const hasPass = await ownsItem(pool, character.id, passCode);
-  return { stage: Number(progress?.stage ?? 0), dungeonId: progress?.dungeon_id === null || progress?.dungeon_id === undefined ? null : Number(progress.dungeon_id), status: progress?.status ?? 'none', hasPass, level: Number(character.level), hasSecondaryProfession: false };
+  return { stage: Number(progress?.stage ?? 0), dungeonId: progress?.dungeon_id === null || progress?.dungeon_id === undefined ? null : Number(progress.dungeon_id), status: progress?.status ?? 'none', hasPass, level: Number(character.level), hasSecondaryProfession: Boolean(character.secondary_profession_code) };
 };
 
 export const secondaryProfessionGuide = async (qqUserId: string) => {
@@ -98,27 +99,46 @@ export const completeDungeonSecretPurchase = async (connection: PoolConnection, 
   if (progress && Number(progress.stage) === 3) await connection.execute('UPDATE player_dungeon_secret_progress SET stage=4 WHERE character_id=?', [characterId]);
 };
 
-export const buyOddWorkshopItem = async (qqUserId: string, code: 'demon_breaker_teleporter' | 'demon_breaker_teleporter_blueprint') => withTransaction(async connection => {
+export const buyOddWorkshopItem = async (qqUserId: string, code: string) => withTransaction(async connection => {
   const character = await characterFor(connection, qqUserId, true); await requireAtNpc(connection, character, 'oddworkshop');
   const [items] = await connection.execute<(RowDataPacket & { id: number; name: string; buy_price: number; stock_quantity: number })[]>(`SELECT i.id,i.name,oi.buy_price,oi.stock_quantity FROM oddworkshop_items oi JOIN item_definitions i ON i.id=oi.item_id WHERE i.code=? AND oi.is_active=1 FOR UPDATE`, [code]);
   const item = items[0]; if (!item) throw new Error('这件商品暂时没有摆上货架。');
   if (Number(item.stock_quantity) < 1) throw new Error('这件商品暂时售罄。');
   if (Number(character.copper_coins) < Number(item.buy_price)) throw new Error(`铜币不足，还需要 ${Number(item.buy_price) - Number(character.copper_coins)} 铜币。`);
   if (code === passCode && await ownsItem(connection, character.id, passCode)) throw new Error('你已经持有破魔传送器，无需重复购买。');
+  const box = blindBoxBlueprints.find(entry => entry.code === code);
+  if (box) {
+    if (character.secondary_profession_code !== 'deconstructor') throw new Error('异械盲盒仅向解构师开放。');
+    const [professionRows] = await connection.execute<(RowDataPacket & { level: number })[]>('SELECT level FROM player_secondary_professions WHERE character_id=? AND profession_code=\'deconstructor\' LIMIT 1', [character.id]);
+    const deconstructorLevel = Number(professionRows[0]?.level ?? 0);
+    if (deconstructorLevel < box.requiredLevel) throw new Error(`需要解构师等级 ${box.requiredLevel} 才能开启这只盲盒。`);
+    const candidates: string[] = [];
+    for (const recipeCode of box.outputs) if (!await ownsItem(connection, character.id, `${recipeCode}_blueprint`)) candidates.push(recipeCode);
+    if (!candidates.length) throw new Error('这档盲盒内的图纸你都已拥有，无需重复购买。');
+    const rewardCode = candidates[Math.floor(Math.random() * candidates.length)];
+    const [rewardRows] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>('SELECT id,name FROM item_definitions WHERE code=? LIMIT 1', [`${rewardCode}_blueprint`]);
+    if (!rewardRows[0]) throw new Error('盲盒图纸定义尚未初始化，请稍后再试。');
+    await connection.execute('UPDATE characters SET copper_coins=copper_coins-? WHERE id=?', [item.buy_price, character.id]);
+    await connection.execute('UPDATE oddworkshop_items SET stock_quantity=stock_quantity-1 WHERE item_id=?', [item.id]);
+    await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,1) ON DUPLICATE KEY UPDATE quantity=quantity+1,acquired_at=NOW()', [character.id, rewardRows[0].id]);
+    await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [character.id, rewardRows[0].id]);
+    return { name: item.name, price: Number(item.buy_price), rewardName: rewardRows[0].name };
+  }
+  if (constructionBlueprintCodes.has(code) && await ownsItem(connection, character.id, code)) throw new Error('这张图纸已经在你的背包中。');
   await connection.execute('UPDATE characters SET copper_coins=copper_coins-? WHERE id=?', [item.buy_price, character.id]);
   await connection.execute('UPDATE oddworkshop_items SET stock_quantity=stock_quantity-1 WHERE item_id=?', [item.id]);
   await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,1) ON DUPLICATE KEY UPDATE quantity=quantity+1,acquired_at=NOW()', [character.id, item.id]);
   await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [character.id, item.id]);
   if (code === passCode) await completeDungeonSecretPurchase(connection, character.id);
-  return { name: item.name, price: Number(item.buy_price) };
+  return { name: item.name, price: Number(item.buy_price), rewardName: blueprintRecipeCode(code) ? item.name : undefined };
 });
 
 export const oddWorkshopDungeonCatalog = async (qqUserId: string) => {
   const pool = await getPool(); const character = await characterFor(pool, qqUserId);
-  const [rows] = await pool.execute<(RowDataPacket & { code: string; name: string; description: string; buy_price: number; stock_quantity: number; quantity: number })[]>(`SELECT i.code,i.name,i.description,oi.buy_price,oi.stock_quantity,COALESCE(pi.quantity,0) AS quantity
+  const [rows] = await pool.execute<(RowDataPacket & { code: string; name: string; description: string; item_category: string; buy_price: number; stock_quantity: number; quantity: number })[]>(`SELECT i.code,i.name,i.description,i.item_category,oi.buy_price,oi.stock_quantity,COALESCE(pi.quantity,0) AS quantity
     FROM oddworkshop_items oi JOIN item_definitions i ON i.id=oi.item_id LEFT JOIN player_inventory pi ON pi.item_id=i.id AND pi.character_id=?
     WHERE oi.is_active=1 ORDER BY oi.buy_price`, [character.id]);
-  return rows.map(row => ({ code: row.code, name: row.name, description: row.description, price: Number(row.buy_price), stock: Number(row.stock_quantity), owned: Number(row.quantity) }));
+  return rows.map(row => ({ code: row.code, name: row.name, description: row.description, category: blindBoxBlueprints.some(box => box.code === row.code) ? '盲盒' : row.item_category || '特殊', price: Number(row.buy_price), stock: Number(row.stock_quantity), owned: Number(row.quantity) }));
 };
 
 export const entranceStory = async (qqUserId: string, dungeonId: number) => withTransaction(async connection => {

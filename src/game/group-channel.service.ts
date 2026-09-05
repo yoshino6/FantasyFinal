@@ -1,3 +1,4 @@
+import type { RowDataPacket } from 'mysql2/promise';
 import { getPool } from '../database/pool';
 
 /** 记录机器人已知的 QQ 群。私聊触发的全群公告依赖这份持久化名册。 */
@@ -14,7 +15,7 @@ export const knownGroupChannels = async (botId?: string) => {
   const activeBotId = String(botId ?? '').trim();
   if (!activeBotId) return [];
   const pool = await getPool();
-  const [rows] = await pool.execute<{ group_openid: string }[]>(
+  const [rows] = await pool.execute<(RowDataPacket & { group_openid: string })[]>(
     'SELECT group_openid FROM bot_group_channels WHERE bot_id=? ORDER BY last_seen_at DESC',
     [activeBotId]
   );

@@ -2,8 +2,7 @@ import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { recalculateCharacterStats } from './character.service';
 import { ensureSkillPointLedger, skillPointLedgerSummary } from './skill-point-ledger.service';
-import { forgePrimaryKeys } from './blacksmith.service';
-import { forgedEquipmentCaps } from './constants';
+import { forgeEquipmentCapsFor, forgePrimaryKeys } from './blacksmith.service';
 
 const jsonRecord = (value: unknown): Record<string, unknown> => {
   if (!value) return {};
@@ -14,19 +13,29 @@ const jsonStringArray = (value: unknown): string[] => {
   const raw = typeof value === 'string' ? (() => { try { return JSON.parse(value); } catch { return []; } })() : value;
   return Array.isArray(raw) ? raw.filter(item => typeof item === 'string') : [];
 };
-/** 锻造重构后，非神器装备不再允许保留任何百分比属性词条。 */
-const hasLegacyPercentAffix = (value: unknown) => Object.entries(jsonRecord(value)).some(([key, amount]) => key.endsWith('Pct') && Number(amount) !== 0);
+/** 锻造装备仅允许独立的 0～5% 伤害增加或受伤降低稀有词条。 */
+const hasLegacyPercentAffix = (value: unknown, crafted = false, category = '', subtype: string | null = null) => Object.entries(jsonRecord(value)).some(([key, amount]) => {
+  if (!key.endsWith('Pct') || Number(amount) === 0) return false;
+  const validDamageBonus = crafted && key === 'damageBonusPct' && category === '武器' && subtype !== '盾牌' && Number(amount) > 0 && Number(amount) <= 5;
+  const validDamageReduction = crafted && key === 'damageReductionPct' && (category !== '武器' || subtype === '盾牌') && Number(amount) > 0 && Number(amount) <= 5;
+  return !validDamageBonus && !validDamageReduction;
+});
 const invalidForgedEquipment = (category: string, subtype: string | null, level: number, rarity: string, effectJson: unknown, primaryJson: unknown) => {
   const effect = jsonRecord(effectJson);
   const expectedMain = forgePrimaryKeys(category, subtype);
   const markedMain = jsonStringArray(primaryJson);
   const main = markedMain.length ? markedMain : expectedMain;
+  const damageBonus = Number(effect.damageBonusPct ?? 0);
+  if (damageBonus && (category !== '武器' || subtype === '盾牌' || damageBonus < 0 || damageBonus > 5)) return true;
+  const damageReduction = Number(effect.damageReductionPct ?? 0);
+  if (damageReduction && ((category === '武器' && subtype !== '盾牌') || damageReduction < 0 || damageReduction > 5)) return true;
+  if (subtype === '盾牌' && (Number(effect.physicalAttack ?? 0) !== 0 || Number(effect.magicAttack ?? 0) !== 0)) return true;
   if (markedMain.length && (markedMain.length !== expectedMain.length || markedMain.some(key => !expectedMain.includes(key)))) return true;
   if (!main.every(key => Number(effect[key] ?? 0) > 0)) return true;
-  const secondary = Object.entries(effect).filter(([key, value]) => !main.includes(key) && typeof value === 'number' && Number(value) !== 0);
-  const allowedSecondary = ({ '普通': 1, '优秀': 2, '精良': 3, '稀有': 4, '传说': 5, '史诗': 5, '神器': 5 }[rarity] ?? 1);
+  const secondary = Object.entries(effect).filter(([key, value]) => key !== 'damageBonusPct' && key !== 'damageReductionPct' && !main.includes(key) && typeof value === 'number' && Number(value) !== 0);
+  const allowedSecondary = ({ '普通': 0, '优秀': 1, '精良': 2, '稀有': 3, '传说': 4, '史诗': 4 }[rarity] ?? 0);
   if (secondary.length > allowedSecondary) return true;
-  const caps = forgedEquipmentCaps(category === '武器' ? '武器' : '防具', level, rarity, main);
+  const caps = forgeEquipmentCapsFor(category, subtype, level, rarity, main);
   return Object.entries(effect).some(([key, value]) => caps[key] !== undefined && Math.abs(Number(value)) > caps[key] + .1);
 };
 
@@ -37,7 +46,7 @@ const characterIdFor = async (connection: PoolConnection, qqUserId: string) => {
 
 export const auditCharacter = async (qqUserId: string) => withTransaction(async connection => {
   const character = await characterIdFor(connection, qqUserId);
-  const columns = ['hp_max', 'mp_max', 'current_hp', 'current_mp', 'physical_attack', 'magic_attack', 'physical_defense', 'magic_defense', 'accuracy', 'evasion', 'crit_rate_bp', 'crit_damage_bp', 'crit_resist_bp', 'crit_damage_reduction_bp', 'tenacity', 'speed'];
+  const columns = ['hp_max', 'mp_max', 'current_hp', 'current_mp', 'physical_attack', 'magic_attack', 'physical_defense', 'magic_defense', 'accuracy', 'evasion', 'crit_rate_bp', 'crit_damage_bp', 'crit_resist_bp', 'crit_damage_reduction_bp', 'tenacity', 'tenacity_pierce', 'speed'];
   const [beforeRows] = await connection.execute<RowDataPacket[]>(`SELECT ${columns.join(',')} FROM characters WHERE id=? FOR UPDATE`, [character.id]);
   await recalculateCharacterStats(connection, Number(character.id));
   await connection.execute('UPDATE characters SET current_hp=LEAST(GREATEST(0,current_hp),hp_max),current_mp=LEAST(GREATEST(0,current_mp),mp_max) WHERE id=?', [character.id]);
@@ -69,19 +78,20 @@ export const auditInventory = async (qqUserId: string) => withTransaction(async 
     FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
     WHERE ii.character_id=? AND i.code LIKE 'crafted\\_%' FOR UPDATE`, [character.id]);
   const invalidInstances = forgedRows.filter(item => invalidForgedEquipment(item.item_category, item.weapon_type, Number(item.required_level), item.rarity, item.effect_json, item.forge_primary_json)).map(item => Number(item.id));
-  const [equipmentRows] = await connection.execute<(RowDataPacket & { id: number; effect_json: unknown })[]>(`SELECT ii.id,COALESCE(ii.effect_json,i.effect_json) AS effect_json FROM player_item_instances ii
+  const [equipmentRows] = await connection.execute<(RowDataPacket & { id: number; code: string; item_category: string; weapon_type: string | null; effect_json: unknown })[]>(`SELECT ii.id,i.code,i.item_category,i.weapon_type,COALESCE(ii.effect_json,i.effect_json) AS effect_json FROM player_item_instances ii
     JOIN item_definitions i ON i.id=ii.item_id WHERE ii.character_id=? AND i.item_type='equipment' AND i.rarity<>'神器' FOR UPDATE`, [character.id]);
-  const percentInstances = equipmentRows.filter(item => hasLegacyPercentAffix(item.effect_json)).map(item => Number(item.id));
-  const recycledInstances = [...new Set([...invalidInstances, ...percentInstances])];
+  const percentInstances = equipmentRows.filter(item => hasLegacyPercentAffix(item.effect_json, item.code.startsWith('crafted_'), item.item_category, item.weapon_type)).map(item => Number(item.id));
+  const invalidShieldInstances = equipmentRows.filter(item => item.weapon_type === '盾牌' && (Number(jsonRecord(item.effect_json).physicalAttack ?? 0) !== 0 || Number(jsonRecord(item.effect_json).magicAttack ?? 0) !== 0)).map(item => Number(item.id));
+  const recycledInstances = [...new Set([...invalidInstances, ...percentInstances, ...invalidShieldInstances])];
   if (recycledInstances.length) {
     const marks = recycledInstances.map(() => '?').join(',');
     await connection.execute(`DELETE FROM player_equipment WHERE character_id=? AND instance_id IN (${marks})`, [character.id, ...recycledInstances]);
     await connection.execute(`DELETE FROM player_item_instances WHERE character_id=? AND id IN (${marks})`, [character.id, ...recycledInstances]);
   }
   if (invalidInstances.length || recycledInstances.length) await recalculateCharacterStats(connection, Number(character.id));
-  const removedCount = Number(removed.affectedRows); const quickRemovedCount = Number(quickRemoved.affectedRows); const artifactCount = excessArtifacts.length; const forgedCount = invalidInstances.length; const percentCount = percentInstances.filter(id => !invalidInstances.includes(id)).length; const recycledCount = recycledInstances.length;
+  const removedCount = Number(removed.affectedRows); const quickRemovedCount = Number(quickRemoved.affectedRows); const artifactCount = excessArtifacts.length; const forgedCount = invalidInstances.length; const percentCount = percentInstances.filter(id => !invalidInstances.includes(id)).length; const shieldCount = invalidShieldInstances.filter(id => !invalidInstances.includes(id) && !percentInstances.includes(id)).length; const recycledCount = recycledInstances.length;
   const changed = Boolean(removedCount || quickRemovedCount || artifactCount || forgedCount || recycledCount);
-  return { name: character.name, changed, fixed: changed ? `已清除 ${removedCount} 条异常背包记录、${quickRemovedCount} 条失效快捷道具${artifactCount ? `，并卸下 ${artifactCount} 件超额神器至背包` : ''}${forgedCount ? `，并回收 ${forgedCount} 件超出现阶段打造或熔铸规则的装备` : ''}${percentCount ? `，并回收 ${percentCount} 件含百分比属性词条的非神器装备` : ''}。` : '背包与装备记录正常，未发现需要修正的数据。' };
+  return { name: character.name, changed, fixed: changed ? `已清除 ${removedCount} 条异常背包记录、${quickRemovedCount} 条失效快捷道具${artifactCount ? `，并卸下 ${artifactCount} 件超额神器至背包` : ''}${forgedCount ? `，并回收 ${forgedCount} 件超出现阶段打造或熔铸规则的装备` : ''}${percentCount ? `，并回收 ${percentCount} 件含百分比属性词条的非神器装备` : ''}${shieldCount ? `，并回收 ${shieldCount} 件含攻击属性的违规盾牌` : ''}。` : '背包与装备记录正常，未发现需要修正的数据。' };
 });
 
 /** 管理员定向清空背包：已装备实例保留，其余堆叠物品、装备和异械一并移除。 */

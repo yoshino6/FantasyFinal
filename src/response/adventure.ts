@@ -1,6 +1,7 @@
 import { Format, logger, MessageDirect, useEvent, useMessage, useRoute } from 'alemonjs';
 import { readFile } from 'node:fs/promises';
 import { durationText } from '../game/time-format';
+import { continueCombatChant } from '../game/adventure.service';
 import { addNpcAffinity, adjustMovementStep, battleStatus, blockedDungeonDirections, cancelResourceMining, cancelTravel, claimCombatAmbushHandoffs, combatAction, chooseTarget, completeTravel, continueForestArrival, coordinateInteraction, currentEncounter, encounterAction, explore, forceAutoBattleDefeat, forestGuideAdvance, forestGuideChoice, forestGuideProgress, huntMonster, inventory, leaveOccupiedBattle, mineResource, move, moveTo, moveToMap, moveToNearbyMonster, movementProfile, nearbyPoints, queueAmbush, requireNpcAtCurrentPosition, resourceMiningStatus, switchCombatTarget, talkToNpc, travelStatus, type CombatAmbushHandoff, type CoordinateInteractionTarget, type VictorySettlement } from '../game/adventure.service';
 import { autoBattleConfig, isFullPartyAutoBattle, pendingPartyAutoBattleActions } from '../game/auto-battle.service';
 import { messageFormat } from '../game/message';
@@ -12,13 +13,19 @@ import { adventurerCardImage } from '../game/adventurer-card.service';
 import { realmEnergyDissipationText } from '../game/constants';
 import { currentMainQuest } from '../game/main-quest.service';
 import { npcChatDialogue } from '../game/npc-dialogue.service';
+import { dynamicNpcChatDialogue, dynamicNpcProfile } from '../game/dynamic-npc-dialogue.service';
+import { advancedProfessionReveal, mentorSuccessDialogue } from '../game/advanced-profession.dialogue';
+import { advancedProfessionByCode } from '../game/advanced-profession.config';
 import { changeDungeonFloor, dungeonPvP, dungeonTrackingHint, enterDungeon, interactDungeonPlayer, openDungeonChest } from '../game/dungeon.service';
 import { dungeonSecretProgress } from '../game/dungeon-quest.service';
-import { cityWantedAlert, pvpBattleStatus, pvpCombatAction, reserveWarrantEntryNotice, startAmbushPvpBattle, startPvpBattle } from '../game/pvp.service';
+import { selectPvpBattleOption, cityWantedAlert, pvpBattleStatus, pvpCombatAction, continuePvpChant, reserveWarrantEntryNotice, startAmbushPvpBattle, startPvpBattle } from '../game/pvp.service';
 import { createFormatWithoutGroupMention } from '../middleware/group-reply-mention';
 import { knownGroupChannels, rememberGroupChannel } from '../game/group-channel.service';
 import { warrantNoticeFormat } from './warrant-notice';
 import { gameAssetUrls, isPublicImageUrl } from '../config/game-assets';
+import { omniscientTraces } from '../game/omniscient.service';
+import { offerDynamicEncounter, recordExplorationMovement } from '../game/world-dynamics.service';
+import { encounterFormat } from './world-dynamics';
 
 const pearGuideImagePath = decodeURIComponent(pearGuideImage).replace(/^([a-zA-Z]):(?![\\/])/, '$1:\\');
 const pearGuideImageBuffer = () => readFile(pearGuideImagePath);
@@ -59,11 +66,17 @@ const movementButtons = async (qqUserId: string, resting = false) => {
   return panelButtons(resting, Boolean(config.settings.enabled), blockedDirections);
 };
 const battleButtons = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
-  const activeSkills = new Set(battle.readySkillSlots); const activeItems = new Set(battle.itemSlots); const actionStyle = battle.canAct ? 'blue' : undefined;
-  const buttons = Format.createButtonGroup()
-    .addRow().addButton('普攻', '/攻击', { type: 'command', autoEnter: true, style: actionStyle }).addButton('技能①', '/技能 1', { type: 'command', autoEnter: true, style: battle.canAct && activeSkills.has(1) ? 'blue' : undefined }).addButton('技能②', '/技能 2', { type: 'command', autoEnter: true, style: battle.canAct && activeSkills.has(2) ? 'blue' : undefined }).addButton('技能③', '/技能 3', { type: 'command', autoEnter: true, style: battle.canAct && activeSkills.has(3) ? 'blue' : undefined }).addButton('技能④', '/技能 4', { type: 'command', autoEnter: true, style: battle.canAct && activeSkills.has(4) ? 'blue' : undefined })
-    .addRow().addButton('道具①', '/道具 1', { type: 'command', autoEnter: true, style: battle.canAct && activeItems.has(1) ? 'blue' : undefined }).addButton('道具②', '/道具 2', { type: 'command', autoEnter: true, style: battle.canAct && activeItems.has(2) ? 'blue' : undefined }).addButton('道具③', '/道具 3', { type: 'command', autoEnter: true, style: battle.canAct && activeItems.has(3) ? 'blue' : undefined }).addButton('道具④', '/道具 4', { type: 'command', autoEnter: true, style: battle.canAct && activeItems.has(4) ? 'blue' : undefined }).addButton('逃跑', '/逃跑', { type: 'command', autoEnter: true, style: actionStyle });
+  const buttons = Format.createButtonGroup().addRow().addButton('普攻', '/攻击', { type: 'command', autoEnter: true, style: battle.canAct ? 'blue' : undefined });
+  for (let slot = 1; slot <= 4; slot++) buttons.addButton('技能' + '①②③④'[slot - 1], '/技能 ' + slot, { type: 'command', autoEnter: true, style: battle.canAct && battle.readySkillSlots.includes(slot) ? 'blue' : undefined });
+  buttons.addRow();
+  if (battle.mode !== 'spar') for (let slot = 1; slot <= 4; slot++) buttons.addButton('道具' + '①②③④'[slot - 1], '/道具 ' + slot, { type: 'command', autoEnter: true, style: battle.canAct && battle.itemSlots.includes(slot) ? 'blue' : undefined });
+  buttons.addButton(battle.mode === 'spar' ? '认输' : '逃跑', '/逃跑', { type: 'command', autoEnter: true });
+  if (battle.mode !== 'spar' && battle.deviceSlots.length) {
+    buttons.addRow(); for (const device of battle.deviceSlots) buttons.addButton('异械' + '①②③④'[device.slot - 1], '/异械施放 ' + device.slot, { type: 'command', autoEnter: true, style: battle.canAct ? 'blue' : undefined });
+    buttons.addButton('异械状态', '/战斗异械状态', { type: 'command', autoEnter: true });
+  }
   if (battle.appraisal.learned) buttons.addRow().addButton('鉴识', '/鉴识', { type: 'command', autoEnter: true, style: 'blue' });
+  if (battle.canEnchant) { buttons.addRow(); for (const element of ['风', '雷', '火']) buttons.addButton('附锋·' + element, '/附锋元素 ' + element, { type: 'command', autoEnter: true, style: battle.enchantElement === element ? 'blue' : undefined }); }
   return buttons;
 };
 const encounterButtons = (spawnId: number, canAmbush = false, occupied = false, cityPursuit = false) => {
@@ -72,43 +85,51 @@ const encounterButtons = (spawnId: number, canAmbush = false, occupied = false, 
   if (!cityPursuit) buttons.addButton('交涉', `/交涉 ${spawnId}`, { type: 'command', autoEnter: true });
   return buttons.addButton('躲避', `/躲避 ${spawnId}`, { type: 'command', autoEnter: true });
 };
-const battleStateText = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
-  const members = battle.members.map(member => {
-    return `【${member.name}】HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}${member.defeated ? '（倒下）' : member.pending ? '（已行动）' : ''}`;
-  });
-  return members.join('\n');
-};
-const appendBattleState = (markdown: ReturnType<typeof Format.createMarkdown>, battle: Awaited<ReturnType<typeof battleStatus>>) => {
-  markdown.addText(`${battleStateText(battle)}\n`);
-  for (const [index, target] of battle.targets.entries()) markdown.addButton(`${battle.selectedTargetId === target.id ? '▶' : ''}敌方${index + 1} ${target.name}`, { data: `/切换目标 ${target.id}`, autoEnter: false }).addText(` HP ${target.hp}/${target.hpMax}${target.defeated ? '（击败）' : ''}\n`);
+export const appendBattleState = (markdown: ReturnType<typeof Format.createMarkdown>, battle: Awaited<ReturnType<typeof battleStatus>>) => {
+  for (const [index, member] of battle.members.entries()) {
+    const label = `${battle.selectedAllyId === member.id ? '▶' : ''}友方${index + 1} ${member.name}`;
+    markdown.addText('> ');
+    if (member.defeated) markdown.addText(label);
+    else markdown.addButton(label, { data: `/切换目标 ${member.id} 友方`, autoEnter: false });
+    markdown.addText(` HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}${member.resource ? `｜${member.resource.name} ${member.resource.current}/${member.resource.max}` : ''}${member.defeated ? '（倒下）' : member.chanting ? `（吟唱：${member.chanting}）` : member.pending ? '（已确认）' : member.extraAction ? '（额外行动）' : ''}\n`);
+    if (member.statusText) markdown.addBlockquote(`状态：${member.statusText}`).addNewline();
+  }
+  if (battle.spirits.length) markdown.addBlockquote(`灵兽：${battle.spirits.map(spirit => `【${spirit.name}】HP ${spirit.hp}/${spirit.hpMax}·${spirit.remainingTurns}回合`).join('｜')}`).addNewline();
+  if (battle.mode !== 'spar' && battle.deviceSlots.length) markdown.addBlockquote(`异械：${battle.deviceSlots.map(device => `${device.deviceName} ${device.currentEnergy}/${device.maxEnergy}`).join('｜')}`).addNewline();
+  markdown.addNewline();
+  for (const [index, target] of battle.targets.entries()) {
+    const hierarchy = target.isBossComponent ? '　└ ' : '';
+    const bodyState = !target.isBossComponent && target.livingComponentCount ? `｜部位减伤 ${target.bodyDamageReductionPct}%` : '';
+    const componentState = target.isBossComponent ? `｜${target.warning || target.passiveSummary}${target.breakSummary ? `｜击破：${target.breakSummary}` : ''}` : '';
+    markdown.addText('> ').addButton(`${!battle.selectedAllyId && battle.selectedTargetId === target.id ? '▶' : ''}${hierarchy}敌方${index + 1} ${target.name}`, { data: `/切换目标 ${target.id}`, autoEnter: false }).addText(` HP ${target.hp}/${target.hpMax}${bodyState}${componentState}${target.defeated ? '（击败）' : ''}\n`);
+    if (target.statusText) markdown.addBlockquote(`状态：${target.statusText}`).addNewline();
+  }
   return markdown;
 };
 const appendCombatLog = (markdown: ReturnType<typeof Format.createMarkdown>, text: string) => {
-  // QQ 对“一个引用块内含多行和标题”的解析不稳定，会让后续内容脱离引用。
-  // 逐行构建引用，确保行动、分支与回合前效果都保持统一的战斗过程样式。
-  const lines = text.trim().split('\n').flatMap(line => {
-    const matched = /^(\s*)(?:§)?([#$&])([^#$&]+)\2(.*)$/.exec(line);
-    if (matched) {
-      const description = matched[4].trimStart();
-      // 效果名单独以引用内标题显示，说明仍保留为引用正文；不显示内部标记符。
-      return description ? [`### ${matched[3].trim()}`, description] : [`### ${matched[3].trim()}`];
-    }
-    return [line.replaceAll('$', '\\$').replaceAll('#', '\\#').replaceAll('&', '\\&').replaceAll('§', '')];
-  });
-  for (const line of lines) {
+  // 效果行统一缩进至行动正文起点，并保留 #自身# / $敌方$ / &回合结算& 的战斗样式。
+  for (const raw of text.trim().split(/\r?\n/)) {
+    const line = raw.replace(/^§/, '');
     if (!line.trim()) markdown.addNewline();
+    else if (/^(?:➤|　➥)/.test(line)) markdown.addBlockquote(line).addNewline();
+    // 保留战斗日志的 #自身# / $敌方$ / &回合结算& 记号；仅转义 &，避免 QQ Markdown 把它渲染为标题。
+    else if (/^　*&[^&]+&/.test(line)) markdown.addText(`　\u200B${line.replace(/^　*/, '').replace(/^&([^&]+)&/, '\\&$1\\&')}`).addNewline();
+    else if (/^　*[#$][^#$]+[#$]/.test(line)) markdown.addText(`　\u200B${line.replace(/^　*/, '')}`).addNewline();
     else markdown.addBlockquote(line).addNewline();
   }
   return markdown;
 };
+const battleRoundTitle = (mode: string, turn: number) => mode === 'spar' ? `切磋＜${turn}＞回合` : `战斗<${turn}>回合`;
+const battleRoundHeader = /^(战斗|切磋)[<＜](\d+)[>＞]回合$/;
 const battleFormat = (_title: string, text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => {
-  const lines = text.split('\n'); const turn = /^战斗<(\d+)>回合$/.exec(lines[0]); if (turn) lines.shift();
-  const markdown = Format.createMarkdown().addTitle(`战斗<${turn ? Number(turn[1]) : battle.turn}>回合`);
+  const lines = text.split(/\r?\n/); const turn = battleRoundHeader.exec(lines[0]); if (turn) lines.shift();
+  const markdown = Format.createMarkdown().addTitle(battleRoundTitle(battle.mode, turn ? Number(turn[2]) : battle.turn)).addNewline().addNewline();
   if (lines.join('\n')) appendCombatLog(markdown, lines.join('\n')).addNewline();
   return Format.create().addMarkdown(appendBattleState(markdown, battle)).addButtonGroup(battleButtons(battle));
 };
-const battleOperationFormat = (text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => {
-  const markdown = Format.createMarkdown().addTitle(`战斗<${battle.turn}>回合`).addNewline().addNewline().addText(text).addNewline().addNewline();
+export const battleOperationFormat = (text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => {
+  const markdown = Format.createMarkdown().addTitle(battleRoundTitle(battle.mode, battle.turn)).addNewline().addNewline();
+  if (text) markdown.addText(text).addNewline().addNewline();
   return Format.create().addMarkdown(appendBattleState(markdown, battle)).addButtonGroup(battleButtons(battle));
 };
 const ambushStartFormat = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
@@ -117,8 +138,8 @@ const ambushStartFormat = (battle: Awaited<ReturnType<typeof battleStatus>>) => 
     .addBlockquote('（首回合直击伤害+50%）').addNewline().addNewline();
   return Format.create().addMarkdown(appendBattleState(markdown, battle)).addButtonGroup(battleButtons(battle));
 };
-const battleStartFormat = (text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => {
-  const markdown = Format.createMarkdown().addTitle('战斗开始').addNewline().addNewline().addBlockquote(text).addNewline().addNewline();
+export const battleStartFormat = (text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => {
+  const markdown = Format.createMarkdown().addTitle(battle.mode === 'spar' ? battleRoundTitle(battle.mode, battle.turn) : '战斗开始').addNewline().addNewline().addBlockquote(text).addNewline().addNewline();
   return Format.create().addMarkdown(appendBattleState(markdown, battle)).addButtonGroup(battleButtons(battle));
 };
 const negotiationFailureFormat = (text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => {
@@ -131,8 +152,8 @@ const battleErrorFormat = (text: string, battle: Awaited<ReturnType<typeof battl
   return Format.create().addMarkdown(appendBattleState(markdown, battle)).addButtonGroup(battleButtons(battle));
 };
 const finalBattleFormat = (log: string) => {
-  const lines = log.split('\n'); const turn = /^战斗<(\d+)>回合$/.exec(lines[0]); const title = turn ? `战斗<${Number(turn[1])}>回合` : '战斗'; if (turn) lines.shift();
-  const markdown = Format.createMarkdown().addTitle(title);
+  const lines = log.split(/\r?\n/); const turn = battleRoundHeader.exec(lines[0]); const title = turn ? battleRoundTitle(turn[1] === '切磋' ? 'spar' : 'pve', Number(turn[2])) : '战斗'; if (turn) lines.shift();
+  const markdown = Format.createMarkdown().addTitle(title).addNewline().addNewline();
   if (lines.join('\n')) appendCombatLog(markdown, lines.join('\n'));
   return Format.create().addMarkdown(markdown);
 };
@@ -155,6 +176,12 @@ const victoryFormat = (settlement: VictorySettlement) => {
     markdown.addNewline();
   }
   if (settlement.members.some(reward => reward.levelText?.includes('Lv.8'))) markdown.addText('发现新支线【职业之外的道路】\n去百纳镇的各个店铺转转，或许能找到适合自己的副职业。').addNewline();
+  for (const completed of settlement.advancedProfessionCompleted ?? []) {
+    const profession = advancedProfessionByCode(completed.code);
+    markdown.addNewline().addText(`【${completed.name}】的二转仪式`).addNewline().addNewline().addBlockquote(mentorSuccessDialogue(completed.code) ?? `你已二转成功：${completed.profession}。`).addNewline();
+    if (profession) markdown.addText(`【${profession.name}】职业档案已解锁`).addNewline().addBlockquote(advancedProfessionReveal(profession)).addNewline();
+    markdown.addText(`技能点已重置：返还 ${completed.refundedSkillPoints} 点，当前可分配 ${completed.availableSkillPoints} 点。`).addNewline();
+  }
   if (settlement.dungeonSecretCompleted) markdown.addText('【地下的秘密】已完成。').addNewline();
   if (settlement.pursuitCooldownMinutes) markdown.addText(`你击退了城镇执法者，暂时脱离追捕。${settlement.pursuitCooldownMinutes} 分钟内不会再遭到强制拦截。`).addNewline();
   return Format.create().addMarkdown(markdown);
@@ -166,6 +193,13 @@ const realmBarrierFormat = () => Format.create()
     .addText('主线变更【无形的禁锢】').addNewline()
     .addText('你决定去找专业的人来请教这件事情。').addNewline()
     .addText('先去冒险者公会里面问问吧。'))
+  .addButtonGroup(Format.createButtonGroup().addRow().addButton('任务', '/任务', { type: 'command', autoEnter: true, style: 'blue' }));
+const evolutionBarrierFormat = () => Format.create()
+  .addMarkdown(Format.createMarkdown().addTitle('未知的枷锁').addNewline().addNewline()
+    .addText('一股精纯的能量冲入你的体壳，却没有像往常一样化作成长的养分。它在体内盘桓片刻，最终悄无声息地散去。').addNewline().addNewline()
+    .addText('你感觉到身体能量已趋于饱和，而眼前的门槛却比从前更加陌生。').addNewline().addNewline()
+    .addText('主线已更新【未知的枷锁】').addNewline()
+    .addText('去冒险者公会问问吧。'))
   .addButtonGroup(Format.createButtonGroup().addRow().addButton('任务', '/任务', { type: 'command', autoEnter: true, style: 'blue' }));
 const chapterFormat = (stage: number, text: string) => {
   const markdown = Format.createMarkdown().addTitle(`初章·包容之镇（${stage}/5）`).addNewline().addNewline().addText(text);
@@ -211,11 +245,11 @@ const npcInteractionFormat = async (qqUserId: string, npc: { code: string; name:
   const nearby = await nearbyPoints(qqUserId);
   const name = simpleNpcName(npc.name);
   const markdown = Format.createMarkdown().addTitle(name).addNewline().addNewline().addText(`【${name}】`);
-  if (nearby.npcDetailsUnlocked) markdown.addText(' ').addButton('[详情]', { data: `/NPC详情 ${npc.code}`, autoEnter: false });
+  if (nearby.npcDetailsUnlocked) markdown.addText(' ').addButton('[详情]', { data: `/域民详情 ${npc.code}`, autoEnter: false });
   markdown.addNewline().addNewline().addBlockquote(text);
-  if (continuingChat) return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('继续闲聊', npc.code === 'pear_guide' ? '/梨子喵闲聊' : `/NPC对话 ${npc.code}`, { type: 'command', autoEnter: true, style: 'blue' }));
+  if (continuingChat) return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('切磋', `/切磋 ${npc.code}`, { type: 'command', autoEnter: true, style: 'blue' }).addButton('继续闲聊', npc.code === 'pear_guide' ? '/梨子喵闲聊' : `/NPC对话 ${npc.code}`, { type: 'command', autoEnter: true, style: 'blue' }));
   const buttons = Format.createButtonGroup().addRow();
-  buttons.addButton('离开', `/NPC离开 ${npc.code}`, { type: 'command', autoEnter: true });
+  buttons.addButton('切磋', `/切磋 ${npc.code}`, { type: 'command', autoEnter: true, style: 'blue' }).addButton('离开', `/NPC离开 ${npc.code}`, { type: 'command', autoEnter: true });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 const unimplementedBuildingFormat = (building: { code: string; name: string; description: string }) => Format.create()
@@ -352,24 +386,52 @@ const sendCombatResult = async (message: any, qqUserId: string, result: Awaited<
       ? victoryButtons(settlement.arrivalPending)
       : panelButtons(nearby?.character.activity_status !== 'active').addRow().addButton('技能列表', '/技能列表', { type: 'command', autoEnter: true, style: 'blue' });
     await message.send({ format: format.addButtonGroup(buttons) });
-    if (victory && settlement.members.some(member => member.realmCapReached)) await message.send({ format: realmBarrierFormat() });
+    if (victory && settlement.members.some(member => member.realmCapReached && member.realmStage === 1)) await message.send({ format: realmBarrierFormat() });
+    // 二十级瓶颈的提示必须服从当前主线：尚未完成「失踪的少女」及其后续同行时，
+    // 当前主线仍应留在原剧情，不能仅因灵阶与经验满足便提前揭示进化。
+    if (victory && settlement.members.some(member => member.realmCapReached && member.realmStage === 2)) {
+      const mainQuest = await currentMainQuest(qqUserId);
+      if (mainQuest.title === '【主线·未知的枷锁】') await message.send({ format: evolutionBarrierFormat() });
+    }
+    if (victory && settlement.goblinKingCompleted) {
+      const story = Format.createMarkdown().addTitle('主线·少女获救').addNewline().addNewline()
+        .addText('哥布林国王倒下后，原本凶悍的大军像忽然失去了脊梁，嘶叫着退入密林。浅红色幼龙拖着伤躯远去，只留下被踩碎的旗帜与尚未散尽的雷鸣。梨子喵扶着短刃站起身，发间缺失的鱼骨头发卡终于被她从泥里拾回。').addNewline().addNewline()
+        .addText('她把发卡别回耳边，沉默了好一会儿，才轻声开口。\n\n“那天我本来只是进森林打猎喵。可我在一处废营地里看见了少女留下的布片和脚印，旁边还有哥布林拖拽过的痕迹……我就一路跟了上来。”\n\n她望向哥布林逃散的方向，握着短刃的手仍微微发颤。\n\n“我在部落里看见了那些木笼，才知道失踪的少女都被关在里面。守卫少的时候，我本来想把人带走；可我杀了几个拦路的哥布林，警报就响了。它们把我当成入侵者，越聚越多，我一个人根本撑不住，最后只能藏进断木后面。要不是你赶来，我可能还会被困在这里喵。”').addNewline().addNewline()
+        .addText('梨子喵忽然抬起头，指向逃兵消失的方向。\n\n“它们把人藏在部落里面！国王一倒，守卫也散了。跟我来喵！”\n\n她带着我穿过被遗弃的营火与歪斜木栅，来到部落深处的几间木笼前。笼门被一一劈开，失踪的少女们终于重见天光；有人相拥而泣，有人仍攥着同伴的手，却都还活着。\n\n直到最后一人走出阴影，我才真正松开握紧的武器。\n\n我与梨子喵领着她们踏上归路。远处的百纳镇灯火微明，终于有人能等到失而复得的家人。');
+      await message.send({ format: Format.create().addMarkdown(story).addButtonGroup(Format.createButtonGroup().addRow().addButton('前往 梨子喵', '/前往 -22 -196', { type: 'command', autoEnter: true, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
+    }
+    if (victory && settlement.evolutionCompleted) {
+      const story = Format.createMarkdown().addTitle('大学者·噶').addNewline().addNewline()
+        .addText('『噶』\n\n“做得不错。我感受到了你坚定的信念。”\n\n她收起深蓝色的法杖，呼吸仍有些不稳。沉默片刻后，她从桌旁取出一个陈旧的木盒，双手递到你面前。\n\n“来，拿上这个——”\n\n木盒开启的瞬间，一颗金色圆珠在绒布上泛起柔和光泽，仿佛正随着你的心跳轻轻搏动。\n\n“这是开启进化的种子。感悟它之后，你会真正踏进那扇门；但从那一刻起，每一次成长都不再只是积累力量。”\n\n她抬眼望向研究室外层层延展的世界树枝冠。\n\n“你的种子会在每一个新的等级尽头形成生长结。届时，世界树上会有一扇门回应你——那是我留在这里的稳定研究室。你可以在那里查看自身的变化，整理观察记录，接受委托、收集材料，并选择一支针剂决定下一步如何生长。”\n\n“保守一些，身体会更容易维持平衡；激进一些，也许能看见从未有过的表型。无论选择哪一条路，结果都会留下记录，而不是由谁替你决定。”\n\n她将木盒向前推了半寸，声音低了下来。\n\n“去感悟它吧。等你准备面对下一道生长结时，再来找我。”\n\n“不过记住——一旦踏上这条路，就再也无法回头。”').addNewline().addNewline()
+        .addText('————————————').addNewline().addNewline().addText('获得【进化之种】');
+      await message.send({ format: Format.create().addMarkdown(story).addButtonGroup(Format.createButtonGroup().addRow().addButton('打开 背包', '/背包 道具', { type: 'command', autoEnter: true, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
+    }
     const ambushSessionId = 'ambushSessionId' in result ? result.ambushSessionId : undefined;
     if (ambushSessionId) await dispatchCombatAmbushHandoffs(ambushSessionId);
     return;
   }
   const battle = await battleStatus(qqUserId);
   await message.send({ format: battleFormat(result.waiting ? '行动已确认' : '战斗回合', result.log, battle) });
+  const continued = await continueCombatChant(qqUserId);
+  if (continued) { await sendCombatResult(message, qqUserId, continued); return; }
   // 这一轮将主角击倒时，不能再等待玩家按钮；由仍存活的剧情队友每秒继续一轮。
-  if (!result.waiting && !battle.canAct) scheduleStoryNpcBattle(message, qqUserId);
+  if (!result.waiting && !battle.canAct && battle.mode !== 'spar') scheduleStoryNpcBattle(message, qqUserId);
 };
 const resolvePartyAutoBattleActions = async (qqUserId: string) => {
   let latest: Awaited<ReturnType<typeof combatAction>> | null = null;
+  // 吟唱不依赖自动配置；先补齐全部已锁定的吟唱行动，再提交尚未出招的自动成员。
+  for (let count = 0; count < 32; count++) {
+    const chanting = await continueCombatChant(qqUserId); if (!chanting) break;
+    latest = chanting; if (chanting.ended || !chanting.waiting) return chanting;
+  }
   for (const entry of await pendingPartyAutoBattleActions(qqUserId)) {
     try {
+      if (entry.targetId) await switchCombatTarget(entry.qqUserId, entry.targetId);
       latest = await combatAction(entry.qqUserId, entry.action.type, undefined, entry.action.type === 'skill' ? entry.action.skillId : undefined, entry.action.type === 'item' ? entry.action.itemId : undefined);
     } catch (error) {
-      // 自动配置的技能处于冷却或蓝量不足时，仅让对应队员退回普通攻击。
-      if (!(error instanceof Error) || !error.message.startsWith('自动')) throw error;
+      // 自动配置可能因洗点、转职、武器更换、二转资源不足或道具耗尽而临时失效。
+      // 任何“配置动作”失败都仅降级该成员为普攻，绝不能阻断其余队友的同回合提交。
+      if (!(error instanceof Error) || entry.action.type === 'attack') throw error;
       latest = await combatAction(entry.qqUserId, 'attack');
     }
     if (latest.ended || !latest.waiting) return latest;
@@ -513,7 +575,8 @@ const sendPvpCombatResult = async (message: any, qqUserId: string, result: Await
     return;
   }
   const battle = await pvpBattleStatus(qqUserId);
-  await message.send({ format: battleFormat('玩家对战', result.log, battle as Awaited<ReturnType<typeof battleStatus>>) });
+  await message.send({ format: battleFormat('玩家对战', result.log, battle as unknown as Awaited<ReturnType<typeof battleStatus>>) });
+  const continued = await continuePvpChant(qqUserId); if (continued) await sendPvpCombatResult(message, qqUserId, continued);
 };
 const startPvpAutoBattle = async (message: any, qqUserId: string) => {
   const config = await autoBattleConfig(qqUserId, 'pvp'); if (!config.settings.enabled) return;
@@ -576,7 +639,7 @@ const dispatchCombatAmbushHandoffs = async (sessionId: string) => {
         if (!handoff.opponentCharacterId) throw new Error('残血玩家已经离开战场。');
         const started = await startAmbushPvpBattle(handoff.ambusherCharacterId, handoff.opponentCharacterId, handoff.spawnId, handoff.delivery);
         const battle = await pvpBattleStatus(handoff.ambusherQqUserId);
-        await sendAmbushDirect(handoff, battleStartFormat(`BOSS 已被击败。你趁【${started.target}】尚未恢复，发动了伏击！`, battle as Awaited<ReturnType<typeof battleStatus>>), handoff.delivery.scope === 'group');
+        await sendAmbushDirect(handoff, battleStartFormat(`BOSS 已被击败。你趁【${started.target}】尚未恢复，发动了伏击！`, battle as unknown as Awaited<ReturnType<typeof battleStatus>>), handoff.delivery.scope === 'group');
         await startPvpAutoBattle(messenger, handoff.ambusherQqUserId);
       } else {
         await chooseTarget(handoff.ambusherQqUserId, handoff.spawnId);
@@ -608,10 +671,10 @@ const guildInteriorFormat = (area = '大厅') => {
 };
 
 const professionDetails: Record<string, { name: string; blessing: string; skills: { name: string; description: string }[] }> = {
-  warrior: { name: '战士', blessing: '体质成长+1.2，力量成长+1.2', skills: [{ name: '长剑精通', description: '（被动）装备长剑类武器时，物攻+(5/25)%。副手装备时效果(减半/无衰减)。' }, { name: '盾牌精通', description: '（被动）装备盾牌类武器时，双防+(5/25)%。副手装备时效果(减半/无衰减)。' }] },
-  mage: { name: '法师', blessing: '精神成长+1.2，智力成长+1.2', skills: [{ name: '法杖精通', description: '（被动）装备法杖类武器时，魔攻+(5/25)%。副手装备时效果(减半/无衰减)。' }, { name: '法书精通', description: '（被动）装备法书类武器时，吟唱速度+(14/70)%。副手装备时效果(减半/无衰减)。' }] },
-  priest: { name: '牧师', blessing: '体质成长+1.2，精神成长+1.2', skills: [{ name: '法书精通', description: '（被动）装备法书类武器时，吟唱速度+(14/70)%。副手装备时效果(减半/无衰减)。' }, { name: '法球精通', description: '（被动）装备法球类武器时，魔力上限+(14/70)%。副手装备时效果(减半/无衰减)。' }] },
-  rogue: { name: '盗贼', blessing: '敏捷成长+1.2，感知成长+1.2', skills: [{ name: '匕首精通', description: '（被动）装备匕首类武器时，双攻+(4/20)%。副手装备时效果(减半/无衰减)。' }, { name: '拳刃精通', description: '（被动）装备拳刃类武器时，暴击、暴伤+(5/25)%。副手装备时效果(减半/无衰减)。' }] }
+  warrior: { name: '战士', blessing: '体质成长+1.2，力量成长+1.2', skills: [{ name: '长剑精通', description: '（被动）装备长剑类武器时，暴击提高40%至80%。副手效果由50%随专精提升至100%。' }, { name: '盾牌精通', description: '（被动）装备盾牌类武器时，暴免、暴抗各提高20%至40%。副手效果由50%随专精提升至100%。' }] },
+  mage: { name: '法师', blessing: '精神成长+1.2，智力成长+1.2', skills: [{ name: '法杖精通', description: '（被动）装备法杖类武器时，暴伤提高40%至80%。副手效果由50%随专精提升至100%。' }, { name: '法书精通', description: '（被动）装备法书类武器时，吟唱速度提高40%至80%。副手效果由50%随专精提升至100%。' }] },
+  priest: { name: '牧师', blessing: '体质成长+1.2，精神成长+1.2', skills: [{ name: '法书精通', description: '（被动）装备法书类武器时，吟唱速度提高40%至80%。副手效果由50%随专精提升至100%。' }, { name: '法球精通', description: '（被动）装备法球类武器时，魔力上限提高40%至80%。副手效果由50%随专精提升至100%。' }] },
+  rogue: { name: '盗贼', blessing: '敏捷成长+1.2，感知成长+1.2', skills: [{ name: '匕首精通', description: '（被动）装备匕首类武器时，命中提高40%至80%。副手效果由50%随专精提升至100%。' }, { name: '拳刃精通', description: '（被动）装备拳刃类武器时，暴击、暴伤各提高20%至40%。副手效果由50%随专精提升至100%。' }] }
 };
 const professionCodeByName: Record<string, string> = { 战士: 'warrior', 法师: 'mage', 盗贼: 'rogue', 牧师: 'priest' };
 const timeGreeting = (morning: string, afternoon: string, evening: string) => {
@@ -632,14 +695,16 @@ const guildFrontDeskFormat = async (qqUserId: string, text?: string, continuingC
       : '夜色渐深，前台的魔石灯却依然明亮。莫妮卡停下笔，温和地向你致意。\n“晚上好，欢迎来到百纳镇冒险者公会。我是接待员莫妮卡。”'
   );
   const markdown = Format.createMarkdown().addTitle('冒险者公会·前台').addNewline().addNewline().addText('【莫妮卡】');
-  if (nearby.npcDetailsUnlocked) markdown.addText(' ').addButton('[详情]', { data: '/NPC详情 guild_counter', autoEnter: false });
+  if (nearby.npcDetailsUnlocked) markdown.addText(' ').addButton('[详情]', { data: '/域民详情 guild_counter', autoEnter: false });
   markdown.addNewline().addNewline();
   markdown.addBlockquote(introduction);
   if (continuingChat) return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('继续闲聊', '/前台闲聊', { type: 'command', autoEnter: true, style: 'blue' }));
   const buttons = Format.createButtonGroup().addRow().addButton(profile.adventurer_registered ? '冒险者 晋升' : '冒险者 注册', '/公会注册', { type: 'command', autoEnter: true, style: 'blue' });
   buttons.addButton('职业选择', '/职业选择', { type: 'command', autoEnter: true, style: profile.adventurer_registered ? 'blue' : undefined });
-  buttons.addRow().addButton('闲聊 莫妮卡', '/前台闲聊', { type: 'command', autoEnter: true, style: 'blue' }).addButton('返回公会大厅', '/建筑进入 guild_counter', { type: 'command', autoEnter: true });
+  buttons.addRow().addButton('切磋 莫妮卡', '/切磋 guild_counter', { type: 'command', autoEnter: true, style: 'blue' }).addButton('闲聊 莫妮卡', '/前台闲聊', { type: 'command', autoEnter: true, style: 'blue' }).addButton('返回公会大厅', '/建筑进入 guild_counter', { type: 'command', autoEnter: true });
   if (mainQuest.title === '【主线·无形的禁锢】') buttons.addRow().addButton('关于 无形的禁锢', '/关于无形的禁锢', { type: 'command', autoEnter: true, style: 'blue' });
+  if (mainQuest.title === '【主线·未知的枷锁】') buttons.addRow().addButton('询问 等级停滞', '/询问等级停滞', { type: 'command', autoEnter: true, style: 'blue' });
+  if (mainQuest.title === '【主线·失踪的少女】' && mainQuest.description.startsWith('最近哥布林')) buttons.addRow().addButton('了解 少女失踪事件', '/关于深处的阴谋', { type: 'command', autoEnter: true, style: 'blue' });
   if (dungeonSecret.stage === 1) buttons.addRow().addButton('关于 地下的秘密', '/询问地下的秘密', { type: 'command', autoEnter: true, style: 'blue' });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
@@ -662,13 +727,13 @@ const professionDetailFormat = async (qqUserId: string, name: string) => {
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 
-export const exploreHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await explore(event.current.UserId); const targets = result.spawns.length ? `\n\n可选目标\n${result.spawns.map(s => result.canViewMonsterInfo ? `#${s.id} ${s.name} Lv.${s.level}｜HP ${s.current_hp}/${s.hp_max}` : `#${s.id} ???`).join('\n')}\n\n发送 /目标 编号 进入战斗。` : ''; await message.send({ format: messageFormat('探索', result.text + targets) }); } catch (error) { logger.warn({ err: error }, 'explore failed'); await fail(message, error); } };
+export const exploreHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await explore(event.current.UserId); if (!result.spawns.length) { const encounter = await offerDynamicEncounter(event.current.UserId); if (encounter) { await message.send({ format: encounterFormat(encounter) }); return; } } const targets = result.spawns.length ? `\n\n可选目标\n${result.spawns.map(s => result.canViewMonsterInfo ? `#${s.id} ${s.name} Lv.${s.level}｜HP ${s.current_hp}/${s.hp_max}` : `#${s.id} ???`).join('\n')}\n\n发送 /目标 编号 进入战斗。` : ''; await message.send({ format: messageFormat('探索', result.text + targets) }); } catch (error) { logger.warn({ err: error }, 'explore failed'); await fail(message, error); } };
 export const inventoryHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const bag = await inventory(event.current.UserId); const penaltyText = bag.rawSpeedPenalty > 0 && bag.constitutionOffset > 0 ? `速度惩罚 -${bag.speedPenalty}（体质抵消 ${Math.min(bag.rawSpeedPenalty, bag.constitutionOffset)}）` : `速度惩罚 -${bag.speedPenalty}`; await message.send({ format: messageFormat('冒险背包', `负重 ${bag.weight.toFixed(2)}/${bag.capacity}｜${penaltyText}\n当前速度 ${bag.speed}\n\n${bag.items.length ? bag.items.map(i => `${i.equipped_slot ? `[已装备·${i.equipped_slot}] ` : i.quick_slot ? `[道具${i.quick_slot}] ` : ''}${i.name} ×${i.quantity}（${i.weight}kg）`).join('\n') : '背包为空。'}`) }); } catch (error) { await fail(message, error); } };
 const dungeonPanel = async (message: any, qqUserId: string, text: string) => { const panel = await movementPanel(qqUserId, text); const nearby = await nearbyPoints(qqUserId); await message.send({ format: panel.addButtonGroup(await movementButtons(qqUserId, nearby.character.activity_status !== 'active')) }); };
 export const dungeonEnterHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const result = await enterDungeon(event.current.UserId, Number(route.param('id'))); await dungeonPanel(message, event.current.UserId, `你沿着石阶踏入地下。地下迷宫第一层（${result.x}, ${result.y}, ${result.z}）的墙壁渗着寒意。`); } catch (error) { await fail(message, error, '无法进入地下迷宫'); } };
 const dungeonFloorHandler = (direction: 'down' | 'up' | 'leave' | 'escape') => async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await changeDungeonFloor(event.current.UserId, direction); const leaving = direction === 'leave' || direction === 'escape'; const text = leaving ? `${'usedTeleporter' in result && result.usedTeleporter ? '破魔传送器的符文碎裂成光点，你被送回入口外。' : '你从入口的石阶返回地面。'}\n你回到了幽暗密林（${result.x}, ${result.y}, 0）。` : `你沿石阶来到地下迷宫的下一处区域（${result.x}, ${result.y}, ${result.z}）。`; await dungeonPanel(message, event.current.UserId, text); } catch (error) { await fail(message, error, direction === 'escape' ? '脱离失败' : '无法通过石阶'); } };
 export const dungeonDownHandler = dungeonFloorHandler('down'); export const dungeonUpHandler = dungeonFloorHandler('up'); export const dungeonLeaveHandler = dungeonFloorHandler('leave'); export const dungeonEscapeHandler = dungeonFloorHandler('escape');
-export const dungeonChestHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const result = await openDungeonChest(event.current.UserId, Number(route.param('id'))); const coins = [`铜币×${result.copper}`, result.silver ? `银币×${result.silver}` : '', result.gold ? `金币×${result.gold}` : ''].filter(Boolean).join('、'); await dungeonPanel(message, event.current.UserId, `${result.quality}宝箱在一阵轻响中开启。获得【${result.name}】×${result.quantity}，${coins}。`); } catch (error) { await fail(message, error, '无法开启宝箱'); } };
+export const dungeonChestHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const result = await openDungeonChest(event.current.UserId, Number(route.param('id'))); const coins = [`铜币×${result.copper}`, result.silver ? `银币×${result.silver}` : '', result.gold ? `金币×${result.gold}` : ''].filter(Boolean).join('、'); await dungeonPanel(message, event.current.UserId, `${result.quality}宝箱在一阵轻响中开启。获得【${result.name}】×${result.quantity}，${coins}。${result.blueprintName ? `\n额外发现【${result.blueprintName}】；打开「/构造」即可补齐其前置图纸。` : ''}`); } catch (error) { await fail(message, error, '无法开启宝箱'); } };
 export const dungeonPvpHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const result = await dungeonPvP(event.current.UserId, Number(route.param('id'))); await dungeonPanel(message, event.current.UserId, result.text); } catch (error) { await fail(message, error, 'PvP失败'); } };
 export const playerPvpHandler = async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
@@ -679,17 +744,17 @@ export const playerPvpHandler = async () => {
       const buttons = Format.createButtonGroup().addRow().addButton('确认攻击', `/确认攻击 ${targetId}`, { type: 'command', autoEnter: true, style: 'blue' }).addButton('取消攻击', '/面板', { type: 'command', autoEnter: true });
       await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) }); return;
     }
-    const battle = await pvpBattleStatus(event.current.UserId); await message.send({ format: battleStartFormat(`你向【${result.target}】发起了玩家对战！`, battle as Awaited<ReturnType<typeof battleStatus>>) }); await startPvpAutoBattle(message, event.current.UserId);
+    const battle = await pvpBattleStatus(event.current.UserId); await message.send({ format: battleStartFormat(`你向【${result.target}】发起了玩家对战！`, battle as unknown as Awaited<ReturnType<typeof battleStatus>>) }); await startPvpAutoBattle(message, event.current.UserId);
   } catch (error) { await fail(message, error, 'PvP失败'); }
 };
 export const confirmPlayerPvpHandler = async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
-  try { const result = await startPvpBattle(event.current.UserId, Number(route.param('id')), true); const battle = await pvpBattleStatus(event.current.UserId); await message.send({ format: battleStartFormat(`你向【${result.target}】发起了玩家对战！`, battle as Awaited<ReturnType<typeof battleStatus>>) }); await startPvpAutoBattle(message, event.current.UserId); }
+  try { const result = await startPvpBattle(event.current.UserId, Number(route.param('id')), true); const battle = await pvpBattleStatus(event.current.UserId); await message.send({ format: battleStartFormat(`你向【${result.target}】发起了玩家对战！`, battle as unknown as Awaited<ReturnType<typeof battleStatus>>) }); await startPvpAutoBattle(message, event.current.UserId); }
   catch (error) { await fail(message, error, '攻击失败'); }
 };
 export const playerInteractionHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const targetGameId = Number(route.param('id')); const result = await interactDungeonPlayer(event.current.UserId, targetGameId); await message.send({ format: playerInteractionFormat({ type: '玩家', id: String(targetGameId), name: result.name, description: '', gameId: targetGameId }, result.isFriend) }); } catch (error) { await fail(message, error, '互动失败'); } };
-const movementPanel = async (qqUserId: string, description: string) => { const [nearby, movement, trackingHint] = await Promise.all([nearbyPoints(qqUserId), movementProfile(qqUserId), dungeonTrackingHint(qqUserId)]); const resting = nearby.character.activity_status !== 'active'; const text = trackingHint ? `${description}\n\n【识踪】${trackingHint}` : description; return outsidePanel('行动', movedLocationText(nearby.character), movement.step, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), text, nearby.points, resting, nearby.landmarks, '', movement.maximum, nearby.perceptionObscured, movement.showLandmarks, movement.showPlayers, nearby.mapUnlocked, nearby.character.activity_status); };
-const interactionTypeLabel: Record<CoordinateInteractionTarget['type'], string> = { 玩家: '玩家', NPC: 'NPC', 建筑: '建筑', 资源: '资源', 入口: '入口', 地标: '地标' };
+const movementPanel = async (qqUserId: string, description: string) => { const [nearby, movement, trackingHint, surfaceTrace] = await Promise.all([nearbyPoints(qqUserId), movementProfile(qqUserId), dungeonTrackingHint(qqUserId), omniscientTraces(qqUserId)]); const resting = nearby.character.activity_status !== 'active'; const trace = [surfaceTrace, trackingHint ? `【地宫识踪】${trackingHint}` : ''].filter(Boolean).join('\n'); return outsidePanel('行动', movedLocationText(nearby.character), movement.step, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), description, nearby.points, resting, nearby.landmarks, trace, movement.maximum, nearby.perceptionObscured, movement.showLandmarks, movement.showPlayers, nearby.mapUnlocked, nearby.character.activity_status, true); };
+const interactionTypeLabel: Record<CoordinateInteractionTarget['type'], string> = { 玩家: '玩家', 域民: '域民', NPC: '域民', 建筑: '建筑', 资源: '资源', 入口: '入口', 地标: '地标' };
 const playerInteractionFormat = (target: CoordinateInteractionTarget, isFriend = false) => {
   const targetGameId = Number(target.gameId ?? target.id);
   const markdown = Format.createMarkdown().addTitle('玩家互动').addNewline().addNewline()
@@ -699,7 +764,7 @@ const playerInteractionFormat = (target: CoordinateInteractionTarget, isFriend =
     .addButton('邀请入队', `/邀请入队 ${targetGameId}`, { type: 'command', autoEnter: true });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
-const coordinateInteractionFormat = (_character: any, targets: CoordinateInteractionTarget[]) => {
+const coordinateInteractionFormat = async (qqUserId: string, _character: any, targets: CoordinateInteractionTarget[]) => {
   if (targets.length === 1 && targets[0].type === '玩家') return playerInteractionFormat(targets[0], Boolean(targets[0].isFriend));
   const markdown = Format.createMarkdown().addTitle('互动').addNewline().addNewline().addText('该位置有多个目标存在：').addNewline().addNewline();
   for (const [index, target] of targets.entries()) {
@@ -712,7 +777,13 @@ const coordinateInteractionFormat = (_character: any, targets: CoordinateInterac
         .addButton('[邀请入队]', { data: `/邀请入队 ${target.gameId}`, autoEnter: false }).addText(' ')
         .addButton(target.isFriend ? '[赠礼]' : '[加好友]', { data: target.isFriend ? `/好友赠礼选择 ${target.gameId}` : `/加好友 ${target.gameId}`, autoEnter: false });
     } else if (target.type === '建筑') {
-      markdown.addText(' ').addButton('[进入]', { data: `/建筑进入 ${target.code}`, autoEnter: false }).addText(' ')
+      let actionLabel = '进入'; let command = `/建筑进入 ${target.code}`;
+      if (target.code?.startsWith('dw_')) {
+        const { worldSiteView } = await import('../game/world-dynamics.service');
+        const site = await worldSiteView(qqUserId, target.code);
+        if (site.access === 'private' && !site.attendant) { actionLabel = '敲门'; command = `/建筑敲门 ${target.code}`; }
+      }
+      markdown.addText(' ').addButton(`[${actionLabel}]`, { data: command, autoEnter: false }).addText(' ')
         .addButton('[忽略]', { data: `/建筑忽略 ${target.code}`, autoEnter: false });
     } else markdown.addText(' ').addButton('[互动]', { data: `/坐标互动 ${target.type} ${target.id}`, autoEnter: false });
     markdown.addNewline().addNewline();
@@ -733,6 +804,7 @@ export const coordinateInteractionHandler = async () => {
   } catch (error) { await fail(message, error, '无法互动'); }
 };
 const showMoveResult = async (message: any, qqUserId: string, result: any) => {
+  try { await recordExplorationMovement(qqUserId); } catch (error) { logger.warn({ err: error, qqUserId }, 'exploration exposure recording failed'); }
   const wanted = await cityWantedAlert(qqUserId);
   if (result.character?.enteredTown && wanted) {
     try { await publishWantedCityEntryNotice(wanted); }
@@ -751,8 +823,41 @@ const showMoveResult = async (message: any, qqUserId: string, result: any) => {
     await message.send({ format: chapterFormat(1, '你在林中听见了兵刃碰撞的声音。\n那声响被湿润的枝叶过滤得断断续续，却仍清晰地指向前方。\n是有人在附近战斗吗？') });
     return;
   }
+  if (result.kind === 'main_quest_story') {
+    const markdown = Format.createMarkdown().addTitle(`主线·失踪的少女（${result.questChapter}/7）`).addNewline().addNewline().addText(result.text);
+    const buttons = Format.createButtonGroup().addRow();
+    if (result.questClue) buttons.addButton('查看线索', '/任务', { type: 'command', autoEnter: true, style: 'blue' });
+    else buttons.addButton('继续前进', '/继续深处阴谋', { type: 'command', autoEnter: true, style: 'blue' });
+    buttons.addButton('任务', '/任务', { type: 'command', autoEnter: true });
+    await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) });
+    return;
+  }
   if (result.kind === 'npc') {
-    if (result.npc.interaction_kind === 'building') { await message.send({ format: buildingEncounterFormat(result.npc.name, result.npc.code, movedLocationText(result.character)) }); return; }
+    if (result.npc.interaction_kind === 'building') {
+      if (result.npc.code.startsWith('dw_')) {
+        const siteCode = result.npc.code!; const { worldSiteView, worldSiteKnock } = await import('../game/world-dynamics.service'); const site = await worldSiteView(qqUserId, siteCode);
+        if (site.access === 'public' || site.attendant) await message.send({ format: buildingEncounterFormat(result.npc.name, siteCode, movedLocationText(result.character)) });
+        else {
+          const door = await worldSiteKnock(qqUserId, siteCode);
+          await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText(movedLocationText(result.character)).addNewline().addNewline().addBlockquote(('text' in door ? door.text : undefined) ?? '门后暂时没有回应。')).addButtonGroup(Format.createButtonGroup().addRow().addButton('敲门', `/建筑敲门 ${siteCode}`, { type: 'command', autoEnter: true, style: 'blue' }).addButton('忽略', `/建筑忽略 ${siteCode}`, { type: 'command', autoEnter: true })) });
+        }
+        return;
+      }
+      await message.send({ format: buildingEncounterFormat(result.npc.name, result.npc.code, movedLocationText(result.character)) }); return;
+    }
+    // 已发出的旧移动结果或数据库旧状态可能仍把驻店域民作为坐标目标。
+    // 这里再按内容注册表核验一次，确保常驻在站内的域民不会绕过建筑入口。
+    const residentProfile = dynamicNpcProfile(result.npc.code);
+    if (residentProfile) {
+      try {
+        const { worldSiteView } = await import('../game/world-dynamics.service');
+        const site = await worldSiteView(qqUserId, residentProfile.homeSiteCode);
+        if (site.attendant?.code === result.npc.code) {
+          await message.send({ format: buildingEncounterFormat(site.name, site.code, movedLocationText(result.character)) });
+          return;
+        }
+      } catch { /* 域民已离开驻点或旧存档尚未初始化站点，按野外相遇处理。 */ }
+    }
     const markdown = Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText(movedLocationText(result.character)).addNewline().addBlockquote(result.text).addNewline().addNewline().addText(result.npc.name);
     const buttons = Format.createButtonGroup().addRow().addButton('对话', `/NPC对话 ${result.npc.code}`, { type: 'command', autoEnter: true, style: 'blue' }).addButton('忽略', `/NPC忽略 ${result.npc.code}`, { type: 'command', autoEnter: true });
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) }); return;
@@ -794,7 +899,7 @@ const showMoveResult = async (message: any, qqUserId: string, result: any) => {
     }
     return;
   }
-  if (result.kind === 'interaction') { await message.send({ format: coordinateInteractionFormat(result.character, result.targets) }); return; }
+  if (result.kind === 'interaction') { await message.send({ format: await coordinateInteractionFormat(qqUserId, result.character, result.targets) }); return; }
   if (result.kind === 'dungeon') {
     // 陷阱与岔路痕迹只是当前位置的信息，不打断正常的行动面板与移动操作。
     if (result.dungeon.kind === 'trap' || result.dungeon.kind === 'landmark') {
@@ -857,7 +962,7 @@ export const continueStoryHandler = async () => {
       }
       await message.send({ format: storyFormat }); return;
     }
-    if (story.arrivalBuilding) { await message.send({ format: buildingEncounterFormat('冒险者公会', story.arrivalBuilding, '你移动至百纳镇·猫拉瑞亚(-2, -111)') }); return; }
+    if (story.arrivalBuilding) { await message.send({ format: buildingEncounterFormat('冒险者公会', story.arrivalBuilding, '你移动至百纳镇·猫拉瑞亚(-2, -161)') }); return; }
     const panel = await movementPanel(event.current.UserId, story.text);
     const nearby = await nearbyPoints(event.current.UserId);
     await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) });
@@ -911,7 +1016,47 @@ export const buildingHandler = (action: 'enter' | 'ignore' | 'leave' | 'area') =
       const nearby = await nearbyPoints(event.current.UserId);
       await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return;
     }
+    if (code === 'world_gate') {
+      if (action === 'enter') { const { worldGateFormat } = await import('./girl-gratitude'); await worldGateFormat(); return; }
+      const panel = await movementPanel(event.current.UserId, action === 'leave' ? '你离开界门驿站，银蓝色光纹在身后渐渐暗下。' : '界门驿站的值守人安静地等着你的决定。');
+      const nearby = await nearbyPoints(event.current.UserId);
+      await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return;
+    }
+    if (code === 'world_tree_gate') {
+      if (action === 'enter') { const { worldTreeGateFormat } = await import('./girl-gratitude'); await worldTreeGateFormat(); return; }
+      const panel = await movementPanel(event.current.UserId, action === 'leave' ? '你离开世界树界门，银蓝色光纹在根须之间渐渐收束。' : '世界树界门静静伫立，门内隐约映着远方的城镇灯火。');
+      const nearby = await nearbyPoints(event.current.UserId);
+      await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return;
+    }
+    if (code === 'canopy_exchange') {
+      if (action === 'enter') { const { worldExchangeFormat } = await import('./girl-gratitude'); await worldExchangeFormat(); return; }
+      const panel = await movementPanel(event.current.UserId, action === 'leave' ? '你离开万叶联市，叶脉间的交易声仍在身后流淌。' : '万叶联市的叶灯已为夜间来客亮起。');
+      const nearby = await nearbyPoints(event.current.UserId);
+      await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return;
+    }
+    if (code === 'world_library') {
+      if (action === 'enter') { const { worldLibraryFormat } = await import('./evolution-quest'); await message.send({ format: await worldLibraryFormat(event.current.UserId) }); return; }
+      if (action === 'area') { const { worldLibraryAreaHandler } = await import('./evolution-quest'); await worldLibraryAreaHandler(); return; }
+      const panel = await movementPanel(event.current.UserId, action === 'leave' ? '你离开世界图书馆，枝叶间的翻页声渐渐远去。' : '图书馆的门扉仍为求知者敞开。');
+      const nearby = await nearbyPoints(event.current.UserId);
+      await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return;
+    }
+    if (code === 'evolution_lab') {
+      if (action === 'enter') { const { evolutionLabHandler } = await import('./evolution'); await evolutionLabHandler(); return; }
+      const panel = await movementPanel(event.current.UserId, action === 'leave' ? '深蓝色小门在身后合拢，叶脉的微光渐渐远去。' : '门牌上的字在枝影中静静发亮。');
+      const nearby = await nearbyPoints(event.current.UserId);
+      await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return;
+    }
     if (action === 'enter') {
+      if (code.startsWith('dw_')) {
+        const { completeWorldSiteCommissionsAtSite, worldSiteKnock, worldSiteView } = await import('../game/world-dynamics.service'); const { worldSiteFormat } = await import('./world-site'); const site = await worldSiteView(event.current.UserId, code);
+        if (site.access === 'private' && !site.attendant) {
+          const door = await worldSiteKnock(event.current.UserId, code);
+          await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle(`${site.regionName}·${door.site.name}`).addNewline().addNewline().addBlockquote(('text' in door ? door.text : undefined) ?? '门后暂时没有回应。')).addButtonGroup(Format.createButtonGroup().addRow().addButton('敲门', `/建筑敲门 ${code}`, { type: 'command', autoEnter: true, style: 'blue' }).addButton('离开', `/建筑离开 ${code}`, { type: 'command', autoEnter: true })) }); return;
+        }
+        const notices = site.attendant ? await completeWorldSiteCommissionsAtSite(event.current.UserId, code) : [];
+        await message.send({ format: await worldSiteFormat(event.current.UserId, code, notices) }); return;
+      }
       if (code === 'guild_counter') { await message.send({ format: guildInteriorFormat() }); return; }
       await message.send({ format: unimplementedBuildingFormat({ code, name: building.name, description: building.description }) }); return;
     }
@@ -922,7 +1067,7 @@ export const buildingHandler = (action: 'enter' | 'ignore' | 'leave' | 'area') =
   } catch (error) { await fail(message, error, '建筑操作失败'); }
 };
 export const guildRegistrationHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireNpcAtCurrentPosition(event.current.UserId, 'guild_counter'); const registered = await registerAdventurer(event.current.UserId); if (!registered) { await message.send({ format: await guildFrontDeskFormat(event.current.UserId, '莫妮卡轻轻摇头：“您的冒险者身份已经登记在册了。晋升考核将在满足条件后开放。”') }); return; } const markdown = Format.createMarkdown().addTitle('冒险家 注册').addNewline().addNewline().addBlockquote('你将手轻放在水晶球上，顿时散发出一阵耀眼的白光。').addNewline().addBlockquote('莫妮卡将一张通体漆黑卡片靠近球体，光芒汇聚成一道银线注入，卡片逐渐被染成银白。').addNewline().addBlockquote('随后一行行异世界文字在卡面上依次浮现——').addNewline().addNewline().addText('获得【冒险者 卡片】').addNewline().addText('你随时可以发送 ').addButton('/卡片', { data: '/卡片', autoEnter: false }).addText(' 查看。').addNewline().addText('你已察觉到自身属性，发送 ').addButton('/角色', { data: '/角色', autoEnter: false }).addText(' 查看。'); await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('返回前台', '/建筑区域 guild_counter 前台', { type: 'command', autoEnter: true, style: 'blue' })) }); } catch (error) { await fail(message, error, '注册失败'); } };
-export const professionHandler = (action: 'select' | 'detail' | 'choose') => async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireNpcAtCurrentPosition(event.current.UserId, 'guild_counter'); if (action === 'select') { await message.send({ format: await professionSelectFormat(event.current.UserId) }); return; } const name = String(route.param('name')); if (action === 'detail') { await message.send({ format: await professionDetailFormat(event.current.UserId, name) }); return; } const code = professionCodeByName[name]; if (!code) throw new Error('未知职业。'); await chooseProfession(event.current.UserId, code); await message.send({ format: await guildFrontDeskFormat(event.current.UserId, `莫妮卡郑重地在档案上盖下印记。“恭喜您成为一名${name}。愿您始终记得最初踏上旅途的理由。”`) }); } catch (error) { await fail(message, error, '职业操作失败'); } };
+export const professionHandler = (action: 'select' | 'detail' | 'choose') => async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireNpcAtCurrentPosition(event.current.UserId, 'guild_counter'); if (action === 'select') { await message.send({ format: await professionSelectFormat(event.current.UserId) }); return; } const name = String(route.param('name')); if (action === 'detail') { await message.send({ format: await professionDetailFormat(event.current.UserId, name) }); return; } const code = professionCodeByName[name]; if (!code) throw new Error('未知职业。'); const result = await chooseProfession(event.current.UserId, code); await message.send({ format: await guildFrontDeskFormat(event.current.UserId, `莫妮卡郑重地在档案上盖下印记。“恭喜您成为一名${name}。愿您始终记得最初踏上旅途的理由。”\n\n技能点已重置：返还 ${result.reset.restoredPoints} 点，当前可分配 ${result.reset.availablePoints} 点。`) }); } catch (error) { await fail(message, error, '职业操作失败'); } };
 export const guildChatHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireNpcAtCurrentPosition(event.current.UserId, 'guild_counter'); const { affinity } = await addNpcAffinity(event.current.UserId, 'guild_counter', 'chat'); await message.send({ format: await guildFrontDeskFormat(event.current.UserId, npcChatDialogue('guild_counter', affinity), true) }); } catch (error) { await fail(message, error, '闲聊失败'); } };
 export const guildBarrierHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireNpcAtCurrentPosition(event.current.UserId, 'guild_counter'); const { advanceRealmBarrier } = await import('../game/main-quest.service'); await advanceRealmBarrier(event.current.UserId, 'guild'); const { barrierAdviceFormat } = await import('./alchemist'); await message.send({ format: barrierAdviceFormat(true) }); } catch (error) { await fail(message, error, '无法询问'); } };
 export const adventurerCardHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try {
@@ -964,6 +1109,12 @@ export const pearGuideChatHandler = async () => {
   const [event] = useEvent(); const [message] = useMessage();
   try {
     await requireNpcAtCurrentPosition(event.current.UserId, 'pear_guide');
+    const { girlGratitudePending } = await import('../game/girl-gratitude.service');
+    if (await girlGratitudePending(event.current.UserId)) {
+      const { girlGratitudeStartFormat } = await import('./girl-gratitude');
+      await message.send({ format: await girlGratitudeStartFormat(event.current.UserId) });
+      return;
+    }
     const { affinity } = await addNpcAffinity(event.current.UserId, 'pear_guide', 'chat');
     const chat = npcChatDialogue('pear_guide', affinity);
     await message.send({ format: await pearGuideFormat(event.current.UserId, chat, true) });
@@ -986,7 +1137,54 @@ export const npcLeaveHandler = async () => {
   try { const npc = await requireNpcAtCurrentPosition(event.current.UserId, String(route.param('code'))); if (npc.interaction_kind !== 'npc') throw new Error('该目标不是 NPC。'); await sendNpcLeavePanel(message, event.current.UserId, npc.name); }
   catch (error) { await fail(message, error, '无法离开'); }
 };
-export const npcEncounterHandler = (action: 'talk' | 'ignore') => async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const code = String(route.param('code')); const npc = await requireNpcAtCurrentPosition(event.current.UserId, code); if (npc.interaction_kind !== 'npc') throw new Error('该目标不是 NPC。'); if (action === 'ignore') { const [nearby, movement] = await Promise.all([nearbyPoints(event.current.UserId), movementProfile(event.current.UserId)]); const panel = outsidePanel('行动', currentLocationText(nearby.character), movement.step, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), '你暂时没有上前搭话，继续留意四周。', nearby.points, nearby.character.activity_status !== 'active', nearby.landmarks, '', movement.maximum, false, movement.showLandmarks, movement.showPlayers, nearby.mapUnlocked); await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return; } const affinity = await addNpcAffinity(event.current.UserId, code, 'chat'); const text = code === 'pear_guide' ? npcChatDialogue('pear_guide', affinity.affinity) : await talkToNpc(event.current.UserId, code); if (code === 'pear_guide') { await message.send({ format: await pearGuideFormat(event.current.UserId, text, true) }); return; } await message.send({ format: await npcInteractionFormat(event.current.UserId, { code, name: npc.name }, text, true) }); } catch (error) { await fail(message, error, '对话失败'); } };
+export const npcEncounterHandler = (action: 'talk' | 'ignore') => async () => {
+  const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
+  try {
+    const code = String(route.param('code'));
+    const npc = await requireNpcAtCurrentPosition(event.current.UserId, code);
+    if (npc.interaction_kind !== 'npc') throw new Error('该目标不是域民。');
+    if (action === 'ignore') {
+      const [nearby, movement] = await Promise.all([nearbyPoints(event.current.UserId), movementProfile(event.current.UserId)]);
+      const panel = outsidePanel('行动', currentLocationText(nearby.character), movement.step, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), '你暂时没有上前搭话，继续留意四周。', nearby.points, nearby.character.activity_status !== 'active', nearby.landmarks, '', movement.maximum, false, movement.showLandmarks, movement.showPlayers, nearby.mapUnlocked);
+      await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) });
+      return;
+    }
+    const { isWorldTreeAdvancedMentor } = await import('../game/advanced-profession.service');
+    if (isWorldTreeAdvancedMentor(code)) {
+      const { advancedMentorFormat } = await import('./advanced-profession');
+      await message.send({ format: await advancedMentorFormat(event.current.UserId, code) });
+      return;
+    }
+    if (code === 'pear_guide') {
+      const { girlGratitudePending } = await import('../game/girl-gratitude.service');
+      if (await girlGratitudePending(event.current.UserId)) {
+        const { girlGratitudeStartFormat } = await import('./girl-gratitude');
+        await message.send({ format: await girlGratitudeStartFormat(event.current.UserId) });
+        return;
+      }
+    }
+    const affinity = await addNpcAffinity(event.current.UserId, code, 'chat');
+    const text = code === 'pear_guide' ? npcChatDialogue('pear_guide', affinity.affinity) : dynamicNpcChatDialogue(code, affinity.affinity) ?? await talkToNpc(event.current.UserId, code);
+    if (code === 'pear_guide') {
+      await message.send({ format: await pearGuideFormat(event.current.UserId, text, true) });
+      return;
+    }
+    const { worldSiteForAttendant } = await import('../game/world-dynamics.service');
+    const residentSite = await worldSiteForAttendant(event.current.UserId, code);
+    if (residentSite) {
+      const markdown = Format.createMarkdown().addTitle(`域民·${npc.name}`).addNewline().addNewline().addBlockquote(text);
+      if (residentSite.capability === 'commission') markdown.addNewline().addNewline().addText('前台的委托簿已经摊开；若你愿意接下巡检，便在这里留下名字。');
+      else markdown.addNewline().addNewline().addText('对方将手边的事务暂放一旁，等你决定是否办理站内服务。');
+      const buttons = Format.createButtonGroup().addRow().addButton('继续闲聊', `/域民交谈 ${code}`, { type: 'command', autoEnter: true, style: 'blue' });
+      if (residentSite.capability === 'commission') buttons.addButton('接取委托', `/接取站点委托 ${residentSite.siteCode} ${code}`, { type: 'command', autoEnter: true, style: 'blue' });
+      buttons.addButton('返回站内', `/建筑进入 ${residentSite.siteCode}`, { type: 'command', autoEnter: true });
+      buttons.addButton('切磋', `/切磋 ${code}`, { type: 'command', autoEnter: true, style: 'blue' });
+      await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) });
+      return;
+    }
+    await message.send({ format: await npcInteractionFormat(event.current.UserId, { code, name: npc.name }, text, true) });
+  } catch (error) { await fail(message, error, '对话失败'); }
+};
 const miningFormat = (kind: '矿脉' | '植被', name: string, seconds: number, remaining: number) => Format.create().addMarkdown(Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText('正在开采').addNewline().addBlockquote(`【${kind === '植被' ? '植被' : '锻材'}】${name}`).addNewline().addText(`预计耗时${durationText(seconds)}`).addNewline().addText(`当前剩余${durationText(remaining)}`)).addButtonGroup(Format.createButtonGroup().addRow().addButton('刷新开采', '/刷新开采', { type: 'command', autoEnter: true, style: 'blue' }).addButton('取消开采', '/取消开采', { type: 'command', autoEnter: true }).addRow().addButton('角色', '/角色', { type: 'command', autoEnter: true }).addButton('装备', '/装备', { type: 'command', autoEnter: true }).addButton('背包', '/背包', { type: 'command', autoEnter: true }).addButton('技能', '/技能列表', { type: 'command', autoEnter: true }).addButton('队伍', '/队伍', { type: 'command', autoEnter: true }));
 export const mineResourceHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const result = await mineResource(event.current.UserId, Number(route.param('id'))); if (result.state === 'completed') { const panel = await movementPanel(event.current.UserId, `资源开采完成，获得【${result.kind === '植被' ? '植被' : '锻材'}】${result.name}×${result.quantity}。`); const nearby = await nearbyPoints(event.current.UserId); await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return; } await message.send({ format: miningFormat(result.kind, result.name, result.seconds || (await resourceMiningStatus(event.current.UserId))?.seconds || 0, result.remaining) }); } catch (error) { await fail(message, error, '开采失败'); } };
 export const refreshMiningHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const mining = await resourceMiningStatus(event.current.UserId); if (!mining) throw new Error('当前没有正在进行的资源开采。'); const result = await mineResource(event.current.UserId, mining.resourceId); if (result.state === 'completed') { const panel = await movementPanel(event.current.UserId, `资源开采完成，获得【${result.kind === '植被' ? '植被' : '锻材'}】${result.name}×${result.quantity}。`); const nearby = await nearbyPoints(event.current.UserId); await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return; } await message.send({ format: miningFormat(result.kind, result.name, mining.seconds, result.remaining) }); } catch (error) { await fail(message, error, '开采状态不可用'); } };
@@ -1011,6 +1209,12 @@ export const refreshTravelHandler = async () => {
   try {
     const travel = await travelStatus(event.current.UserId);
     if (!travel) {
+      const home = await homePanel(event.current.UserId);
+      if (home.inHome) {
+        const { homeFormat } = await import('./home');
+        await message.send({ format: await homeFormat(event.current.UserId) });
+        return;
+      }
       // 抵达后的旧“刷新”按钮仍可安全使用，改为展示当前位置而非报错。
       const [nearby, movement] = await Promise.all([nearbyPoints(event.current.UserId), movementProfile(event.current.UserId)]);
       const panel = outsidePanel('行动', currentLocationText(nearby.character), movement.step, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), nearby.description, nearby.points, nearby.character.activity_status !== 'active', nearby.landmarks, '', movement.maximum, nearby.perceptionObscured, movement.showLandmarks, movement.showPlayers, nearby.mapUnlocked);
@@ -1025,7 +1229,8 @@ export const refreshTravelHandler = async () => {
       await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) });
       return;
     }
-    await message.send({ format: travelFormat(travel.activityType === 'hunt' ? '正在寻怪' : '正在前往', travel.regionName, travel.x, travel.y, travel.seconds, travel.remaining, travel.activityType, travel.destinationName) });
+    const title = travel.activityType === 'hunt' ? '正在寻怪' : travel.destinationKind === 'home' ? '正在回家·' : '正在前往';
+    await message.send({ format: travelFormat(title, travel.regionName, travel.x, travel.y, travel.seconds, travel.remaining, travel.activityType, travel.destinationName) });
   } catch (error) { await fail(message, error, '刷新行动失败'); }
 };
 export const targetHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await chooseTarget(event.current.UserId, Number(route.param('id'))); const battle = await battleStatus(event.current.UserId); await message.send({ format: battleStartFormat(`遭遇 ${battle.targets.map(target => `[${target.name}]`).join('、')}！`, battle) }); await startAutoBattle(message, event.current.UserId); } catch (error) { await fail(message, error, '无法锁定目标'); } };
@@ -1052,7 +1257,17 @@ export const ambushHandler = async () => { const [event] = useEvent(); const [ro
 export const queueAmbushHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const spawnId = Number(route.param('id')); const channelId = String(event.current.ChannelId ?? ''); const delivery = { scope: !event.current.IsPrivate && channelId ? 'group' as const : 'c2c' as const, targetId: !event.current.IsPrivate && channelId ? channelId : String(event.current.UserId), botId: String(event.current.BotId ?? '') || undefined }; const result = await queueAmbush(event.current.UserId, spawnId, delivery); if (result.ready) { await chooseTarget(event.current.UserId, result.spawnId ?? spawnId); const battle = await battleStatus(event.current.UserId); await message.send({ format: battleStartFormat(result.residualParty ? '前一支队伍击败了目标，但伤势未愈。你抓住破绽，伏击其残余队伍！' : '前一场战斗已经结束，你趁目标尚未恢复时切入战场。', battle) }); await startAutoBattle(message, event.current.UserId); return; } await message.send({ format: messageFormat('伏击等待', '你已埋伏在战场边缘。当前战斗结束后，机器人会在你发送伏击的会话中通知并自动接管后续战斗。') }); } catch (error) { await fail(message, error, '无法伏击'); } };
 export const leaveOccupiedBattleHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await leaveOccupiedBattle(event.current.UserId); const panel = await movementPanel(event.current.UserId, '你避开了正在进行的战斗，可以继续移动。'); const nearby = await nearbyPoints(event.current.UserId); await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); } catch (error) { await fail(message, error, '无法离开战场'); } };
 export const forestGuideHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const progress = await forestGuideAdvance(event.current.UserId, String(route.param('action'))); if (!progress.battleChoice) { await message.send({ format: chapterFormat(progress.stage, progress.text) }); return; } await message.send({ format: chapterFormat(5, progress.text) }); const result = await forestGuideChoice(event.current.UserId, progress.battleChoice); await chooseTarget(event.current.UserId, result.spawnId); const battle = await battleStatus(event.current.UserId); await message.send({ format: battleStartFormat(`${result.text}\n本场剧情战斗将暂时关闭自动战斗。`, battle) }); } catch (error) { await fail(message, error, '初章推进失败'); } };
-export const switchTargetHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await switchCombatTarget(event.current.UserId, Number(route.param('id'))); const battle = await battleStatus(event.current.UserId); await message.send({ format: battleOperationFormat('目标已切换，请选择本回合行动。', battle) }); } catch (error) { await fail(message, error, '无法切换目标'); } };
+export const switchTargetHandler = async () => {
+  const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
+  try {
+    const id = Number(route.param('id')); const side = route.param('side') === '友方' ? 'member' : 'target';
+    let battle: Awaited<ReturnType<typeof battleStatus>>;
+    try { battle = await battleStatus(event.current.UserId); }
+    catch { battle = await selectPvpBattleOption(event.current.UserId, { targetId: id, side }) as unknown as typeof battle; await message.send({ format: battleOperationFormat('目标已切换。', battle) }); return; }
+    await switchCombatTarget(event.current.UserId, id, side);
+    await message.send({ format: battleOperationFormat('目标已切换，请选择本回合行动。', await battleStatus(event.current.UserId)) });
+  } catch (error) { await fail(message, error, '无法切换目标'); }
+};
 const showRetreatArrival = async (message: any, qqUserId: string, retreatText: string) => {
   const encounter = await currentEncounter(qqUserId);
   if (encounter) {
@@ -1071,7 +1286,18 @@ const actionHandler = (action: 'attack' | 'skill' | 'item' | 'escape') => async 
   let pveBattle: Awaited<ReturnType<typeof battleStatus>> | null = null;
   try { pveBattle = await battleStatus(event.current.UserId); } catch { /* 当前没有怪物战斗时再尝试 PVP。 */ }
   if (pveBattle) {
-    stopAutoBattle(event.current.UserId); let result = await combatAction(event.current.UserId, action, Number(route.param('slot')) || undefined); if (!result.ended && result.waiting) result = await resolvePartyAutoBattleActions(event.current.UserId) ?? result; await sendCombatResult(message, event.current.UserId, result);
+    stopAutoBattle(event.current.UserId);
+    // 旧版自动战斗在某位队友的配置动作报错后会停止计时器，已提交行动的队友便无法再点按钮。
+    // 玩家此时任意点一次战斗按钮，先补跑尚未提交的自动队友，令这一回合能够自然结算。
+    if (!pveBattle.canAct) {
+      const recovered = await resolvePartyAutoBattleActions(event.current.UserId);
+      if (recovered) {
+        await sendCombatResult(message, event.current.UserId, recovered);
+        if (!recovered.ended && !recovered.waiting) { const battle = await battleStatus(event.current.UserId); if (battle.canAct) await startAutoBattle(message, event.current.UserId); else scheduleStoryNpcBattle(message, event.current.UserId); }
+        return;
+      }
+    }
+    let result = await combatAction(event.current.UserId, action, Number(route.param('slot')) || undefined); if (!result.ended && result.waiting) result = await resolvePartyAutoBattleActions(event.current.UserId) ?? result; await sendCombatResult(message, event.current.UserId, result);
     if (action === 'escape' && result.ended) { await showRetreatArrival(message, event.current.UserId, '你脱离战斗，沿来路退回上一格。'); return; }
     if (!result.ended && !result.waiting) { const battle = await battleStatus(event.current.UserId); if (battle.canAct) await startAutoBattle(message, event.current.UserId); else scheduleStoryNpcBattle(message, event.current.UserId); }
     return;
@@ -1085,7 +1311,7 @@ const actionHandler = (action: 'attack' | 'skill' | 'item' | 'escape') => async 
     if (!(pvpError instanceof Error) || !pvpError.message.includes('当前不在玩家对战中')) {
       if (pvpError instanceof Error && pvpError.message.includes('对方正在发起攻击')) {
         const pvpBattle = await pvpBattleStatus(event.current.UserId);
-        await message.send({ format: battleFormat('玩家对战', `${pvpError.message}\n请等待对方本回合行动结束。`, pvpBattle as Awaited<ReturnType<typeof battleStatus>>) });
+        await message.send({ format: battleFormat('玩家对战', `${pvpError.message}\n请等待对方本回合行动结束。`, pvpBattle as unknown as Awaited<ReturnType<typeof battleStatus>>) });
         return;
       }
       throw pvpError;
@@ -1114,6 +1340,97 @@ const actionHandler = (action: 'attack' | 'skill' | 'item' | 'escape') => async 
   await message.send({ format: battleErrorFormat(messageText, battle) });
 } catch { await fail(message, error, '操作失败'); } } };
 export const attackHandler = actionHandler('attack'); export const skillHandler = actionHandler('skill'); export const itemHandler = actionHandler('item'); export const escapeHandler = actionHandler('escape');
+
+const deviceSkillChoiceFormat = (battle: Awaited<ReturnType<typeof battleStatus>>, slot: number) => {
+  const device = battle.deviceSlots.find(item => item.slot === slot); if (!device) throw new Error('该异械栏位未配置。');
+  const markdown = Format.createMarkdown().addTitle(`异械${'①②③④'.charAt(slot - 1)}·${device.deviceName}`).addNewline().addNewline()
+    .addText(`充能：${device.currentEnergy}/${device.maxEnergy}`).addNewline().addNewline();
+  const buttons = Format.createButtonGroup().addRow();
+  for (const skill of device.skills) {
+    markdown.addBlockquote(`【${skill.name}】消耗 ${skill.energyCost} 充能｜冷却 ${skill.cooldownTurns ? `${skill.cooldownTurns} 回合` : '无'}\n${skill.description}`).addNewline();
+    buttons.addButton(skill.name, `/异械技能 ${slot} ${skill.code}`, { type: 'command', autoEnter: true, style: battle.canAct && skill.ready ? 'blue' : undefined });
+  }
+  buttons.addRow().addButton('返回战斗', '/战斗异械状态', { type: 'command', autoEnter: true });
+  return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
+};
+
+const deviceTargetChoiceFormat = (battle: Awaited<ReturnType<typeof battleStatus>>, slot: number, skillCode: string) => {
+  const device = battle.deviceSlots.find(item => item.slot === slot); const skill = device?.skills.find(item => item.code === skillCode);
+  if (!device || !skill) throw new Error('异械技能配置已变化，请重新选择。');
+  const markdown = Format.createMarkdown().addTitle(`异械·${skill.name}`).addNewline().addNewline().addBlockquote(skill.description).addNewline().addNewline().addText('选择作用目标：').addNewline();
+  const buttons = Format.createButtonGroup();
+  if (skill.targetScope === 'ally' || skill.targetScope === 'any') {
+    const row = buttons.addRow(); for (const member of battle.members.filter(member => !member.defeated)) row.addButton(`友方·${member.name}`, `/异械目标 ${slot} ${skillCode} member ${member.id}`, { type: 'command', autoEnter: true, style: 'blue' });
+  }
+  if (skill.targetScope === 'enemy' || skill.targetScope === 'any') {
+    const row = buttons.addRow(); for (const target of battle.targets.filter(target => !target.defeated)) row.addButton(`敌方·${target.name}`, `/异械目标 ${slot} ${skillCode} target ${target.id}`, { type: 'command', autoEnter: true, style: 'blue' });
+  }
+  buttons.addRow().addButton('返回异械', `/异械施放 ${slot}`, { type: 'command', autoEnter: true });
+  return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
+};
+
+const resolveDeviceAction = async (message: any, qqUserId: string, slot: number, skillCode: string, targetKind?: 'member' | 'target', targetId?: number) => {
+  stopAutoBattle(qqUserId);
+  let result = await combatAction(qqUserId, 'device', slot, undefined, undefined, skillCode, targetKind, targetId);
+  if (!result.ended && result.waiting) result = await resolvePartyAutoBattleActions(qqUserId) ?? result;
+  await sendCombatResult(message, qqUserId, result);
+  if (!result.ended && !result.waiting) { const next = await battleStatus(qqUserId); if (next.canAct) await startAutoBattle(message, qqUserId); else scheduleStoryNpcBattle(message, qqUserId); }
+};
+const resolvePvpDeviceAction = async (message: any, qqUserId: string, slot: number, skillCode: string, targetKind?: 'member' | 'target') => {
+  stopPvpAutoBattle(qqUserId);
+  const result = await pvpCombatAction(qqUserId, 'device', slot, skillCode, targetKind);
+  await sendPvpCombatResult(message, qqUserId, result);
+  if (!result.ended) await startPvpAutoBattle(message, qqUserId);
+};
+
+export const deviceBattleHandler = async () => {
+  const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
+  try {
+    const battle = await battleStatus(event.current.UserId); const slot = Number(route.param('slot')); const device = battle.deviceSlots.find(item => item.slot === slot);
+    if (!device) throw new Error('该异械栏位未配置。');
+    if (device.skills.length > 1) { await message.send({ format: deviceSkillChoiceFormat(battle, slot) }); return; }
+    const skill = device.skills[0]!;
+    // 不足能量时直接提交充能行动，绝不先弹出目标选择。
+    if (device.currentEnergy < skill.energyCost || ['self', 'all_allies', 'all_enemies'].includes(skill.targetScope)) { await resolveDeviceAction(message, event.current.UserId, slot, skill.code); return; }
+    await message.send({ format: deviceTargetChoiceFormat(battle, slot, skill.code) });
+  } catch (pveError) { try {
+    const battle = await pvpBattleStatus(event.current.UserId); const slot = Number(route.param('slot')); const device = battle.deviceSlots.find(item => item.slot === slot);
+    if (!device) throw new Error('该异械栏位未配置。');
+    if (device.skills.length > 1) { await message.send({ format: deviceSkillChoiceFormat(battle as unknown as Awaited<ReturnType<typeof battleStatus>>, slot) }); return; }
+    const skill = device.skills[0]!;
+    // PVP 只有一名敌我双方；非任意目标技能会直接选中其合法唯一目标。
+    if (skill.targetScope === 'any') { await message.send({ format: deviceTargetChoiceFormat(battle as unknown as Awaited<ReturnType<typeof battleStatus>>, slot, skill.code) }); return; }
+    await resolvePvpDeviceAction(message, event.current.UserId, slot, skill.code);
+  } catch (error) { try { const battle = await pvpBattleStatus(event.current.UserId); await message.send({ format: battleErrorFormat(error instanceof Error ? error.message : '异械无法启动。', battle as unknown as Awaited<ReturnType<typeof battleStatus>>) }); } catch { await fail(message, pveError, '异械无法启动'); } } }
+};
+
+export const deviceSkillHandler = async () => {
+  const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
+  try {
+    const slot = Number(route.param('slot')); const skillCode = String(route.param('skillCode')); const battle = await battleStatus(event.current.UserId); const device = battle.deviceSlots.find(item => item.slot === slot); const skill = device?.skills.find(item => item.code === skillCode);
+    if (!device || !skill) throw new Error('该异械技能未配置。');
+    if (device.currentEnergy < skill.energyCost || ['self', 'all_allies', 'all_enemies'].includes(skill.targetScope)) { await resolveDeviceAction(message, event.current.UserId, slot, skillCode); return; }
+    await message.send({ format: deviceTargetChoiceFormat(battle, slot, skillCode) });
+  } catch (pveError) { try {
+    const slot = Number(route.param('slot')); const skillCode = String(route.param('skillCode')); const battle = await pvpBattleStatus(event.current.UserId); const device = battle.deviceSlots.find(item => item.slot === slot); const skill = device?.skills.find(item => item.code === skillCode);
+    if (!device || !skill) throw new Error('该异械技能未配置。');
+    if (skill.targetScope === 'any') { await message.send({ format: deviceTargetChoiceFormat(battle as unknown as Awaited<ReturnType<typeof battleStatus>>, slot, skillCode) }); return; }
+    await resolvePvpDeviceAction(message, event.current.UserId, slot, skillCode);
+  } catch (error) { try { const battle = await pvpBattleStatus(event.current.UserId); await message.send({ format: battleErrorFormat(error instanceof Error ? error.message : '异械无法启动。', battle as unknown as Awaited<ReturnType<typeof battleStatus>>) }); } catch { await fail(message, pveError, '异械无法启动'); } } }
+};
+
+export const deviceTargetHandler = async () => {
+  const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
+  try { await resolveDeviceAction(message, event.current.UserId, Number(route.param('slot')), String(route.param('skillCode')), String(route.param('targetKind')) as 'member' | 'target', Number(route.param('targetId'))); }
+  catch (pveError) { try { await resolvePvpDeviceAction(message, event.current.UserId, Number(route.param('slot')), String(route.param('skillCode')), String(route.param('targetKind')) as 'member' | 'target'); }
+  catch (error) { try { const battle = await pvpBattleStatus(event.current.UserId); await message.send({ format: battleErrorFormat(error instanceof Error ? error.message : '异械无法启动。', battle as unknown as Awaited<ReturnType<typeof battleStatus>>) }); } catch { await fail(message, pveError, '异械无法启动'); } } }
+};
+
+export const combatDeviceStatusHandler = async () => {
+  const [event] = useEvent(); const [message] = useMessage();
+  try { const battle = await battleStatus(event.current.UserId); await message.send({ format: battleOperationFormat('异械充能不会随回合自然恢复；能量不足时点击异械会消耗本回合，为该异械恢复 30 点充能。', battle) }); }
+  catch (pveError) { try { const battle = await pvpBattleStatus(event.current.UserId); await message.send({ format: battleOperationFormat('异械充能不会随回合自然恢复；能量不足时点击异械会消耗本回合，为该异械恢复 30 点充能。', battle as unknown as Awaited<ReturnType<typeof battleStatus>>) }); } catch { await fail(message, pveError, '无法查看异械状态'); } }
+};
 export const encounterHandler = (action: 'avoid' | 'persuade', title: string) => async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
   try {

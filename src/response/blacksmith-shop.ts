@@ -8,14 +8,19 @@ import { npcChatDialogue } from '../game/npc-dialogue.service';
 const requireBlacksmithShop = async (qqUserId: string) => {
   await requireNpcAtCurrentPosition(qqUserId, 'blacksmith');
 };
-const pageButtons = (page: number, totalPages: number, category: string, keyword = '') => Format.createButtonGroup()
-  .addRow().addButton('全部', '/铁匠铺购买 全部', { type: 'command', autoEnter: true, style: category === '全部' ? 'blue' : undefined }).addButton('头肩', '/铁匠铺购买 头肩', { type: 'command', autoEnter: true, style: category === '头肩' ? 'blue' : undefined }).addButton('上装', '/铁匠铺购买 上装', { type: 'command', autoEnter: true, style: category === '上装' ? 'blue' : undefined })
-  .addRow().addButton('腰部', '/铁匠铺购买 腰部', { type: 'command', autoEnter: true, style: category === '腰部' ? 'blue' : undefined }).addButton('下装', '/铁匠铺购买 下装', { type: 'command', autoEnter: true, style: category === '下装' ? 'blue' : undefined }).addButton('脚部', '/铁匠铺购买 脚部', { type: 'command', autoEnter: true, style: category === '脚部' ? 'blue' : undefined })
-  .addRow()
-  .addButton('上一页', `/铁匠铺购买页 ${category} ${Math.max(1, page - 1)}${keyword ? ` ${keyword}` : ''}`, { type: 'command', autoEnter: true, style: page > 1 ? 'blue' : undefined })
-  .addButton('搜索', `/铁匠铺购买搜索 ${category} `, { type: 'command', autoEnter: false, style: 'blue' })
-  .addButton('下一页', `/铁匠铺购买页 ${category} ${Math.min(totalPages, page + 1)}${keyword ? ` ${keyword}` : ''}`, { type: 'command', autoEnter: true, style: page < totalPages ? 'blue' : undefined })
-  .addRow().addButton('返回 铁匠铺', '/铁匠铺', { type: 'command', autoEnter: true });
+const weaponShopTypes = ['长剑', '法杖', '法书', '法球', '匕首', '拳刃', '盾牌'];
+const armorShopCategories = ['头肩', '上装', '腰部', '下装', '脚部'];
+const armorShopTypes = ['布甲', '皮甲', '轻甲', '重甲', '板甲'];
+const pageButtons = (page: number, totalPages: number, category: string, keyword = '') => {
+  const buttons = Format.createButtonGroup();
+  buttons.addRow()
+    .addButton('上一页', `/铁匠铺购买页 ${category} ${Math.max(1, page - 1)}${keyword ? ` ${keyword}` : ''}`, { type: 'command', autoEnter: true, style: page > 1 ? 'blue' : undefined })
+    .addButton('搜索', `/铁匠铺购买搜索 ${category} `, { type: 'command', autoEnter: false, style: 'blue' })
+    .addButton('下一页', `/铁匠铺购买页 ${category} ${Math.min(totalPages, page + 1)}${keyword ? ` ${keyword}` : ''}`, { type: 'command', autoEnter: true, style: page < totalPages ? 'blue' : undefined });
+  buttons.addRow().addButton('全部', '/铁匠铺购买 全部', { type: 'command', autoEnter: true, style: category === '全部' ? 'blue' : undefined }).addButton('武器', '/铁匠铺购买 武器', { type: 'command', autoEnter: true, style: category === '武器' || weaponShopTypes.includes(category) ? 'blue' : undefined }).addButton('防具', '/铁匠铺购买 防具', { type: 'command', autoEnter: true, style: category === '防具' || armorShopCategories.includes(category) || armorShopTypes.includes(category) ? 'blue' : undefined });
+  buttons.addRow().addButton('返回 铁匠铺', '/铁匠铺', { type: 'command', autoEnter: true });
+  return buttons;
+};
 const sellPageButtons = (page: number, totalPages: number, keyword = '') => Format.createButtonGroup().addRow()
   .addButton('上一页', `/铁匠铺出售页 ${Math.max(1, page - 1)}${keyword ? ` ${keyword}` : ''}`, { type: 'command', autoEnter: true, style: page > 1 ? 'blue' : undefined })
   .addButton('搜索', '/铁匠铺出售搜索 ', { type: 'command', autoEnter: false, style: 'blue' })
@@ -26,9 +31,26 @@ const buyFormat = async (qqUserId: string, page = 1, category = '全部', keywor
   const shop = await blacksmithShopCatalog(qqUserId, page, category, keyword);
   const markdown = Format.createMarkdown().addTitle('铁匠铺·购买').addNewline().addNewline()
     .addBlockquote(keyword ? `小北翻出与「${keyword}」有关的货架清单。“这些都在这儿了。”` : '小北将一排制式装备摆上柜台。“都是普通货色，但结实耐用。出门在外，先有一件趁手的家伙总没错。”').addNewline().addNewline();
+  const addCategoryLinks = (title: string, types: string[]) => {
+    markdown.addText(`${title}：`);
+    types.forEach((type, index) => {
+      markdown.addButton(`[${type}]`, { data: `/铁匠铺购买 ${type}`, autoEnter: false });
+      if (index < types.length - 1) markdown.addText(' ');
+    });
+    markdown.addNewline().addNewline();
+  };
+  if (shop.category !== '防具' && !armorShopCategories.includes(shop.category) && !armorShopTypes.includes(shop.category)) addCategoryLinks('武器分类', weaponShopTypes);
+  if (shop.category !== '武器' && !weaponShopTypes.includes(shop.category)) {
+    if (!armorShopCategories.includes(shop.category)) addCategoryLinks('防具部位', armorShopCategories);
+    if (!armorShopTypes.includes(shop.category)) addCategoryLinks('防具甲类', armorShopTypes);
+  }
   if (!shop.items.length) markdown.addText('没有找到符合条件的装备。');
   const sequence = '①②③④⑤';
-  shop.items.forEach((item, index) => markdown.addText(`${sequence[index]}【${item.category}】`).addButton(item.name, { data: `/物品图鉴 ${item.codexId}`, autoEnter: false }).addText(' ').addButton('[购买]', { data: `/购买铁匠铺装备 ${item.id} `, autoEnter: false }).addNewline().addBlockquote(`等级：Lv.${item.level}｜价格：铜币×${item.price}｜剩余：${item.stockQuantity}｜已拥有${item.ownedQuantity}`).addNewline().addBlockquote(`简介：${item.description}`).addNewline().addNewline());
+  shop.items.forEach((item, index) => {
+    const isArmor = armorShopCategories.includes(item.category);
+    const typeText = isArmor ? `甲类：${item.weaponType ?? '通用'}｜` : '';
+    markdown.addText(`${sequence[index]}【${item.category}${isArmor ? `·${item.weaponType ?? '通用'}` : ''}】`).addButton(item.name, { data: `/物品图鉴 ${item.codexId}`, autoEnter: false }).addText(' ').addButton('[购买]', { data: `/购买铁匠铺装备 ${item.id} `, autoEnter: false }).addNewline().addBlockquote(`${typeText}等级：Lv.${item.level}｜价格：铜币×${item.price}｜剩余：${item.stockQuantity}｜已拥有${item.ownedQuantity}`).addNewline().addNewline();
+  });
   markdown.addText(`当前第(${shop.page}/${shop.totalPages})页｜持有铜币：${shop.copper}`);
   return Format.create().addMarkdown(markdown).addButtonGroup(pageButtons(shop.page, shop.totalPages, shop.category, shop.keyword));
 };
@@ -36,7 +58,7 @@ const buyFormat = async (qqUserId: string, page = 1, category = '全部', keywor
 const sellFormat = async (qqUserId: string, page = 1, keyword = '') => {
   const shop = await blacksmithSellCatalog(qqUserId, page, keyword);
   const markdown = Format.createMarkdown().addTitle('铁匠铺·出售').addNewline().addNewline()
-    .addBlockquote(keyword ? `小北看了看你挑出的「${keyword}」相关物品。` : '“未装备的武器和防具，还有兽材、锻材、元素尘都可以拿来。我会按材料与成色收下。”小北从铁砧旁拖来一只空木箱。').addNewline().addNewline();
+    .addBlockquote(keyword ? `小北看了看你挑出的「${keyword}」相关物品。` : '“未装备的武器和防具，还有兽材、锻材、粒子都可以拿来。我会按材料与成色收下。”小北从铁砧旁拖来一只空木箱。').addNewline().addNewline();
   if (!shop.items.length) markdown.addText('没有可出售的未装备物品或锻造素材。');
   shop.items.forEach((item, index) => {
     const command = item.kind === 'equipment' ? `/出售铁匠铺装备 ${item.id}` : `/出售铁匠铺材料 ${item.id} `;
@@ -92,20 +114,20 @@ export const blacksmithChatHandler = async () => {
     const text = npcChatDialogue('blacksmith', affinity);
     const craftHeart = await xiaobeiCraftsmanshipStatus(event.current.UserId);
     if (affinity >= 200 && !craftHeart.learned) {
-      const markdown = Format.createMarkdown().addTitle('百纳镇·铁匠铺').addNewline().addNewline().addText('【漠北】').addNewline().addNewline().addBlockquote(text).addNewline().addNewline();
+      const markdown = Format.createMarkdown().addTitle('百纳镇·铁匠铺').addNewline().addNewline().addText('【漠北·Lv.3 锻造师】').addNewline().addNewline().addBlockquote(text).addNewline().addNewline();
       if (detailsUnlocked) markdown.addText(`好感：${affinity}｜${rank.title}`).addNewline().addNewline();
       markdown.addText('小北从工具架上取下一枚刻着锤纹的铁片：“我有个不错的本事，或许你学得会。要不要试试？”').addNewline().addNewline()
         .addText('是否消耗 5 技能点学习绑定技能【匠心】？');
       const buttons = Format.createButtonGroup().addRow()
         .addButton('确认学习', '/学习小北的匠心', { type: 'command', autoEnter: true, style: 'blue' })
         .addButton('下次再来', '/铁匠铺', { type: 'command', autoEnter: true })
-        .addRow().addButton('继续闲聊', '/铁匠铺闲聊', { type: 'command', autoEnter: true, style: 'blue' });
+        .addRow().addButton('切磋', '/切磋 blacksmith', { type: 'command', autoEnter: true, style: 'blue' }).addButton('继续闲聊', '/铁匠铺闲聊', { type: 'command', autoEnter: true, style: 'blue' });
       await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) });
       return;
     }
-    const markdown = Format.createMarkdown().addTitle('百纳镇·铁匠铺').addNewline().addNewline().addText('【漠北】').addNewline().addNewline().addBlockquote(text);
+    const markdown = Format.createMarkdown().addTitle('百纳镇·铁匠铺').addNewline().addNewline().addText('【漠北·Lv.3 锻造师】').addNewline().addNewline().addBlockquote(text);
     if (detailsUnlocked) markdown.addNewline().addNewline().addText(`好感：${affinity}｜${rank.title}`);
-    const buttons = Format.createButtonGroup().addRow().addButton('继续闲聊', '/铁匠铺闲聊', { type: 'command', autoEnter: true, style: 'blue' });
+    const buttons = Format.createButtonGroup().addRow().addButton('切磋', '/切磋 blacksmith', { type: 'command', autoEnter: true, style: 'blue' }).addButton('继续闲聊', '/铁匠铺闲聊', { type: 'command', autoEnter: true, style: 'blue' });
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) });
   } catch (error) { await message.send({ format: messageFormat('无法闲聊', error instanceof Error ? error.message : '请稍后重试。') }); }
 };

@@ -1,6 +1,6 @@
 import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
 import { addNpcAffinity, grantNpcAffinity, nearbyPoints, requireNpcAtCurrentPosition } from '../game/adventure.service';
-import { acceptBlacksmithQuest, addForgeMaterial, blacksmithFusionEquipment, blacksmithProgress, blacksmithQuest, blacksmithWeapons, claimBlacksmithQuest, clearForgeMaterial, craftForgeEquipment, forgeState, fuseWeapon, fusionMaterials, refineWeapon, refinementMaterials, removeForgeMaterial, resetForgeSession, selectForgeCategory, selectForgeLevel, selectForgeSubtype, setForgeMaterial } from '../game/blacksmith.service';
+import { acceptBlacksmithQuest, armorClassEffectText, blacksmithFusionEquipment, blacksmithMaxLevel, blacksmithProgress, blacksmithQuest, blacksmithWeapons, claimBlacksmithQuest, craftEpicForgeEquipment, craftForgeEquipment, epicForgeBlueprints, epicForgePreview, forgeFee, forgeRarityWeights, forgeState, fuseWeapon, fusionMaterials, refineWeapon, refinementMaterials, resetForgeSession, selectForgeCategory, selectForgeLevel, selectForgeSubtype } from '../game/blacksmith.service';
 import { messageFormat } from '../game/message';
 
 const requireBlacksmith = async (qqUserId: string) => {
@@ -14,22 +14,26 @@ const proficiencyBar = (current: number, required: number) => {
   return `${'■'.repeat(filled)}${'□'.repeat(10 - filled)}`;
 };
 export const blacksmithButtons = () => Format.createButtonGroup()
-  .addRow().addButton('打造', '/打造装备', { type: 'command', autoEnter: true, style: 'blue' }).addButton('精炼', '/精炼', { type: 'command', autoEnter: true, style: 'blue' }).addButton('熔铸', '/熔铸', { type: 'command', autoEnter: true, style: 'blue' })
+  .addRow().addButton('打造', '/打造装备', { type: 'command', autoEnter: true, style: 'blue' }).addButton('图纸打造', '/图纸打造', { type: 'command', autoEnter: true, style: 'blue' }).addButton('精炼', '/精炼', { type: 'command', autoEnter: true, style: 'blue' }).addButton('熔铸', '/熔铸', { type: 'command', autoEnter: true, style: 'blue' })
   .addRow().addButton('我要买', '/铁匠铺购买', { type: 'command', autoEnter: true, style: 'blue' }).addButton('我要卖', '/铁匠铺出售', { type: 'command', autoEnter: true, style: 'blue' })
-  .addRow().addButton('闲聊', '/铁匠铺闲聊', { type: 'command', autoEnter: true, style: 'blue' }).addButton('关于 锻造师', '/关于锻造师', { type: 'command', autoEnter: true, style: 'blue' })
+  .addRow().addButton('切磋', '/切磋 blacksmith', { type: 'command', autoEnter: true, style: 'blue' }).addButton('闲聊', '/铁匠铺闲聊', { type: 'command', autoEnter: true, style: 'blue' }).addButton('关于 锻造师', '/关于锻造师', { type: 'command', autoEnter: true, style: 'blue' })
   .addRow().addButton('离开 铁匠铺', '/建筑离开 blacksmith', { type: 'command', autoEnter: true });
-const professionButtons = () => Format.createButtonGroup().addRow().addButton('打造', '/副职业打造装备', { type: 'command', autoEnter: true, style: 'blue' }).addButton('精炼', '/精炼', { type: 'command', autoEnter: true, style: 'blue' }).addButton('熔铸', '/熔铸', { type: 'command', autoEnter: true, style: 'blue' });
-const effectText = (effect: Record<string, unknown>) => {
-  const labels: Record<string, string> = { hpMax: '生命', mpMax: '魔力', physicalAttack: '物攻', magicAttack: '魔攻', physicalDefense: '物防', magicDefense: '魔防', accuracy: '命中', evasion: '闪避', speed: '速度', critRateBp: '暴击', hpPct: '生命上限', mpPct: '魔力上限', physicalAttackPct: '物攻', magicAttackPct: '魔攻', physicalDefensePct: '物防', magicDefensePct: '魔防', accuracyPct: '命中', evasionPct: '闪避', speedPct: '速度', critRatePct: '暴击', magicDamagePct: '魔法伤害', damageBonusPct: '伤害增加' };
+const professionButtons = () => Format.createButtonGroup().addRow().addButton('打造', '/副职业打造装备', { type: 'command', autoEnter: true, style: 'blue' }).addButton('图纸打造', '/图纸打造', { type: 'command', autoEnter: true, style: 'blue' }).addButton('精炼', '/精炼', { type: 'command', autoEnter: true, style: 'blue' }).addButton('熔铸', '/熔铸', { type: 'command', autoEnter: true, style: 'blue' });
+const effectText = (effect: Record<string, unknown>, primaryKeys: readonly string[] = []) => {
+  const labels: Record<string, string> = { hpMax: '生命', mpMax: '魔力', physicalAttack: '物攻', magicAttack: '魔攻', physicalDefense: '物防', magicDefense: '魔防', accuracy: '命中', evasion: '闪避', speed: '速度', critRateBp: '暴击', critDamageBp: '暴伤', critResistBp: '暴免', critDamageReductionBp: '暴抗', tenacity: '韧性', tenacityPierce: '破韧', hpPct: '生命上限', mpPct: '魔力上限', physicalAttackPct: '物攻', magicAttackPct: '魔攻', physicalDefensePct: '物防', magicDefensePct: '魔防', accuracyPct: '命中', evasionPct: '闪避', speedPct: '速度', critRatePct: '暴击', magicDamagePct: '魔法伤害', damageBonusPct: '伤害增加', damageReductionPct: '受伤降低' };
   const label = (key: string) => labels[key] ?? (key.startsWith('elementMastery_') ? `${key.slice('elementMastery_'.length)}元素精通` : key.startsWith('elementResistance_') ? `${key.slice('elementResistance_'.length)}元素抗性` : '');
-  return Object.entries(effect).filter(([key, value]) => label(key) && Number(value)).map(([key, value]) => { const amount = key.endsWith('Pct') ? `${Number(value).toFixed(1)}%` : String(Math.round(Number(value))); return `${label(key)}${Number(value) >= 0 ? '+' : ''}${amount}`; }).join('｜') || '随机基础强化';
+  const primary = new Set(primaryKeys);
+  const normalOrder = ['hpMax', 'mpMax', 'physicalAttack', 'magicAttack', 'physicalDefense', 'magicDefense', 'accuracy', 'evasion', 'speed', 'critRateBp', 'critDamageBp', 'critResistBp', 'critDamageReductionBp', 'tenacity', 'tenacityPierce', 'hpPct', 'mpPct', 'physicalAttackPct', 'magicAttackPct', 'physicalDefensePct', 'magicDefensePct', 'accuracyPct', 'evasionPct', 'speedPct', 'critRatePct'];
+  const elementalOrder = ['金', '木', '水', '火', '土', '风', '雷', '冰', '光', '暗'];
+  return Object.entries(effect).filter(([key, value]) => label(key) && Number(value)).map(([key, value]) => {
+    const group = primary.has(key) ? 0 : key.startsWith('elementMastery_') || key.startsWith('elementResistance_') ? 2 : 1;
+    const order = group === 2 ? elementalOrder.indexOf(key.split('_')[1] ?? '') * 2 + (key.startsWith('elementResistance_') ? 1 : 0) : normalOrder.indexOf(key);
+    const amount = key.endsWith('Pct') ? `${Number(value).toFixed(1)}%` : String(Math.round(Number(value)));
+    const rare = key === 'damageBonusPct' || key === 'damageReductionPct';
+    return { group, order: order < 0 ? Number.MAX_SAFE_INTEGER : order, text: `${rare ? '⭐️' : ''}${label(key)}${Number(value) >= 0 ? '+' : ''}${amount}` };
+  }).sort((left, right) => left.group - right.group || left.order - right.order || left.text.localeCompare(right.text, 'zh-CN')).map(attribute => attribute.text).join('｜') || '随机基础强化';
 };
-const materialNames: Record<string, string> = { living_wood: '活木', meteor_iron: '陨铁', star_copper: '星铜', moon_silver: '月银', sun_gold: '曜金' };
-const materialTendencies: Record<string, string> = { beast_meat: '倾向于生命', beast_bone: '倾向于物防', beast_hide: '倾向于魔防', beast_tendon: '倾向于速度', beast_core: '随武器主攻击类型倾向物攻或魔攻', magic_wool: '倾向于闪避', magic_tusk: '倾向于命中', magic_scale: '倾向于暴击抵抗', magic_claw: '倾向于暴击', magic_heartcore: '倾向于暴击伤害', magic_blood: '倾向于魔力', magic_eye: '倾向于暴伤减免', magic_horn: '倾向于韧性', refined_beast_bone: '倾向于物防', refined_beast_hide: '倾向于魔防', refined_beast_tendon: '倾向于速度', refined_beast_core: '随武器主攻击类型倾向物攻或魔攻', refined_magic_wool: '倾向于闪避', refined_magic_tusk: '倾向于命中', refined_magic_scale: '倾向于暴击抵抗', refined_magic_claw: '倾向于暴击', refined_magic_heartcore: '倾向于暴击伤害', living_wood: '倾向于生命', meteor_iron: '倾向于物防', star_copper: '倾向于命中', moon_silver: '倾向于魔力', sun_gold: '倾向于双攻', riot_aura: '倾向于伤害增加' };
 const numberMark = '①②③④⑤⑥⑦⑧⑨⑩';
-const elementalDustTendencies: Record<string, string> = {
-  wood_element_dust: '武器加木精通，防具加木抗性', metal_element_dust: '武器加土精通，防具加土抗性', water_element_dust: '武器加水精通，防具加水抗性', ice_element_dust: '武器加冰精通，防具加冰抗性', dark_element_dust: '武器加暗精通，防具加暗抗性', fire_element_dust: '武器加火精通，防具加火抗性', thunder_element_dust: '武器加雷精通，防具加雷抗性', light_element_dust: '武器加光精通，防具加光抗性'
-};
 export const blacksmithFormat = async (qqUserId: string, text?: string) => {
   const hour = new Date().getHours();
   const scene = text ?? (hour < 11
@@ -38,8 +42,8 @@ export const blacksmithFormat = async (qqUserId: string, text?: string) => {
       ? '炉火映亮了铁砧。握锤的是个约莫十二三岁的少年，狐耳在热浪中微微晃动，矮人的结实骨架却让他挥锤时格外稳当。\n他抬头看了你一眼：“我叫漠北，镇里都叫我小北。要打造、精炼，还是看看制式装备？”'
       : '夜里的铁匠铺仍回荡着清脆锤声。漠北将刚淬好的铁器搁到一旁，火光映得他眼神明亮。\n“晚上好。炉火还热着，有需要就说吧。”');
   const detailsUnlocked = (await nearbyPoints(qqUserId)).npcDetailsUnlocked;
-  const markdown = Format.createMarkdown().addTitle('百纳镇·铁匠铺').addNewline().addNewline().addText('【漠北】');
-  if (detailsUnlocked) markdown.addText(' ').addButton('[详情]', { data: '/NPC详情 blacksmith', autoEnter: false });
+  const markdown = Format.createMarkdown().addTitle('百纳镇·铁匠铺').addNewline().addNewline().addText('【漠北·Lv.3 锻造师】');
+  if (detailsUnlocked) markdown.addText(' ').addButton('[详情]', { data: '/域民详情 blacksmith', autoEnter: false });
   markdown.addNewline().addNewline().addBlockquote(scene);
   return Format.create().addMarkdown(markdown).addButtonGroup(blacksmithButtons());
 };
@@ -63,7 +67,7 @@ const weaponList = async (qqUserId: string, mode: 'refine' | 'fuse', page = 1, k
   const currentPage = Math.min(Math.max(1, page), totalPages);
   const entries = weapons.slice((currentPage - 1) * 10, currentPage * 10);
   const title = mode === 'refine' ? '精炼' : '熔铸';
-  const markdown = Format.createMarkdown().addTitle(title).addNewline().addNewline().addBlockquote(mode === 'refine' ? '选择一把武器放上铁砧。品质越高，精炼越困难；每次精炼有 3% 概率大成功。' : '选择一件装备放上熔炉。每 10 级获得 1 次熔铸机会，优秀及以上品质会额外增加机会；元素粉尘会随装备部位转为精通或抗性。').addNewline().addNewline().addText('背包装备：').addNewline();
+  const markdown = Format.createMarkdown().addTitle(title).addNewline().addNewline().addBlockquote(mode === 'refine' ? '选择一把武器放上铁砧。品质越高，精炼越困难；每次精炼有 3% 概率大成功。' : '选择一件装备放上熔炉。每 10 级获得 1 次熔铸机会，优秀及以上品质会额外增加机会；元素微尘会随装备部位转为精通或抗性。').addNewline().addNewline().addText('背包装备：').addNewline();
   if (!entries.length) markdown.addBlockquote(`背包中没有可${mode === 'refine' ? '精炼的武器' : '熔铸的装备'}。`).addNewline();
   for (const [index, weapon] of entries.entries()) {
     markdown.addBlockquote(`${numberMark.charAt(index)}【${weapon.category}】${weapon.name} #${weapon.id}｜品质：${weapon.quality.toFixed(1)}%｜稀有度：${weapon.rarity}｜熔铸：${weapon.fusionCount}/${weapon.fusionLimit}`).addText(' ').addButton('[放入]', { data: mode === 'refine' ? `/精炼放入 ${weapon.id}` : `/熔铸放入 ${weapon.id}`, autoEnter: false }).addNewline();
@@ -113,42 +117,24 @@ export const fuseExecuteHandler = async () => { const [event] = useEvent(); cons
 const forgeCommand = (source: 'blacksmith' | 'profession') => source === 'profession' ? '/副职业打造装备' : '/打造装备';
 const forgeReturn = (source: 'blacksmith' | 'profession') => source === 'profession' ? '/副职业' : '/铁匠铺';
 const forgeFormat = async (source: 'blacksmith' | 'profession') => Format.create().addMarkdown(Format.createMarkdown().addTitle('打造装备').addNewline().addNewline().addBlockquote('选择想打造的装备部位。首饰暂不开放打造。').addNewline().addNewline()).addButtonGroup(Format.createButtonGroup().addRow().addButton('武器', '/打造部位 武器', { type: 'command', autoEnter: true, style: 'blue' }).addButton('头肩', '/打造部位 头肩', { type: 'command', autoEnter: true, style: 'blue' }).addButton('上装', '/打造部位 上装', { type: 'command', autoEnter: true, style: 'blue' }).addRow().addButton('腰部', '/打造部位 腰部', { type: 'command', autoEnter: true, style: 'blue' }).addButton('下装', '/打造部位 下装', { type: 'command', autoEnter: true, style: 'blue' }).addButton('脚部', '/打造部位 脚部', { type: 'command', autoEnter: true, style: 'blue' }).addRow().addButton('返回', forgeReturn(source), { type: 'command', autoEnter: true }));
-const forgeSubtypeFormat = async (qqUserId: string) => { const state = await forgeState(qqUserId); if (!state.category) throw new Error('请先选择打造部位。'); const types = state.category === '武器' ? ['长剑', '法杖', '法书', '法球', '匕首', '拳刃', '盾牌'] : ['布甲', '皮甲', '轻甲', '重甲', '板甲']; const buttons = Format.createButtonGroup(); for (let index = 0; index < types.length; index += 3) { const row = buttons.addRow(); for (const type of types.slice(index, index + 3)) row.addButton(type, `/打造类型 ${type}`, { type: 'command', autoEnter: true, style: 'blue' }); } buttons.addRow().addButton('返回打造', forgeCommand(state.source), { type: 'command', autoEnter: true }); return Format.create().addMarkdown(Format.createMarkdown().addTitle(`打造·${state.category}`).addNewline().addNewline().addBlockquote(state.category === '武器' ? '请选择武器类型。不同武器会拥有不同的基础属性倾向。盾牌也属于武器，可装备在主手或副手。' : '布甲：防御极低；给予大量命中、闪避、速度。\n皮甲：防御略低；给予中量命中、速度。\n轻甲：双防中等；中规中矩，无额外惩罚。\n重甲：双防很高；剥夺中量闪避、速度。\n板甲：双防极高；剥夺大量命中、闪避、速度。')).addButtonGroup(buttons); };
-const forgeLevelFormat = async (qqUserId: string) => { const state = await forgeState(qqUserId); if (!state.subtype) throw new Error('请先选择装备类型。'); const buttons = Format.createButtonGroup(); for (let base = 5; base <= 50; base += 25) { const row = buttons.addRow(); for (let level = base; level < base + 25 && level <= 50; level += 5) row.addButton(`Lv.${level}`, `/打造等级 ${level}`, { type: 'command', autoEnter: true, style: 'blue' }); } buttons.addRow().addButton('返回类型', forgeCommand(state.source), { type: 'command', autoEnter: true }); return Format.create().addMarkdown(Format.createMarkdown().addTitle(`打造·${state.category}·${state.subtype}`).addNewline().addNewline().addBlockquote('请选择欲打造装备的适应等级。等级越高，基础属性越高。')).addButtonGroup(buttons); };
-const forgeMaterialsFormat = async (qqUserId: string, page = 1, keyword = '') => {
+const forgeSubtypeFormat = async (qqUserId: string) => { const state = await forgeState(qqUserId); if (!state.category) throw new Error('请先选择打造部位。'); const types = state.category === '武器' ? ['长剑', '法杖', '法书', '法球', '匕首', '拳刃', '盾牌'] : ['布甲', '皮甲', '轻甲', '重甲', '板甲']; const buttons = Format.createButtonGroup(); for (let index = 0; index < types.length; index += 3) { const row = buttons.addRow(); for (const type of types.slice(index, index + 3)) row.addButton(type, `/打造类型 ${type}`, { type: 'command', autoEnter: true, style: 'blue' }); } buttons.addRow().addButton('返回打造', forgeCommand(state.source), { type: 'command', autoEnter: true }); const guide = state.category === '武器' ? '请选择武器类型。不同武器会拥有不同的基础属性倾向。盾牌也属于武器，可装备在主手或副手。' : types.map(type => `${type}：${armorClassEffectText(type)}`).join('\n'); return Format.create().addMarkdown(Format.createMarkdown().addTitle(`打造·${state.category}`).addNewline().addNewline().addBlockquote(guide)).addButtonGroup(buttons); };
+const forgeLevelFormat = async (qqUserId: string) => { const state = await forgeState(qqUserId); if (!state.subtype) throw new Error('请先选择装备类型。'); const buttons = Format.createButtonGroup().addRow(); for (const level of [15, 20, 25, 30]) buttons.addButton(`Lv.${level}`, `/打造等级 ${level}`, { type: 'command', autoEnter: true, style: 'blue' }); buttons.addRow().addButton('返回类型', forgeCommand(state.source), { type: 'command', autoEnter: true }); return Format.create().addMarkdown(Format.createMarkdown().addTitle(`打造·${state.category}·${state.subtype}`).addNewline().addNewline().addBlockquote('常规打造暂开放 Lv.15、20、25、30。Lv.15–20 使用活纹木胚，Lv.25–30 使用岩脊核心。')).addButtonGroup(buttons); };
+const forgeMaterialsFormat = async (qqUserId: string, _page = 1, _keyword = '') => {
   const state = await forgeState(qqUserId);
   if (!state.category || !state.subtype || !state.level) throw new Error('请完成部位、类型和等级选择。');
-  const requiredCodes = new Set(state.requirements.map(item => item.code));
-  const auxiliary = state.materials.filter(item => item.selected > 0 && !requiredCodes.has(item.code));
-  const filtered = state.materials.filter(item => !requiredCodes.has(item.code) && item.supported && (!keyword || item.name.includes(keyword) || item.category.includes(keyword)));
-  const totalPages = Math.max(1, Math.ceil(filtered.length / 10));
-  const currentPage = Math.min(Math.max(1, page), totalPages);
-  const materials = filtered.slice((currentPage - 1) * 10, currentPage * 10);
-  const markdown = Format.createMarkdown().addTitle('打造·放入材料').addNewline().addNewline()
+  const markdown = Format.createMarkdown().addTitle('打造').addNewline().addNewline()
     .addText(`目标：${state.category}·${state.subtype}·Lv.${state.level}`).addNewline()
-    .addText('费用：铜币×60').addNewline()
-    .addText('必备材料：').addNewline();
+    .addText(`费用：铜币×${forgeFee(state.requirements)}`).addNewline()
+    .addText('所需材料：').addNewline();
   for (const requirement of state.requirements) {
     const material = state.materials.find(item => item.code === requirement.code);
     const owned = material?.quantity ?? 0;
-    markdown.addBlockquote(`${material?.name ?? materialNames[requirement.code] ?? requirement.code}（${owned}/${requirement.quantity}）${owned >= requirement.quantity ? ' 已满足' : ' 不足'}`).addNewline();
+    markdown.addBlockquote(`${material?.name ?? requirement.name}（${owned}/${requirement.quantity}）${owned >= requirement.quantity ? ' 已满足' : ' 不足'}`).addNewline();
   }
-  markdown.addNewline().addText('当前放入辅材：').addNewline();
-  markdown.addBlockquote('每份辅材先掷基础值、再将上限翻倍，最后独立按正态分布抽取实际增量。\n装备只按每条词条上限截断，不再存在跨属性总容量或递减结算。').addNewline();
-  if (!auxiliary.length) markdown.addBlockquote('无').addNewline();
-  for (const material of auxiliary) {
-    markdown.addBlockquote(`【${material.category}】${material.name}×${material.selected}(可放入${material.quantity - material.selected})`).addText(' ').addButton('[修改]', { data: `/修改打造材料 ${material.id}`, autoEnter: false }).addText(' ').addButton('[删除]', { data: `/删除打造材料 ${material.id}`, autoEnter: false }).addNewline();
-  }
-  markdown.addNewline().addText('背包材料：').addNewline();
-  if (!materials.length) markdown.addBlockquote('没有符合条件的材料。').addNewline();
-  for (const [index, material] of materials.entries()) {
-    const tendency = elementalDustTendencies[material.code] ?? materialTendencies[material.code] ?? '已配置锻造倾向';
-    markdown.addBlockquote(`${'①②③④⑤⑥⑦⑧⑨⑩'.charAt(index)}【${material.category}】${material.name}×${material.quantity}（已放入${material.selected}）｜${tendency}`).addText(' ').addButton('[放入]', { data: `/放入打造材料 ${material.id}`, autoEnter: false }).addText(' ').addButton('[取出]', { data: `/取出打造材料 ${material.id}`, autoEnter: false }).addNewline();
-  }
-  markdown.addText(`当前第（${currentPage}/${totalPages}）页`).addNewline();
-  const previous = Math.max(1, currentPage - 1); const next = Math.min(totalPages, currentPage + 1); const pageCommand = (target: number) => `/打造材料页 ${target}${keyword ? ` ${keyword}` : ''}`;
+  const armorText = armorClassEffectText(state.subtype);
+  if (armorText) markdown.addNewline().addBlockquote(armorText).addNewline();
+  markdown.addNewline().addBlockquote(`稀有度概率：${forgeRarityWeights(state.progress.level).filter(([, chance]) => chance > 0).map(([rarity, chance]) => `${rarity} ${chance}%`).join('｜')}`);
   return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup()
-    .addRow().addButton('上一页', pageCommand(previous), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined }).addButton('搜索', '/打造材料搜索', { type: 'command', autoEnter: false }).addButton('下一页', pageCommand(next), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined })
     .addRow().addButton('开始打造', '/开始打造', { type: 'command', autoEnter: true, style: 'blue' }).addButton('重新选择', forgeCommand(state.source), { type: 'command', autoEnter: true }));
 };
 const openForge = (source: 'blacksmith' | 'profession') => async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await resetForgeSession(event.current.UserId, source); await message.send({ format: await forgeFormat(source) }); } catch (error) { await message.send({ format: messageFormat('无法打造', error instanceof Error ? error.message : '请稍后重试。') }); } };
@@ -157,10 +143,39 @@ export const secondaryProfessionForgeHandler = openForge('profession');
 export const forgeCategoryHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await selectForgeCategory(event.current.UserId, String(route.param('category'))); await message.send({ format: await forgeSubtypeFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('选择失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const forgeSubtypeHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await selectForgeSubtype(event.current.UserId, String(route.param('subtype'))); await message.send({ format: await forgeLevelFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('选择失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const forgeLevelHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await selectForgeLevel(event.current.UserId, Number(route.param('level'))); await message.send({ format: await forgeMaterialsFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('选择失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
-export const forgeMaterialHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await addForgeMaterial(event.current.UserId, Number(route.param('id')), Number(route.param('quantity') ?? 1)); await message.send({ format: await forgeMaterialsFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法放入材料', error instanceof Error ? error.message : '请稍后重试。') }); } };
-export const forgeMaterialRemoveHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await removeForgeMaterial(event.current.UserId, Number(route.param('id'))); await message.send({ format: await forgeMaterialsFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法取出材料', error instanceof Error ? error.message : '请稍后重试。') }); } };
-export const forgeMaterialSetHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await setForgeMaterial(event.current.UserId, Number(route.param('id')), Number(route.param('quantity'))); await message.send({ format: await forgeMaterialsFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法修改材料', error instanceof Error ? error.message : '请稍后重试。') }); } };
-export const forgeMaterialClearHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await clearForgeMaterial(event.current.UserId, Number(route.param('id'))); await message.send({ format: await forgeMaterialsFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法删除材料', error instanceof Error ? error.message : '请稍后重试。') }); } };
+const blueprintForgeListFormat = async (qqUserId: string) => {
+  const blueprints = await epicForgeBlueprints(qqUserId);
+  const markdown = Format.createMarkdown().addTitle('图纸打造').addNewline().addNewline()
+    .addText('背包内图纸：').addNewline().addNewline();
+  if (!blueprints.length) markdown.addBlockquote('无');
+  for (const [index, entry] of blueprints.entries()) {
+    const recipe = entry.recipe;
+    markdown.addBlockquote(`${numberMark.charAt(index)}【Lv.30·史诗·${recipe.category}·${recipe.subtype}】${recipe.name}｜图纸×${entry.blueprintQuantity}`).addText(' ')
+      .addButton('[打造]', { data: `/查看图纸打造 ${recipe.blueprintCode}`, autoEnter: false }).addNewline()
+      .addText(`来源：${recipe.bossName}`).addNewline().addNewline();
+  }
+  return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('返回 铁匠铺', '/铁匠铺', { type: 'command', autoEnter: true }));
+};
+const blueprintForgePreviewFormat = async (qqUserId: string, blueprintCode: string) => {
+  const preview = await epicForgePreview(qqUserId, blueprintCode); const { recipe } = preview;
+  const kind = recipe.category === '武器' ? `${recipe.subtype}武器` : `${recipe.subtype}${recipe.category}`;
+  const markdown = Format.createMarkdown().addTitle(`图纸打造·${recipe.name}`).addNewline().addNewline()
+    .addBlockquote(`装备简介：由【${recipe.bossName}】图纸打造的 Lv.30 史诗${kind}。${recipe.setCode ? '属于固定甲类套装部件；实际套装效果在装备后按件数触发。' : '为独立史诗武器，不计入任何防具套装件数。'} 本页不展示装备具体属性数值。`)
+    .addNewline().addNewline().addText('打造后消耗：').addNewline();
+  for (const material of preview.materials) markdown.addBlockquote(`${material.name} ${material.owned}/${material.required}${material.owned >= material.required ? ' 已满足' : ' 不足'}`).addNewline();
+  markdown.addNewline().addText(`手续费：铜币×${preview.fee}`).addNewline();
+  return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup()
+    .addRow().addButton('确认打造', `/确认图纸打造 ${recipe.blueprintCode}`, { type: 'command', autoEnter: true, style: preview.ready ? 'blue' : undefined })
+    .addButton('返回 图纸', '/图纸打造', { type: 'command', autoEnter: true }));
+};
+export const epicForgeListHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await message.send({ format: await blueprintForgeListFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法查看图纸打造', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const epicForgePreviewHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await message.send({ format: await blueprintForgePreviewFormat(event.current.UserId, String(route.param('blueprintCode'))) }); } catch (error) { await message.send({ format: messageFormat('无法查看图纸', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const epicForgeCraftHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); const result = await craftEpicForgeEquipment(event.current.UserId, String(route.param('blueprintCode'))); await awardBlacksmithCraftAffinity(event.current.UserId); await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('史诗打造完成').addNewline().addNewline().addText(`获得【${result.name}】\n稀有度：史诗\n品质：${result.quality.toFixed(1)}%\n消耗图纸与全部配方材料。\n手续费：铜币×${result.fee}`).addNewline().addNewline().addBlockquote(`本次词条：\n${effectText(result.effect, result.primaryKeys)}`).addNewline().addNewline().addBlockquote(result.setCode ? '该防具已可计入对应史诗套装件数。' : '该武器拥有独立战斗效果，不计入防具套装件数。')).addButtonGroup(Format.createButtonGroup().addRow().addButton('查看装备', `/装备详情 ${result.instanceId}`, { type: 'command', autoEnter: true, style: 'blue' }).addButton('图纸打造', '/图纸打造', { type: 'command', autoEnter: true })) }); } catch (error) { await message.send({ format: messageFormat('史诗打造失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+const fixedRecipeNotice = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await message.send({ format: messageFormat('固定配方打造', '打造不再接受辅材；请选择装备等级后查看并备齐固定材料。') }); } catch (error) { await message.send({ format: messageFormat('无法打造', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const forgeMaterialHandler = fixedRecipeNotice;
+export const forgeMaterialRemoveHandler = fixedRecipeNotice;
+export const forgeMaterialSetHandler = fixedRecipeNotice;
+export const forgeMaterialClearHandler = fixedRecipeNotice;
 export const forgeMaterialPageHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await message.send({ format: await forgeMaterialsFormat(event.current.UserId, Number(route.param('page')), String(route.param('keyword') ?? '')) }); } catch (error) { await message.send({ format: messageFormat('无法查看材料', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const forgeMaterialSearchHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await message.send({ format: await forgeMaterialsFormat(event.current.UserId, 1, String(route.param('keyword'))) }); } catch (error) { await message.send({ format: messageFormat('无法搜索材料', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const forgeMaterialListHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await message.send({ format: await forgeMaterialsFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法查看材料', error instanceof Error ? error.message : '请稍后重试。') }); } };
@@ -171,7 +186,7 @@ export const forgeStartHandler = (_confirmed = false) => async () => {
     const state = await forgeState(event.current.UserId);
     const result = await craftForgeEquipment(event.current.UserId, _confirmed);
     if (state.source === 'blacksmith') await awardBlacksmithCraftAffinity(event.current.UserId);
-    await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('打造成功').addNewline().addNewline().addText(`获得【${result.name}】\n稀有度：${result.rarity}\n品质：${result.quality.toFixed(1)}%\n`).addNewline().addBlockquote(effectText(result.effect))).addButtonGroup(Format.createButtonGroup().addRow().addButton('查看装备', `/装备详情 ${result.instanceId}`, { type: 'command', autoEnter: true, style: 'blue' }).addButton(state.source === 'profession' ? '返回副职业' : '返回铁匠铺', forgeReturn(state.source), { type: 'command', autoEnter: true })) });
+    await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('打造成功').addNewline().addNewline().addText(`获得【${result.name}】\n稀有度：${result.rarity}\n品质：${result.quality.toFixed(1)}%\n熟练度：+${result.proficiencyGain}\n`).addNewline().addBlockquote(effectText(result.effect, result.primaryKeys))).addButtonGroup(Format.createButtonGroup().addRow().addButton('查看装备', `/装备详情 ${result.instanceId}`, { type: 'command', autoEnter: true, style: 'blue' }).addButton(state.source === 'profession' ? '返回副职业' : '返回铁匠铺', forgeReturn(state.source), { type: 'command', autoEnter: true })) });
   } catch (error) { await message.send({ format: messageFormat('打造失败', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
 export const blacksmithAboutHandler = async () => {
@@ -181,7 +196,7 @@ export const blacksmithAboutHandler = async () => {
     const quest = await blacksmithQuest(event.current.UserId);
     if (quest.status === 'none') {
       const markdown = Format.createMarkdown().addTitle('关于 锻造师').addNewline().addNewline()
-        .addBlockquote('漠北——镇民通常称他小北——相信金属并非冰冷的死物。每一块矿石、每一次落锤和每一道火候，都会决定武器最终能否回应持有者。成为锻造师后，你可以亲手打造装备、精炼品质，并以材料为装备熔铸新的力量。');
+        .addBlockquote('漠北——镇民通常称他小北——是一名 Lv.3 锻造师。他相信金属并非冰冷的死物；每一块矿石、每一次落锤和每一道火候，都会决定武器最终能否回应持有者。成为锻造师后，你可以亲手打造装备、精炼品质，并以材料为装备熔铸新的力量。');
       await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('选定副职业 锻造师', '/选择副职业 锻造师', { type: 'command', autoEnter: true, style: 'blue' })) });
       return;
     }
@@ -224,8 +239,8 @@ export const claimBlacksmithQuestHandler = async () => {
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('查看 副职业', '/副职业', { type: 'command', autoEnter: true, style: 'blue' })) });
   } catch (error) { await message.send({ format: messageFormat('提交失败', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
-export const secondaryProfessionHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const { secondaryProfessionCode } = await import('../game/alchemist.service'); const profession = await secondaryProfessionCode(event.current.UserId); if (profession === 'alchemist') { const { alchemistProfessionFormat } = await import('./alchemist'); await message.send({ format: await alchemistProfessionFormat(event.current.UserId) }); return; } if (profession === 'deconstructor') { const { deconstructorProfessionFormat } = await import('./deconstructor'); await message.send({ format: await deconstructorProfessionFormat(event.current.UserId) }); return; } if (profession === 'omniscient') { const { omniscientProfessionFormat } = await import('./bookshop'); await message.send({ format: await omniscientProfessionFormat(event.current.UserId) }); return; } const isBlacksmith = profession === 'blacksmith'; const progress = isBlacksmith ? await blacksmithProgress(event.current.UserId) : null; const markdown = Format.createMarkdown().addTitle(isBlacksmith ? '副职业·锻造师' : '副职业').addNewline().addNewline(); if (isBlacksmith && progress) markdown.addText(`等级：Lv.${progress.level}\n熟练度：${progress.proficiency}/${progress.required}\n${proficiencyBar(progress.proficiency, progress.required)}`).addNewline().addNewline().addBlockquote(`打造成功率+${progress.bonus}%`).addNewline().addBlockquote(`精炼大成功率+${progress.bonus}%`).addNewline().addBlockquote(`熔铸成功率+${progress.bonus}%`); else markdown.addText('尚未获得副职业。你可以前往导师处了解并选择一门副职业。'); const buttons = isBlacksmith ? professionButtons() : Format.createButtonGroup()
-  .addRow().addButton('前往 铁匠铺', '/前往 -17 -123', { type: 'command', autoEnter: true, style: 'blue' })
-  .addRow().addButton('前往 糖水屋', '/前往 -12 -128', { type: 'command', autoEnter: true, style: 'blue' })
-  .addRow().addButton('前往 异工坊', '/前往 6 -121', { type: 'command', autoEnter: true, style: 'blue' })
-  .addRow().addButton('前往 百味书屋', '/前往 14 -108', { type: 'command', autoEnter: true, style: 'blue' }); await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) }); } catch (error) { await message.send({ format: messageFormat('无法查看副职业', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const secondaryProfessionHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const { secondaryProfessionCode } = await import('../game/alchemist.service'); const profession = await secondaryProfessionCode(event.current.UserId); if (profession === 'alchemist') { const { alchemistProfessionFormat } = await import('./alchemist'); await message.send({ format: await alchemistProfessionFormat(event.current.UserId) }); return; } if (profession === 'deconstructor') { const { deconstructorProfessionFormat } = await import('./deconstructor'); await message.send({ format: await deconstructorProfessionFormat(event.current.UserId) }); return; } if (profession === 'omniscient') { const { omniscientProfessionFormat } = await import('./bookshop'); await message.send({ format: await omniscientProfessionFormat(event.current.UserId) }); return; } const isBlacksmith = profession === 'blacksmith'; const progress = isBlacksmith ? await blacksmithProgress(event.current.UserId) : null; const markdown = Format.createMarkdown().addTitle(isBlacksmith ? '副职业·锻造师' : '副职业').addNewline().addNewline(); if (isBlacksmith && progress) { const maxed = progress.level >= blacksmithMaxLevel; markdown.addText(`等级：Lv.${maxed ? 'MAX' : progress.level}\n${maxed ? '熟练度：已达上限' : `熟练度：${progress.proficiency}/${progress.required}\n${proficiencyBar(progress.proficiency, progress.required)}`}`).addNewline().addNewline().addBlockquote(`打造成功率+${progress.bonus}%`).addNewline().addBlockquote(`精炼大成功率+${progress.bonus}%`).addNewline().addBlockquote(`熔铸成功率+${progress.bonus}%`); } else markdown.addText('尚未获得副职业。你可以前往导师处了解并选择一门副职业。'); const buttons = isBlacksmith ? professionButtons() : Format.createButtonGroup()
+  .addRow().addButton('前往 铁匠铺', '/前往 -17 -191', { type: 'command', autoEnter: true, style: 'blue' })
+  .addRow().addButton('前往 糖水屋', '/前往 -12 -196', { type: 'command', autoEnter: true, style: 'blue' })
+  .addRow().addButton('前往 异工坊', '/前往 6 -189', { type: 'command', autoEnter: true, style: 'blue' })
+  .addRow().addButton('前往 百味书屋', '/前往 14 -176', { type: 'command', autoEnter: true, style: 'blue' }); await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) }); } catch (error) { await message.send({ format: messageFormat('无法查看副职业', error instanceof Error ? error.message : '请稍后重试。') }); } };

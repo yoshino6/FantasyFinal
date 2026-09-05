@@ -15,10 +15,10 @@ const timeScene = () => {
 
 const lodgeFormat = async (text?: string, continuingChat = false) => {
   const markdown = Format.createMarkdown().addTitle('幽暗密林·猎户小屋').addNewline().addNewline().addText('【雷恩·霍尔特】').addNewline().addNewline().addBlockquote(text ?? timeScene());
-  if (continuingChat) return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('继续闲聊', '/猎户闲聊', { type: 'command', autoEnter: true, style: 'blue' }));
+  if (continuingChat) return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('切磋', '/切磋 hunter_lodge', { type: 'command', autoEnter: true, style: 'blue' }).addButton('继续闲聊', '/猎户闲聊', { type: 'command', autoEnter: true, style: 'blue' }));
   return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup()
     .addRow().addButton('我要买', '/猎户购买', { type: 'command', autoEnter: true, style: 'blue' }).addButton('我要卖', '/猎户出售', { type: 'command', autoEnter: true, style: 'blue' })
-    .addRow().addButton('闲聊', '/猎户闲聊', { type: 'command', autoEnter: true, style: 'blue' }).addButton('离开 猎户小屋', '/建筑离开 hunter_lodge', { type: 'command', autoEnter: true }));
+    .addRow().addButton('切磋', '/切磋 hunter_lodge', { type: 'command', autoEnter: true, style: 'blue' }).addButton('闲聊', '/猎户闲聊', { type: 'command', autoEnter: true, style: 'blue' }).addButton('离开 猎户小屋', '/建筑离开 hunter_lodge', { type: 'command', autoEnter: true }));
 };
 
 const pageButtons = (page: number, totalPages: number, command: string, search: string, keyword = '') => Format.createButtonGroup().addRow()

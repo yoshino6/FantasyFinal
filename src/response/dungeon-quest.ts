@@ -10,7 +10,7 @@ export const dungeonSecretGuildHandler = async () => {
   const [event] = useEvent(); const [message] = useMessage();
   try {
     const text = await consultDungeonAtGuild(event.current.UserId);
-    await message.send({ format: chapterFormat(2, text, Format.createButtonGroup().addRow().addButton('前往 异工坊', '/前往 6 -121', { type: 'command', autoEnter: true, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
+    await message.send({ format: chapterFormat(2, text, Format.createButtonGroup().addRow().addButton('前往 异工坊', '/前往 6 -189', { type: 'command', autoEnter: true, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
   } catch (error) { await message.send({ format: messageFormat('无法询问地下迷宫', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
 
@@ -28,8 +28,8 @@ export const dungeonSecretEntranceHandler = async () => {
     const dungeonId = Number(route.param('id')); const result = await entranceStory(event.current.UserId, dungeonId);
     const buttons = Format.createButtonGroup().addRow();
     if (result.stage >= 5) buttons.addButton('进入', `/下迷宫 ${dungeonId}`, { type: 'command', autoEnter: true, style: 'blue' });
-    else if (result.stage < 2) buttons.addButton('前往 冒险者公会', '/前往 -2 -111', { type: 'command', autoEnter: true, style: 'blue' });
-    else if (result.stage < 4) buttons.addButton('前往 异工坊', '/前往 6 -121', { type: 'command', autoEnter: true, style: 'blue' });
+    else if (result.stage < 2) buttons.addButton('前往 冒险者公会', '/前往 -2 -181', { type: 'command', autoEnter: true, style: 'blue' });
+    else if (result.stage < 4) buttons.addButton('前往 异工坊', '/前往 6 -189', { type: 'command', autoEnter: true, style: 'blue' });
     else if (result.stage === 4) buttons.addButton('再次查看石门', `/地下的秘密 ${dungeonId}`, { type: 'command', autoEnter: true, style: 'blue' });
     buttons.addButton('任务', '/任务', { type: 'command', autoEnter: true });
     await message.send({ format: chapterFormat(Math.min(6, Math.max(1, result.stage)), result.text, buttons) });
@@ -39,7 +39,7 @@ export const dungeonSecretEntranceHandler = async () => {
 export const oddWorkshopBuyFormat = async (qqUserId: string) => {
     const items = await oddWorkshopDungeonCatalog(qqUserId);
     const markdown = Format.createMarkdown().addTitle('百纳镇·异工坊货架').addNewline().addNewline().addBlockquote('唯薇安将两件装置摆到防震垫上，认真地贴好价签。“要买就快点，别碰旁边那个会冒烟的！”').addNewline().addNewline();
-    items.forEach((item, index) => markdown.addText(`${'①②③④⑤'[index]}【特殊】${item.name} `).addButton('[购买]', { data: `/购买异工坊商品 ${item.code}`, autoEnter: false }).addNewline().addBlockquote(`价格：铜币×${item.price}｜剩余：${item.stock}${item.owned ? `｜已拥有${item.owned}` : ''}`).addNewline().addBlockquote(item.description).addNewline().addNewline());
+    items.forEach((item, index) => markdown.addText(`${'①②③④⑤⑥⑦⑧'[index] ?? '·'}【${item.category}】${item.name} `).addButton('[购买]', { data: `/购买异工坊商品 ${item.code}`, autoEnter: false }).addNewline().addBlockquote(`价格：铜币×${item.price}｜剩余：${item.stock}${item.owned ? `｜已拥有${item.owned}` : ''}`).addNewline().addBlockquote(item.description).addNewline().addNewline());
     markdown.addText('当前第（1/1）页');
     return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('返回 异工坊', '/异工坊', { type: 'command', autoEnter: true }));
 };
@@ -53,15 +53,15 @@ export const oddWorkshopBuyHandler = async () => {
 export const oddWorkshopPurchaseHandler = async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
   try {
-    const code = String(route.param('code')) as 'demon_breaker_teleporter' | 'demon_breaker_teleporter_blueprint';
-    if (!['demon_breaker_teleporter', 'demon_breaker_teleporter_blueprint'].includes(code)) throw new Error('未找到这件异工坊商品。');
+    const code = String(route.param('code'));
+    if (!code) throw new Error('未找到这件异工坊商品。');
     const result = await buyOddWorkshopItem(event.current.UserId, code);
-    const detail = code === 'demon_breaker_teleporter' ? '你将它收进背包，圆盘边缘的符文轻轻亮起。现在可以回到地下大门。' : '图纸上的回路复杂得令人眼花，却也确实记录着完整的构造方法。';
+    const detail = code === 'demon_breaker_teleporter' ? '你将它收进背包，圆盘边缘的符文轻轻亮起。现在可以回到地下大门。' : result.rewardName ? `获得【${result.rewardName}】。图纸的前置构造会在打开「/构造」时自动补齐。` : '图纸上的回路复杂得令人眼花，却也确实记录着完整的构造方法。';
     if (code === 'demon_breaker_teleporter') {
       await message.send({ format: chapterFormat(4, `获得【${result.name}】。\n\n${detail}\n\n结界另一侧的黑暗仿佛也在等待你的脚步。`, Format.createButtonGroup().addRow().addButton('地图', '/地图', { type: 'command', autoEnter: true, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
       return;
     }
-    await message.send({ format: messageFormat('购买成功', `获得【${result.name}】\n${detail}`) });
+    await message.send({ format: messageFormat('购买成功', `${result.rewardName ? `购入【${result.name}】\n` : `获得【${result.name}】\n`}${detail}`) });
   } catch (error) { await message.send({ format: messageFormat('购买失败', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
 

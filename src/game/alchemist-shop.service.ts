@@ -37,7 +37,7 @@ export const buyAlchemistItem = async (qqUserId: string, itemId: number, quantit
   return { name: item.name, quantity: amount, price: total };
 });
 
-const alchemistSellable = "pi.character_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0 AND (i.item_category IN ('药剂','食物','粒子','炼材','怪材','元素尘') OR i.code='healing_herb') AND i.name LIKE ?";
+const alchemistSellable = "pi.character_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0 AND (i.item_category IN ('药剂','食物','粒子','炼材','怪材') OR i.code='healing_herb') AND i.name LIKE ?";
 
 export const alchemistSellCatalog = async (qqUserId: string, page = 1, keyword = '') => {
   const pool = await getPool(); const character = await characterFor(pool, qqUserId); const term = `%${keyword.trim()}%`;
@@ -54,7 +54,7 @@ export const sellAlchemistItem = async (qqUserId: string, itemId: number, quanti
   const [rows] = await connection.execute<SellRow[]>(`SELECT i.id,i.name,i.item_category,pi.quantity,CEIL(i.trade_price*1.15) AS sell_price
     FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id
     WHERE pi.character_id=? AND pi.item_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0
-      AND (i.item_category IN ('药剂','食物','粒子','炼材','怪材','元素尘') OR i.code='healing_herb') FOR UPDATE`, [character.id, itemId]);
+      AND (i.item_category IN ('药剂','食物','粒子','炼材','怪材') OR i.code='healing_herb') FOR UPDATE`, [character.id, itemId]);
   const item = rows[0]; if (!item) throw new Error('晴儿只收购药剂、食物、草药与炼金相关素材。');
   if (Number(item.quantity) < amount) throw new Error(`背包数量不足，当前仅有 ${item.quantity} 个。`);
   const price = Number(item.sell_price) * amount;

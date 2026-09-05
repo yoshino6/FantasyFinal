@@ -5,6 +5,7 @@ import { autoBattleConfig } from '../game/auto-battle.service';
 import { homePanel } from '../game/home.service';
 import { durationText } from '../game/time-format';
 import { markerName, sortMapMarkers } from '../game/map-marker.service';
+import { omniscientTraces } from '../game/omniscient.service';
 
 const directionText = (point: NearbyPoint, x: number, y: number) => {
   const vertical = point.y > y ? '北' : point.y < y ? '南' : '';
@@ -19,9 +20,13 @@ const areaText = (character: LocationCharacter, verb: '位于' | '移动至') =>
 export const currentLocationText = (character: LocationCharacter) => areaText(character, '位于');
 export const movedLocationText = (character: LocationCharacter) => areaText(character, '移动至');
 
-export const outsidePanel = (title: string, location: string, speed: number, range: number, x: number, y: number, description: string, points: NearbyPoint[], resting = false, landmarks: MapLandmark[] = [], speaker = '', speedLimit = speed, perceptionObscured = false, showLandmarks = true, showPlayers = true, mapUnlocked = false, activityStatus?: string) => {
+export const outsidePanel = (title: string, location: string, speed: number, range: number, x: number, y: number, description: string, points: NearbyPoint[], resting = false, landmarks: MapLandmark[] = [], speaker = '', speedLimit = speed, perceptionObscured = false, showLandmarks = true, showPlayers = true, mapUnlocked = false, activityStatus?: string, emphasizeSpeaker = false) => {
   const markdown = Format.createMarkdown().addTitle(title).addNewline().addNewline().addText(location).addNewline().addNewline();
-  if (speaker) markdown.addText(speaker).addNewline().addNewline();
+  if (speaker) {
+    if (emphasizeSpeaker) for (const line of speaker.split('\n')) markdown.addText('> ').addBold(line).addNewline();
+    else markdown.addText(speaker).addNewline();
+    markdown.addNewline();
+  }
   markdown.addBlockquote(description).addNewline().addNewline();
   if (resting) markdown.addText(activityStatus === 'detained' ? '状态：关押中' : activityStatus === 'unconscious' ? '状态：昏迷中' : '状态：休息中（每秒恢复 1% 生命与魔力）').addNewline();
   markdown.addText(`移动速度：（${speed}/${speedLimit}）`).addButton('[调整移速]', { data: '/调整移速 ', autoEnter: false }).addNewline().addText(`感知范围：${range}`);
@@ -31,16 +36,14 @@ export const outsidePanel = (title: string, location: string, speed: number, ran
   const regularLandmarks = normalLandmarks.filter(landmark => !landmark.code?.includes('entrance'));
   const bountyLandmarks = landmarks.filter(landmark => landmark.kind === 'bounty');
   if (mapUnlocked || landmarks.length) {
-    markdown.addNewline().addNewline().addText('地图标识：').addButton(showLandmarks ? '[折叠]' : '[显示]', { data: `/地图标识 ${showLandmarks ? '折叠' : '显示'}`, autoEnter: false });
+    markdown.addNewline().addNewline().addText('地图标识：').addButton(showLandmarks ? '[折叠]' : '[显示]', { data: `/地图标识 ${showLandmarks ? '折叠' : '显示'}`, autoEnter: false }).addNewline();
     if (showLandmarks) {
-      markdown.addNewline();
       for (const landmark of regularLandmarks) {
         const seconds = Math.max(1, Math.ceil((Math.abs(landmark.x - x) + Math.abs(landmark.y - y)) / speedLimit));
         markdown.addText('> ').addButton(markerName(landmark), { data: `/前往 ${landmark.x} ${landmark.y}`, autoEnter: false }).addText(`（${landmark.x}, ${landmark.y}）[预计${durationText(seconds)}]`).addNewline();
       }
     }
-    // 悬赏／BOSS 坐标属于地图标识的一部分，且不能被普通地标的折叠开关隐藏。
-    for (const landmark of bountyLandmarks) {
+    if (showLandmarks) for (const landmark of bountyLandmarks) {
       const seconds = Math.max(1, Math.ceil((Math.abs(landmark.x - x) + Math.abs(landmark.y - y)) / speedLimit));
       markdown.addText('> ').addButton(`🎯 ${landmark.name}`, { data: `/前往 ${landmark.x} ${landmark.y}`, autoEnter: false }).addText(`（${landmark.x}, ${landmark.y}）[预计${durationText(seconds)}]`).addNewline();
     }
@@ -67,6 +70,7 @@ export const outsidePanel = (title: string, location: string, speed: number, ran
       else if (point.type !== '玩家' && point.distance === 0 && point.interaction) markdown.addText(' ').addButton('[互动]', { data: `/坐标互动 ${point.interaction.type} ${point.interaction.id}`, autoEnter: false });
       else if (point.type !== '玩家' && point.distance > 0 && speedLimit >= point.distance) markdown.addText(' ').addButton('[前往]', { data: `/前往 ${point.x} ${point.y}`, autoEnter: false });
       if (point.type === '怪物' && point.code) markdown.addText(' ').addButton('[攻击]', { data: `/怪物攻击 ${point.code}`, autoEnter: false });
+      if (point.isTrialTarget && point.code) markdown.addText(' ').addButton('[试炼]', { data: `/怪物攻击 ${point.code}`, autoEnter: false });
       if (point.type === '玩家' && point.code) {
         if (point.pvpAvailable) markdown.addText(' ').addButton('[攻击]', { data: `/玩家攻击 ${point.code}`, autoEnter: false });
         else markdown.addText(' [好友]');
@@ -91,15 +95,10 @@ export const panelButtons = (resting = false, _autoBattleEnabled = false, blocke
     .addRow().addButton('菜单', '/菜单', { type: 'command', autoEnter: true });
 };
 
-const battlePanel = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
-  const markdown = Format.createMarkdown().addTitle('战斗面板').addNewline().addNewline().addText(`第 ${battle.turn} 回合\n${battle.members.map(member => `【${member.name}】HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}`).join('\n')}\n`);
-  for (const [index, target] of battle.targets.entries()) markdown.addButton(`${battle.selectedTargetId === target.id ? '▶' : ''}敌方${index + 1} ${target.name}`, { data: `/切换目标 ${target.id}`, autoEnter: false }).addText(` HP ${target.hp}/${target.hpMax}${target.defeated ? '（击败）' : ''}\n`);
-  const activeSkills = new Set(battle.readySkillSlots); const activeItems = new Set(battle.itemSlots); const actionStyle = battle.canAct ? 'blue' : undefined;
-  const buttons = Format.createButtonGroup()
-    .addRow().addButton('普攻', '/攻击', { type: 'command', autoEnter: true, style: actionStyle }).addButton('技能①', '/技能 1', { type: 'command', autoEnter: true, style: battle.canAct && activeSkills.has(1) ? 'blue' : undefined }).addButton('技能②', '/技能 2', { type: 'command', autoEnter: true, style: battle.canAct && activeSkills.has(2) ? 'blue' : undefined }).addButton('技能③', '/技能 3', { type: 'command', autoEnter: true, style: battle.canAct && activeSkills.has(3) ? 'blue' : undefined }).addButton('技能④', '/技能 4', { type: 'command', autoEnter: true, style: battle.canAct && activeSkills.has(4) ? 'blue' : undefined })
-    .addRow().addButton('道具①', '/道具 1', { type: 'command', autoEnter: true, style: battle.canAct && activeItems.has(1) ? 'blue' : undefined }).addButton('道具②', '/道具 2', { type: 'command', autoEnter: true, style: battle.canAct && activeItems.has(2) ? 'blue' : undefined }).addButton('道具③', '/道具 3', { type: 'command', autoEnter: true, style: battle.canAct && activeItems.has(3) ? 'blue' : undefined }).addButton('道具④', '/道具 4', { type: 'command', autoEnter: true, style: battle.canAct && activeItems.has(4) ? 'blue' : undefined }).addButton('逃跑', '/逃跑', { type: 'command', autoEnter: true, style: actionStyle });
-  if (battle.appraisal.learned) buttons.addRow().addButton('鉴识', '/鉴识', { type: 'command', autoEnter: true, style: 'blue' });
-  return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
+const battlePanel = async (battle: Awaited<ReturnType<typeof battleStatus>>) => {
+  // 与回合结果共用状态与按钮，避免重开面板后丢失切磋模式或友方选取。
+  const { battleOperationFormat } = await import('./adventure');
+  return battleOperationFormat('', battle);
 };
 const limitedViewButtons = (buttons: ReturnType<typeof Format.createButtonGroup>) => buttons.addRow()
   .addButton('角色', '/角色', { type: 'command', autoEnter: true }).addButton('装备', '/装备', { type: 'command', autoEnter: true }).addButton('背包', '/背包', { type: 'command', autoEnter: true }).addButton('技能', '/技能列表', { type: 'command', autoEnter: true }).addButton('好友', '/好友', { type: 'command', autoEnter: true });
@@ -126,20 +125,18 @@ export default async () => {
     if (mining) { await message.send({ format: miningPanel(mining) }); return; }
     try {
       const battle = await battleStatus(event.current.UserId);
-      await sendWithTextFallback(message, battlePanel(battle), `【战斗面板】\n${battle.members.map(member => `【${member.name}】HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}`).join('\n')}\n${battle.targets.map(target => `敌方 #${target.id} ${target.name} HP ${target.hp}/${target.hpMax}`).join('\n')}\n/攻击｜/技能 1｜/道具 1｜/逃跑`);
+      await sendWithTextFallback(message, await battlePanel(battle), `【${battle.mode === 'spar' ? `切磋＜${battle.turn}＞回合` : '战斗面板'}】\n${battle.members.map(member => `【${member.name}】HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}`).join('\n')}${battle.spirits.length ? `\n场上灵兽：${battle.spirits.map(spirit => `${spirit.name} HP ${spirit.hp}/${spirit.hpMax}（${spirit.remainingTurns}回合）`).join('、')}` : ''}\n${battle.targets.map(target => `敌方 #${target.id} ${target.name} HP ${target.hp}/${target.hpMax}`).join('\n')}\n/攻击｜/技能 1｜${battle.mode === 'spar' ? '认输（/逃跑）' : '/道具 1｜/逃跑'}`);
     } catch (error) {
       if (!(error instanceof Error) || !error.message.includes('当前不在战斗中')) throw error;
-      const [nearby, autoBattle, blockedDirections, movement] = await Promise.all([nearbyPoints(event.current.UserId), autoBattleConfig(event.current.UserId), blockedDungeonDirections(event.current.UserId), movementProfile(event.current.UserId)]);
+      const [nearby, autoBattle, blockedDirections, movement, trace] = await Promise.all([nearbyPoints(event.current.UserId), autoBattleConfig(event.current.UserId), blockedDungeonDirections(event.current.UserId), movementProfile(event.current.UserId), omniscientTraces(event.current.UserId)]);
       const visiblePoints = movement.showPlayers ? nearby.points : nearby.points.filter(point => point.type !== '玩家');
       const targets = visiblePoints.length ? `\n感知内目标：\n${visiblePoints.map(point => `${point.type} ${point.name} · ${directionText(point, Number(nearby.character.pos_x), Number(nearby.character.pos_y))}${point.distance}${point.distance === 0 && point.interaction?.type === '建筑' ? ' [进入]' : point.type === '玩家' && point.distance === 0 ? ' [互动]' : point.type === '玩家' && point.distance > 0 ? ' [前往]' : point.type !== '玩家' && point.distance === 0 && point.interaction ? ' [互动]' : point.type !== '玩家' && point.distance > 0 && movement.maximum >= point.distance ? ' [前往]' : ''}`).join('\n')}` : '\n感知内目标：\n空空如也';
       const x = Number(nearby.character.pos_x); const y = Number(nearby.character.pos_y);
       const location = currentLocationText(nearby.character);
       const resting = nearby.character.activity_status !== 'active';
-      const ordinaryLandmarks = nearby.landmarks.filter(landmark => landmark.kind !== 'bounty');
-      const bountyLandmarks = nearby.landmarks.filter(landmark => landmark.kind === 'bounty');
-      const mapEntries = [...(movement.showLandmarks ? ordinaryLandmarks : []), ...bountyLandmarks];
+      const mapEntries = movement.showLandmarks ? nearby.landmarks : [];
       const mapText = nearby.mapUnlocked ? `\n\n地图标识：${mapEntries.length ? `\n${mapEntries.map(landmark => landmark.name).join('\n')}` : ''}` : '';
-      await sendWithTextFallback(message, outsidePanel('操作面板', location, movement.step, nearby.range, x, y, nearby.description, nearby.points, resting, nearby.landmarks, '', movement.maximum, nearby.perceptionObscured, movement.showLandmarks, movement.showPlayers, nearby.mapUnlocked, nearby.character.activity_status).addButtonGroup(panelButtons(resting, Boolean(autoBattle.settings.enabled), blockedDirections)), `【操作面板】\n${location}\n\n${nearby.description}${mapText}\n\n移动速度：（${movement.step}/${movement.maximum}）\n感知范围：${nearby.range}${nearby.perceptionObscured ? '\n> 压抑的黑暗干扰了你的感知' : ''}${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
+      await sendWithTextFallback(message, outsidePanel('操作面板', location, movement.step, nearby.range, x, y, nearby.description, nearby.points, resting, nearby.landmarks, trace ?? '', movement.maximum, nearby.perceptionObscured, movement.showLandmarks, movement.showPlayers, nearby.mapUnlocked, nearby.character.activity_status, true).addButtonGroup(panelButtons(resting, Boolean(autoBattle.settings.enabled), blockedDirections)), `【操作面板】\n${location}${trace ? `\n\n${trace}` : ''}\n\n${nearby.description}${mapText}\n\n移动速度：（${movement.step}/${movement.maximum}）\n感知范围：${nearby.range}${nearby.perceptionObscured ? '\n> 压抑的黑暗干扰了你的感知' : ''}${targets}\n\n/移动 上｜/移动 下｜/移动 左｜/移动 右｜/探索｜/背包`);
     }
   } catch (error) {
     logger.error({ err: error, userId: event.current.UserId }, 'open panel failed');
@@ -149,10 +146,10 @@ export default async () => {
 
 const showRestPanel = async (message: any, qqUserId: string, text: string) => {
   if ((await homePanel(qqUserId)).inHome) { const { homeFormat } = await import('./home'); await message.send({ format: await homeFormat(qqUserId, text) }); return; }
-  const [nearby, movement] = await Promise.all([nearbyPoints(qqUserId), movementProfile(qqUserId)]); const resting = nearby.character.activity_status !== 'active';
+  const [nearby, movement, trace] = await Promise.all([nearbyPoints(qqUserId), movementProfile(qqUserId), omniscientTraces(qqUserId)]); const resting = nearby.character.activity_status !== 'active';
   const autoBattle = await autoBattleConfig(qqUserId);
   const blockedDirections = await blockedDungeonDirections(qqUserId);
-  const panel = outsidePanel('操作面板', currentLocationText(nearby.character), movement.step, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), text, nearby.points, resting, nearby.landmarks, '', movement.maximum, nearby.perceptionObscured, movement.showLandmarks, movement.showPlayers, nearby.mapUnlocked, nearby.character.activity_status).addButtonGroup(panelButtons(resting, Boolean(autoBattle.settings.enabled), blockedDirections));
+  const panel = outsidePanel('操作面板', currentLocationText(nearby.character), movement.step, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), text, nearby.points, resting, nearby.landmarks, trace ?? '', movement.maximum, nearby.perceptionObscured, movement.showLandmarks, movement.showPlayers, nearby.mapUnlocked, nearby.character.activity_status, true).addButtonGroup(panelButtons(resting, Boolean(autoBattle.settings.enabled), blockedDirections));
   await sendWithTextFallback(message, panel, `【操作面板】\n${text}`);
 };
 export const restHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await startRest(event.current.UserId); await showRestPanel(message, event.current.UserId, result.message); } catch (error) { await message.send({ format: messageFormat('无法休息', error instanceof Error ? error.message : '请稍后重试。') }); } };

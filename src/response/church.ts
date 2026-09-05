@@ -18,7 +18,7 @@ export const churchFormat = async (qqUserId: string, dialogue?: string) => {
       ? '午后的圣恩教堂宁静而明亮。伊芙琳为来访者添上一杯温水，随后以温和的目光向你问候。'
       : '暮色渐深，伊芙琳逐一点亮烛台。她在摇曳的烛火中合起祷典，为晚归的来客留出一处安静的位置。');
   const markdown = Format.createMarkdown().addTitle('百纳镇·圣恩教堂').addNewline().addNewline().addText('【修女·伊芙琳】');
-  if (nearby.npcDetailsUnlocked) markdown.addText(' ').addButton('[详情]', { data: '/NPC详情 saint_church', autoEnter: false });
+  if (nearby.npcDetailsUnlocked) markdown.addText(' ').addButton('[详情]', { data: '/域民详情 saint_church', autoEnter: false });
   markdown.addNewline().addNewline().addBlockquote(scene);
   if (oath?.status === 'ceremony_pending') markdown.addNewline().addNewline().addText(`【${oath.name}】已接受星光申请。请与对方一同站在祭台前，打开“星誓”开始正式仪式。`);
   if (oathCandidates.length) {
@@ -29,7 +29,7 @@ export const churchFormat = async (qqUserId: string, dialogue?: string) => {
     .addRow().addButton('星誓', '/星誓', { type: 'command', autoEnter: false }).addButton('祈福', '/祈福', { type: 'command', autoEnter: false });
   for (const candidate of oathCandidates) buttons.addRow().addButton(`发起星誓·${candidate.name}`, `/发起星誓 ${candidate.game_id}`, { type: 'command', autoEnter: true, style: 'blue' });
   buttons
-    .addRow().addButton('闲聊', '/修女闲聊', { type: 'command', autoEnter: true, style: 'blue' })
+    .addRow().addButton('切磋', '/切磋 saint_church', { type: 'command', autoEnter: true, style: 'blue' }).addButton('闲聊', '/修女闲聊', { type: 'command', autoEnter: true, style: 'blue' })
     .addRow().addButton('离开', `/建筑离开 ${churchCode}`, { type: 'command', autoEnter: true });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };

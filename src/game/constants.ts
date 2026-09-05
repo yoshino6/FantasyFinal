@@ -9,15 +9,20 @@ export const realmEnergyDissipationText = '精纯的能量冲入你的体壳，�
 export const staminaMaxForRealm = (stage: number) => 120 + Math.max(0, Math.floor(stage) - 1) * 30;
 export const STAMINA_RECOVERY_MS = 5 * 60 * 1000;
 
-// 索引表示当前等级；例如 Lv.10 升至 Lv.11 需要 1500 点经验。
+// 索引表示当前等级；例如 Lv.10 升至 Lv.11 需要 5200 点经验。
+// 以每 5 分钟恢复 1 点体力（每日 288 点）、当前地图怪物池的加权经验为标尺：
+// Lv.10→20 合计 70000，约 5 天；Lv.20→30 合计 296000，约 15 天（全局倍率 1、单人、无经验药剂）。
 const levelExperienceRequirements = [
   0,
-  25, 50, 100, 200, 300, 450, 600, 800, 1000, 1500,
-  1500, 1800, 2200, 2600, 3000, 3500, 4000, 4500, 5000, 6000
+  25, 50, 100, 200, 300, 450, 600, 800, 1000,
+  5200, 5600, 6000, 6400, 6800, 7200, 7600, 8000, 8400, 8800,
+  18000, 20500, 23100, 25700, 28300, 30900, 33500, 36100, 38700, 41200,
+  46693, 52187, 57876, 64154, 71021, 78476, 86716, 95937, 106139, 117714,
+  121638, 127524, 133410, 141257, 149105, 156952, 164800, 172648, 184419, 202076
 ] as const;
 
-/** 返回当前等级升至下一等级所需的经验；20 级后的数值待后续境界内容补充。 */
-export const experienceRequiredForLevel = (level: number) => levelExperienceRequirements[Math.max(1, Math.min(20, Math.floor(level)))] ?? 6000;
+/** 返回当前等级升至下一等级所需的经验；50 级以上暂沿用 50 级档。 */
+export const experienceRequiredForLevel = (level: number) => levelExperienceRequirements[Math.max(1, Math.min(50, Math.floor(level)))] ?? 51500;
 
 export const attributeNames: Record<keyof Allocation, string> = {
   constitution: '体质', spirit: '精神', strength: '力量',
@@ -30,21 +35,22 @@ export const attributeAliases: Record<string, keyof Allocation> = {
 };
 
 export const calculateDerivedStats = (value: Allocation): DerivedStats => ({
-  // 主属性系数至少是任一副属性系数的两倍；数值属性会在战斗中按双方对抗结算。
-  hpMax: 120 + value.constitution * 20 + value.spirit * 4 + value.strength * 5 + value.intelligence * 2 + value.agility * 2 + value.perception * 2,
-  mpMax: 60 + value.spirit * 16 + value.intelligence * 8 + value.perception * 3 + value.constitution * 2 + value.strength + value.agility,
-  physicalAttack: 8 + value.strength * 2 + value.agility + value.constitution * 0.5 + value.perception * 0.4 + value.intelligence * 0.2 + value.spirit * 0.2,
-  magicAttack: 8 + value.intelligence * 2 + value.spirit + value.perception * 0.5 + value.agility * 0.4 + value.constitution * 0.2 + value.strength * 0.2,
-  physicalDefense: 8 + value.constitution * 2 + value.strength + value.agility * 0.5 + value.perception * 0.25 + value.spirit * 0.25 + value.intelligence * 0.25,
-  magicDefense: 8 + value.spirit * 2 + value.intelligence + value.perception * 0.5 + value.agility * 0.4 + value.constitution * 0.2 + value.strength * 0.2,
-  accuracy: (100 + value.agility * 20 + value.perception * 8 + value.intelligence * 4 + value.strength * 2 + value.constitution * 2 + value.spirit * 2) / 5,
-  evasion: (100 + value.agility * 20 + value.perception * 8 + value.intelligence * 4 + value.strength * 2 + value.constitution * 2 + value.spirit * 2) / 5,
-  critRateBp: (100 + value.perception * 20 + value.agility * 8 + value.intelligence * 4 + value.strength * 2 + value.constitution * 2 + value.spirit * 2) / 5,
-  critDamageBp: (100 + value.perception * 20 + value.strength * 8 + value.intelligence * 4 + value.agility * 2 + value.constitution * 2 + value.spirit * 2) / 5,
-  critResistBp: (100 + value.constitution * 20 + value.perception * 8 + value.spirit * 4 + value.strength * 2 + value.intelligence * 2 + value.agility * 2) / 5,
-  critDamageReductionBp: (100 + value.spirit * 20 + value.perception * 8 + value.constitution * 4 + value.intelligence * 2 + value.strength * 2 + value.agility * 2) / 5,
-  tenacity: value.constitution * 4 + value.spirit * 3 + value.perception,
-  speed: 100 + value.agility * 8
+  // 六维均为 x 时，成长严格为：攻防/破韧 4.3x : 命闪双暴双抗速度韧性 8.6x : 生命魔力 34.4x = 1 : 2 : 8。
+  hpMax: 120 + value.constitution * 19.9 + value.spirit * 3.9 + value.strength * 4.9 + value.intelligence * 1.9 + value.agility * 1.9 + value.perception * 1.9,
+  mpMax: 60 + value.constitution * 2.2 + value.spirit * 17.8 + value.strength * 1.1 + value.intelligence * 8.9 + value.agility * 1.1 + value.perception * 3.3,
+  physicalAttack: 8 + value.constitution * .5 + value.spirit * .2 + value.strength * 2 + value.intelligence * .2 + value.agility + value.perception * .4,
+  magicAttack: 8 + value.constitution * .2 + value.spirit + value.strength * .2 + value.intelligence * 2 + value.agility * .4 + value.perception * .5,
+  physicalDefense: 8 + value.constitution * 2 + value.spirit * .25 + value.strength + value.intelligence * .25 + value.agility * .5 + value.perception * .3,
+  magicDefense: 8 + value.constitution * .2 + value.spirit * 2 + value.strength * .2 + value.intelligence + value.agility * .4 + value.perception * .5,
+  accuracy: 20 + value.constitution * .7 + value.spirit * .7 + value.strength * .7 + value.intelligence * 1.1 + value.agility * 4.4 + value.perception,
+  evasion: 20 + value.constitution * .7 + value.spirit * .7 + value.strength * .7 + value.intelligence * 1.1 + value.agility * 4.4 + value.perception,
+  critRateBp: 20 + value.constitution * .5 + value.spirit * .5 + value.strength * .5 + value.intelligence * .9 + value.agility * 1.8 + value.perception * 4.4,
+  critDamageBp: 20 + value.constitution * .5 + value.spirit * .5 + value.strength * 1.8 + value.intelligence * .9 + value.agility * .5 + value.perception * 4.4,
+  critResistBp: 20 + value.constitution * 4.4 + value.spirit * .9 + value.strength * .5 + value.intelligence * .5 + value.agility * .5 + value.perception * 1.8,
+  critDamageReductionBp: 20 + value.constitution * .9 + value.spirit * 4.4 + value.strength * .5 + value.intelligence * .5 + value.agility * .5 + value.perception * 1.8,
+  tenacity: value.constitution * 4.3 + value.spirit * 3.2 + value.perception * 1.1,
+  tenacityPierce: Math.floor(value.perception * 2.5 + value.strength * .9 + value.intelligence * .9),
+  speed: 100 + value.agility * 8.6
 });
 
 export const forgeRarityMultiplier: Record<string, number> = {
@@ -64,35 +70,50 @@ export const forgedEquipmentBase = (level: number, category: '武器' | '防具'
   const equalAttribute = 100 / 6 + 10 / 6 * (normalizedLevel - 1);
   const levelMultiplier = Math.pow(1.2, Math.floor(normalizedLevel / 10));
   const physicalAttack = 8 + equalAttribute * 4.3;
-  const physicalDefense = 8 + equalAttribute * 4.25;
+  const physicalDefense = 8 + equalAttribute * 4.3;
   const magicDefense = 8 + equalAttribute * 4.3;
   return (category === '武器'
     ? (physicalAttack + physicalAttack) / 2
     : (physicalDefense + magicDefense) / 4) * levelMultiplier;
 };
 
-const weaponHighWeightAffixes = new Set(['mpMax', 'accuracy', 'critRateBp', 'critDamageBp']);
-const armorHighWeightAffixes = new Set(['hpMax', 'evasion', 'critResistBp', 'critDamageReductionBp']);
-const standardAffixes = ['hpMax', 'mpMax', 'physicalAttack', 'magicAttack', 'physicalDefense', 'magicDefense', 'accuracy', 'evasion', 'critRateBp', 'critDamageBp', 'critResistBp', 'critDamageReductionBp', 'tenacity', 'speed'];
+// 六维均分时各档成长严格为 4.3 : 8.6 : 34.4 = 1 : 2 : 8。
+const affixCapMultiplier: Record<string, number> = {
+  physicalAttack: .5,
+  magicAttack: .5,
+  physicalDefense: .5,
+  magicDefense: .5,
+  tenacityPierce: .5,
+  accuracy: 1,
+  evasion: 1,
+  critRateBp: 1,
+  critDamageBp: 1,
+  critResistBp: 1,
+  critDamageReductionBp: 1,
+  tenacity: 1,
+  speed: 1,
+  hpMax: 4,
+  mpMax: 4
+};
+const standardAffixes = ['hpMax', 'mpMax', 'physicalAttack', 'magicAttack', 'physicalDefense', 'magicDefense', 'accuracy', 'evasion', 'critRateBp', 'critDamageBp', 'critResistBp', 'critDamageReductionBp', 'tenacity', 'tenacityPierce', 'speed'];
 const elementNames = ['水', '火', '土', '木', '风', '冰', '雷', '光', '暗'];
 const elementalAffixes = elementNames.flatMap(element => [`elementMastery_${element}`, `elementResistance_${element}`]);
-const elementalAffixCap = (level: number) => Math.max(0, Math.floor(Math.max(0, Number(level)) / 5) * 11);
+const elementalAffixCap = (level: number) => Math.max(0, Math.floor(Math.max(0, Number(level)) / 10) * 11);
 
-/** 不含主词条本体的单项辅词条上限。 */
+/** 不含主词条本体的单项辅词条上限，按当前六维均分时各派生属性的成长贡献折算。 */
 export const forgedAffixCap = (category: '武器' | '防具', key: string, level: number, rarity: string) => {
   if (key.startsWith('elementMastery_') || key.startsWith('elementResistance_')) {
     const matchingKind = category === '武器' ? key.startsWith('elementMastery_') : key.startsWith('elementResistance_');
-    return matchingKind ? elementalAffixCap(level) : 0;
+    return matchingKind ? elementalAffixCap(level) * (forgeRarityMultiplier[rarity] ?? 1) : 0;
   }
   const base = forgedEquipmentBase(level, category) * (forgeRarityMultiplier[rarity] ?? 1);
   if (category === '武器') {
     if (key === 'physicalDefense' || key === 'magicDefense') return 0;
-    if (key === 'physicalAttack' || key === 'magicAttack') return base * .5;
-    return weaponHighWeightAffixes.has(key) ? base * 2 : base;
+    if (key === 'hpMax' || key === 'tenacity') return 0;
+    return base * (affixCapMultiplier[key] ?? 0);
   }
-  if (key === 'physicalAttack' || key === 'magicAttack') return 0;
-  if (key === 'physicalDefense' || key === 'magicDefense') return base * .5;
-  return armorHighWeightAffixes.has(key) ? base * 2 : base;
+  if (key === 'physicalAttack' || key === 'magicAttack' || key === 'mpMax' || key === 'tenacityPierce') return 0;
+  return base * (affixCapMultiplier[key] ?? 0);
 };
 
 /** 成品词条总上限；主词条可额外叠加一条同类辅词条。 */
@@ -105,18 +126,64 @@ export const forgedEquipmentCaps = (category: '武器' | '防具', level: number
 };
 
 export type VirtualEquipmentTier = 'normal' | 'large' | 'elite' | 'boss';
-const virtualEquipmentMultiplier: Record<VirtualEquipmentTier, number> = { normal: .6, large: 1, elite: 1.15, boss: 1.3 };
+export type VirtualEquipmentLoadout = { rarity: string; quality: number; secondaryAffixes: number };
 
-export const virtualEquipmentStats = (level: number, tier: VirtualEquipmentTier, physicalAttack: number, magicAttack: number) => {
-  const multiplier = virtualEquipmentMultiplier[tier];
-  const weapon = forgedEquipmentBase(level, '武器') * multiplier;
-  const armor = forgedEquipmentBase(level, '防具') * multiplier * 5;
-  return {
-    physicalAttack: physicalAttack >= magicAttack ? weapon : 0,
-    magicAttack: magicAttack > physicalAttack ? weapon : 0,
-    physicalDefense: armor,
-    magicDefense: armor
-  };
+// 旧倍率 .6 / 1 / 1.15 / 1.3 分别等价于下列正式打造装备的稀有度与品质。
+// 怪物不掷随机词条，而是取同档位整套装备的期望值，确保同类目标面板稳定可预期。
+const virtualEquipmentLoadouts: Record<VirtualEquipmentTier, VirtualEquipmentLoadout> = {
+  normal: { rarity: '普通', quality: 0, secondaryAffixes: 0 },
+  large: { rarity: '普通', quality: 100, secondaryAffixes: 0 },
+  elite: { rarity: '优秀', quality: 100, secondaryAffixes: 1 },
+  boss: { rarity: '精良', quality: 100, secondaryAffixes: 2 }
+};
+const virtualSecondaryExpectation = .62;
+const virtualElementalAffixWeight = 4; // 七种常规元素各 0.5，光、暗各 0.25。
+const emptyDerivedStats = (): DerivedStats => ({ hpMax: 0, mpMax: 0, physicalAttack: 0, magicAttack: 0, physicalDefense: 0, magicDefense: 0, accuracy: 0, evasion: 0, critRateBp: 0, critDamageBp: 0, critResistBp: 0, critDamageReductionBp: 0, tenacity: 0, tenacityPierce: 0, speed: 0 });
+
+/**
+ * 以正式打造词条池的期望值模拟一件虚拟装备的副词条。
+ * 元素词条同样占据出现权重，但怪物的元素属性仍由模板决定，因此不会在此凭空附加元素。
+ */
+const virtualSecondaryStats = (category: '武器' | '防具', primaryKeys: readonly string[], level: number, loadout: VirtualEquipmentLoadout) => {
+  if (!loadout.secondaryAffixes) return emptyDerivedStats();
+  const keys = standardAffixes.filter(key => {
+    if (primaryKeys.includes(key)) return false;
+    // 与玩家锻造规则一致：武器不获得另一种攻击主词条，防具不获得攻击、魔力或破韧副词条。
+    if (category === '武器' && (key === 'physicalAttack' || key === 'magicAttack')) return false;
+    return forgedAffixCap(category, key, level, loadout.rarity) > 0;
+  });
+  const denominator = keys.length + virtualElementalAffixWeight;
+  const scale = virtualSecondaryExpectation * equipmentQualityMultiplier(loadout.quality) * loadout.secondaryAffixes / denominator;
+  const bonus = emptyDerivedStats();
+  for (const key of keys) bonus[key as keyof DerivedStats] = forgedAffixCap(category, key, level, loadout.rarity) * scale;
+  return bonus;
+};
+
+const addDerivedStats = (target: DerivedStats, source: DerivedStats, multiplier = 1) => {
+  for (const key of Object.keys(target) as Array<keyof DerivedStats>) target[key] += source[key] * multiplier;
+  return target;
+};
+
+/**
+ * 怪物虚拟套装：一把同级主武器与五件防具。
+ * 主词条遵循品质与稀有度，精英与 Boss 再按正式打造的副词条数量、上限和期望掷值补全套装属性。
+ */
+export const virtualEquipmentStats = (level: number, tier: VirtualEquipmentTier, physicalAttack: number, magicAttack: number, customLoadout?: VirtualEquipmentLoadout): DerivedStats => {
+  const loadout = customLoadout ?? virtualEquipmentLoadouts[tier];
+  const primaryMultiplier = (forgeRarityMultiplier[loadout.rarity] ?? 1) * equipmentQualityMultiplier(loadout.quality);
+  const weapon = forgedEquipmentBase(level, '武器') * primaryMultiplier;
+  const armor = forgedEquipmentBase(level, '防具') * primaryMultiplier;
+  const bonus = emptyDerivedStats();
+  if (physicalAttack >= magicAttack) bonus.physicalAttack = weapon;
+  else bonus.magicAttack = weapon;
+  bonus.physicalDefense = armor * 5;
+  bonus.magicDefense = armor * 5;
+  const weaponSecondary = virtualSecondaryStats('武器', [physicalAttack >= magicAttack ? 'physicalAttack' : 'magicAttack'], level, loadout);
+  const armorSecondary = virtualSecondaryStats('防具', ['physicalDefense', 'magicDefense'], level, loadout);
+  addDerivedStats(bonus, weaponSecondary);
+  addDerivedStats(bonus, armorSecondary, 5);
+  for (const key of Object.keys(bonus) as Array<keyof DerivedStats>) bonus[key] = Math.floor(bonus[key]);
+  return bonus;
 };
 
 export const gifts = {

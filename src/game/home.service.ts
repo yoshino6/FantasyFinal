@@ -32,6 +32,15 @@ const assertFree = async (connection: Db, character: Character, allowResting = f
   if (character.activity_status === 'detained') throw new Error('你正在被守卫关押。');
   if (character.activity_status === 'unconscious') throw new Error('你已昏迷，暂时无法进入家园。');
   if (!allowResting && character.activity_status === 'resting') throw new Error('请先结束休息。');
+  // PvP 没有后续操作时不会自然推进；避免遗留会话永久阻塞家园购买与进入。
+  await connection.execute(`UPDATE player_pvp_battle_logs log
+    JOIN player_pvp_battle_sessions battle ON battle.id=log.id
+    SET log.outcome='escaped',log.ended_at=NOW()
+    WHERE battle.state='active' AND battle.created_at<=DATE_SUB(NOW(),INTERVAL 30 MINUTE)
+      AND (battle.attacker_character_id=? OR battle.defender_character_id=?)`, [character.id, character.id]);
+  await connection.execute(`UPDATE player_pvp_battle_sessions SET state='escaped'
+    WHERE state='active' AND created_at<=DATE_SUB(NOW(),INTERVAL 30 MINUTE)
+      AND (attacker_character_id=? OR defender_character_id=?)`, [character.id, character.id]);
   const [[travel], [mining], [combat], [pvp], [party]] = await Promise.all([
     connection.execute<RowDataPacket[]>('SELECT 1 FROM player_travels WHERE character_id=? LIMIT 1', [character.id]),
     connection.execute<RowDataPacket[]>('SELECT 1 FROM player_resource_mining WHERE character_id=? LIMIT 1', [character.id]),
@@ -98,7 +107,7 @@ export const homePanel = async (qqUserId: string) => {
 
 const choosePlot = async (connection: Db, townId: number) => {
   const candidates: Array<[number, number]> = [];
-  for (let x = -25; x <= 24; x++) for (let y = -135; y <= -86; y++) {
+  for (let x = -25; x <= 24; x++) for (let y = -185; y <= -136; y++) {
     const distance = Math.abs(x - BAINA_GUILD_POSITION.x) + Math.abs(y - BAINA_GUILD_POSITION.y);
     if (distance >= homePlotDistance.min && distance <= homePlotDistance.max) candidates.push([x, y]);
   }

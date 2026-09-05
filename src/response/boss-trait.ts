@@ -16,7 +16,8 @@ const traitDescriptions = [
 
 export default async () => {
   const [message] = useMessage();
-  const markdown = Format.createMarkdown().addTitle('BOSS词条说明').addNewline().addNewline();
+  const markdown = Format.createMarkdown().addTitle('BOSS词条说明').addNewline().addNewline()
+    .addBlockquote('自然刷新且未进入战斗的公共地图 BOSS，每逢整点仍存活便会降低一级词条；梦幻、璀璨、黄金会随机降为猩红、腐化或神圣，之后依次降为地狱、深渊、英雄、强大、普通。剧情、导师、试炼与迷宫 BOSS 不受影响。').addNewline().addNewline();
   traitDescriptions.forEach(([name, attributes, rewards], index) => {
     markdown.addText(`【${name}】`).addNewline()
       .addBlockquote(attributes).addNewline()
