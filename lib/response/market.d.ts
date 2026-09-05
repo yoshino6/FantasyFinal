@@ -1,0 +1,13 @@
+import { Format } from 'alemonjs';
+export declare const marketHomeFormat: (qqUserId: string) => Promise<Format>;
+export declare const marketHomeHandler: () => Promise<void>;
+export declare const marketListHandler: () => Promise<void>;
+export declare const marketSearchHandler: () => Promise<void>;
+export declare const marketSellListHandler: () => Promise<void>;
+export declare const marketSellSearchHandler: () => Promise<void>;
+export declare const marketDetailHandler: () => Promise<void>;
+export declare const marketSellHandler: () => Promise<void>;
+export declare const marketBuyHandler: () => Promise<void>;
+export declare const marketOrdersHandler: () => Promise<void>;
+export declare const marketCancelHandler: () => Promise<void>;
+export declare const marketFeeHandler: () => Promise<void>;

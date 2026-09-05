@@ -1,0 +1,14 @@
+import { Format } from 'alemonjs';
+export declare const evolutionPanelFormat: (qqUserId: string, inLab?: boolean) => Promise<Format>;
+export declare const evolutionLabHandler: () => Promise<void>;
+export declare const evolutionPanelHandler: () => Promise<void>;
+export declare const evolutionNeedleHandler: () => Promise<void>;
+export declare const evolutionInjectionPreviewHandler: () => Promise<void>;
+export declare const evolutionInjectHandler: () => Promise<void>;
+export declare const evolutionSymbiosisHandler: () => Promise<void>;
+export declare const evolutionShapingHandler: () => Promise<void>;
+export declare const evolutionShapingToggleHandler: () => Promise<void>;
+export declare const evolutionObservationHandler: () => Promise<void>;
+export declare const evolutionObservationClaimHandler: () => Promise<void>;
+export declare const evolutionMutationHandler: () => Promise<void>;
+export declare const evolutionMutationActionHandler: () => Promise<void>;

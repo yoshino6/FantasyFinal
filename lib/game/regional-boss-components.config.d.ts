@@ -1,0 +1,22 @@
+export declare const regionalBossElements: readonly ["水", "火", "土", "木", "风", "冰", "雷", "光", "暗"];
+export type RegionalBossElement = typeof regionalBossElements[number];
+export type RegionalBossComponentKey = 'gruen_armor' | 'gruen_horn' | 'gruen_arm' | 'valk_armor' | 'valk_chain' | 'valk_bellows';
+export type RegionalBossComponentDefinition = {
+    key: RegionalBossComponentKey;
+    templateCode: string;
+    name: string;
+    bodyCode: 'gruen_mountainheart' | 'valk_forge_overseer';
+    hpRatio: number;
+    physicalDefenseRatio: number;
+    magicDefenseRatio: number;
+    physicalAttackRatio: number;
+    magicAttackRatio: number;
+    speedRatio: number;
+    elementResistance: Record<RegionalBossElement, number>;
+    passiveSummary: string;
+    breakSummary: string;
+};
+export declare const regionalBossComponentDefinitions: RegionalBossComponentDefinition[];
+export declare const regionalBossComponentByTemplateCode: Map<string, RegionalBossComponentDefinition>;
+export declare const regionalBossComponentsFor: (bodyCode: string) => RegionalBossComponentDefinition[];
+export declare const regionalBossComponentByKey: (key: string) => RegionalBossComponentDefinition | undefined;

@@ -1,0 +1,15 @@
+import { Format } from 'alemonjs';
+export declare const homeFormat: (qqUserId: string, notice?: string) => Promise<Format>;
+export declare const homeHandler: () => Promise<void>;
+export declare const homePurchaseHandler: () => Promise<void>;
+export declare const homeEnterHandler: () => Promise<void>;
+export declare const homeLeaveHandler: () => Promise<void>;
+export declare const homeRenameHandler: () => Promise<void>;
+export declare const homeUpgradeHandler: () => Promise<void>;
+export declare const homeExpandHandler: () => Promise<void>;
+export declare const homeFloorHandler: () => Promise<void>;
+export declare const homeFurnitureHandler: () => Promise<void>;
+export declare const homeFurnitureSearchHandler: () => Promise<void>;
+export declare const homeFurniturePlacementHandler: () => Promise<void>;
+export declare const homeCraftHandler: () => Promise<void>;
+export declare const homeRemoveHandler: () => Promise<void>;
