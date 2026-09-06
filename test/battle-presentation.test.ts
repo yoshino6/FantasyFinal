@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { skillSpecialization } from '../src/game/skill-specialization';
+import { specializationPerLevelLines, specializationTotalLines, specializationNumberText, passiveSpecializationPerLevelLine, passiveSpecializationTotalLine } from '../src/game/skill-specialization-presentation';
 import ts from 'typescript';
 import { Format } from '../node_modules/alemonjs/lib/application/format/message-format.js';
 
@@ -116,7 +118,8 @@ const showSkill = async (overrides: Record<string, unknown> = {}) => {
   const skill = {
     id: 1, code: 'resident_a01', name: '万象折页', category: 'utility', tier: '中位', skill_kind: '奥术', element: '无', range_type: '远程', target_scope: '自身',
     description: '下一次技能效果全体化。', actualPower: 0, actualManaCost: 100, actualCooldown: 5, actualChant: 1,
-    specializationResult: { damageFactor: 1, supportFactor: 1, effectFactor: 1 },
+    power: 0, mana_cost: 100, cooldown_turns: 5, chant_turns: 1,
+    specializationResult: skillSpecialization({ code: 'resident_a01', category: 'utility', tier: '中位', power: 0, mana_cost: 100, cooldown_turns: 5, chant_turns: 1 }),
     specializationChoices: ['overcharge', 'instant', 'efficient', 'potent'],
     learned: false, level: 1, max_level: 1, learn_cost: 5, effectDetails: [], specializations: {}, specializationMaxLevel: 1, specializationUpgradeCost: null, nextUpgradeCost: null, skillPoints: 10,
     ...overrides
@@ -124,7 +127,7 @@ const showSkill = async (overrides: Record<string, unknown> = {}) => {
   const { skillDetailHandler } = loadDeclarations('../src/response/skill-list.ts', ['categoryNames', 'effectValueText', 'effectDescription', 'appendSkillEffectDetails', 'skillDetailHandler'], {
     Format, skillDetail: async () => skill,
     balancedSkillDescription: (_code: string, text: string) => text,
-    specializationDescriptions: { overcharge: '过充', instant: '瞬息', efficient: '节能', potent: '强效' },
+    specializationPerLevelLines, specializationTotalLines, specializationNumberText, passiveSpecializationPerLevelLine, passiveSpecializationTotalLine,
     useEvent: () => [{ current: { UserId: 'test' } }], useRoute: () => [{ param: () => 1 }],
     useMessage: () => [{ send: async ({ format }: { format: ReturnType<typeof Format.create> }) => { result = format; } }],
     advancedSkillDescriptions: { advanced_test: '二转技能的完整效果。' }, advancedResourceRequirementForSkill: () => undefined, advancedResourceForProfession: () => undefined,
@@ -144,6 +147,40 @@ test('已学与未学主动效果都置于效果栏，冷却下一行显示吟�
     assert.ok(!nodes(format).some(item => item.type === 'MD.text' && String(item.value).includes('下一次技能效果全体化')));
     assert.ok(!fields.includes('无'));
   }
+});
+
+test('专精固定四类顺序与简洁文案，不适用项不提供升级按钮', async () => {
+  const text = rendered(await showSkill({ learned: true, specializationChoices: ['instant'] }));
+  const order = ['①过充', '②强效', '③瞬息', '④节能'].map(name => text.indexOf(name));
+  assert.ok(order.every(index => index >= 0)); assert.deepEqual([...order].sort((a, b) => a - b), order);
+  assert.match(text, /①过充：不适用/); assert.match(text, /②强效：不适用/);
+  assert.ok(text.includes(specializationPerLevelLines('中位').instant[0]));
+  assert.equal((text.match(/总体变化（仅专精）/g) ?? []).length, 1);
+  assert.doesNotMatch(text, /当前专精：/);
+});
+
+test('各阶专精显示每级数值，总体区显示组合与时间取整结果', async () => {
+  for (const [tier, maximum] of [['基础', 10], ['下位', 20], ['中位', 40]] as const) {
+    const base = { code: 'test', category: 'magic', tier, power: 150, mana_cost: 300, cooldown_turns: 3, chant_turns: 0 };
+    const specializations = { overcharge: 2, potent: 2 };
+    const current = skillSpecialization(base, specializations);
+    const text = rendered(await showSkill({ ...base, learned: true, specializations, specializationResult: current, actualManaCost: current.mana, actualCooldown: current.cooldown, actualChant: current.chant, specializationMaxLevel: maximum }));
+    assert.ok(text.includes('升至Lv.3：威力+7.2%'));
+    assert.match(text, /可成长时长\+7.2%/);
+    assert.match(text, /威力：150 → 162（\+8%）/);
+    assert.match(text, /蓝耗：300 → 404（\+34.67%）/);
+    assert.match(text, /冷却：3 → 3回合｜吟唱：0 → 0回合/);
+    assert.ok(text.indexOf('总体变化（仅专精）') > text.indexOf('④节能'));
+    assert.doesNotMatch(text, /NaN|undefined/);
+  }
+});
+
+test('被动强效每级变化与总体变化分区，不套主动成本', async () => {
+  const text = rendered(await showSkill({ category: 'passive', learned: true, passiveSpecializable: true, passiveFactor: 1.15, specializationMaxLevel: 40 }));
+  assert.match(text, /升至Lv.2：可成长数值\+1.5%/);
+  assert.match(text, /可成长数值：\+15%/);
+  assert.equal((text.match(/总体变化（仅专精）/g) ?? []).length, 1);
+  assert.doesNotMatch(text, /冷却\/吟唱基数|蓝耗：/);
 });
 
 test('被动、二转与附加状态技能详情保留效果且不贴在名称之后', async () => {

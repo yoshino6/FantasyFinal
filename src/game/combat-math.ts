@@ -4,7 +4,9 @@ export const opposedChance = (offense: number, defense: number) => {
   return x / (x + y);
 };
 
-/** 负面状态只按破韧与韧性对抗；命中、暴击只参与直击结算。 */
+/** 首领承受控制时的命中系数，技能与药剂共用。 */
+export const bossControlChanceMultiplier = .4;
+/** 技能负面状态按破韧与韧性对抗；命中、暴击只参与直击结算。 */
 export const tenacityContest = (tenacityPierce: number, targetTenacity: number, levelDifference: number, baseChancePct: number) => {
   const pierce = Math.max(0, Number(tenacityPierce));
   const tenacity = Math.max(0, Number(targetTenacity));

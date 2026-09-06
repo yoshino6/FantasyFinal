@@ -1,3 +1,4 @@
+import { buySecondaryFinished } from './secondary-shop.service';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { recordPvpLootSale } from './pvp.service';
@@ -24,20 +25,9 @@ export const alchemistShopCatalog = async (qqUserId: string, page = 1, category 
   return { items: rows.map(row => ({ id: Number(row.id), codexId: row.codex_id, name: row.name, category: row.item_category, description: row.description, price: Number(row.buy_price), stockQuantity: Number(row.stock_quantity), ownedQuantity: Number(row.owned_quantity) })), ...paging, category: selected, keyword: keyword.trim(), copper: Number(character.copper_coins) };
 };
 
-export const buyAlchemistItem = async (qqUserId: string, itemId: number, quantity = 1) => withTransaction(async connection => {
-  const amount = validQuantity(quantity); const character = await characterFor(connection, qqUserId, true);
-  const [rows] = await connection.execute<(ShopRow & { item_id: number })[]>('SELECT i.id AS item_id,i.name,si.buy_price,si.stock_quantity FROM alchemist_shop_items si JOIN item_definitions i ON i.id=si.item_id WHERE si.item_id=? AND si.is_active=1 FOR UPDATE', [itemId]);
-  const item = rows[0]; if (!item) throw new Error('该商品已下架。'); const total = Number(item.buy_price) * amount;
-  if (Number(item.stock_quantity) < amount) throw new Error(`库存不足，剩余 ${item.stock_quantity} 件。`);
-  if (Number(character.copper_coins) < total) throw new Error(`铜币不足，需要 ${total} 铜币。`);
-  await connection.execute('UPDATE characters SET copper_coins=copper_coins-? WHERE id=?', [total, character.id]);
-  await connection.execute('UPDATE alchemist_shop_items SET stock_quantity=stock_quantity-? WHERE item_id=?', [amount, item.item_id]);
-  await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),acquired_at=NOW()', [character.id, item.item_id, amount]);
-  await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [character.id, item.item_id]);
-  return { name: item.name, quantity: amount, price: total };
-});
+export const buyAlchemistItem = async (qqUserId: string, itemId: number, quantity = 1) => buySecondaryFinished(qqUserId, 'alchemy_sweetshop', itemId, quantity);
 
-const alchemistSellable = "pi.character_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0 AND (i.item_category IN ('药剂','食物','粒子','炼材','怪材') OR i.code='healing_herb') AND i.name LIKE ?";
+const alchemistSellable = "pi.character_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0 AND COALESCE(JSON_EXTRACT(i.effect_json,'$.noNpcSale'),0)=0 AND (i.item_category IN ('药剂','食物','粒子','炼材','怪材') OR i.code='healing_herb') AND i.name LIKE ?";
 
 export const alchemistSellCatalog = async (qqUserId: string, page = 1, keyword = '') => {
   const pool = await getPool(); const character = await characterFor(pool, qqUserId); const term = `%${keyword.trim()}%`;
@@ -53,7 +43,7 @@ export const sellAlchemistItem = async (qqUserId: string, itemId: number, quanti
   const amount = validQuantity(quantity); const character = await characterFor(connection, qqUserId, true);
   const [rows] = await connection.execute<SellRow[]>(`SELECT i.id,i.name,i.item_category,pi.quantity,CEIL(i.trade_price*1.15) AS sell_price
     FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id
-    WHERE pi.character_id=? AND pi.item_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0
+    WHERE pi.character_id=? AND pi.item_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0 AND COALESCE(JSON_EXTRACT(i.effect_json,'$.noNpcSale'),0)=0
       AND (i.item_category IN ('药剂','食物','粒子','炼材','怪材') OR i.code='healing_herb') FOR UPDATE`, [character.id, itemId]);
   const item = rows[0]; if (!item) throw new Error('晴儿只收购药剂、食物、草药与炼金相关素材。');
   if (Number(item.quantity) < amount) throw new Error(`背包数量不足，当前仅有 ${item.quantity} 个。`);

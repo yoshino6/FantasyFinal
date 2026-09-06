@@ -1,13 +1,16 @@
+import { consumeInventory, grantInventory, productionBinding, type Binding } from './inventory-binding';
+import { alchemyMaterialValue, alchemyQualityRoll, alchemyQualityBudget, alchemyCostQualityBudget, alchemySupportsQuality, alchemySuccessRate } from './alchemy-balance';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { materialValueMultiplierForLevel, purifiedCraftOutputFor } from './monster-crafting-material.service';
 import { alchemyOutputsAtOrBelow, type AlchemyOutputDefinition, type AlchemyTag } from './alchemy-catalog';
 import { requireNpcAtCurrentPosition } from './adventure.service';
 import { secondaryProfessionBonus, secondaryProfessionMaxLevel, secondaryProfessionProficiencyRequired } from './secondary-profession';
+import { alchemyFingerprint, alchemyRuleVersion, scanAlchemyCombinations, validAlchemyCombination, type AlchemyBatch, type AlchemySearch, type AlchemySnapshot } from './alchemy-journal';
+import { createCraftRequest, craftRequestFor, completeCraftRequest, invalidateCraftRequests, recordAlchemyJournal, alchemyJournalDetail, craftJson } from './alchemy-journal.service';
 
 const questCode = 'alchemist_apprentice';
 const sweetshopCode = 'alchemy_sweetshop';
-const sweetshopAlchemistLevel = 3;
 
 const characterIdFor = async (connection: PoolConnection | Awaited<ReturnType<typeof getPool>>, qqUserId: string, lock = false) => {
   const [rows] = await connection.execute<(RowDataPacket & { id: number })[]>(`SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1${lock ? ' FOR UPDATE' : ''}`, [qqUserId]);
@@ -83,9 +86,9 @@ const alchemistProgressFor = async (connection: PoolConnection | Awaited<ReturnT
 const activeAlchemistProgressFor = async (connection: PoolConnection | Awaited<ReturnType<typeof getPool>>, qqUserId: string, characterId: number, lock = false): Promise<AlchemistProgress> => {
   const [sessions] = await connection.execute<(RowDataPacket & { service_mode: AlchemyServiceMode })[]>(`SELECT service_mode FROM player_alchemy_sessions WHERE character_id=?${lock ? ' FOR UPDATE' : ''}`, [characterId]);
   if (sessions[0]?.service_mode === 'sweetshop') {
-    await requireNpcAtCurrentPosition(qqUserId, sweetshopCode);
-    return { level: sweetshopAlchemistLevel, proficiency: 0, required: proficiencyRequired(sweetshopAlchemistLevel), bonus: secondaryProfessionBonus(sweetshopAlchemistLevel), serviceMode: 'sweetshop' };
+    throw new Error('城镇副职业商店现仅出售成品，请从个人副职业面板操作。');
   }
+  void qqUserId;
   return alchemistProgressFor(connection, characterId, lock);
 };
 const addAlchemistProficiency = async (connection: PoolConnection, qqUserId: string, characterId: number, amount = 1) => {
@@ -113,11 +116,7 @@ export const activatePersonalAlchemy = async (qqUserId: string) => withTransacti
 });
 export const activateSweetshopAlchemy = async (qqUserId: string) => {
   await requireNpcAtCurrentPosition(qqUserId, sweetshopCode);
-  await withTransaction(async connection => {
-    const characterId = await characterIdFor(connection, qqUserId, true);
-    await assertAlchemyNotProcessingFor(connection, characterId, true);
-    await connection.execute("INSERT INTO player_alchemy_sessions (character_id,service_mode) VALUES (?,'sweetshop') ON DUPLICATE KEY UPDATE service_mode='sweetshop'", [characterId]);
-  });
+  throw new Error('城镇副职业商店现仅出售成品，请从个人副职业面板操作。');
 };
 
 export const purificationMaterials = async (qqUserId: string) => {
@@ -154,57 +153,72 @@ const rolledPurificationQuantity = (quantity: number, success: number, valueMult
   }
   return output;
 };
-export const bulkPurificationPreview = async (qqUserId: string) => {
-  const pool = await getPool(); const characterId = await characterIdFor(pool, qqUserId); const progress = await activeAlchemistProgressFor(pool, qqUserId, characterId);
+export const bulkPurificationPreview = async (qqUserId: string) => withTransaction(async pool => {
+  const characterId = await characterIdFor(pool, qqUserId,true); const progress = await activeAlchemistProgressFor(pool, qqUserId, characterId);
   const items = await bulkPurificationItemsFor(pool, characterId); const outputs = await bulkPurificationOutputsFor(pool, items); const success = purificationSuccess(progress.bonus);
-  return { success, materials: items.map(item => ({ ...item, outputName: outputs.get(item.outputCode)?.name ?? '未知产物', expectedOutput: item.quantity * success / 100 * materialValueMultiplierForLevel(materialLevelFor(item)) })) };
-};
-export const purificationState = async (qqUserId: string) => {
-  const pool = await getPool(); const characterId = await characterIdFor(pool, qqUserId); const progress = await activeAlchemistProgressFor(pool, qqUserId, characterId);
+  const token=await createCraftRequest(pool,characterId,'bulk_purification',{fingerprint:alchemyFingerprint({items:items.map(item=>[item.id,item.quantity]),level:progress.level,version:alchemyRuleVersion})});
+  return { token,success, materials: items.map(item => ({ ...item, outputName: outputs.get(item.outputCode)?.name ?? '未知产物', expectedOutput: item.quantity * success / 100 * materialValueMultiplierForLevel(materialLevelFor(item)) })) };
+});
+export const purificationState = async (qqUserId: string) => withTransaction(async pool => {
+  const characterId = await characterIdFor(pool, qqUserId,true); const progress = await activeAlchemistProgressFor(pool, qqUserId, characterId);
   const [rows] = await pool.execute<(RowDataPacket & { item_id: number | null; quantity: number; code: string | null; name: string | null; item_category: string; effect_json: unknown; available: number | null })[]>(`SELECT s.purification_item_id AS item_id,s.purification_quantity AS quantity,i.code,i.name,i.item_category,i.effect_json,pi.quantity AS available FROM player_alchemy_sessions s LEFT JOIN item_definitions i ON i.id=s.purification_item_id LEFT JOIN player_inventory pi ON pi.character_id=s.character_id AND pi.item_id=s.purification_item_id WHERE s.character_id=?`, [characterId]);
   const row = rows[0]; const amount = Number(row?.quantity ?? 0); const outputCode = row?.code ? purificationOutputFor(row.code) : undefined;
   const [outputs] = outputCode ? await pool.execute<(RowDataPacket & { name: string })[]>('SELECT name FROM item_definitions WHERE code=? LIMIT 1', [outputCode]) : [[] as any];
   const success = purificationSuccess(progress.bonus);
   const sourceLevel = row ? materialLevelFor({ code: row.code ?? '', name: row.name ?? '', item_category: row.item_category, effect_json: row.effect_json }) : 1;
-  return { progress, itemId: row?.item_id ? Number(row.item_id) : null, name: row?.name ?? null, quantity: amount, available: Number(row?.available ?? 0), outputCode, outputName: outputs[0]?.name ?? null, expectedOutput: amount * success / 100 * materialValueMultiplierForLevel(sourceLevel), success };
-};
+  const token=amount>0?await createCraftRequest(pool,characterId,'purification',{fingerprint:alchemyFingerprint({itemId:Number(row?.item_id),quantity:amount,level:progress.level,version:alchemyRuleVersion})}):undefined;
+  return { token,progress, itemId: row?.item_id ? Number(row.item_id) : null, name: row?.name ?? null, quantity: amount, available: Number(row?.available ?? 0), outputCode, outputName: outputs[0]?.name ?? null, expectedOutput: amount * success / 100 * materialValueMultiplierForLevel(sourceLevel), success };
+});
 export const selectPurificationMaterial = async (qqUserId: string, itemId: number, quantity = 10) => withTransaction(async connection => {
   if (!Number.isInteger(quantity) || quantity < 1) throw new Error('提纯数量至少为 1。');
-  const characterId = await characterIdFor(connection, qqUserId, true); await activeAlchemistProgressFor(connection, qqUserId, characterId, true);
+  const characterId = await characterIdFor(connection, qqUserId, true); await activeAlchemistProgressFor(connection, qqUserId, characterId, true);await invalidateCraftRequests(connection,characterId,'purification');
   const [items] = await connection.execute<AlchemyItemRow[]>(`SELECT i.id,i.code,i.name,i.item_category,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.id=? FOR UPDATE`, [characterId, itemId]);
   const item = items[0]; if (!item || !purificationOutputFor(item.code)) throw new Error('该材料暂时无法提纯。'); if (quantity > Number(item.quantity)) throw new Error(`材料不足，最多可放入 ${item.quantity} 份。`);
   await connection.execute('INSERT INTO player_alchemy_sessions (character_id,purification_item_id,purification_quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE purification_item_id=VALUES(purification_item_id),purification_quantity=VALUES(purification_quantity)', [characterId, itemId, quantity]);
 });
 export const clearPurificationMaterial = async (qqUserId: string) => withTransaction(async connection => {
-  const characterId = await characterIdFor(connection, qqUserId, true); await activeAlchemistProgressFor(connection, qqUserId, characterId, true);
+  const characterId = await characterIdFor(connection, qqUserId, true); await activeAlchemistProgressFor(connection, qqUserId, characterId, true);await invalidateCraftRequests(connection,characterId,'purification');
   await connection.execute('UPDATE player_alchemy_sessions SET purification_item_id=NULL,purification_quantity=0 WHERE character_id=?', [characterId]);
 });
-export const executePurification = async (qqUserId: string) => withTransaction(async connection => {
-  const characterId = await characterIdFor(connection, qqUserId, true); const progress = await activeAlchemistProgressFor(connection, qqUserId, characterId, true);
+export const executePurification = async (qqUserId: string,requestToken?:string) => withTransaction(async connection => {
+  const characterId = await characterIdFor(connection, qqUserId, true);
+  if(!requestToken)throw new Error('请打开提纯面板确认实际耗材后再开始。');
+  const request=await craftRequestFor<{fingerprint:string}>(connection,characterId,'purification',requestToken);
+  if(request.result)return request.result as {succeeded:boolean;inputName:string;inputQuantity:number;outputName:string;outputQuantity:number;success:number;proficiencyGain:number;progress:AlchemistProgress;journalId:number};
+  const progress = await activeAlchemistProgressFor(connection, qqUserId, characterId, true);
   const [rows] = await connection.execute<(AlchemyItemRow & { selected: number })[]>(`SELECT i.id,i.code,i.name,i.item_category,i.effect_json,pi.quantity,s.purification_quantity AS selected FROM player_alchemy_sessions s JOIN player_inventory pi ON pi.character_id=s.character_id AND pi.item_id=s.purification_item_id JOIN item_definitions i ON i.id=s.purification_item_id WHERE s.character_id=? FOR UPDATE`, [characterId]);
   const item = rows[0]; const selected = Number(item?.selected ?? 0); const outputCode = item ? purificationOutputFor(item.code) : undefined;
   if (!item || !outputCode || selected < 1 || Number(item.quantity) < selected) throw new Error('请先放入足够的可提纯材料。');
+  if(request.snapshot.fingerprint!==alchemyFingerprint({itemId:Number(item.id),quantity:selected,level:progress.level,version:alchemyRuleVersion}))throw new Error('提纯耗材或制作条件已改变，请重新预览。');
   const success = purificationSuccess(progress.bonus);
   const outputQuantity = rolledPurificationQuantity(selected, success, materialValueMultiplierForLevel(materialLevelFor(item)));
   const succeeded = outputQuantity > 0;
-  await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [selected, characterId, item.id]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [characterId, item.id]);
+  const usedBinding=await consumeInventory(connection,characterId,Number(item.id),selected);
   const [outputs] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>('SELECT id,name FROM item_definitions WHERE code=? LIMIT 1 FOR UPDATE', [outputCode]); if (!outputs[0]) throw new Error('精材料配方尚未初始化，请重启机器人。');
-  if (succeeded) { await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity)', [characterId, outputs[0].id, outputQuantity]); await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [characterId, outputs[0].id]); }
+  if (succeeded) { await grantInventory(connection,characterId,Number(outputs[0].id),productionBinding(usedBinding,outputQuantity,false)); await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [characterId, outputs[0].id]); }
   await connection.execute('UPDATE player_alchemy_sessions SET purification_item_id=NULL,purification_quantity=0 WHERE character_id=?', [characterId]); const proficiencyGain = Math.round(selected * mapMaterialProficiencyGain(item)); const next = await addAlchemistProficiency(connection, qqUserId, characterId, proficiencyGain);
-  return { succeeded, inputName: item.name, inputQuantity: selected, outputName: outputs[0].name, outputQuantity, success, proficiencyGain, progress: next };
+  const token = requestToken;
+  const journalId = await recordAlchemyJournal(connection,characterId,token,{kind:'purification',source:'single',version:alchemyRuleVersion,level:progress.level,craftsmanship:0,ingredients:[{id:Number(item.id),code:item.code,name:item.name,quantity:selected,role:'提纯耗材',effect:item.effect_json}]},[{success:succeeded,outputs:succeeded?[{id:Number(outputs[0].id),code:outputCode,name:outputs[0].name,quantity:outputQuantity,role:'output'}]:[]}],{success});
+  const result = { succeeded, inputName: item.name, inputQuantity: selected, outputName: outputs[0].name, outputQuantity, success, proficiencyGain, progress: next, journalId };
+  await completeCraftRequest(connection,characterId,token,result); return result;
 });
-export const executeBulkPurification = async (qqUserId: string) => withTransaction(async connection => {
-  const characterId = await characterIdFor(connection, qqUserId, true); const progress = await activeAlchemistProgressFor(connection, qqUserId, characterId, true);
+export const executeBulkPurification = async (qqUserId: string, requestToken?:string) => withTransaction(async connection => {
+  const characterId = await characterIdFor(connection, qqUserId, true);
+  if(!requestToken) throw new Error('请重新打开一键提纯预览并确认。');
+  const request=await craftRequestFor<{fingerprint:string}>(connection,characterId,'bulk_purification',requestToken);
+  if(request.result) return request.result as {inputQuantity:number;outputQuantity:number;outputs:{name:string;quantity:number}[];success:number;proficiencyGain:number;progress:AlchemistProgress;journalId:number};
+  const progress = await activeAlchemistProgressFor(connection, qqUserId, characterId, true);
   const items = await bulkPurificationItemsFor(connection, characterId, true);
+  if(request.snapshot.fingerprint!==alchemyFingerprint({items:items.map(item=>[item.id,item.quantity]),level:progress.level,version:alchemyRuleVersion})) throw new Error('库存或提纯条件已改变，请重新预览。');
   if (!items.length) throw new Error('背包中没有可一键提纯的普通或大型怪材。');
   const outputs = await bulkPurificationOutputsFor(connection, items); const success = purificationSuccess(progress.bonus);
   const results = new Map<string, { name: string; quantity: number }>(); let inputQuantity = 0; let proficiencyGain = 0;
   for (const item of items) {
     const output = outputs.get(item.outputCode); if (!output) throw new Error('精材料配方尚未初始化，请重启机器人。');
     const outputQuantity = rolledPurificationQuantity(item.quantity, success, materialValueMultiplierForLevel(materialLevelFor(item))); inputQuantity += item.quantity; proficiencyGain += item.quantity * mapMaterialProficiencyGain(item);
-    await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [item.quantity, characterId, item.id]);
+    const usedBinding=await consumeInventory(connection,characterId,Number(item.id),Number(item.quantity));
     if (outputQuantity > 0) {
-      await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity)', [characterId, output.id, outputQuantity]);
+      await grantInventory(connection,characterId,Number(output.id),productionBinding(usedBinding,outputQuantity,false));
       await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [characterId, output.id]);
       const current = results.get(item.outputCode) ?? { name: output.name, quantity: 0 }; current.quantity += outputQuantity; results.set(item.outputCode, current);
     }
@@ -212,7 +226,10 @@ export const executeBulkPurification = async (qqUserId: string) => withTransacti
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND quantity<=0', [characterId]);
   await connection.execute(`UPDATE player_alchemy_sessions SET purification_item_id=NULL,purification_quantity=0 WHERE character_id=? AND purification_item_id IN (${items.map(() => '?').join(',')})`, [characterId, ...items.map(item => item.id)]);
   const earnedProficiency = Math.round(proficiencyGain); const next = await addAlchemistProficiency(connection, qqUserId, characterId, earnedProficiency);
-  return { inputQuantity, outputQuantity: [...results.values()].reduce((total, result) => total + result.quantity, 0), outputs: [...results.values()], success, proficiencyGain: earnedProficiency, progress: next };
+  const token = requestToken;
+  const journalId = await recordAlchemyJournal(connection,characterId,token,{kind:'purification',source:'bulk',version:alchemyRuleVersion,level:progress.level,craftsmanship:0,ingredients:items.map(item=>({id:item.id,code:item.code,name:item.name,quantity:item.quantity,role:'提纯耗材',effect:item.effect_json}))},[{success:results.size>0,outputs:[...results].map(([code,item])=>({id:outputs.get(code)!.id,code,name:item.name,quantity:item.quantity,role:'output'}))}],{success});
+  const result = { inputQuantity, outputQuantity: [...results.values()].reduce((total, result) => total + result.quantity, 0), outputs: [...results.values()], success, proficiencyGain: earnedProficiency, progress: next, journalId };
+  await completeCraftRequest(connection,characterId,token,result); return result;
 });
 
 const jsonRecord = (value: unknown): Record<string, unknown> => {
@@ -280,21 +297,24 @@ const randomWeighted = <T>(entries: readonly T[], weight: (entry: T) => number) 
   for (const entry of entries) { roll -= Math.max(0, weight(entry)); if (roll <= 0) return entry; }
   return entries[entries.length - 1];
 };
-const selectDynamicOutput = (main: DynamicAlchemyMaterial, auxiliary: DynamicAlchemyMaterial, reagent: DynamicAlchemyMaterial) => {
+const dynamicOutputDistribution = (main: DynamicAlchemyMaterial, auxiliary: DynamicAlchemyMaterial, reagent: DynamicAlchemyMaterial) => {
   const nonParticlePrimary = [main, auxiliary].filter(item => !item.isParticle);
   const effectiveLevel = nonParticlePrimary.length ? Math.min(...nonParticlePrimary.map(item => item.sourceLevel)) : 1;
   const materialTier = nonParticlePrimary.length ? Math.min(...nonParticlePrimary.map(item => item.tier)) : 1;
   const maxTier = maxOutputTierFor(effectiveLevel);
   const tags = [...main.tags, ...auxiliary.tags, ...reagent.tags];
-  const candidates = alchemyOutputsAtOrBelow(effectiveLevel).filter(output => outputTierValue(output.tier) <= maxTier);
+  const pool = alchemyOutputsAtOrBelow(effectiveLevel).filter(output => outputTierValue(output.tier) <= maxTier);
+  const levels = [...new Set(pool.map(output => output.level))].sort((a,b)=>b-a).slice(0,2);
+  const candidates = pool.filter(output => levels.includes(output.level));
   if (!candidates.length) throw new Error('当前材料尚不能稳定形成炼金成品。');
-  return randomWeighted(candidates, output => {
+  const weighted=candidates.map(output => {
     const tagScore = output.tags.reduce((score, tag) => score + tags.filter(value => value === tag).length * 4, 0);
     const levelScore = output.level === 1 ? 1 : 2 + Math.max(0, 3 - Math.abs(output.level - effectiveLevel) / 10);
     // 怪材阶位不会把同等级材料锁死在低阶成品，而是提高高位成品在相同等级池中的权重。
     const rarityScore = 1 + Math.max(0, outputTierValue(output.tier) - 1) * Math.max(0, materialTier - 1) * .25;
-    return (1 + tagScore + levelScore) * rarityScore;
+    return {output,weight:(1 + tagScore + levelScore) * rarityScore * (output.level === levels[0] ? 4 : 1)};
   });
+  const total=weighted.reduce((sum,item)=>sum+item.weight,0);return weighted.map(item=>({...item,probability:item.weight/total}));
 };
 const particleConversionChance = (main: DynamicAlchemyMaterial, auxiliary: DynamicAlchemyMaterial) => main.isParticle && auxiliary.isParticle ? 95 : main.isParticle ? 80 : auxiliary.isParticle ? 70 : 0;
 const particleOutputCodeFor = (main: DynamicAlchemyMaterial, auxiliary: DynamicAlchemyMaterial, reagent: DynamicAlchemyMaterial) => {
@@ -329,9 +349,10 @@ export const selectAlchemyMaterial = async (qqUserId: string, role: 'main' | 'au
   const characterId = await characterIdFor(connection, qqUserId, true); await activeAlchemistProgressFor(connection, qqUserId, characterId, true); await assertAlchemyNotProcessingFor(connection, characterId, true); const itemId = Number(itemKey);
   const [items] = await connection.execute<AlchemyItemRow[]>(`SELECT i.id,i.code,i.name,i.item_category,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type='material' AND ${Number.isInteger(itemId) && itemId > 0 ? 'i.id=?' : 'i.name=?'} LIMIT 1 FOR UPDATE`, [characterId, Number.isInteger(itemId) && itemId > 0 ? itemId : itemKey]);
   const item = items[0]; if (!item) throw new Error('背包中没有该材料。'); if (Number(item.quantity) < quantity) throw new Error(`材料不足，最多可放入 ${item.quantity} 份。`); const column = role === 'main' ? 'main_item_id' : role === 'auxiliary' ? 'auxiliary_item_id' : 'reagent_item_id'; const quantityColumn = role === 'main' ? 'main_quantity' : role === 'auxiliary' ? 'auxiliary_quantity' : 'reagent_quantity';
+  await invalidateCraftRequests(connection, characterId);
   await connection.execute(`INSERT INTO player_alchemy_sessions (character_id,${column},${quantityColumn},alchemy_confirmation_expires_at) VALUES (?,?,?,NULL) ON DUPLICATE KEY UPDATE ${column}=VALUES(${column}),${quantityColumn}=VALUES(${quantityColumn}),alchemy_confirmation_expires_at=NULL`, [characterId, item.id, quantity]); return item.name;
 });
-export const clearAlchemyMaterial = async (qqUserId: string, role: 'main' | 'auxiliary' | 'reagent') => withTransaction(async connection => { const characterId = await characterIdFor(connection, qqUserId, true); await activeAlchemistProgressFor(connection, qqUserId, characterId, true); await assertAlchemyNotProcessingFor(connection, characterId, true); const column = role === 'main' ? 'main_item_id' : role === 'auxiliary' ? 'auxiliary_item_id' : 'reagent_item_id'; const quantityColumn = role === 'main' ? 'main_quantity' : role === 'auxiliary' ? 'auxiliary_quantity' : 'reagent_quantity'; await connection.execute(`UPDATE player_alchemy_sessions SET ${column}=NULL,${quantityColumn}=1,alchemy_confirmation_expires_at=NULL WHERE character_id=?`, [characterId]); });
+export const clearAlchemyMaterial = async (qqUserId: string, role: 'main' | 'auxiliary' | 'reagent') => withTransaction(async connection => { const characterId = await characterIdFor(connection, qqUserId, true); await activeAlchemistProgressFor(connection, qqUserId, characterId, true); await assertAlchemyNotProcessingFor(connection, characterId, true); await invalidateCraftRequests(connection, characterId); const column = role === 'main' ? 'main_item_id' : role === 'auxiliary' ? 'auxiliary_item_id' : 'reagent_item_id'; const quantityColumn = role === 'main' ? 'main_quantity' : role === 'auxiliary' ? 'auxiliary_quantity' : 'reagent_quantity'; await connection.execute(`UPDATE player_alchemy_sessions SET ${column}=NULL,${quantityColumn}=1,alchemy_confirmation_expires_at=NULL WHERE character_id=?`, [characterId]); });
 
 export const alchemyMaterials = async (qqUserId: string) => {
   const pool = await getPool(); const characterId = await characterIdFor(pool, qqUserId); await activeAlchemistProgressFor(pool, qqUserId, characterId);
@@ -339,18 +360,26 @@ export const alchemyMaterials = async (qqUserId: string) => {
   return rows.map(row => ({ id: Number(row.id), code: row.code, name: row.name, category: row.item_category, quantity: Number(row.quantity) }));
 };
 
-type AlchemyFormulaRow = RowDataPacket & { id: number; name: string; main_item_id: number; auxiliary_item_id: number | null; reagent_item_id: number | null; main_name: string; auxiliary_name: string | null; reagent_name: string | null };
+type AlchemyFormulaRow = RowDataPacket & { main_quantity: number; auxiliary_quantity: number; reagent_quantity: number; id: number; name: string; main_item_id: number; auxiliary_item_id: number | null; reagent_item_id: number | null; main_name: string; auxiliary_name: string | null; reagent_name: string | null };
 const formulaAdjectives = ['晨露', '星辉', '月影', '琥珀', '雾语', '绯红', '晴空', '秘仪'];
 const formulaName = (mainName: string) => `${formulaAdjectives[Math.floor(Math.random() * formulaAdjectives.length)]}·${mainName}试作配方`;
 
-export const saveAlchemyFormula = async (qqUserId: string) => withTransaction(async connection => {
+export const saveAlchemyFormula = async (qqUserId: string, journalId = 0) => withTransaction(async connection => {
   const characterId = await characterIdFor(connection, qqUserId, true); const progress = await activeAlchemistProgressFor(connection, qqUserId, characterId, true); const state = await alchemyStateFor(connection, characterId);
+  if (journalId) {
+    const [records] = await connection.execute<RowDataPacket[]>('SELECT snapshot_json,batches_json FROM player_alchemy_journal WHERE id=? AND character_id=?', [journalId, characterId]);
+    if (!records[0]) throw new Error('未找到你的这条炼金手记。');
+    const snapshot = craftJson<AlchemySnapshot>(records[0].snapshot_json); const batches = craftJson<AlchemyBatch[]>(records[0].batches_json).length;
+    if (snapshot.kind === 'purification' || snapshot.ingredients.length !== 3) throw new Error('提纯记录不是三槽配方。');
+    const [main, auxiliary, reagent] = snapshot.ingredients;
+    Object.assign(state, { main_id: main!.id, main_name: main!.name, main_quantity: main!.quantity * batches, auxiliary_id: auxiliary!.id, auxiliary_quantity: auxiliary!.quantity * batches, reagent_id: reagent!.id, reagent_quantity: reagent!.quantity * batches });
+  }
   if (!state.main_id || !state.main_name) throw new Error('请先选择主材后再保存配方。');
   const [counts] = await connection.execute<(RowDataPacket & { total: number })[]>('SELECT COUNT(*) AS total FROM player_alchemy_formulas WHERE character_id=? FOR UPDATE', [characterId]);
   const capacity = Math.max(1, Number(progress.level)) * 3;
   if (Number(counts[0]?.total ?? 0) >= capacity) throw new Error(`快捷配方已满（${counts[0]?.total ?? 0}/${capacity}）。提升炼金师等级可增加上限。`);
   const name = formulaName(state.main_name);
-  const [result] = await connection.execute<any>('INSERT INTO player_alchemy_formulas (character_id,name,main_item_id,auxiliary_item_id,reagent_item_id) VALUES (?,?,?,?,?)', [characterId, name, state.main_id, state.auxiliary_id, state.reagent_id]);
+  const [result] = await connection.execute<any>('INSERT INTO player_alchemy_formulas (character_id,name,main_item_id,auxiliary_item_id,reagent_item_id,main_quantity,auxiliary_quantity,reagent_quantity) VALUES (?,?,?,?,?,?,?,?)', [characterId, name, state.main_id, state.auxiliary_id, state.reagent_id, state.main_quantity, state.auxiliary_quantity, state.reagent_quantity]);
   return { id: Number(result.insertId), name, capacity };
 });
 
@@ -358,10 +387,10 @@ export const alchemyFormulaList = async (qqUserId: string, page = 1, keyword = '
   const pool = await getPool(); const characterId = await characterIdFor(pool, qqUserId); const progress = await activeAlchemistProgressFor(pool, qqUserId, characterId);
   const [countRows] = await pool.execute<(RowDataPacket & { total: number })[]>('SELECT COUNT(*) AS total FROM player_alchemy_formulas WHERE character_id=? AND name LIKE ?', [characterId, `%${keyword}%`]);
   const total = Number(countRows[0]?.total ?? 0); const totalPages = Math.max(1, Math.ceil(total / 5)); const currentPage = Math.min(Math.max(1, page), totalPages);
-  const [rows] = await pool.execute<AlchemyFormulaRow[]>(`SELECT f.id,f.name,f.main_item_id,f.auxiliary_item_id,f.reagent_item_id,m.name AS main_name,a.name AS auxiliary_name,r.name AS reagent_name
+  const [rows] = await pool.execute<AlchemyFormulaRow[]>(`SELECT f.id,f.name,f.main_quantity,f.auxiliary_quantity,f.reagent_quantity,f.main_item_id,f.auxiliary_item_id,f.reagent_item_id,m.name AS main_name,a.name AS auxiliary_name,r.name AS reagent_name
     FROM player_alchemy_formulas f JOIN item_definitions m ON m.id=f.main_item_id LEFT JOIN item_definitions a ON a.id=f.auxiliary_item_id LEFT JOIN item_definitions r ON r.id=f.reagent_item_id
     WHERE f.character_id=? AND f.name LIKE ? ORDER BY f.created_at,f.id LIMIT ? OFFSET ?`, [characterId, `%${keyword}%`, 5, (currentPage - 1) * 5]);
-  return { capacity: Math.max(1, Number(progress.level)) * 3, total, page: currentPage, totalPages, keyword, formulas: rows.map(row => ({ id: Number(row.id), name: row.name, mainName: row.main_name, auxiliaryName: row.auxiliary_name, reagentName: row.reagent_name })) };
+  return { capacity: Math.max(1, Number(progress.level)) * 3, total, page: currentPage, totalPages, keyword, formulas: rows.map(row => ({ id: Number(row.id), name: row.name, mainName: row.main_name, auxiliaryName: row.auxiliary_name, reagentName: row.reagent_name,mainQuantity:Number(row.main_quantity),auxiliaryQuantity:Number(row.auxiliary_quantity),reagentQuantity:Number(row.reagent_quantity) })) };
 };
 
 export const renameAlchemyFormula = async (qqUserId: string, formulaId: number, name: string) => withTransaction(async connection => {
@@ -373,9 +402,9 @@ export const renameAlchemyFormula = async (qqUserId: string, formulaId: number, 
 
 export const loadAlchemyFormula = async (qqUserId: string, formulaId: number) => withTransaction(async connection => {
   const characterId = await characterIdFor(connection, qqUserId, true); await activeAlchemistProgressFor(connection, qqUserId, characterId, true); await assertAlchemyNotProcessingFor(connection, characterId, true);
-  const [rows] = await connection.execute<AlchemyFormulaRow[]>('SELECT f.id,f.name,f.main_item_id,f.auxiliary_item_id,f.reagent_item_id,m.name AS main_name,a.name AS auxiliary_name,r.name AS reagent_name FROM player_alchemy_formulas f JOIN item_definitions m ON m.id=f.main_item_id LEFT JOIN item_definitions a ON a.id=f.auxiliary_item_id LEFT JOIN item_definitions r ON r.id=f.reagent_item_id WHERE f.id=? AND f.character_id=? FOR UPDATE', [formulaId, characterId]);
+  const [rows] = await connection.execute<AlchemyFormulaRow[]>('SELECT f.id,f.name,f.main_quantity,f.auxiliary_quantity,f.reagent_quantity,f.main_item_id,f.auxiliary_item_id,f.reagent_item_id,m.name AS main_name,a.name AS auxiliary_name,r.name AS reagent_name FROM player_alchemy_formulas f JOIN item_definitions m ON m.id=f.main_item_id LEFT JOIN item_definitions a ON a.id=f.auxiliary_item_id LEFT JOIN item_definitions r ON r.id=f.reagent_item_id WHERE f.id=? AND f.character_id=? FOR UPDATE', [formulaId, characterId]);
   const formula = rows[0]; if (!formula) throw new Error('未找到该快捷配方。');
-  await connection.execute('INSERT INTO player_alchemy_sessions (character_id,main_item_id,auxiliary_item_id,reagent_item_id,main_quantity,auxiliary_quantity,reagent_quantity,alchemy_confirmation_expires_at) VALUES (?,?,?,?,1,1,1,NULL) ON DUPLICATE KEY UPDATE main_item_id=VALUES(main_item_id),auxiliary_item_id=VALUES(auxiliary_item_id),reagent_item_id=VALUES(reagent_item_id),main_quantity=1,auxiliary_quantity=1,reagent_quantity=1,alchemy_confirmation_expires_at=NULL', [characterId, formula.main_item_id, formula.auxiliary_item_id, formula.reagent_item_id]);
+  await setAlchemySlots(connection, characterId, [{ id: Number(formula.main_item_id), quantity: Number(formula.main_quantity) }, { id: Number(formula.auxiliary_item_id), quantity: Number(formula.auxiliary_quantity) }, { id: Number(formula.reagent_item_id), quantity: Number(formula.reagent_quantity) }]);
   return formula.name;
 });
 
@@ -391,6 +420,10 @@ export const cancelAlchemyConfirmation = async (qqUserId: string) => withTransac
 });
 
 type DynamicAlchemyResult = {
+  averageCost?: number;
+  token?: string;
+  journalId?: number;
+  preview?: { note?:string; ingredients: { id: number; name: string; quantity: number; role: string }[]; warning: boolean };
   needsConfirmation?: boolean;
   succeeded?: boolean;
   batches?: number;
@@ -403,58 +436,86 @@ type DynamicAlchemyResult = {
   progress?: { level: number; proficiency: number; required: number; bonus: number };
 };
 
-export const executeAlchemy = async (qqUserId: string, confirmed = false): Promise<DynamicAlchemyResult> => withTransaction(async connection => {
-  const characterId = await characterIdFor(connection, qqUserId, true); const progress = await activeAlchemistProgressFor(connection, qqUserId, characterId, true); const state = await alchemyStateFor(connection, characterId);
+export const executeAlchemy = async (qqUserId: string, token?: string, origin='manual', note?:string): Promise<DynamicAlchemyResult> => withTransaction(async connection => {
+  const characterId = await characterIdFor(connection, qqUserId, true);
+  const request = token ? await craftRequestFor<{ fingerprint: string; origin?:string; note?:string }>(connection, characterId, 'alchemy', token) : null;
+  if (request?.result) return request.result as DynamicAlchemyResult;
+  const progress = await activeAlchemistProgressFor(connection, qqUserId, characterId, true); const state = await alchemyStateFor(connection, characterId);
   await assertAlchemyNotProcessingFor(connection, characterId, true);
   if (!state.main_id || !state.auxiliary_id || !state.reagent_id) throw new Error('请先分别放入主材、辅材与反应剂。');
   const roleRows = [
     { role: '主材', id: Number(state.main_id), quantity: Math.max(1, Number(state.main_quantity)) },
     { role: '辅材', id: Number(state.auxiliary_id), quantity: Math.max(1, Number(state.auxiliary_quantity)) },
-    { role: '反应剂', id: Number(state.reagent_id), quantity: Math.max(1, Number(state.reagent_quantity)) }
+    { role: '催化剂', id: Number(state.reagent_id), quantity: Math.max(1, Number(state.reagent_quantity)) }
   ];
   const ids = [...new Set(roleRows.map(row => row.id))]; const marks = ids.map(() => '?').join(',');
   const [items] = await connection.execute<AlchemyItemRow[]>(`SELECT i.id,i.code,i.name,i.item_category,i.effect_json,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.id IN (${marks}) AND i.item_type='material' FOR UPDATE`, [characterId, ...ids]);
   const getMaterial = (id: number) => {
     const item = items.find(row => Number(row.id) === id);
     if (!item) throw new Error('选中的材料已不在背包中。');
+    if(jsonRecord(item.effect_json).automatonProduct || item.code==='sky_dust')throw new Error('机巧专用材料与天空粉尘请使用机巧固定配方。');
     return dynamicMaterialFor(item);
   };
   const main = getMaterial(roleRows[0]!.id); const auxiliary = getMaterial(roleRows[1]!.id); const reagent = getMaterial(roleRows[2]!.id);
   const sourceLevels = [main, auxiliary, reagent].filter(item => !item.isParticle).map(item => item.sourceLevel);
   const levelGap = sourceLevels.length > 1 ? Math.max(...sourceLevels) - Math.min(...sourceLevels) : 0;
-  if (levelGap >= 15 && !confirmed) {
-    await connection.execute('INSERT INTO player_alchemy_sessions (character_id,alchemy_confirmation_expires_at) VALUES (?,DATE_ADD(NOW(),INTERVAL 2 MINUTE)) ON DUPLICATE KEY UPDATE alchemy_confirmation_expires_at=VALUES(alchemy_confirmation_expires_at)', [characterId]);
-    return { needsConfirmation: true };
-  }
-  if (levelGap >= 15 && confirmed) {
-    const expiry = state.confirmation_expires_at ? new Date(state.confirmation_expires_at).getTime() : 0;
-    if (!expiry || expiry <= Date.now()) throw new Error('炼金风险确认已失效，请重新开始炼金。');
-  }
-  const batches = Math.min(99, ...roleRows.map(row => row.quantity));
+  const extractCode = auxiliary.code === 'blood_residue' && reagent.code === 'energy_ember' ? ({ beast_core: 'mana_dust', living_wood: 'herbal_extract' } as Record<string,string>)[main.code] : undefined;
+  const resetRecipe = main.code === 'mana_dust' && auxiliary.code === 'herbal_extract' && reagent.code === 'magic_unit';
+  if (resetRecipe && (progress.level < 3 || roleRows.some(row => row.quantity !== 3))) throw new Error('归悟洗练露需炼金师 Lv.3，三槽各放入 3 份，本次只制作一批。');
+  const batches = resetRecipe ? 1 : Math.min(99, ...roleRows.map(row => row.quantity));
+  const perBatch = resetRecipe ? 3 : 1;
+  const [craftRows] = await connection.execute<RowDataPacket[]>("SELECT 1 FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND s.code='craftsmanship' LIMIT 1", [characterId]);
+  const craftsmanship = craftRows.length ? Math.min(5, progress.level) * 10 : 0;
+  const fingerprint = alchemyFingerprint({ roleRows, level: progress.level, craftsmanship, version: alchemyRuleVersion });
   const demands = new Map<number, number>();
-  for (const row of roleRows) demands.set(row.id, (demands.get(row.id) ?? 0) + batches);
+  for (const row of roleRows) demands.set(row.id, (demands.get(row.id) ?? 0) + batches * perBatch);
   if ([...demands.entries()].some(([id, demand]) => Number(items.find(item => Number(item.id) === id)?.quantity ?? 0) < demand)) throw new Error('放入的材料总数量不足。');
+  if (!token) {
+    token = await createCraftRequest(connection, characterId, 'alchemy', { fingerprint,origin,note });
+    return { needsConfirmation: true, token, batches, preview: { note,ingredients: roleRows.map(row => ({ ...row, name: getMaterial(row.id).name, quantity: batches * perBatch })), warning: levelGap >= 15 } };
+  }
+  if (request?.snapshot.fingerprint !== fingerprint) throw new Error('投料或制作条件已经改变，请重新预览并确认。');
+  const snapshot: AlchemySnapshot = { kind: resetRecipe ? 'skill_reset' : 'alchemy', source: request?.snapshot.origin??origin, version: alchemyRuleVersion, level: progress.level, craftsmanship,
+    ingredients: roleRows.map(row => { const item = getMaterial(row.id); return { ...row, code: item.code, name: item.name, quantity: perBatch, level: item.sourceLevel, effect: item.effect_json }; }) };
+  const values = [main,auxiliary,reagent].map(item => alchemyMaterialValue(item.code,item.sourceLevel,item.item_category));
+  if(values.some(value=>value===null))throw new Error(`材料【${[main,auxiliary,reagent].filter((_item,index)=>values[index]===null).map(item=>item.name).join('、')}】缺少制作成本锚价，请更换材料；本次未消耗材料。`);
+  snapshot.cost = values.every(value => value !== null) ? values.reduce<number>((sum,value)=>sum+(value??0),0)*perBatch : undefined;
+  const batchRecords: AlchemyBatch[] = [];
+
   const sharedTags = main.tags.filter(tag => auxiliary.tags.includes(tag)); const stability = main.stability + auxiliary.stability + reagent.stability + sharedTags.length * 4 + (reagent.isParticle ? 5 : -5) - (levelGap >= 30 ? 20 : levelGap >= 15 ? 10 : levelGap >= 11 ? 4 : 0);
-  const successRate = Math.max(45, Math.min(92, 64 + (progress.level - 1) * 2 + stability)); const greatRate = Math.max(2, Math.min(18, 3 + (progress.level - 1) * .8 + (reagent.code === 'magic_unit' ? 5 : 0)));
-  const converted = particleConversionChance(main, auxiliary) > 0 && (main.isParticle && auxiliary.isParticle || Math.random() * 100 < particleConversionChance(main, auxiliary));
+  const successRate = alchemySuccessRate(progress.level,stability); const greatRate = Math.max(2, Math.min(18, 3 + (progress.level - 1) * .8 + (reagent.code === 'magic_unit' ? 5 : 0)));
+  const conversionRate=resetRecipe||extractCode?0:main.isParticle&&auxiliary.isParticle?1:particleConversionChance(main,auxiliary)/100;
+  const distribution=resetRecipe||extractCode||conversionRate===1?[]:dynamicOutputDistribution(main,auxiliary,reagent);
+  const normalYield=conversionRate+(1-conversionRate)*distribution.reduce((sum,item)=>sum+item.probability*(1+(outputTierValue(item.output.tier)<=2?greatRate/100:0)),0);
+  const baseCost=snapshot.cost===undefined?undefined:snapshot.cost/(successRate/100*(resetRecipe||extractCode?1+greatRate/100:normalYield));
+  const costBudgetFor=(output:AlchemyOutputDefinition)=>alchemyCostQualityBudget(baseCost,output.level);
+  const expectedProduced=resetRecipe||extractCode?(1+greatRate/100)*(1+craftsmanship/100):conversionRate+(1-conversionRate)*distribution.reduce((sum,item)=>sum+item.probability*(1+(outputTierValue(item.output.tier)<=2?greatRate/100:0))*alchemyQualityBudget(craftsmanship,costBudgetFor(item.output),alchemySupportsQuality(item.output.effect)).quantity,0);
+  const averageCost=snapshot.cost===undefined?undefined:snapshot.cost/(successRate/100*expectedProduced);
+  let conversions=0;
+  const producedBindings = new Map<string,Binding>();
   const produced = new Map<string, number>(); let successes = 0; let greatSuccesses = 0; let failures = 0;
   for (let batch = 0; batch < batches; batch += 1) {
-    if (Math.random() * 100 >= successRate) { failures += 1; continue; }
+    const used:Binding={personal:0,trade:0,unbound:0};for(const [id,quantity] of demands){const part=await consumeInventory(connection,characterId,id,quantity/batches);for(const key of ['personal','trade','unbound'] as const)used[key]+=part[key];}
+    if (Math.random() * 100 >= successRate) { failures += 1; batchRecords.push({ success: false, outputs: [] }); continue; }
     successes += 1;
     const great = Math.random() * 100 < greatRate; if (great) greatSuccesses += 1;
-    const result = converted ? undefined : selectDynamicOutput(main, auxiliary, reagent);
-    const code = converted ? particleOutputCodeFor(main, auxiliary, reagent) : result!.code;
-    const quantity = great && !converted && outputTierValue(result!.tier) <= 2 ? 2 : 1;
+    const converted=conversionRate>0 && Math.random()<conversionRate; if(converted) conversions++;
+    const result = converted || resetRecipe || extractCode ? undefined : randomWeighted(distribution,item=>item.weight)!.output;
+    const quality = alchemyQualityRoll(craftsmanship,great,Boolean(result && outputTierValue(result.tier)>2),Math.random,result?costBudgetFor(result):0,result?alchemySupportsQuality(result.effect):false);
+    const code = extractCode ?? (resetRecipe ? 'alchemy_skill_reset_elixir' : converted ? particleOutputCodeFor(main, auxiliary, reagent) : result!.code + (quality.quality ? `_q${quality.quality}` : ''));
+    const quantity = (great && !converted && (resetRecipe || Boolean(extractCode) || outputTierValue(result!.tier) <= 2) ? 2 : 1) * (converted ? 1 : resetRecipe || extractCode ? (Math.random()<craftsmanship/100?2:1) : quality.quantity);
     produced.set(code, (produced.get(code) ?? 0) + quantity);
+    const bound=productionBinding(used,quantity,!converted),current=producedBindings.get(code)??{personal:0,trade:0,unbound:0};for(const key of ['personal','trade','unbound'] as const)current[key]+=bound[key];producedBindings.set(code,current);
+    batchRecords.push({ success: true, great, outputs: [{ id: 0, code, name: '', quantity, role: 'output' }] });
   }
-  for (const [id, quantity] of demands) await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [quantity, characterId, id]);
+
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND quantity<=0', [characterId]);
-  const codes = [...produced.keys()]; const outputRows = codes.length ? (await connection.execute<(RowDataPacket & { id: number; code: string; name: string })[]>(`SELECT id,code,name FROM item_definitions WHERE code IN (${codes.map(() => '?').join(',')}) FOR UPDATE`, codes))[0] : [];
+  const codes = [...produced.keys()]; const outputRows = codes.length ? (await connection.execute<(RowDataPacket & { id: number; code: string; name: string; required_level: number; effect_json: unknown })[]>(`SELECT id,code,name,required_level,effect_json FROM item_definitions WHERE code IN (${codes.map(() => '?').join(',')}) FOR UPDATE`, codes))[0] : [];
   if (outputRows.length !== codes.length) throw new Error('炼金产物尚未初始化，请重启机器人后重试。');
   const outputEntries: { name: string; quantity: number }[] = [];
   for (const [code, quantity] of produced) {
     const outputRow = outputRows.find(row => row.code === code); if (!outputRow) continue;
-    await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity)', [characterId, outputRow.id, quantity]);
+    await grantInventory(connection,characterId,Number(outputRow.id),producedBindings.get(code)!);
     await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [characterId, outputRow.id]);
     outputEntries.push({ name: outputRow.name, quantity });
   }
@@ -462,9 +523,12 @@ export const executeAlchemy = async (qqUserId: string, confirmed = false): Promi
   const proficiencyGain = alchemyProficiencyGain([main, auxiliary, reagent], batches);
   const next = await addAlchemistProficiency(connection, qqUserId, characterId, proficiencyGain);
   const exploded = failures > 0 && successes === 0 && Math.random() * 100 < Math.max(5, 28 - stability / 2);
-  const sourceText = converted ? '粒子在主反应中占据了主导，反应转入粒子转化路线。' : successes ? randomNarrative(alchemyNarrative.success) : exploded ? randomNarrative(alchemyNarrative.explosion) : randomNarrative(alchemyNarrative.failure);
+  const sourceText = conversions ? '粒子在主反应中占据了主导，反应转入粒子转化路线。' : successes ? randomNarrative(alchemyNarrative.success) : exploded ? randomNarrative(alchemyNarrative.explosion) : randomNarrative(alchemyNarrative.failure);
   const outcome = outputEntries.length ? `获得${outputEntries.map(item => `【${item.name}】×${item.quantity}`).join('、')}。` : exploded ? '本次反应发生炸炉，没有留下可用成品。' : '本次反应没有留下可用成品。';
-  return {
+  for (const batch of batchRecords) for (const item of batch.outputs) { const row = outputRows.find(row => row.code === item.code)!; Object.assign(item, { id: Number(row.id), name: row.name, level: Number(row.required_level), effect: jsonRecord(row.effect_json) }); }
+  const result: DynamicAlchemyResult = {
+    token,
+    averageCost,
     succeeded: successes > 0,
     batches,
     successRate,
@@ -472,9 +536,9 @@ export const executeAlchemy = async (qqUserId: string, confirmed = false): Promi
     failures,
     outputs: outputEntries,
     stages: [
-      `① 主材：投入【${main.name}】×${batches}，${main.tags.join('、')}的性质开始浮现。${randomNarrative(alchemyNarrative.main)}`,
-      `② 辅材：投入【${auxiliary.name}】×${batches}，${randomNarrative(alchemyNarrative.auxiliary)}`,
-      `③ 反应剂：投入【${reagent.name}】×${batches}，它为坩埚提供了${reagent.isParticle ? '元素定型' : '稳定载体'}。${randomNarrative(alchemyNarrative.reagent)}`,
+      `① 主材：投入【${main.name}】×${batches * perBatch}，${main.tags.join('、')}的性质开始浮现。${randomNarrative(alchemyNarrative.main)}`,
+      `② 辅材：投入【${auxiliary.name}】×${batches * perBatch}，${randomNarrative(alchemyNarrative.auxiliary)}`,
+      `③ 催化剂：投入【${reagent.name}】×${batches * perBatch}，它为坩埚提供了${reagent.isParticle ? '元素定型' : '稳定载体'}。${randomNarrative(alchemyNarrative.reagent)}`,
       `④ 反应：${sourceText} 成功 ${successes}/${batches}${greatSuccesses ? `，其中大成功 ${greatSuccesses} 次` : ''}${failures ? `，失败 ${failures} 次` : ''}。`,
       `⑤ 结果：${outcome}`,
       `⑥ 熟练度：炼金熟练度 +${proficiencyGain}`
@@ -482,8 +546,64 @@ export const executeAlchemy = async (qqUserId: string, confirmed = false): Promi
     proficiencyGain,
     progress: next
   };
+  result.journalId = await recordAlchemyJournal(connection, characterId, token, snapshot, batchRecords, result);
+  await completeCraftRequest(connection, characterId, token, result);
+  return result;
 });
 export const finishAlchemyProcessing = async (qqUserId: string) => withTransaction(async connection => {
   const characterId = await characterIdFor(connection, qqUserId, true);
   await connection.execute('UPDATE player_alchemy_sessions SET alchemy_processing_until=NULL WHERE character_id=?', [characterId]);
 });
+
+const setAlchemySlots = async (connection: PoolConnection, characterId: number, items: { id: number; quantity: number }[]) => {
+  if (items.length !== 3 || items.some(item=>!Number.isInteger(item.id)||item.id<1||!Number.isInteger(item.quantity)||item.quantity<1||item.quantity>99)) throw new Error('这条记录不是三槽炼金，请从个人提纯面板操作。');
+  await invalidateCraftRequests(connection, characterId);
+  await connection.execute(`INSERT INTO player_alchemy_sessions (character_id,main_item_id,auxiliary_item_id,reagent_item_id,main_quantity,auxiliary_quantity,reagent_quantity,service_mode)
+    VALUES (?,?,?,?,?,?,?,'personal') ON DUPLICATE KEY UPDATE main_item_id=VALUES(main_item_id),auxiliary_item_id=VALUES(auxiliary_item_id),reagent_item_id=VALUES(reagent_item_id),main_quantity=VALUES(main_quantity),auxiliary_quantity=VALUES(auxiliary_quantity),reagent_quantity=VALUES(reagent_quantity),service_mode='personal',alchemy_confirmation_expires_at=NULL`, [characterId, ...items.map(item => item.id), ...items.map(item => item.quantity)]);
+};
+export const alchemyJournalReload = async (qqUserId: string, journalId: number) => {
+  const journal = await alchemyJournalDetail(qqUserId, journalId);
+  await withTransaction(async connection => {
+    const id = await characterIdFor(connection, qqUserId, true); await alchemistProgressFor(connection, id, true); await assertAlchemyNotProcessingFor(connection, id, true);
+    const missing: string[] = []; const demand = new Map<number, { quantity: number; name: string }>();
+    for (const item of journal.snapshot.ingredients) { const old = demand.get(item.id); demand.set(item.id, { name: item.name, quantity: (old?.quantity ?? 0) + item.quantity * journal.batches.length }); }
+    for (const [itemId, item] of demand) { const [rows] = await connection.execute<RowDataPacket[]>('SELECT quantity FROM player_inventory WHERE character_id=? AND item_id=? FOR UPDATE', [id, itemId]); const gap = item.quantity - Number(rows[0]?.quantity ?? 0); if (gap > 0) missing.push(`【${item.name}】缺少 ${gap} 份`); }
+    if (missing.length) throw new Error(missing.join('；'));
+    await setAlchemySlots(connection, id, journal.snapshot.ingredients.map(item => ({ id: item.id, quantity: item.quantity * journal.batches.length })));
+  });
+  return executeAlchemy(qqUserId,undefined,'journal',`来自手记${journalId}：当时炼金师Lv.${journal.snapshot.level}、匠心${journal.snapshot.craftsmanship}%。请按当前条件确认，历史结果不保证重现。${journal.snapshot.version!==alchemyRuleVersion?'此手记属于旧规则版本。':''}`);
+};
+export const randomAlchemyFormula = async (qqUserId: string, searchToken?: string, replaceToken?: string) => {
+  const selected = await withTransaction(async connection => {
+    const id = await characterIdFor(connection, qqUserId, true); const progress=await activeAlchemistProgressFor(connection, qqUserId, id, true); await assertAlchemyNotProcessingFor(connection, id, true);
+    if (replaceToken) { const old = await craftRequestFor(connection, id, 'alchemy', replaceToken); if (old.result) throw new Error('该炉已经完成，请使用结果底部的继续尝试。'); }
+    const [items] = await connection.execute<RowDataPacket[]>("SELECT i.id,i.code,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type='material' AND i.item_category IN ('怪材','炼材','锻材','粒子','构件','基材') AND i.code NOT IN ('evolution_catalyst','evolution_stable_medium','sky_dust','automaton_body','pure_soul_trace') AND COALESCE(JSON_EXTRACT(i.effect_json,'$.automatonProduct'),0)=0 ORDER BY i.id FOR UPDATE", [id]);
+    const [history] = await connection.execute<RowDataPacket[]>("SELECT DISTINCT combination_key FROM player_alchemy_journal WHERE character_id=? AND kind<>'purification'", [id]);
+    const tried = new Set(history.map(row => String(row.combination_key)));
+    const ids = items.map(row => Number(row.id)); const available = new Map(items.map(row => [Number(row.id), Number(row.quantity)]));
+    const resetIds=['mana_dust','herbal_extract','magic_unit'].map(code=>Number(items.find(item=>item.code===code)?.id??0));
+    const resetKey=resetIds.join(':');
+    if(progress.level<3||resetIds.some(itemId=>(available.get(itemId)??0)<3))tried.add(resetKey);
+    const slotChoice=(choice:number[])=>choice.map(id=>({id,quantity:choice.join(':')===resetKey?3:1}));
+    const current = await alchemyStateFor(connection, id); const currentIds = [current.main_id, current.auxiliary_id, current.reagent_id].map(Number);
+    const currentKey = currentIds.join(':'); if (replaceToken) tried.add(currentKey);
+    const fingerprint = alchemyFingerprint({ items: items.map(row => [Number(row.id), Number(row.quantity)]), tried: [...tried].sort() });
+    let state: AlchemySearch | undefined;
+    if (searchToken) {
+      const old = await craftRequestFor<{ fingerprint: string; state: AlchemySearch; replaceToken?: string }>(connection, id, 'alchemy_search', searchToken);
+      if (old.snapshot.fingerprint === fingerprint) state = old.snapshot.state;
+    }
+    if (!state && ids.length) for (let retry = 0; retry < 128; retry++) {
+      const choice = Array.from({ length: 3 }, () => ids[Math.floor(Math.random() * ids.length)]!);
+      if (validAlchemyCombination(choice, available) && !tried.has(choice.join(':'))) { await setAlchemySlots(connection, id, slotChoice(choice)); return { ready: true }; }
+    }
+    const scan = scanAlchemyCombinations(ids, available, tried, state);
+    if (!scan.done) return { searchToken: await createCraftRequest(connection, id, 'alchemy_search', { fingerprint, state: scan.state, replaceToken }, 10) };
+    if (!scan.combination) {
+      if (replaceToken && validAlchemyCombination(currentIds, available) && !history.some(row => row.combination_key === currentKey)) return { ready: true, onlyCurrent: true };
+      throw new Error('当前背包中可炼金的材料组合都已尝试过。补充新材料后可以继续探索，也可以从“我的配方”重复炼制。');
+    }
+    await setAlchemySlots(connection, id, slotChoice(scan.combination)); return { ready: true };
+  });
+  return selected.ready ? { ...await executeAlchemy(qqUserId,undefined,'random'), onlyCurrent: selected.onlyCurrent } : selected;
+};

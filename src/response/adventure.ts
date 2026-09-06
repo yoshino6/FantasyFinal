@@ -1,3 +1,4 @@
+import { acknowledgeAutomatonBattleText } from '../game/automaton-dialogue.service';
 import { Format, logger, MessageDirect, useEvent, useMessage, useRoute } from 'alemonjs';
 import { readFile } from 'node:fs/promises';
 import { durationText } from '../game/time-format';
@@ -16,6 +17,7 @@ import { npcChatDialogue } from '../game/npc-dialogue.service';
 import { dynamicNpcChatDialogue, dynamicNpcProfile } from '../game/dynamic-npc-dialogue.service';
 import { advancedProfessionReveal, mentorSuccessDialogue } from '../game/advanced-profession.dialogue';
 import { advancedProfessionByCode } from '../game/advanced-profession.config';
+import { spiritDefinitions } from '../game/spirit-summoner.config';
 import { changeDungeonFloor, dungeonPvP, dungeonTrackingHint, enterDungeon, interactDungeonPlayer, openDungeonChest } from '../game/dungeon.service';
 import { dungeonSecretProgress } from '../game/dungeon-quest.service';
 import { selectPvpBattleOption, cityWantedAlert, pvpBattleStatus, pvpCombatAction, continuePvpChant, reserveWarrantEntryNotice, startAmbushPvpBattle, startPvpBattle } from '../game/pvp.service';
@@ -65,18 +67,52 @@ const movementButtons = async (qqUserId: string, resting = false) => {
   const [config, blockedDirections] = await Promise.all([autoBattleConfig(qqUserId), blockedDungeonDirections(qqUserId)]);
   return panelButtons(resting, Boolean(config.settings.enabled), blockedDirections);
 };
+// 战斗按键使用两字简称，技能详情与战斗日志继续使用完整技能名称。
+const advancedBattleSkillLabels: Record<string, string> = {
+  bulwark_shieldwall_advance: '盾墙', bulwark_vicarious_guard: '代偿', bulwark_immovable_mountain: '如山', bulwark_bastion_judgment: '裁决',
+  warlord_quake_command: '震地', warlord_break_formation: '破阵', warlord_triumph_banner: '战旗', warlord_hundred_battle_sweep: '横扫',
+  ironbreaker_armor_rend: '裂甲', ironbreaker_breaking_pursuit: '追斩', ironbreaker_gap_execution: '处决', ironbreaker_steel_flash: '断钢',
+  elementalist_cinderfrost_cycle: '炽霜', elementalist_storm_chain: '雷暴', elementalist_fourfold_resonance: '四相', elementalist_sky_sequence: '天穹',
+  summoner_contract_spirit: '契约', summoner_spirit_tether: '灵线', summoner_returning_veil: '返魂', summoner_star_pact: '群星',
+  spellblade_arcane_thrust: '突刺', spellblade_phase_guard: '格挡', spellblade_spellbreak_whirl: '回旋', spellblade_starfire_duel: '星火',
+  nightblade_shadow_mark: '标定', nightblade_gap_stab: '背隙', nightblade_crescent_throat: '割喉', nightblade_silent_finale: '终章',
+  venomancer_serpent_kiss: '蛇吻', venomancer_corrosion_mist: '腐雾', venomancer_venom_burst: '毒爆', venomancer_thousand_throat: '封喉',
+  ranger_grapple_trap: '钩索', ranger_weakness_survey: '测绘', ranger_guiding_smoke: '烟幕', ranger_hundred_hunt: '协猎',
+  saint_healer_mending_prayer: '愈合', saint_healer_absolution_hand: '净罪', saint_healer_resonant_mass: '弥撒', saint_healer_revival_sanctuary: '复苏',
+  aegis_watch_bastion: '守望', aegis_shared_vow: '分担', aegis_luminous_echo: '光幕', aegis_undying_dome: '穹顶',
+  dawn_morning_mark: '烙印', dawn_exorcism_word: '驱邪', dawn_judgment_litany: '连祷', dawn_daybreak_decree: '破晓'
+};
+const addAdvancedBattleButton = (row: ReturnType<typeof Format.createButtonGroup>, label: string, command: string, ready: boolean, autoEnter = true) => row.addButton(label, command, {
+  type: 'command', autoEnter, style: ready ? 'blue' : 'gray'
+});
 const battleButtons = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
   const buttons = Format.createButtonGroup().addRow().addButton('普攻', '/攻击', { type: 'command', autoEnter: true, style: battle.canAct ? 'blue' : undefined });
   for (let slot = 1; slot <= 4; slot++) buttons.addButton('技能' + '①②③④'[slot - 1], '/技能 ' + slot, { type: 'command', autoEnter: true, style: battle.canAct && battle.readySkillSlots.includes(slot) ? 'blue' : undefined });
+  if (battle.advancedSkills?.length) {
+    let row = buttons.addRow();
+    const summonSkills = battle.advancedSkills.filter(skill => spiritDefinitions.some(spirit => spirit.skillCode === skill.code));
+    if (summonSkills.length) {
+      // 召唤需要玩家补充灵契编号或名称，不能把点击本身当作一次施放。
+      addAdvancedBattleButton(row, '召唤', '/召唤 ', battle.canAct && summonSkills.some(skill => skill.ready), false);
+      for (const skill of battle.advancedSkills.filter(skill => !spiritDefinitions.some(spirit => spirit.skillCode === skill.code)).slice(0, 4)) {
+        addAdvancedBattleButton(row, advancedBattleSkillLabels[skill.code] ?? Array.from(skill.name).slice(0, 2).join(''), `/二转技能 ${skill.id}`, battle.canAct && skill.ready);
+      }
+    } else for (const [index, skill] of battle.advancedSkills.entries()) {
+      if (index > 0 && index % 5 === 0) row = buttons.addRow();
+      addAdvancedBattleButton(row, advancedBattleSkillLabels[skill.code] ?? Array.from(skill.name).slice(0, 2).join(''), `/二转技能 ${skill.id}`, battle.canAct && skill.ready);
+    }
+  }
   buttons.addRow();
   if (battle.mode !== 'spar') for (let slot = 1; slot <= 4; slot++) buttons.addButton('道具' + '①②③④'[slot - 1], '/道具 ' + slot, { type: 'command', autoEnter: true, style: battle.canAct && battle.itemSlots.includes(slot) ? 'blue' : undefined });
-  buttons.addButton(battle.mode === 'spar' ? '认输' : '逃跑', '/逃跑', { type: 'command', autoEnter: true });
+  if (battle.mode !== 'spar' && (battle.members?.length ?? 0) > 1) buttons.addButton('援助', '/药剂援助', { type: 'command', autoEnter: true });
   if (battle.mode !== 'spar' && battle.deviceSlots.length) {
     buttons.addRow(); for (const device of battle.deviceSlots) buttons.addButton('异械' + '①②③④'[device.slot - 1], '/异械施放 ' + device.slot, { type: 'command', autoEnter: true, style: battle.canAct ? 'blue' : undefined });
     buttons.addButton('异械状态', '/战斗异械状态', { type: 'command', autoEnter: true });
   }
-  if (battle.appraisal.learned) buttons.addRow().addButton('鉴识', '/鉴识', { type: 'command', autoEnter: true, style: 'blue' });
   if (battle.canEnchant) { buttons.addRow(); for (const element of ['风', '雷', '火']) buttons.addButton('附锋·' + element, '/附锋元素 ' + element, { type: 'command', autoEnter: true, style: battle.enchantElement === element ? 'blue' : undefined }); }
+  const finalRow = buttons.addRow();
+  if (battle.appraisal.learned) finalRow.addButton('鉴识', '/鉴识', { type: 'command', autoEnter: true, style: 'blue' });
+  finalRow.addButton(battle.mode === 'spar' ? '认输' : '逃跑', '/逃跑', { type: 'command', autoEnter: true });
   return buttons;
 };
 const encounterButtons = (spawnId: number, canAmbush = false, occupied = false, cityPursuit = false) => {
@@ -170,7 +206,7 @@ const victoryFormat = (settlement: VictorySettlement) => {
     if (reward.staminaSpent) markdown.addBlockquote(`体力-${reward.staminaSpent}`).addNewline();
     for (const drop of reward.drops) {
       markdown.addBlockquote('获得');
-      markdown.addButton(`[${drop.name}]`, { data: drop.itemType === 'equipment' && drop.instanceId ? `/装备详情 ${drop.instanceId}` : `/物品图鉴 ${drop.codexId}`, autoEnter: false }).addText(`×${drop.quantity}`).addNewline();
+      markdown.addButton(`[${drop.name}]`, { data: drop.instanceId ? drop.itemType === 'device' ? `/异械详情 ${drop.instanceId}` : `/装备详情 ${drop.instanceId}` : `/物品图鉴 ${drop.codexId}`, autoEnter: false }).addText(`×${drop.quantity}`).addNewline();
     }
     for (const skill of reward.learned) markdown.addText('领悟').addButton(`[${skill.name}]`, { data: `/技能详情 ${skill.id}`, autoEnter: false }).addText('\n');
     markdown.addNewline();
@@ -375,7 +411,7 @@ const scheduleStoryNpcBattle = (message: any, qqUserId: string) => {
 };
 const sendCombatResult = async (message: any, qqUserId: string, result: Awaited<ReturnType<typeof combatAction>>, options: { omitFinalLog?: boolean } = {}) => {
   if (result.ended) {
-    if (!options.omitFinalLog) await message.send({ format: finalBattleFormat(result.log) });
+    if (!options.omitFinalLog) { const sent = await message.send({ format: finalBattleFormat(result.log) }); if (Array.isArray(sent) && sent.some(item => item.code === 2000)) await acknowledgeAutomatonBattleText(qqUserId, result.log); }
     const settlement = result.settlement;
     const victory = isVictorySettlement(settlement);
     const format = victory
@@ -411,7 +447,8 @@ const sendCombatResult = async (message: any, qqUserId: string, result: Awaited<
     return;
   }
   const battle = await battleStatus(qqUserId);
-  await message.send({ format: battleFormat(result.waiting ? '行动已确认' : '战斗回合', result.log, battle) });
+  const sent = await message.send({ format: battleFormat(result.waiting ? '行动已确认' : '战斗回合', result.log, battle) });
+  if (Array.isArray(sent) && sent.some(item => item.code === 2000)) await acknowledgeAutomatonBattleText(qqUserId, result.log);
   const continued = await continueCombatChant(qqUserId);
   if (continued) { await sendCombatResult(message, qqUserId, continued); return; }
   // 这一轮将主角击倒时，不能再等待玩家按钮；由仍存活的剧情队友每秒继续一轮。
@@ -425,8 +462,16 @@ const resolvePartyAutoBattleActions = async (qqUserId: string) => {
     latest = chanting; if (chanting.ended || !chanting.waiting) return chanting;
   }
   for (const entry of await pendingPartyAutoBattleActions(qqUserId)) {
+    if (entry.targetId) {
+      try {
+        await switchCombatTarget(entry.qqUserId, entry.targetId);
+      } catch (error) {
+        // 读取出招后目标仍可能被击破。保留原技能，由回合结算重选存活敌人；
+        // 选敌失败不代表技能不可用，不能落入下方的临时普攻分支。
+        if (!(error instanceof Error) || error.message !== '该目标已被击败或不在本场战斗中。') throw error;
+      }
+    }
     try {
-      if (entry.targetId) await switchCombatTarget(entry.qqUserId, entry.targetId);
       latest = await combatAction(entry.qqUserId, entry.action.type, undefined, entry.action.type === 'skill' ? entry.action.skillId : undefined, entry.action.type === 'item' ? entry.action.itemId : undefined);
     } catch (error) {
       // 自动配置可能因洗点、转职、武器更换、二转资源不足或道具耗尽而临时失效。
@@ -501,7 +546,7 @@ const startAutoBattle = async (message: any, qqUserId: string, openingText = '')
   if (await isFullPartyAutoBattle(qqUserId)) {
     const full = await resolveFullAutoBattle(qqUserId);
     const fullLog = [openingText, full.log].filter(Boolean).join('\n\n');
-    if (fullLog) await message.send({ format: fullAutoBattleFormat(fullLog) });
+    if (fullLog) { const sent = await message.send({ format: fullAutoBattleFormat(fullLog) }); if (Array.isArray(sent) && sent.some(item => item.code === 2000)) await acknowledgeAutomatonBattleText(qqUserId, fullLog); }
     if (full.result?.ended) await sendCombatResult(message, qqUserId, full.result, { omitFinalLog: true });
     else if (full.result && !full.result.waiting) scheduleAutoBattle(message, qqUserId, true);
     return Boolean(full.result);
@@ -1192,7 +1237,7 @@ export const cancelMiningHandler = async () => { const [event] = useEvent(); con
 export const moveHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await leaveHomeForMovement(message, event.current.UserId); await showMoveResult(message, event.current.UserId, await move(event.current.UserId, String(route.param('direction')))); } catch (error) { if (error instanceof Error && error.message.includes('当前格子存在敌对生物') && await showBlockedEncounter(message, event.current.UserId)) return; if (isForestGuideLocked(error)) { await storyLockedMessage(message, '无法移动'); return; } if (await showOngoingActivity(message, event.current.UserId, '无法移动')) return; await fail(message, error, '无法移动'); } };
 export const goToHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await leaveHomeForMovement(message, event.current.UserId); const result = await moveTo(event.current.UserId, Number(route.param('x')), Number(route.param('y'))); if (result.kind === 'travel') { await message.send({ format: travelFormat('开始前往', result.regionName, result.x, result.y, result.seconds, result.remaining, 'move', result.destinationName) }); scheduleTravelCompletion(message, event.current.UserId, result.remaining); return; } await showMoveResult(message, event.current.UserId, result); } catch (error) { if (error instanceof Error && error.message.includes('当前格子存在敌对生物') && await showBlockedEncounter(message, event.current.UserId)) return; if (isForestGuideLocked(error)) { await storyLockedMessage(message, '无法前往该位置'); return; } if (await showOngoingActivity(message, event.current.UserId, '无法前往该位置')) return; await fail(message, error, '无法前往该位置'); } };
 export const goToMapHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await leaveHomeForMovement(message, event.current.UserId); const result = await moveToMap(event.current.UserId, String(route.param('code'))); if (result.kind === 'travel') { await message.send({ format: travelFormat('开始前往', result.regionName, result.x, result.y, result.seconds, result.remaining, 'move', result.destinationName) }); scheduleTravelCompletion(message, event.current.UserId, result.remaining); return; } await showMoveResult(message, event.current.UserId, result); } catch (error) { if (error instanceof Error && error.message.includes('当前格子存在敌对生物') && await showBlockedEncounter(message, event.current.UserId)) return; if (isForestGuideLocked(error)) { await storyLockedMessage(message, '无法前往地图'); return; } if (await showOngoingActivity(message, event.current.UserId, '无法前往地图')) return; await fail(message, error, '无法前往地图'); } };
-export const huntHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await huntMonster(event.current.UserId); await message.send({ format: travelFormat('开始寻怪……', result.regionName, result.x, result.y, result.seconds, result.remaining, 'hunt') }); scheduleTravelCompletion(message, event.current.UserId, result.remaining); } catch (error) { if (isForestGuideLocked(error)) { await storyLockedMessage(message, '无法寻怪'); return; } if (await showOngoingActivity(message, event.current.UserId, '无法寻怪')) return; await fail(message, error, '无法寻怪'); } };
+export const huntHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await huntMonster(event.current.UserId); await message.send({ format: travelFormat('开始寻怪……', result.regionName, result.x, result.y, result.seconds, result.remaining, 'hunt') }); scheduleTravelCompletion(message, event.current.UserId, result.remaining); } catch (error) { if (error instanceof Error && error.message.includes('当前格子存在敌对生物') && await showBlockedEncounter(message, event.current.UserId)) return; if (isForestGuideLocked(error)) { await storyLockedMessage(message, '无法寻怪'); return; } if (await showOngoingActivity(message, event.current.UserId, '无法寻怪')) return; await fail(message, error, '无法寻怪'); } };
 export const cancelTravelHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const cancelled = await cancelTravel(event.current.UserId); const timer = travelTimers.get(event.current.UserId); if (timer) clearTimeout(timer); travelTimers.delete(event.current.UserId); const [nearby, movement] = await Promise.all([nearbyPoints(event.current.UserId), movementProfile(event.current.UserId)]); const character = cancelled.character; const cancellationText = cancelled.activityType === 'hunt' ? '寻怪已取消' : '移动已取消'; const panel = outsidePanel('行动', `${cancellationText}\n${currentLocationText(character)}`, movement.step, nearby.range, Number(character.pos_x), Number(character.pos_y), nearby.description, nearby.points, nearby.character.activity_status !== 'active', nearby.landmarks, '', movement.maximum, false, movement.showLandmarks, movement.showPlayers, nearby.mapUnlocked); await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); } catch (error) { await fail(message, error, '取消行动失败'); } };
 
 export const adjustMovementHandler = async () => {
@@ -1234,6 +1279,18 @@ export const refreshTravelHandler = async () => {
   } catch (error) { await fail(message, error, '刷新行动失败'); }
 };
 export const targetHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await chooseTarget(event.current.UserId, Number(route.param('id'))); const battle = await battleStatus(event.current.UserId); await message.send({ format: battleStartFormat(`遭遇 ${battle.targets.map(target => `[${target.name}]`).join('、')}！`, battle) }); await startAutoBattle(message, event.current.UserId); } catch (error) { await fail(message, error, '无法锁定目标'); } };
+export const nearbyMonsterInteractionHandler = async () => {
+  const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
+  try {
+    // 复用攻击入口的距离、可见性与移动限制，抵达后先让玩家选择遭遇行动。
+    await moveToNearbyMonster(event.current.UserId, Number(route.param('id')));
+    if (!await showBlockedEncounter(message, event.current.UserId)) throw new Error('该怪物已离开当前位置或被击败。');
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('当前格子存在敌对生物') && await showBlockedEncounter(message, event.current.UserId)) return;
+    if (await showOngoingActivity(message, event.current.UserId, '无法交互')) return;
+    await fail(message, error, '无法交互');
+  }
+};
 export const nearbyMonsterAttackHandler = async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
   try {
@@ -1251,7 +1308,7 @@ export const nearbyMonsterAttackHandler = async () => {
       await message.send({ format: battleStartFormat(`你直奔 ${battle.targets.map(target => `[${target.name}]`).join('、')}，抢先发动攻击！`, battle) });
     }
     await startAutoBattle(message, event.current.UserId);
-  } catch (error) { await fail(message, error, '无法攻击目标'); }
+  } catch (error) { if (error instanceof Error && error.message.includes('当前格子存在敌对生物') && await showBlockedEncounter(message, event.current.UserId)) return; await fail(message, error, '无法攻击目标'); }
 };
 export const ambushHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await chooseTarget(event.current.UserId, Number(route.param('id')), true); const battle = await battleStatus(event.current.UserId); if (await isFullPartyAutoBattle(event.current.UserId)) { await startAutoBattle(message, event.current.UserId, '战斗开始\n你看准目标，疾速突进——\n（首回合直击伤害+50%）'); return; } await message.send({ format: ambushStartFormat(battle) }); await startAutoBattle(message, event.current.UserId); } catch (error) { await fail(message, error, '无法发动偷袭'); } };
 export const queueAmbushHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const spawnId = Number(route.param('id')); const channelId = String(event.current.ChannelId ?? ''); const delivery = { scope: !event.current.IsPrivate && channelId ? 'group' as const : 'c2c' as const, targetId: !event.current.IsPrivate && channelId ? channelId : String(event.current.UserId), botId: String(event.current.BotId ?? '') || undefined }; const result = await queueAmbush(event.current.UserId, spawnId, delivery); if (result.ready) { await chooseTarget(event.current.UserId, result.spawnId ?? spawnId); const battle = await battleStatus(event.current.UserId); await message.send({ format: battleStartFormat(result.residualParty ? '前一支队伍击败了目标，但伤势未愈。你抓住破绽，伏击其残余队伍！' : '前一场战斗已经结束，你趁目标尚未恢复时切入战场。', battle) }); await startAutoBattle(message, event.current.UserId); return; } await message.send({ format: messageFormat('伏击等待', '你已埋伏在战场边缘。当前战斗结束后，机器人会在你发送伏击的会话中通知并自动接管后续战斗。') }); } catch (error) { await fail(message, error, '无法伏击'); } };
@@ -1280,12 +1337,29 @@ const showRetreatArrival = async (message: any, qqUserId: string, retreatText: s
   const panel = await movementPanel(qqUserId, retreatText);
   await message.send({ format: panel.addButtonGroup(await movementButtons(qqUserId, nearby.character.activity_status !== 'active')) });
 };
-const actionHandler = (action: 'attack' | 'skill' | 'item' | 'escape') => async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try {
+type AdvancedSkillRequest = { id?: number; code?: string };
+const advancedSkillIdFor = (battle: { advancedSkills: Array<{ id: number; code: string }> }, request?: AdvancedSkillRequest) => {
+  const skillId = request?.id ?? battle.advancedSkills.find(skill => skill.code === request?.code)?.id;
+  if (!Number.isInteger(skillId) || !skillId || !battle.advancedSkills.some(skill => skill.id === skillId)) throw new Error('该技能不是你当前可用的二转主动技能。');
+  return skillId;
+};
+const summonSpiritRequest = (input: unknown): AdvancedSkillRequest => {
+  const query = String(input ?? '').trim();
+  const index = /^\d+$/.test(query) ? Number(query) - 1 : -1;
+  const normalized = query.toLocaleLowerCase();
+  const spirit = (index >= 0 && index < spiritDefinitions.length ? spiritDefinitions[index] : undefined)
+    ?? spiritDefinitions.find(candidate => [candidate.name, candidate.code, candidate.skillCode].some(alias => alias.toLocaleLowerCase() === normalized));
+  if (!spirit) throw new Error(`请输入灵契编号或名称：${spiritDefinitions.map((candidate, i) => `${i + 1}.${candidate.name}`).join('、')}。`);
+  return { code: spirit.skillCode };
+};
+const actionHandler = (action: 'attack' | 'skill' | 'item' | 'escape', advancedSkill = false, requestAdvancedSkill?: (input: unknown) => AdvancedSkillRequest) => async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); const slot = advancedSkill ? undefined : Number(route.param('slot')) || undefined; const skillRequest = advancedSkill ? requestAdvancedSkill?.(route.param('spirit')) ?? { id: Number(route.param('id')) } : undefined; try {
+  if (advancedSkill && (!skillRequest || (!skillRequest.code && (!Number.isInteger(skillRequest.id) || !skillRequest.id)))) throw new Error('二转技能编号无效。');
   // PVE 与 PVP 共用同一组操作指令；已有怪物战斗时必须优先按当前怪物战斗处理，
   // 避免残留或并行的 PVP 会话截获怪物战斗面板上的按钮。
   let pveBattle: Awaited<ReturnType<typeof battleStatus>> | null = null;
   try { pveBattle = await battleStatus(event.current.UserId); } catch { /* 当前没有怪物战斗时再尝试 PVP。 */ }
   if (pveBattle) {
+    const skillId = advancedSkill ? advancedSkillIdFor(pveBattle, skillRequest) : undefined;
     stopAutoBattle(event.current.UserId);
     // 旧版自动战斗在某位队友的配置动作报错后会停止计时器，已提交行动的队友便无法再点按钮。
     // 玩家此时任意点一次战斗按钮，先补跑尚未提交的自动队友，令这一回合能够自然结算。
@@ -1297,14 +1371,14 @@ const actionHandler = (action: 'attack' | 'skill' | 'item' | 'escape') => async 
         return;
       }
     }
-    let result = await combatAction(event.current.UserId, action, Number(route.param('slot')) || undefined); if (!result.ended && result.waiting) result = await resolvePartyAutoBattleActions(event.current.UserId) ?? result; await sendCombatResult(message, event.current.UserId, result);
+    let result = await combatAction(event.current.UserId, action, slot, skillId); if (!result.ended && result.waiting) result = await resolvePartyAutoBattleActions(event.current.UserId) ?? result; await sendCombatResult(message, event.current.UserId, result);
     if (action === 'escape' && result.ended) { await showRetreatArrival(message, event.current.UserId, '你脱离战斗，沿来路退回上一格。'); return; }
     if (!result.ended && !result.waiting) { const battle = await battleStatus(event.current.UserId); if (battle.canAct) await startAutoBattle(message, event.current.UserId); else scheduleStoryNpcBattle(message, event.current.UserId); }
     return;
   }
   try {
-    await pvpBattleStatus(event.current.UserId); stopPvpAutoBattle(event.current.UserId);
-    const pvpResult = await pvpCombatAction(event.current.UserId, action, Number(route.param('slot')) || undefined); await sendPvpCombatResult(message, event.current.UserId, pvpResult);
+    const pvpBattle = await pvpBattleStatus(event.current.UserId); const skillId = advancedSkill ? advancedSkillIdFor(pvpBattle, skillRequest) : undefined; stopPvpAutoBattle(event.current.UserId);
+    const pvpResult = await pvpCombatAction(event.current.UserId, action, slot, undefined, undefined, false, skillId); await sendPvpCombatResult(message, event.current.UserId, pvpResult);
     if (!pvpResult.ended) await startPvpAutoBattle(message, event.current.UserId);
     return;
   } catch (pvpError) {
@@ -1317,7 +1391,9 @@ const actionHandler = (action: 'attack' | 'skill' | 'item' | 'escape') => async 
       throw pvpError;
     }
   }
-  stopAutoBattle(event.current.UserId); let result = await combatAction(event.current.UserId, action, Number(route.param('slot')) || undefined); if (!result.ended && result.waiting) result = await resolvePartyAutoBattleActions(event.current.UserId) ?? result; await sendCombatResult(message, event.current.UserId, result);
+  const fallbackBattle = advancedSkill ? await battleStatus(event.current.UserId) : null;
+  const skillId = advancedSkill ? advancedSkillIdFor(fallbackBattle!, skillRequest) : undefined;
+  stopAutoBattle(event.current.UserId); let result = await combatAction(event.current.UserId, action, slot, skillId); if (!result.ended && result.waiting) result = await resolvePartyAutoBattleActions(event.current.UserId) ?? result; await sendCombatResult(message, event.current.UserId, result);
   if (action === 'escape' && result.ended) {
     await showRetreatArrival(message, event.current.UserId, '你脱离战斗，沿来路退回上一格。');
     return;
@@ -1339,7 +1415,7 @@ const actionHandler = (action: 'attack' | 'skill' | 'item' | 'escape') => async 
   }
   await message.send({ format: battleErrorFormat(messageText, battle) });
 } catch { await fail(message, error, '操作失败'); } } };
-export const attackHandler = actionHandler('attack'); export const skillHandler = actionHandler('skill'); export const itemHandler = actionHandler('item'); export const escapeHandler = actionHandler('escape');
+export const attackHandler = actionHandler('attack'); export const skillHandler = actionHandler('skill'); export const advancedSkillHandler = actionHandler('skill', true); export const summonSpiritHandler = actionHandler('skill', true, summonSpiritRequest); export const itemHandler = actionHandler('item'); export const escapeHandler = actionHandler('escape');
 
 const deviceSkillChoiceFormat = (battle: Awaited<ReturnType<typeof battleStatus>>, slot: number) => {
   const device = battle.deviceSlots.find(item => item.slot === slot); if (!device) throw new Error('该异械栏位未配置。');
@@ -1445,4 +1521,17 @@ export const encounterHandler = (action: 'avoid' | 'persuade', title: string) =>
       if (failedNegotiation) await startAutoBattle(message, event.current.UserId);
     } catch { await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle(title).addNewline().addNewline().addText(text)).addButtonGroup(moveButtons()) }); }
   } catch (error) { await fail(message, error, `${title}失败`); }
+};
+
+/** 使用现有战斗行动与回合消息流程，显式选择药剂受益者。 */
+export const alchemyAllyHandler=async()=>{
+  const[event]=useEvent();const[route]=useRoute();const[message]=useMessage();const user=event.current.UserId;
+  try{
+    const battle=await battleStatus(user);const slot=Number(route.param('slot')??0);const targetId=Number(route.param('targetId')??0);
+    if(slot&&targetId){if(!battle.members.some(member=>member.id===targetId&&!member.defeated))throw new Error('请选择本场存活队友。');stopAutoBattle(user);let result=await combatAction(user,'item',slot,undefined,undefined,undefined,'member',targetId);if(!result.ended&&result.waiting)result=await resolvePartyAutoBattleActions(user)??result;await sendCombatResult(message,user,result);return;}
+    const md=Format.createMarkdown().addTitle('药剂援助').addNewline().addText(slot?'选择存活队友，确认后本回合使用该栏位药剂。':'选择已配置的药剂栏位，再选择存活队友。');const buttons=Format.createButtonGroup();
+    if(!slot)for(const itemSlot of battle.itemSlots)buttons.addRow().addButton(`道具${'①②③④'[itemSlot-1]}`,`/药剂援助 ${itemSlot}`,{type:'command',autoEnter:true});
+    else for(const member of battle.members.filter(member=>!member.defeated))buttons.addRow().addButton(member.name,`/药剂援助 ${slot} ${member.id}`,{type:'command',autoEnter:true});
+    await message.send({format:Format.create().addMarkdown(md).addButtonGroup(buttons)});
+  }catch(error){await fail(message,error);}
 };

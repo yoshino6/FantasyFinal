@@ -1,3 +1,4 @@
+import { buySecondaryFinished } from './secondary-shop.service';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { recordPvpLootSale } from './pvp.service';
@@ -14,10 +15,6 @@ const characterFor = async (connection: PoolConnection | Awaited<ReturnType<type
   return rows[0];
 };
 const pageInfo = (page: number, total: number) => ({ page: Math.max(1, Math.min(Math.max(1, Math.ceil(total / PAGE_SIZE)), page)), totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)) });
-const validQuantity = (quantity: number) => {
-  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99) throw new Error('数量必须是 1 至 99 之间的整数。');
-  return quantity;
-};
 const validMaterialQuantity = (quantity: number) => {
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 999) throw new Error('数量必须是 1 至 999 之间的整数。');
   return quantity;
@@ -59,7 +56,7 @@ export const blacksmithSellCatalog = async (qqUserId: string, page = 1, keyword 
   const materialSql = `SELECT 'material' AS sale_kind,i.id AS sale_id,i.name,i.item_category,0 AS required_level,NULL AS quality,pi.quantity,
       CEIL(i.trade_price*1.15) AS sell_price,pi.acquired_at
     FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id
-    WHERE pi.character_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0
+    WHERE pi.character_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0 AND COALESCE(JSON_EXTRACT(i.effect_json,'$.noNpcSale'),0)=0
       AND i.item_category IN ('怪材','锻材','粒子') AND i.name LIKE ?`;
   const source = `(${equipmentSql} UNION ALL ${materialSql}) AS sale_items`;
   const [countRows] = await pool.execute<(RowDataPacket & { total: number })[]>(`SELECT COUNT(*) AS total FROM ${source}`, [character.id, term, character.id, term]);
@@ -68,19 +65,7 @@ export const blacksmithSellCatalog = async (qqUserId: string, page = 1, keyword 
   return { items: rows.map(row => ({ kind: row.sale_kind, id: Number(row.sale_id), name: row.name, category: row.item_category, level: Number(row.required_level), quality: row.quality === null ? null : Number(row.quality), quantity: Number(row.quantity), price: Number(row.sell_price) })), ...paging, keyword: keyword.trim(), copper: Number(character.copper_coins) };
 };
 
-export const buyBlacksmithEquipment = async (qqUserId: string, itemId: number, quantity = 1) => withTransaction(async connection => {
-  const amount = validQuantity(quantity); const character = await characterFor(connection, qqUserId, true);
-  const [rows] = await connection.execute<(RowDataPacket & { id: number; name: string; buy_price: number; stock_quantity: number })[]>(`SELECT i.id,i.name,si.buy_price,si.stock_quantity FROM blacksmith_shop_items si JOIN item_definitions i ON i.id=si.item_id WHERE si.item_id=? AND si.is_active=1 AND i.item_type='equipment' FOR UPDATE`, [itemId]);
-  const item = rows[0]; if (!item) throw new Error('该装备已下架。');
-  if (Number(item.stock_quantity) < amount) throw new Error(`库存不足，剩余 ${item.stock_quantity} 件。`);
-  const totalPrice = Number(item.buy_price) * amount;
-  if (Number(character.copper_coins) < totalPrice) throw new Error(`铜币不足，需要 ${totalPrice} 铜币。`);
-  await connection.execute('UPDATE characters SET copper_coins=copper_coins-? WHERE id=?', [totalPrice, character.id]);
-  await connection.execute('UPDATE blacksmith_shop_items SET stock_quantity=stock_quantity-? WHERE item_id=?', [amount, item.id]);
-  for (let index = 0; index < amount; index += 1) await connection.execute('INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max) VALUES (?,?,0,100,100)', [character.id, item.id]);
-  await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [character.id, item.id]);
-  return { name: item.name, quantity: amount, price: totalPrice };
-});
+export const buyBlacksmithEquipment = async (qqUserId: string, itemId: number, quantity = 1) => buySecondaryFinished(qqUserId, 'blacksmith', itemId, quantity);
 
 export const sellBlacksmithEquipment = async (qqUserId: string, instanceId: number) => withTransaction(async connection => {
   const character = await characterFor(connection, qqUserId, true);
@@ -99,7 +84,7 @@ export const sellBlacksmithMaterial = async (qqUserId: string, itemId: number, q
   const amount = validMaterialQuantity(quantity); const character = await characterFor(connection, qqUserId, true);
   const [rows] = await connection.execute<(RowDataPacket & { id: number; name: string; quantity: number; sell_price: number })[]>(`SELECT i.id,i.name,pi.quantity,CEIL(i.trade_price*1.15) AS sell_price
     FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id
-    WHERE pi.character_id=? AND pi.item_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0
+    WHERE pi.character_id=? AND pi.item_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0 AND COALESCE(JSON_EXTRACT(i.effect_json,'$.noNpcSale'),0)=0
       AND i.item_category IN ('怪材','锻材','粒子') FOR UPDATE`, [character.id, itemId]);
   const item = rows[0]; if (!item) throw new Error('小北只收购装备、怪材、锻材与粒子。');
   if (Number(item.quantity) < amount) throw new Error(`背包数量不足，当前仅有 ${item.quantity} 个。`);

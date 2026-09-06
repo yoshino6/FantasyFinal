@@ -91,7 +91,7 @@ export const consultDungeonAtWorkshop = async (qqUserId: string) => withTransact
   const affinity = await affinityFor(connection, character.id, 'oddworkshop');
   await connection.execute('UPDATE player_dungeon_secret_progress SET stage=3 WHERE character_id=?', [character.id]);
   const familiar = affinity >= 200 ? '唯薇安一听见“结界”两个字，立刻从零件堆里钻了出来，像是早就等着你问。' : '唯薇安听完后眼睛一亮，踮脚从高处的货架上取下一只巴掌大的银黑色圆盘。';
-  return `${familiar}\n\n“这是破魔传送器！它能让携带者穿过那种老式封印，还能把你传回地下大门外——真遇到危险时，按下侧面的符文就能强制脱离。”\n\n她把装置在掌心转了一圈，忽然竖起一根手指：“不过制作很麻烦！现货 200 铜币，绝不还价，这是知识产权。图纸也有，999 铜币；如果你是解构师，拿着图纸就能自己构造。要进去之前，至少带上一台。”`;
+  return `${familiar}\n\n“这是破魔传送器！它能让携带者穿过那种老式封印，还能把你传回地下大门外——真遇到危险时，按下侧面的符文就能强制脱离。”\n\n她把装置在掌心转了一圈，忽然竖起一根手指：“不过制作很麻烦！这台是展示用的样件，基础货架不出售。你可以请掌握图纸的解构师制作；如果自己就是解构师，可以从个人副职业面板进入图纸研习，学会后自行构造，推荐解构师 Lv.6。要进去之前，至少带上一台。”`;
 });
 
 export const completeDungeonSecretPurchase = async (connection: PoolConnection, characterId: number) => {
@@ -99,8 +99,9 @@ export const completeDungeonSecretPurchase = async (connection: PoolConnection, 
   if (progress && Number(progress.stage) === 3) await connection.execute('UPDATE player_dungeon_secret_progress SET stage=4 WHERE character_id=?', [characterId]);
 };
 
-export const buyOddWorkshopItem = async (qqUserId: string, code: string) => withTransaction(async connection => {
+export const studyWorkshopBlueprint = async (qqUserId: string, code: string) => withTransaction(async connection => {
   const character = await characterFor(connection, qqUserId, true); await requireAtNpc(connection, character, 'oddworkshop');
+  if(character.secondary_profession_code!=='deconstructor' || !constructionBlueprintCodes.has(code) && !blindBoxBlueprints.some(box=>box.code===code)) throw new Error('请在个人解构师研习面板选择可研习图纸。');
   const [items] = await connection.execute<(RowDataPacket & { id: number; name: string; buy_price: number; stock_quantity: number })[]>(`SELECT i.id,i.name,oi.buy_price,oi.stock_quantity FROM oddworkshop_items oi JOIN item_definitions i ON i.id=oi.item_id WHERE i.code=? AND oi.is_active=1 FOR UPDATE`, [code]);
   const item = items[0]; if (!item) throw new Error('这件商品暂时没有摆上货架。');
   if (Number(item.stock_quantity) < 1) throw new Error('这件商品暂时售罄。');
@@ -180,4 +181,13 @@ export const markedDungeonEntrances = async (qqUserId: string, regionCode: strin
     JOIN dungeon_instances d ON d.id=m.dungeon_id JOIN map_regions r ON r.id=m.region_id
     WHERE m.character_id=? AND d.state='active' AND r.code=? ORDER BY d.id,x,y`, [character.id, regionCode]);
   return rows.map((row, index) => ({ id: Number(row.id), x: Number(row.x), y: Number(row.y), name: Number(progress?.stage ?? 0) >= 2 ? '地下迷宫入口' : `地下大门${index + 1}#` }));
+};
+
+/** 旧货架购买只接受最终成品，图纸研习属于个人副职业。 */
+export const buyOddWorkshopItem = async (user:string,code:string) => {
+  const {buySecondaryFinished}=await import('./secondary-shop.service');
+  const pool=await getPool(); const[rows]=await pool.execute<RowDataPacket[]>('SELECT id FROM item_definitions WHERE code=?',[code]);
+  if(!rows[0]) throw new Error('该成品不存在。');
+  const result=await buySecondaryFinished(user,'oddworkshop',Number(rows[0].id));
+  return {name:result.name,price:result.price,rewardName:undefined as string|undefined};
 };

@@ -6,7 +6,7 @@ const PAGE_SIZE = 5;
 type Connection = PoolConnection | Awaited<ReturnType<typeof getPool>>;
 type CharacterRow = RowDataPacket & { id: number; name: string };
 type MailRow = RowDataPacket & { id: number; title: string; content: string; received_at: Date; claimed_at: Date | null; attachment_summary: string | null; attachment_count: number };
-type ItemRow = RowDataPacket & { id: number; code: string; name: string; item_type: 'consumable' | 'material' | 'equipment'; stackable: number };
+type ItemRow = RowDataPacket & { id: number; code: string; name: string; item_type: 'consumable' | 'material' | 'equipment' | 'device'; stackable: number };
 
 const pageInfo = (page: number, total: number) => ({ page: Math.max(1, Math.min(Math.max(1, Math.ceil(total / PAGE_SIZE)), page)), totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)) });
 const validQuantity = (quantity: number) => {
@@ -94,8 +94,8 @@ const claimMailForCharacter = async (connection: PoolConnection, characterId: nu
     const copperValue = currencyCopperValue[attachment.code];
     if (copperValue) {
       await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [copperValue * quantity, characterId]);
-    } else if (attachment.item_type === 'equipment') {
-      for (let index = 0; index < quantity; index += 1) await connection.execute('INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max) VALUES (?,?,100,100,100)', [characterId, attachment.id]);
+    } else if (attachment.item_type === 'equipment' || attachment.item_type === 'device') {
+      for (let index = 0; index < quantity; index += 1) await connection.execute(attachment.item_type === 'device' ? 'INSERT INTO player_item_instances (character_id,item_id) VALUES (?,?)' : 'INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max) VALUES (?,?,100,100,100)', [characterId, attachment.id]);
     } else {
       await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),acquired_at=NOW()', [characterId, attachment.id, quantity]);
     }

@@ -1,3 +1,4 @@
+import { consumeInventory, grantInventory, productionBinding, type Binding } from './inventory-binding';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { materialValueMultiplierForLevel } from './monster-crafting-material.service';
@@ -242,6 +243,8 @@ const unlockedConstructionCodes = async (connection: PoolConnection | Awaited<Re
   const [ownedBlueprintRows] = await connection.execute<(RowDataPacket & { code: string })[]>(`SELECT i.code FROM player_inventory pi
     JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.quantity>0 AND i.code REGEXP '_blueprint$'${suffix}`, [characterId]);
   const unlockedCodes = new Set<string>();
+  const [autoUnlock] = await connection.execute<RowDataPacket[]>("SELECT level FROM player_secondary_professions WHERE character_id=? AND profession_code='deconstructor'", [characterId]);
+  if (Number(autoUnlock[0]?.level ?? 0) >= 4) for (const code of ['kinetic_frame','servo_bundle','memory_polymer','shadow_filament','pulse_regulator','luminous_lens','energy_core']) constructionClosureFor(code, unlockedCodes);
   for (const row of ownedBlueprintRows) {
     const recipeCode = blueprintRecipeCode(row.code);
     if (recipeCode) constructionClosureFor(recipeCode, unlockedCodes);
@@ -314,9 +317,13 @@ export const constructItem = async (qqUserId: string, recipeCode: string) => wit
     const material = materials.get(ingredient.code);
     if (!material || Number(material.quantity) < ingredient.quantity) throw new Error(`材料不足：需要【${material?.name ?? ingredient.code}】×${ingredient.quantity}。`);
   }
+  const ingredientBindings = new Map<number, Binding>();
+  const usedBinding: Binding = {unbound:0,trade:0,personal:0};
   for (const ingredient of recipe.ingredients) {
     const material = materials.get(ingredient.code)!;
-    await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [ingredient.quantity, characterId, material.id]);
+    const used = await consumeInventory(connection, characterId, Number(material.id), ingredient.quantity);
+    ingredientBindings.set(Number(material.id), used);
+    for (const key of ['unbound','trade','personal'] as const) usedBinding[key] += used[key];
     await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [characterId, material.id]);
   }
   const gap = constructionGapFor(recipe, progress.level);
@@ -332,7 +339,9 @@ export const constructItem = async (qqUserId: string, recipeCode: string) => wit
       let quantity = 0;
       for (let index = 0; index < ingredient.quantity; index += 1) if (Math.random() < refundRate) quantity += 1;
       if (!quantity) continue;
-      await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity)', [characterId, material.id, quantity]);
+      const consumed = ingredientBindings.get(Number(material.id))!;
+      const personal = Math.min(consumed.personal, quantity), trade = Math.min(consumed.trade, quantity - personal);
+      await grantInventory(connection, characterId, Number(material.id), {personal,trade,unbound:quantity-personal-trade});
       refunded.push({ name: material.name, quantity });
     }
     return { success: false as const, recipe, successRate, refundRate, refunded, proficiencyGain: Math.ceil(proficiencyGain * .5), progress: next };
@@ -340,12 +349,12 @@ export const constructItem = async (qqUserId: string, recipeCode: string) => wit
   const [definitions] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>('SELECT id,name FROM item_definitions WHERE code=? FOR UPDATE', [recipe.code]);
   const output = definitions[0];
   if (!output) throw new Error('构造产物尚未初始化，请重启机器人后重试。');
-  if (recipe.outputType === 'equipment') {
-    const [instance] = await connection.execute<any>('INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max,effect_json) VALUES (?,?,100,100,100,?)', [characterId, output.id, JSON.stringify(recipe.effect ?? {})]);
+  if (recipe.outputType === 'device') {
+    const [instance] = await connection.execute<any>('INSERT INTO player_item_instances (character_id,item_id,effect_json) VALUES (?,?,?)', [characterId, output.id, JSON.stringify(recipe.effect ?? {})]);
     await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [characterId, output.id]);
     return { success: true as const, recipe, successRate, outputName: output.name, instanceId: Number(instance.insertId), proficiencyGain, progress: next };
   }
-  await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,1) ON DUPLICATE KEY UPDATE quantity=quantity+1', [characterId, output.id]);
+  await grantInventory(connection, characterId, Number(output.id), productionBinding(usedBinding, 1, true));
   await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [characterId, output.id]);
   if (recipe.code === 'demon_breaker_teleporter') {
     const { completeDungeonSecretPurchase } = await import('./dungeon-quest.service');
@@ -402,7 +411,7 @@ export const deconstructItems = async (qqUserId: string, itemId: number, quantit
       add('magic_unit', chainedYield(Math.min(1, 0.8 * bonusMultiplier), 0.01, 2));
     }
   }
-  await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [quantity, characterId, item.id]);
+  const deconstructedBinding = await consumeInventory(connection, characterId, Number(item.id), quantity);
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [characterId, item.id]);
   const codes = [...outputs].filter(([, amount]) => amount > 0).map(([code]) => code);
   let results: { name: string; quantity: number }[] = [];
@@ -410,7 +419,7 @@ export const deconstructItems = async (qqUserId: string, itemId: number, quantit
     const [definitions] = await connection.execute<(RowDataPacket & { id: number; code: string; name: string })[]>(`SELECT id,code,name FROM item_definitions WHERE code IN (${codes.map(() => '?').join(',')}) FOR UPDATE`, codes);
     for (const definition of definitions) {
       const amount = outputs.get(definition.code) ?? 0; if (amount <= 0) continue;
-      await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity)', [characterId, definition.id, amount]);
+      await grantInventory(connection, characterId, Number(definition.id), productionBinding(deconstructedBinding, amount, false));
       await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [characterId, definition.id]);
       results.push({ name: definition.name, quantity: amount });
     }

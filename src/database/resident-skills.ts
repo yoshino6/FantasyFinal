@@ -20,7 +20,7 @@ export const initializeResidentSkills = async (pool: Pool) => {
     const physical = skill.category === 'physical';
     const kind = physical ? skill.damageType : skill.category === 'passive' ? '被动' : skill.element === '无' ? '奥术' : '元素';
     const cost = skill.tier === '基础' ? 2 : skill.tier === '下位' ? 3 : 5;
-    const description = `${skill.description}${skill.chant ? ' 吟唱1回合；下一回合自动释放，释放后开始冷却。' : ''} 行动、控制与资源转换次数固定；数值专精按技能详情的上限生效。`;
+    const description = `${skill.description}${skill.chant ? ' 吟唱1回合；下一回合自动释放，释放后开始冷却。' : ''} 专精可改变威力、效果与普通持续时间；硬控时长、行动及资源转换次数固定。`;
     await pool.execute(`INSERT INTO skill_definitions
       (code,name,category,tier,damage_type,skill_kind,element,range_type,target_scope,mana_cost,base_mana_cost,cooldown_turns,chant_turns,power,learn_cost,upgrade_cost,max_level,power_per_level,cooldown_reduction_per_level,passive_effect_json,description)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0,0,?,?) ON DUPLICATE KEY UPDATE

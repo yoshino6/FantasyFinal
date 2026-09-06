@@ -1,6 +1,6 @@
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
-import { activeDeviceCodes } from './deconstructor-catalog';
+import { activeDeviceCodes, constructionRecipeByCode } from './deconstructor-catalog';
 
 export type DeviceTargetScope = 'self' | 'ally' | 'enemy' | 'all_allies' | 'all_enemies' | 'any';
 export type ActiveDeviceSkill = { code: string; name: string; description: string; energyCost: number; cooldownTurns: number; targetScope: DeviceTargetScope; power?: number; effect?: string };
@@ -29,6 +29,20 @@ export const activeDeviceDefinitions: ActiveDeviceDefinition[] = [
 export const activeDeviceDefinitionByCode = new Map(activeDeviceDefinitions.map(definition => [definition.code, definition]));
 export const activeDeviceSkillByCode = new Map(activeDeviceDefinitions.flatMap(definition => definition.skills.map(skill => [skill.code, { ...skill, deviceCode: definition.code }] as const)));
 
+const passiveDeviceActualEffects: Record<string, string[]> = {
+  auxiliary_aiming_scope: ['实际命中率 +8%。'],
+  muscle_pacer: ['物理攻击实际命中率 -6%。', '物理技能威力 +6%。'],
+  critical_glove: ['物理攻击必定暴击。', '物理攻击暴击时，最终伤害 -50%。'],
+  mana_accumulator: ['魔法技能吟唱 +1。', '魔法技能伤害 +60%。'],
+  rocket_propeller: ['每回合开始时速度 +10%，最多叠加至 +100%。'],
+  inverse_buffer: ['每场战斗首次生命降至 30%及以下时，获得 20%减伤，持续 2 回合。'],
+  rail_stabilizer: ['异械直接伤害 +12%。'],
+  precision_scope: ['异械直接伤害命中 +10%。'],
+  fold_barrier_generator: ['自身施放的【折叠壁垒】减伤持续时间 +1 回合。'],
+  electromagnetic_coil_cannon: ['雷属性异械直接伤害 +12%。'],
+  micro_reactor_pack: ['所有主动异械最大充能 +20。']
+};
+
 const characterIdFor = async (connection: Pool | PoolConnection, qqUserId: string, lock = false) => {
   const [rows] = await connection.execute<(RowDataPacket & { id: number })[]>(`SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1${lock ? ' FOR UPDATE' : ''}`, [qqUserId]);
   if (!rows[0]) throw new Error('请先注册角色。');
@@ -46,15 +60,28 @@ const ensureDeviceLoadoutMutable = async (connection: Pool | PoolConnection, cha
 
 export const activeDeviceList = async (qqUserId: string) => {
   const pool = await getPool(); const characterId = await characterIdFor(pool, qqUserId);
-  const [rows] = await pool.execute<(RowDataPacket & { id: number; code: string; name: string; quality: number; durability: number; durability_max: number; active: number; quick_slot: number | null })[]>(`
-    SELECT ii.id,i.code,i.name,ii.quality,ii.durability,ii.durability_max,IF(ad.instance_id IS NULL,0,1) AS active,pdqs.quick_slot
+  const [rows] = await pool.execute<(RowDataPacket & { id: number; code: string; name: string; active: number; quick_slot: number | null })[]>(`
+    SELECT ii.id,i.code,i.name,IF(ad.instance_id IS NULL,0,1) AS active,pdqs.quick_slot
     FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
     LEFT JOIN player_active_devices ad ON ad.character_id=ii.character_id AND ad.instance_id=ii.id
     LEFT JOIN player_device_quick_slots pdqs ON pdqs.character_id=ii.character_id AND pdqs.instance_id=ii.id
-    WHERE ii.character_id=? AND i.item_type='equipment' AND i.item_category='异械'
+    WHERE ii.character_id=? AND i.item_type='device'
     ORDER BY ii.acquired_at DESC,ii.id DESC
   `, [characterId]);
-  return rows.map(row => ({ id: Number(row.id), code: row.code, name: row.name, quality: Number(row.quality), durability: Number(row.durability), durabilityMax: Number(row.durability_max), active: Boolean(row.active), quickSlot: row.quick_slot == null ? null : Number(row.quick_slot), activeDefinition: activeDeviceDefinitionByCode.get(row.code) ?? null }));
+  return rows.map(row => ({ id: Number(row.id), code: row.code, name: row.name, description: constructionRecipeByCode.get(row.code)?.description ?? '尚未记录该异械的完整说明。', actualEffects: passiveDeviceActualEffects[row.code] ?? [], active: Boolean(row.active), quickSlot: row.quick_slot == null ? null : Number(row.quick_slot), activeDefinition: activeDeviceDefinitionByCode.get(row.code) ?? null }));
+};
+
+export const deviceDetail = async (qqUserId: string, instanceId: number) => {
+  const device = (await activeDeviceList(qqUserId)).find(item => item.id === instanceId);
+  if (!device) throw new Error('未找到该异械。');
+  return device;
+};
+
+export const deviceSkillDetail = async (qqUserId: string, instanceId: number, skillCode: string) => {
+  const device = await deviceDetail(qqUserId, instanceId);
+  const skill = device.activeDefinition?.skills.find(item => item.code === skillCode);
+  if (!skill) throw new Error('该异械不具备此主动技。');
+  return { device, skill, maxEnergy: device.activeDefinition!.maxEnergy };
 };
 
 export const activateDevice = async (qqUserId: string, instanceId: number) => withTransaction(async connection => {
@@ -62,7 +89,7 @@ export const activateDevice = async (qqUserId: string, instanceId: number) => wi
   await ensureDeviceLoadoutMutable(connection, characterId);
   const [rows] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>(`
     SELECT ii.id,i.name FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
-    WHERE ii.id=? AND ii.character_id=? AND i.item_type='equipment' AND i.item_category='异械' FOR UPDATE
+    WHERE ii.id=? AND ii.character_id=? AND i.item_type='device' FOR UPDATE
   `, [instanceId, characterId]);
   const device = rows[0]; if (!device) throw new Error('未找到该异械。');
   await connection.execute(`DELETE pe FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id WHERE pe.character_id=? AND pe.instance_id=? AND i.item_category='异械'`, [characterId, instanceId]);
@@ -75,7 +102,7 @@ export const deactivateDevice = async (qqUserId: string, instanceId: number) => 
   await ensureDeviceLoadoutMutable(connection, characterId);
   const [rows] = await connection.execute<(RowDataPacket & { name: string })[]>(`
     SELECT i.name FROM player_active_devices ad JOIN player_item_instances ii ON ii.id=ad.instance_id
-    JOIN item_definitions i ON i.id=ii.item_id WHERE ad.character_id=? AND ad.instance_id=? AND i.item_category='异械' FOR UPDATE
+    JOIN item_definitions i ON i.id=ii.item_id WHERE ad.character_id=? AND ad.instance_id=? AND i.item_type='device' FOR UPDATE
   `, [characterId, instanceId]);
   if (!rows[0]) throw new Error('该异械尚未生效。');
   await connection.execute('DELETE FROM player_device_quick_slots WHERE character_id=? AND instance_id=?', [characterId, instanceId]);
@@ -98,7 +125,7 @@ export const setDeviceQuickSlot = async (qqUserId: string, slot: number, instanc
   await ensureDeviceLoadoutMutable(connection, characterId);
   const [rows] = await connection.execute<(RowDataPacket & { name: string; code: string })[]>(`SELECT i.name,i.code FROM player_active_devices ad
     JOIN player_item_instances ii ON ii.id=ad.instance_id JOIN item_definitions i ON i.id=ii.item_id
-    WHERE ad.character_id=? AND ad.instance_id=? FOR UPDATE`, [characterId, instanceId]);
+    WHERE ad.character_id=? AND ad.instance_id=? AND i.item_type='device' FOR UPDATE`, [characterId, instanceId]);
   const device = rows[0]; if (!device || !activeDeviceDefinitionByCode.has(device.code)) throw new Error('只能配置已生效的主动异械。');
   const [sameTypeRows] = await connection.execute<RowDataPacket[]>(`SELECT 1 FROM player_device_quick_slots qs JOIN player_item_instances ii ON ii.id=qs.instance_id
     JOIN item_definitions i ON i.id=ii.item_id WHERE qs.character_id=? AND i.code=? AND qs.instance_id<>? LIMIT 1 FOR UPDATE`, [characterId, device.code, instanceId]);
@@ -121,8 +148,8 @@ export const initializeCombatDeviceEnergy = async (connection: PoolConnection, s
   const [rows] = await connection.execute<(RowDataPacket & { instance_id: number; code: string; max_energy_bonus: number })[]>(`SELECT ad.instance_id,i.code,
     MAX(CASE WHEN i2.code='micro_reactor_pack' THEN 20 ELSE 0 END) AS max_energy_bonus
     FROM player_active_devices ad JOIN player_item_instances ii ON ii.id=ad.instance_id JOIN item_definitions i ON i.id=ii.item_id
-    LEFT JOIN player_active_devices ad2 ON ad2.character_id=ad.character_id LEFT JOIN player_item_instances ii2 ON ii2.id=ad2.instance_id LEFT JOIN item_definitions i2 ON i2.id=ii2.item_id
-    WHERE ad.character_id=? GROUP BY ad.instance_id,i.code`, [characterId]);
+    LEFT JOIN player_active_devices ad2 ON ad2.character_id=ad.character_id LEFT JOIN player_item_instances ii2 ON ii2.id=ad2.instance_id LEFT JOIN item_definitions i2 ON i2.id=ii2.item_id AND i2.item_type='device'
+    WHERE ad.character_id=? AND i.item_type='device' GROUP BY ad.instance_id,i.code`, [characterId]);
   for (const row of rows) {
     const definition = activeDeviceDefinitionByCode.get(row.code); if (!definition) continue;
     const maximum = definition.maxEnergy + Number(row.max_energy_bonus ?? 0);
@@ -135,7 +162,7 @@ export const combatDeviceSlotsFor = async (connection: DeviceDb, sessionId: stri
     FROM player_device_quick_slots qs JOIN player_active_devices ad ON ad.character_id=qs.character_id AND ad.instance_id=qs.instance_id
     JOIN player_item_instances ii ON ii.id=qs.instance_id JOIN item_definitions i ON i.id=ii.item_id
     JOIN combat_device_energy energy ON energy.battle_kind=? AND energy.session_id=? AND energy.character_id=qs.character_id AND energy.instance_id=qs.instance_id
-    WHERE qs.character_id=? ORDER BY qs.quick_slot${lock ? ' FOR UPDATE' : ''}`, [battleKind, sessionId, characterId]);
+    WHERE qs.character_id=? AND i.item_type='device' ORDER BY qs.quick_slot${lock ? ' FOR UPDATE' : ''}`, [battleKind, sessionId, characterId]);
   return rows.flatMap(row => {
     const definition = activeDeviceDefinitionByCode.get(row.code); if (!definition) return [];
     return [{ slot: Number(row.quick_slot), instanceId: Number(row.instance_id), deviceCode: row.code, deviceName: row.name, currentEnergy: Number(row.current_energy), maxEnergy: Number(row.max_energy), skills: definition.skills }];

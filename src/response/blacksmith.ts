@@ -6,7 +6,7 @@ import { messageFormat } from '../game/message';
 const requireBlacksmith = async (qqUserId: string) => {
   const { secondaryProfessionCode } = await import('../game/alchemist.service');
   if ((await secondaryProfessionCode(qqUserId)) === 'blacksmith') return;
-  await requireNpcAtCurrentPosition(qqUserId, 'blacksmith');
+  throw new Error('城镇副职业商店现仅出售成品，打造、精炼和熔铸需要个人锻造师资格。');
 };
 const proficiencyBar = (current: number, required: number) => {
   const ratio = required > 0 ? Math.max(0, Math.min(1, current / required)) : 1;
@@ -14,11 +14,10 @@ const proficiencyBar = (current: number, required: number) => {
   return `${'■'.repeat(filled)}${'□'.repeat(10 - filled)}`;
 };
 export const blacksmithButtons = () => Format.createButtonGroup()
-  .addRow().addButton('打造', '/打造装备', { type: 'command', autoEnter: true, style: 'blue' }).addButton('图纸打造', '/图纸打造', { type: 'command', autoEnter: true, style: 'blue' }).addButton('精炼', '/精炼', { type: 'command', autoEnter: true, style: 'blue' }).addButton('熔铸', '/熔铸', { type: 'command', autoEnter: true, style: 'blue' })
-  .addRow().addButton('我要买', '/铁匠铺购买', { type: 'command', autoEnter: true, style: 'blue' }).addButton('我要卖', '/铁匠铺出售', { type: 'command', autoEnter: true, style: 'blue' })
-  .addRow().addButton('切磋', '/切磋 blacksmith', { type: 'command', autoEnter: true, style: 'blue' }).addButton('闲聊', '/铁匠铺闲聊', { type: 'command', autoEnter: true, style: 'blue' }).addButton('关于 锻造师', '/关于锻造师', { type: 'command', autoEnter: true, style: 'blue' })
-  .addRow().addButton('离开 铁匠铺', '/建筑离开 blacksmith', { type: 'command', autoEnter: true });
-const professionButtons = () => Format.createButtonGroup().addRow().addButton('打造', '/副职业打造装备', { type: 'command', autoEnter: true, style: 'blue' }).addButton('图纸打造', '/图纸打造', { type: 'command', autoEnter: true, style: 'blue' }).addButton('精炼', '/精炼', { type: 'command', autoEnter: true, style: 'blue' }).addButton('熔铸', '/熔铸', { type: 'command', autoEnter: true, style: 'blue' });
+  .addRow().addButton('我要买','/铁匠铺购买',{type:'command',autoEnter:true,style:'blue'}).addButton('我要卖','/铁匠铺出售',{type:'command',autoEnter:true,style:'blue'})
+  .addRow().addButton('切磋','/切磋 blacksmith',{type:'command',autoEnter:true}).addButton('闲聊','/铁匠铺闲聊',{type:'command',autoEnter:true}).addButton('关于锻造师','/关于锻造师',{type:'command',autoEnter:true})
+  .addRow().addButton('离开','/建筑离开 blacksmith',{type:'command',autoEnter:true});
+const professionButtons = () => Format.createButtonGroup().addRow().addButton('入门与导师','/副职业导师',{type:'command',autoEnter:true}).addButton('制作维修包','/维修包 制作',{type:'command',autoEnter:true}).addRow().addButton('打造', '/副职业打造装备', { type: 'command', autoEnter: true, style: 'blue' }).addButton('图纸打造', '/图纸打造', { type: 'command', autoEnter: true, style: 'blue' }).addButton('精炼', '/精炼', { type: 'command', autoEnter: true, style: 'blue' }).addButton('熔铸', '/熔铸', { type: 'command', autoEnter: true, style: 'blue' });
 const effectText = (effect: Record<string, unknown>, primaryKeys: readonly string[] = []) => {
   const labels: Record<string, string> = { hpMax: '生命', mpMax: '魔力', physicalAttack: '物攻', magicAttack: '魔攻', physicalDefense: '物防', magicDefense: '魔防', accuracy: '命中', evasion: '闪避', speed: '速度', critRateBp: '暴击', critDamageBp: '暴伤', critResistBp: '暴免', critDamageReductionBp: '暴抗', tenacity: '韧性', tenacityPierce: '破韧', hpPct: '生命上限', mpPct: '魔力上限', physicalAttackPct: '物攻', magicAttackPct: '魔攻', physicalDefensePct: '物防', magicDefensePct: '魔防', accuracyPct: '命中', evasionPct: '闪避', speedPct: '速度', critRatePct: '暴击', magicDamagePct: '魔法伤害', damageBonusPct: '伤害增加', damageReductionPct: '受伤降低' };
   const label = (key: string) => labels[key] ?? (key.startsWith('elementMastery_') ? `${key.slice('elementMastery_'.length)}元素精通` : key.startsWith('elementResistance_') ? `${key.slice('elementResistance_'.length)}元素抗性` : '');
@@ -37,9 +36,9 @@ const numberMark = '①②③④⑤⑥⑦⑧⑨⑩';
 export const blacksmithFormat = async (qqUserId: string, text?: string) => {
   const hour = new Date().getHours();
   const scene = text ?? (hour < 11
-    ? '清晨的炉火刚刚旺起来。漠北踩着垫脚木块整理铁砧，狐耳在热浪中微微晃动。\n他抬头看了你一眼：“早啊。我叫漠北，镇里都叫我小北。今天想打造、精炼，还是看看制式装备？”'
+    ? '清晨的炉火刚刚旺起来。漠北踩着垫脚木块整理铁砧，狐耳在热浪中微微晃动。\n他抬头看了你一眼：“早啊。我叫漠北，镇里都叫我小北。今天想买卖装备，还是聊聊锻造师的事？”'
     : hour < 18
-      ? '炉火映亮了铁砧。握锤的是个约莫十二三岁的少年，狐耳在热浪中微微晃动，矮人的结实骨架却让他挥锤时格外稳当。\n他抬头看了你一眼：“我叫漠北，镇里都叫我小北。要打造、精炼，还是看看制式装备？”'
+      ? '炉火映亮了铁砧。握锤的是个约莫十二三岁的少年，狐耳在热浪中微微晃动，矮人的结实骨架却让他挥锤时格外稳当。\n他抬头看了你一眼：“我叫漠北，镇里都叫我小北。要买卖装备，还是聊聊锻造师的事？”'
       : '夜里的铁匠铺仍回荡着清脆锤声。漠北将刚淬好的铁器搁到一旁，火光映得他眼神明亮。\n“晚上好。炉火还热着，有需要就说吧。”');
   const detailsUnlocked = (await nearbyPoints(qqUserId)).npcDetailsUnlocked;
   const markdown = Format.createMarkdown().addTitle('百纳镇·铁匠铺').addNewline().addNewline().addText('【漠北·Lv.3 锻造师】');
@@ -50,7 +49,7 @@ export const blacksmithFormat = async (qqUserId: string, text?: string) => {
 export default async () => {
   const [event] = useEvent(); const [message] = useMessage();
   try {
-    await requireBlacksmith(event.current.UserId);
+    await requireNpcAtCurrentPosition(event.current.UserId,'blacksmith');
     await message.send({ format: await blacksmithFormat(event.current.UserId) });
   } catch (error) {
     await message.send({ format: messageFormat('无法进入铁匠铺', error instanceof Error ? error.message : '请稍后重试。') });
@@ -192,7 +191,7 @@ export const forgeStartHandler = (_confirmed = false) => async () => {
 export const blacksmithAboutHandler = async () => {
   const [event] = useEvent(); const [message] = useMessage();
   try {
-    await requireBlacksmith(event.current.UserId);
+    await requireNpcAtCurrentPosition(event.current.UserId,'blacksmith');
     const quest = await blacksmithQuest(event.current.UserId);
     if (quest.status === 'none') {
       const markdown = Format.createMarkdown().addTitle('关于 锻造师').addNewline().addNewline()
@@ -217,7 +216,7 @@ export const blacksmithAboutHandler = async () => {
 export const blacksmithProfessionSelectHandler = async () => {
   const [event] = useEvent(); const [message] = useMessage();
   try {
-    await requireBlacksmith(event.current.UserId);
+    await requireNpcAtCurrentPosition(event.current.UserId,'blacksmith');
     const quest = await blacksmithQuest(event.current.UserId); if (quest.status !== 'none') throw new Error('你已经接取或完成了锻造师任务。');
     const markdown = Format.createMarkdown().addTitle('我想成为锻造师').addNewline().addNewline()
       .addBlockquote('“我叫漠北，不过镇里都叫我小北。想学打铁，不必先会挥锤——先去替我找一块活木和一枚兽核，让我看看你有没有把材料带回来的本事。”')
@@ -225,11 +224,11 @@ export const blacksmithProfessionSelectHandler = async () => {
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('接受任务', '/接受锻造师任务', { type: 'command', autoEnter: true, style: 'blue' }).addButton('放弃任务', '/关于锻造师', { type: 'command', autoEnter: true })) });
   } catch (error) { await message.send({ format: messageFormat('无法选择副职业', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
-export const acceptBlacksmithQuestHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireBlacksmith(event.current.UserId); await acceptBlacksmithQuest(event.current.UserId); const markdown = Format.createMarkdown().addTitle('接受任务').addNewline().addNewline().addText('已接受【副职业·锻造师入门】\n收集：活木×1、兽核×1\n可随时通过 ').addButton('/任务', { data: '/任务', autoEnter: false }).addText(' 查看进度。'); await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('任务', '/任务', { type: 'command', autoEnter: true, style: 'blue' })) }); } catch (error) { if (error instanceof Error && error.message === 'secondary_profession_level_required') { await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('小北的婉拒').addNewline().addNewline().addBlockquote('小北把锤子搁回铁砧，认真地打量了你一会儿。\n“现在还太早。锻造要经得住炉火，也得经得住冒险里的风浪。等你到了 Lv.10，带着更扎实的本事再来找我吧。”')) }); return; } await message.send({ format: messageFormat('接取失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const acceptBlacksmithQuestHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireNpcAtCurrentPosition(event.current.UserId,'blacksmith'); await acceptBlacksmithQuest(event.current.UserId); const markdown = Format.createMarkdown().addTitle('接受任务').addNewline().addNewline().addText('已接受【副职业·锻造师入门】\n收集：活木×1、兽核×1\n可随时通过 ').addButton('/任务', { data: '/任务', autoEnter: false }).addText(' 查看进度。'); await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('任务', '/任务', { type: 'command', autoEnter: true, style: 'blue' })) }); } catch (error) { if (error instanceof Error && error.message === 'secondary_profession_level_required') { await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('小北的婉拒').addNewline().addNewline().addBlockquote('小北把锤子搁回铁砧，认真地打量了你一会儿。\n“现在还太早。锻造要经得住炉火，也得经得住冒险里的风浪。等你到了 Lv.10，带着更扎实的本事再来找我吧。”')) }); return; } await message.send({ format: messageFormat('接取失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const claimBlacksmithQuestHandler = async () => {
   const [event] = useEvent(); const [message] = useMessage();
   try {
-    await requireBlacksmith(event.current.UserId);
+    await requireNpcAtCurrentPosition(event.current.UserId,'blacksmith');
     const result = await claimBlacksmithQuest(event.current.UserId);
     await grantNpcAffinity(event.current.UserId, 'blacksmith', 200);
     const markdown = Format.createMarkdown().addTitle('副职业转职成功').addNewline().addNewline()
@@ -239,7 +238,7 @@ export const claimBlacksmithQuestHandler = async () => {
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('查看 副职业', '/副职业', { type: 'command', autoEnter: true, style: 'blue' })) });
   } catch (error) { await message.send({ format: messageFormat('提交失败', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
-export const secondaryProfessionHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const { secondaryProfessionCode } = await import('../game/alchemist.service'); const profession = await secondaryProfessionCode(event.current.UserId); if (profession === 'alchemist') { const { alchemistProfessionFormat } = await import('./alchemist'); await message.send({ format: await alchemistProfessionFormat(event.current.UserId) }); return; } if (profession === 'deconstructor') { const { deconstructorProfessionFormat } = await import('./deconstructor'); await message.send({ format: await deconstructorProfessionFormat(event.current.UserId) }); return; } if (profession === 'omniscient') { const { omniscientProfessionFormat } = await import('./bookshop'); await message.send({ format: await omniscientProfessionFormat(event.current.UserId) }); return; } const isBlacksmith = profession === 'blacksmith'; const progress = isBlacksmith ? await blacksmithProgress(event.current.UserId) : null; const markdown = Format.createMarkdown().addTitle(isBlacksmith ? '副职业·锻造师' : '副职业').addNewline().addNewline(); if (isBlacksmith && progress) { const maxed = progress.level >= blacksmithMaxLevel; markdown.addText(`等级：Lv.${maxed ? 'MAX' : progress.level}\n${maxed ? '熟练度：已达上限' : `熟练度：${progress.proficiency}/${progress.required}\n${proficiencyBar(progress.proficiency, progress.required)}`}`).addNewline().addNewline().addBlockquote(`打造成功率+${progress.bonus}%`).addNewline().addBlockquote(`精炼大成功率+${progress.bonus}%`).addNewline().addBlockquote(`熔铸成功率+${progress.bonus}%`); } else markdown.addText('尚未获得副职业。你可以前往导师处了解并选择一门副职业。'); const buttons = isBlacksmith ? professionButtons() : Format.createButtonGroup()
+export const secondaryProfessionHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const { secondaryProfessionCode } = await import('../game/alchemist.service'); const profession = await secondaryProfessionCode(event.current.UserId); if (profession === 'alchemist') { const { alchemistProfessionFormat } = await import('./alchemist'); await message.send({ format: await alchemistProfessionFormat(event.current.UserId) }); return; } if (profession === 'deconstructor') { const { deconstructorProfessionFormat } = await import('./deconstructor'); await message.send({ format: await deconstructorProfessionFormat(event.current.UserId) }); return; } if (profession === 'omniscient') { const { omniscientProfessionFormat } = await import('./bookshop'); await message.send({ format: await omniscientProfessionFormat(event.current.UserId) }); return; } const isBlacksmith = profession === 'blacksmith'; const progress = isBlacksmith ? await blacksmithProgress(event.current.UserId) : null; const markdown = Format.createMarkdown().addTitle(isBlacksmith ? '副职业·锻造师' : '副职业').addNewline().addNewline(); if (isBlacksmith && progress) { const maxed = progress.level >= blacksmithMaxLevel; markdown.addText(`等级：Lv.${maxed ? 'MAX' : progress.level}\n${maxed ? '熟练度：已达上限' : `熟练度：${progress.proficiency}/${progress.required}\n${proficiencyBar(progress.proficiency, progress.required)}`}`).addNewline().addNewline().addBlockquote(`打造成功率+${progress.bonus}%`).addNewline().addBlockquote(`精炼大成功率+${progress.bonus}%`).addNewline().addBlockquote(`熔铸成功率+${progress.bonus}%`); } else markdown.addText('尚未获得副职业。你可以前往导师处了解并选择一门副职业。').addNewline().addButton('[入门与导师]',{data:'/副职业导师',autoEnter:false}); const buttons = isBlacksmith ? professionButtons() : Format.createButtonGroup()
   .addRow().addButton('前往 铁匠铺', '/前往 -17 -191', { type: 'command', autoEnter: true, style: 'blue' })
   .addRow().addButton('前往 糖水屋', '/前往 -12 -196', { type: 'command', autoEnter: true, style: 'blue' })
   .addRow().addButton('前往 异工坊', '/前往 6 -189', { type: 'command', autoEnter: true, style: 'blue' })

@@ -104,9 +104,16 @@ const pointInRegion = (bounds: RegionBounds, index: number, offset = 0): RoutePo
   return { name: '巡游点', x, y, z: bounds.min_z };
 };
 
+// 旧版本的晨露信使已由 dw_morningdew_riverbank_npc_1 接替；保留账本，仅移除会造成重复显示的失效实体状态。
+const retiredDynamicNpcCodes = ['courier_morningdew'] as const;
+
 export const initializeDynamicWorldSystem = async (pool?: Pool) => {
   const connection = pool ?? await getPool();
   for (const statement of schema) await connection.query(statement);
+  for (const code of retiredDynamicNpcCodes) {
+    await connection.execute("DELETE FROM map_npcs WHERE code=? AND interaction_kind='npc'", [code]);
+    await connection.execute('DELETE FROM world_dynamic_npc_states WHERE code=?', [code]);
+  }
   for (const [regionCode, profile] of Object.entries(profiles)) {
     await connection.execute(`INSERT INTO region_weather_profiles (region_id,climate_code,forecast_json,anomaly_pool_json)
       SELECT id,?,?,? FROM map_regions WHERE code=? ON DUPLICATE KEY UPDATE climate_code=VALUES(climate_code),forecast_json=VALUES(forecast_json),anomaly_pool_json=VALUES(anomaly_pool_json)`, [profile.climate, JSON.stringify(profile.forecast), JSON.stringify(profile.anomalies), regionCode]);
@@ -146,10 +153,10 @@ export const initializeDynamicWorldSystem = async (pool?: Pool) => {
       ];
       const current = route[0]!;
       await connection.execute(`INSERT INTO world_dynamic_npc_states (code,name,region_id,status,route_json,state_json,next_action_at)
-        VALUES (?,?,?,?,?,?,DATE_ADD(NOW(),INTERVAL 20 MINUTE))
-        ON DUPLICATE KEY UPDATE name=VALUES(name),region_id=VALUES(region_id),status=VALUES(status),route_json=VALUES(route_json),state_json=JSON_SET(state_json,'$.role',?,'$.homeSite',?,'$.homeRegionId',?,'$.homeStatus',?)`, [npc.code, displayName, bounds.id, npc.status, JSON.stringify(route), JSON.stringify({ role: npc.role, homeSite: home.building.code, homeRegionId: bounds.id, homeStatus: npc.status, currentPoint: current.name }), npc.role, home.building.code, bounds.id, npc.status]);
+        VALUES (?,?,?,?,?,?,DATE_ADD(NOW(),INTERVAL 8 MINUTE))
+        ON DUPLICATE KEY UPDATE name=VALUES(name),route_json=VALUES(route_json),state_json=JSON_SET(state_json,'$.role',?,'$.homeSite',?,'$.homeRegionId',?,'$.homeStatus',?),next_action_at=IF(status IN ('patrolling','responding'),next_action_at,LEAST(next_action_at,DATE_ADD(NOW(),INTERVAL 8 MINUTE)))`, [npc.code, displayName, bounds.id, npc.status, JSON.stringify(route), JSON.stringify({ role: npc.role, homeSite: home.building.code, homeRegionId: bounds.id, homeStatus: npc.status, currentPoint: current.name }), npc.role, home.building.code, bounds.id, npc.status]);
       await connection.execute(`INSERT INTO map_npcs (region_id,code,name,description,interaction_kind,pos_x,pos_y,pos_z) VALUES (?,?,?,?, 'npc',?,?,?)
-        ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),interaction_kind='npc',pos_x=VALUES(pos_x),pos_y=VALUES(pos_y),pos_z=VALUES(pos_z)`, [bounds.id, npc.code, displayName, `${npc.description}\n\n常驻地：${home.building.name}。`, current.x, current.y, current.z]);
+        ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),interaction_kind='npc'`, [bounds.id, npc.code, displayName, `${npc.description}\n\n常驻地：${home.building.name}。`, current.x, current.y, current.z]);
     }
     if (region.bossCode) await connection.execute(`INSERT INTO world_boss_gates (worldline_code,stage_required,boss_code,state) VALUES (?,24,?,'locked')
       ON DUPLICATE KEY UPDATE stage_required=VALUES(stage_required)`, [region.worldline, region.bossCode]);
@@ -674,16 +681,42 @@ export const advanceDynamicNpcs = async () => withTransaction(async connection =
   const [rows] = await connection.execute<(RowDataPacket & { code: string; name: string; region_id: number; status: string; route_json: unknown; state_json: unknown; action_revision: number })[]>('SELECT code,name,region_id,status,route_json,state_json,action_revision FROM world_dynamic_npc_states WHERE next_action_at<=NOW() FOR UPDATE');
   for (const npc of rows) {
     const route = json<RoutePoint[]>(npc.route_json, []); const home = route[0]; const previous = json<Record<string, unknown>>(npc.state_json, {}); const deployment = deployments.get(npc.code); const revision = Number(npc.action_revision) + 1;
-    const homeRegionId = Number(previous.homeRegionId ?? npc.region_id); const homeStatus = String(previous.homeStatus ?? npc.status); const homeDestination = isRoutePoint(home) ? { sceneId: null, regionId: homeRegionId, x: home.x, y: home.y, z: home.z } : null; const destination = deployment ?? homeDestination;
-    if (!destination) {
+    const homeRegionId = Number(previous.homeRegionId ?? npc.region_id); const homeStatus = String(previous.homeStatus ?? npc.status); const homeDestination = isRoutePoint(home) ? { regionId: homeRegionId, x: home.x, y: home.y, z: home.z } : null;
+    if (!deployment && !homeDestination) {
       await connection.execute('UPDATE world_dynamic_npc_states SET next_action_at=DATE_ADD(NOW(),INTERVAL 30 MINUTE) WHERE code=?', [npc.code]);
       continue;
     }
-    const outcome = deployment ? 'deployed' : previous.specialSceneId ? 'returned' : 'stationed';
-    const state = { ...previous, currentPoint: deployment ? '公共奇遇现场' : home?.name ?? '常驻点', specialSceneId: deployment?.sceneId ?? null, deployedAt: deployment ? new Date().toISOString() : null };
-    await connection.execute('UPDATE world_dynamic_npc_states SET region_id=?,status=?,state_json=?,action_revision=?,last_action_at=NOW(),next_action_at=DATE_ADD(NOW(),INTERVAL ? MINUTE) WHERE code=?', [destination.regionId, deployment ? 'responding' : homeStatus, JSON.stringify(state), revision, deployment ? 5 : 30, npc.code]);
+    const storedRouteIndex = Number(previous.routeIndex ?? 0);
+    const routeIndex = Number.isFinite(storedRouteIndex) ? clamp(Math.trunc(storedRouteIndex), 0, Math.max(0, route.length - 1)) : 0;
+    const patrolRoll = hash(`${npc.code}:patrol:${revision}`) % 100;
+    const patrolRoute = route.slice(1).filter(isRoutePoint);
+    let destination: { regionId: number; x: number; y: number; z: number };
+    let nextStatus: string;
+    let nextRouteIndex: number;
+    let nextMinutes: number;
+    let outcome: string;
+    let currentPoint: string;
+    let sceneId: string | null = null;
+    if (deployment) {
+      destination = deployment; nextStatus = 'responding'; nextRouteIndex = routeIndex; nextMinutes = 5; outcome = 'deployed'; currentPoint = '公共奇遇现场'; sceneId = deployment.sceneId;
+    } else if (previous.specialSceneId) {
+      destination = homeDestination!; nextStatus = homeStatus; nextRouteIndex = 0; nextMinutes = 8; outcome = 'returned'; currentPoint = home?.name ?? '常驻点';
+    // 让常驻域民多数时间能被世界遇见：离站概率 72%，巡游途中续行概率 58%。
+    } else if (patrolRoute.length && (npc.status === 'patrolling' ? patrolRoll < 58 : patrolRoll < 72)) {
+      const currentPatrolOffset = Math.max(0, routeIndex - 1);
+      const nextPatrolOffset = npc.status === 'patrolling'
+        ? (currentPatrolOffset + 1) % patrolRoute.length
+        : hash(`${npc.code}:route:${revision}`) % patrolRoute.length;
+      const patrolPoint = patrolRoute[nextPatrolOffset]!;
+      destination = { regionId: homeRegionId, x: patrolPoint.x, y: patrolPoint.y, z: patrolPoint.z };
+      nextStatus = 'patrolling'; nextRouteIndex = nextPatrolOffset + 1; nextMinutes = 12; outcome = 'patrolling'; currentPoint = patrolPoint.name;
+    } else {
+      destination = homeDestination!; nextStatus = homeStatus; nextRouteIndex = 0; nextMinutes = 8; outcome = npc.status === 'patrolling' ? 'returned' : 'stationed'; currentPoint = home?.name ?? '常驻点';
+    }
+    const state = { ...previous, currentPoint, routeIndex: nextRouteIndex, specialSceneId: sceneId, deployedAt: deployment ? new Date().toISOString() : null };
+    await connection.execute('UPDATE world_dynamic_npc_states SET region_id=?,status=?,state_json=?,action_revision=?,last_action_at=NOW(),next_action_at=DATE_ADD(NOW(),INTERVAL ? MINUTE) WHERE code=?', [destination.regionId, nextStatus, JSON.stringify(state), revision, nextMinutes, npc.code]);
     await connection.execute("UPDATE map_npcs SET region_id=?,pos_x=?,pos_y=?,pos_z=? WHERE code=? AND interaction_kind='npc'", [destination.regionId, destination.x, destination.y, destination.z, npc.code]);
-    if (outcome !== 'stationed' || Number(npc.region_id) !== destination.regionId) await writeLedger(connection, 'npc.presence', outcome, npc.code, { name: npc.name, sceneId: deployment?.sceneId ?? null, position: { x: destination.x, y: destination.y, z: destination.z }, homeRegionId }, null, destination.regionId, deployment?.sceneId ?? null);
+    if (outcome !== 'stationed' || Number(npc.region_id) !== destination.regionId) await writeLedger(connection, 'npc.presence', outcome, npc.code, { name: npc.name, sceneId, position: { x: destination.x, y: destination.y, z: destination.z }, homeRegionId, currentPoint }, null, destination.regionId, sceneId);
   }
   return rows.length;
 });
@@ -712,11 +745,11 @@ export const worldAdminSnapshot = async () => {
   const pool = await getPool(); await advanceDynamicNpcs();
   const [weather] = await pool.execute<(RowDataPacket & { region_code: string; region_name: string; weather_code: string; intensity: number; anomaly_code: string | null; transition_due_at: Date })[]>('SELECT r.code AS region_code,r.name AS region_name,s.weather_code,s.intensity,s.anomaly_code,s.transition_due_at FROM region_weather_states s JOIN map_regions r ON r.id=s.region_id ORDER BY r.danger_level,r.id');
   const [worldlines] = await pool.execute<(RowDataPacket & { code: string; stage: number; state_json: unknown })[]>('SELECT code,stage,state_json FROM worldline_states ORDER BY code');
-  const [npcs] = await pool.execute<(RowDataPacket & { code: string; name: string; region_name: string; status: string; state_json: unknown; action_revision: number })[]>('SELECT n.code,n.name,r.name AS region_name,n.status,n.state_json,n.action_revision FROM world_dynamic_npc_states n JOIN map_regions r ON r.id=n.region_id ORDER BY r.name,n.code');
+  const [npcs] = await pool.execute<(RowDataPacket & { code: string; name: string; region_name: string; status: string; state_json: unknown; action_revision: number; x: number; y: number; z: number })[]>('SELECT n.code,n.name,r.name AS region_name,n.status,n.state_json,n.action_revision,m.pos_x AS x,m.pos_y AS y,m.pos_z AS z FROM world_dynamic_npc_states n JOIN map_regions r ON r.id=n.region_id JOIN map_npcs m ON m.code=n.code AND m.interaction_kind=\'npc\' ORDER BY r.name,n.code');
   const [sites] = await pool.execute<(RowDataPacket & { code: string; name: string; region_name: string; site_type: string; state_json: unknown })[]>('SELECT s.code,s.name,r.name AS region_name,s.site_type,s.state_json FROM world_site_states s JOIN map_regions r ON r.id=s.region_id ORDER BY r.name,s.code');
   const [gates] = await pool.execute<(RowDataPacket & { worldline_code: string; boss_code: string; boss_name: string | null; state: string; stage_required: number })[]>('SELECT g.worldline_code,g.boss_code,b.name AS boss_name,g.state,g.stage_required FROM world_boss_gates g LEFT JOIN monster_templates b ON b.code=g.boss_code ORDER BY g.worldline_code,g.boss_code');
   const [counts] = await pool.execute<(RowDataPacket & { active_encounters: number; active_scenes: number; template_count: number; ledger_today: number })[]>(`SELECT (SELECT COUNT(*) FROM player_encounter_instances WHERE status='active' AND expires_at>NOW()) AS active_encounters, (SELECT COUNT(*) FROM world_scene_instances WHERE status='active' AND expires_at>NOW()) AS active_scenes, (SELECT COUNT(*) FROM dynamic_encounter_templates WHERE is_enabled=1) AS template_count, (SELECT COUNT(*) FROM game_event_ledger WHERE created_at>=CURDATE()) AS ledger_today`);
-  return { weather: weather.map(row => ({ regionCode: row.region_code, regionName: row.region_name, name: (weatherText[row.anomaly_code ?? row.weather_code] ?? weatherText.clear).name, intensity: Number(row.intensity), transitionDueAt: new Date(row.transition_due_at) })), worldlines: worldlines.map(row => ({ code: row.code, stage: Number(row.stage), state: json<Record<string, unknown>>(row.state_json, {}) })), npcs: npcs.map(row => ({ code: row.code, name: row.name, regionName: row.region_name, status: row.status, revision: Number(row.action_revision), state: json<Record<string, unknown>>(row.state_json, {}) })), sites: sites.map(row => ({ code: row.code, name: row.name, regionName: row.region_name, siteType: row.site_type, state: json<Record<string, unknown>>(row.state_json, {}) })), bossGates: gates.map(row => ({ worldline: row.worldline_code, bossCode: row.boss_code, bossName: row.boss_name ?? '未命名首领', state: row.state, stageRequired: Number(row.stage_required) })), activeEncounters: Number(counts[0]?.active_encounters ?? 0), activeScenes: Number(counts[0]?.active_scenes ?? 0), templateCount: Number(counts[0]?.template_count ?? 0), ledgerToday: Number(counts[0]?.ledger_today ?? 0) };
+  return { weather: weather.map(row => ({ regionCode: row.region_code, regionName: row.region_name, name: (weatherText[row.anomaly_code ?? row.weather_code] ?? weatherText.clear).name, intensity: Number(row.intensity), transitionDueAt: new Date(row.transition_due_at) })), worldlines: worldlines.map(row => ({ code: row.code, stage: Number(row.stage), state: json<Record<string, unknown>>(row.state_json, {}) })), npcs: npcs.map(row => ({ code: row.code, name: row.name, regionName: row.region_name, status: row.status, revision: Number(row.action_revision), position: { x: Number(row.x), y: Number(row.y), z: Number(row.z) }, state: json<Record<string, unknown>>(row.state_json, {}) })), sites: sites.map(row => ({ code: row.code, name: row.name, regionName: row.region_name, siteType: row.site_type, state: json<Record<string, unknown>>(row.state_json, {}) })), bossGates: gates.map(row => ({ worldline: row.worldline_code, bossCode: row.boss_code, bossName: row.boss_name ?? '未命名首领', state: row.state, stageRequired: Number(row.stage_required) })), activeEncounters: Number(counts[0]?.active_encounters ?? 0), activeScenes: Number(counts[0]?.active_scenes ?? 0), templateCount: Number(counts[0]?.template_count ?? 0), ledgerToday: Number(counts[0]?.ledger_today ?? 0) };
 };
 
 type ContentTemplateRow = RowDataPacket & { code: string; title: string; region_codes_json: unknown; weather_codes_json: unknown; min_exposure: number; weight: number; definition_json: unknown; is_enabled: number };

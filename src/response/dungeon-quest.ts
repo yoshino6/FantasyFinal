@@ -1,5 +1,6 @@
+import { secondaryShopFormat } from './secondary-shop';
 import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
-import { buyOddWorkshopItem, consultDungeonAtGuild, consultDungeonAtWorkshop, dungeonSecretProgress, entranceStory, oddWorkshopDungeonCatalog } from '../game/dungeon-quest.service';
+import { buyOddWorkshopItem, consultDungeonAtGuild, consultDungeonAtWorkshop, dungeonSecretProgress, entranceStory } from '../game/dungeon-quest.service';
 import { messageFormat } from '../game/message';
 
 const chapterFormat = (stage: number, text: string, buttons: ReturnType<typeof Format.createButtonGroup>) => Format.create()
@@ -18,7 +19,7 @@ export const dungeonSecretWorkshopHandler = async () => {
   const [event] = useEvent(); const [message] = useMessage();
   try {
     const text = await consultDungeonAtWorkshop(event.current.UserId);
-    await message.send({ format: chapterFormat(3, text, Format.createButtonGroup().addRow().addButton('查看 异工坊货架', '/异工坊购买', { type: 'command', autoEnter: true, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
+    await message.send({ format: chapterFormat(3, text, Format.createButtonGroup().addRow().addButton('查看个人副职业', '/副职业', { type: 'command', autoEnter: true, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
   } catch (error) { await message.send({ format: messageFormat('无法询问破魔传送器', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
 
@@ -36,13 +37,7 @@ export const dungeonSecretEntranceHandler = async () => {
   } catch (error) { await message.send({ format: messageFormat('地下的秘密', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
 
-export const oddWorkshopBuyFormat = async (qqUserId: string) => {
-    const items = await oddWorkshopDungeonCatalog(qqUserId);
-    const markdown = Format.createMarkdown().addTitle('百纳镇·异工坊货架').addNewline().addNewline().addBlockquote('唯薇安将两件装置摆到防震垫上，认真地贴好价签。“要买就快点，别碰旁边那个会冒烟的！”').addNewline().addNewline();
-    items.forEach((item, index) => markdown.addText(`${'①②③④⑤⑥⑦⑧'[index] ?? '·'}【${item.category}】${item.name} `).addButton('[购买]', { data: `/购买异工坊商品 ${item.code}`, autoEnter: false }).addNewline().addBlockquote(`价格：铜币×${item.price}｜剩余：${item.stock}${item.owned ? `｜已拥有${item.owned}` : ''}`).addNewline().addBlockquote(item.description).addNewline().addNewline());
-    markdown.addText('当前第（1/1）页');
-    return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('返回 异工坊', '/异工坊', { type: 'command', autoEnter: true }));
-};
+export const oddWorkshopBuyFormat = async (qqUserId: string) => secondaryShopFormat(qqUserId, 'oddworkshop');
 
 export const oddWorkshopBuyHandler = async () => {
   const [event] = useEvent(); const [message] = useMessage();

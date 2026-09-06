@@ -23,13 +23,13 @@ const listButtons = (page: number, totalPages: number, type: string, keyword: st
     .addButton('下一页', `/万叶市场 ${Math.min(totalPages, page + 1)} ${suffix}`, { type: 'command', autoEnter: true, style: page < totalPages ? 'blue' : undefined });
   buttons.addRow();
   for (const typeName of MARKET_TYPES) buttons.addButton(typeName, `/万叶市场 1 ${typeName}`, { type: 'command', autoEnter: true, style: typeName === type ? 'blue' : undefined });
-  buttons.addRow().addButton('返回 万叶联市', '/万叶联市', { type: 'command', autoEnter: true });
+  buttons.addRow().addButton('实例寄售', '/实例寄售', { type: 'command', autoEnter: false, style: 'blue' }).addButton('返回 万叶联市', '/万叶联市', { type: 'command', autoEnter: true });
   return buttons;
 };
 
 export const marketHomeFormat = async (qqUserId: string) => {
   const profile = await marketFeeProfile(qqUserId);
-  const markdown = Format.createMarkdown().addTitle('万叶联市').addNewline().addNewline()
+  const markdown = Format.createMarkdown().addTitle('万叶联市').addNewline().addButton('[装备·异械·机巧寄售]',{data:'/实例寄售',autoEnter:false}).addNewline().addNewline()
     .addBlockquote('世界树以叶脉记录货契，由树灵见证托管与结算。双方姓名不会出现在订单上；价与量，才是这里唯一的语言。').addNewline().addNewline()
     .addText(`本周已售：铜币×${profile.gross}｜已缴手续费：铜币×${profile.fees}`).addNewline()
     .addBlockquote(`下一笔成交手续费：${profile.nextRate}%｜订单最多保留 72 小时`).addNewline().addNewline()

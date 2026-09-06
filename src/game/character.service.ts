@@ -96,9 +96,9 @@ const equipmentExtraAttributes = async (connection: Pool | PoolConnection, chara
     FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
     LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
     WHERE pe.character_id=?`, [characterId]);
-  const [deviceRows] = await connection.execute<(RowDataPacket & { effect_json: unknown; quality: number })[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json,COALESCE(ii.quality,100) AS quality
+  const [deviceRows] = await connection.execute<(RowDataPacket & { effect_json: unknown; quality: number })[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json,100 AS quality
     FROM player_active_devices ad JOIN player_item_instances ii ON ii.id=ad.instance_id AND ii.character_id=ad.character_id
-    JOIN item_definitions i ON i.id=ii.item_id WHERE ad.character_id=? AND i.item_category='异械'`, [characterId]);
+    JOIN item_definitions i ON i.id=ii.item_id WHERE ad.character_id=? AND i.item_type='device'`, [characterId]);
   const effects = [...rows, ...deviceRows];
   const keys = ['damageBonusPct', 'damageReductionPct', 'chantReduction', 'magicChantBonus', 'manaCostReduction', 'ignoreDefensePct', 'lifestealPct', 'magicDamagePct', 'physicalDamageReductionPct', 'magicDamageReductionPct', 'hpRegenPct', 'mpRegenPct', 'minimumHitRatePct', 'actualHitRatePct', 'physicalActualHitRatePct', 'physicalSkillDamagePct', 'magicSkillDamagePct', 'lightSkillBonusPct', 'criticalDamageBonusPct', 'physicalCriticalFinalDamagePct'];
   return Object.fromEntries(keys.map(key => [key, Math.round(effects.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[key] ?? 0) * (key === 'damageBonusPct' || key === 'damageReductionPct' ? 1 : equipmentQualityMultiplier(Number(row.quality))), 0) * 10) / 10]));

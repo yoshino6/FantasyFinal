@@ -5,7 +5,7 @@ import { getAdminWebConfig } from '../config/admin-web';
 import pearAdminCover from '../assets/game/story/pear-admin-cover.png';
 import { adminCoverPath, adminPage, loginPage } from './page';
 import { createWebAdminAccount, loginAdminWeb, logoutAdminWeb, sessionForAdminWeb, setWebAdminEnabled, webAdminAccounts, type WebSession } from '../game/admin-web.service';
-import { adminDashboard, adminPlayerDetail, adminPlayers, adminWebJournals, adminWorldOverview, changeGlobalMultiplierFromWeb, runWebPlayerAudit } from '../game/admin-web-data.service';
+import { adminDashboard, adminGameOperations, adminMails, adminPatrolEntities, adminPlayerDetail, adminPlayers, adminWebJournals, adminWorldEvents, adminWorldOverview, changeGlobalMultiplierFromWeb, runWebPlayerAudit, sendWebMail } from '../game/admin-web-data.service';
 import { monitorSnapshot } from '../game/monitor.service';
 
 type Context = any;
@@ -111,6 +111,11 @@ export const registerAdminWebRoutes = (router: koaRouter) => {
   router.post('/api/admin/players/:id/audit', ctx => api(ctx, async (session, body) => runWebPlayerAudit(session, Math.max(1, Number(ctx.params.id)), body.kind, body.reason), true));
   router.get('/api/admin/world', ctx => api(ctx, async () => adminWorldOverview()));
   router.post('/api/admin/world/multiplier', ctx => api(ctx, async (session, body) => ({ value: await changeGlobalMultiplierFromWeb(session, body.key, body.value, body.reason) }), true));
+  router.get('/api/admin/world-events', ctx => api(ctx, async () => adminWorldEvents(ctx.query.keyword)));
+  router.get('/api/admin/patrol-entities', ctx => api(ctx, async () => adminPatrolEntities(ctx.query.keyword)));
+  router.get('/api/admin/game-operations', ctx => api(ctx, async () => adminGameOperations(ctx.query.page, ctx.query.keyword)));
+  router.get('/api/admin/mails', ctx => api(ctx, async () => adminMails(ctx.query.keyword)));
+  router.post('/api/admin/mails', ctx => api(ctx, async (session, body) => sendWebMail(session, body), true));
   router.get('/api/admin/journals', ctx => api(ctx, async () => adminWebJournals(ctx.query.page, ctx.query.keyword)));
   router.get('/api/admin/monitor', ctx => api(ctx, async () => monitorSnapshot()));
   router.get('/api/admin/accounts', ctx => api(ctx, async session => webAdminAccounts(session)));

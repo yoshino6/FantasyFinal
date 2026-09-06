@@ -1,7 +1,7 @@
 import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
 import { learnSkill, skillDetail, skillList, togglePassiveLink, toggleSkillShortcut, upgradeAppraisal, upgradeSkill, upgradeSkillSpecialization } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
-import { specializationDescriptions } from '../game/skill-specialization';
+import { specializationPerLevelLines, specializationTotalLines, specializationNumberText, passiveSpecializationPerLevelLine, passiveSpecializationTotalLine } from '../game/skill-specialization-presentation';
 import { balancedSkillDescription } from '../game/combat-skill-balance.config';
 import { craftsmanshipEffect } from '../game/blacksmith.service';
 import { advancedResourceForProfession, advancedSkillDescriptions, advancedResourceRequirementForSkill } from '../game/advanced-resource.config';
@@ -204,23 +204,26 @@ export const skillDetailHandler = async () => {
       return;
     }
     if (skill.learned && skill.category !== 'passive' && skill.category !== 'bound') {
-      const names = { overcharge: '过充', instant: '瞬息', efficient: '节能', potent: '强效' } as const;
-      const descriptions = specializationDescriptions;
+      const names = { overcharge: '过充', potent: '强效', instant: '瞬息', efficient: '节能' } as const;
+      const perLevel = specializationPerLevelLines(skill.tier, skill.specializations);
       const category = categoryNames[skill.category] ?? '特殊';
       const resourceRequirement = advancedResourceRequirementForSkill(skill.code); const resource = advancedResourceForProfession(resourceRequirement?.professionCode);
       const markdown = Format.createMarkdown().addTitle('技能详情').addNewline().addNewline().addText(`【${skill.name}】${`Lv.${skill.level}`}\n`)
-        .addBlockquote(`等阶：${skill.tier}`).addNewline().addBlockquote(`类别：${category}`).addNewline().addBlockquote(`种类：${skill.skill_kind}`).addNewline().addBlockquote(`属性：${skill.element}`).addNewline().addBlockquote(`距离：${skill.range_type}`).addNewline().addBlockquote(`目标范围：${skill.target_scope}`).addNewline().addBlockquote(`武器限制：${skill.required_weapon_type ? `主手或副手装备${skill.required_weapon_type}` : '无（任意武器可用）'}`).addNewline().addBlockquote(`威力：${skill.actualPower}`).addNewline().addBlockquote(`蓝耗：${skill.actualManaCost}`).addNewline().addBlockquote(`冷却：${skill.actualCooldown}`).addNewline().addBlockquote(`吟唱：${skill.actualChant}`).addNewline();
+        .addBlockquote(`等阶：${skill.tier}`).addNewline().addBlockquote(`类别：${category}`).addNewline().addBlockquote(`种类：${skill.skill_kind}`).addNewline().addBlockquote(`属性：${skill.element}`).addNewline().addBlockquote(`距离：${skill.range_type}`).addNewline().addBlockquote(`目标范围：${skill.target_scope}`).addNewline().addBlockquote(`武器限制：${skill.required_weapon_type ? `主手或副手装备${skill.required_weapon_type}` : '无（任意武器可用）'}`).addNewline().addBlockquote(`威力：${specializationNumberText(skill.specializationResult.power)}`).addNewline().addBlockquote(`蓝耗：${skill.actualManaCost}`).addNewline().addBlockquote(`冷却：${skill.actualCooldown}`).addNewline().addBlockquote(`吟唱：${skill.actualChant}`).addNewline();
       if (resourceRequirement && resource) markdown.addBlockquote(`专属资源：消耗${resourceRequirement.amount}${resource.name}。${resource.summary}`).addNewline();
       appendSkillEffectDetails(markdown, skill);
       {
-        markdown.addBlockquote(`当前专精：最终直伤 ×${skill.specializationResult.damageFactor.toFixed(2)}｜治疗/护盾 ×${skill.specializationResult.supportFactor.toFixed(2)}｜普通增减益 ×${skill.specializationResult.effectFactor.toFixed(2)}`).addNewline();
-        markdown.addNewline().addText('专精：\n');
+        markdown.addNewline().addText('专精 · 下一级变化\n').addBlockquote('Lv.1尚未加点；以下百分比作用于当前值，逐级乘算。收益每点衰减10%、最低保留25%；惩罚倍率固定。').addNewline().addNewline();
         (Object.keys(names) as Array<keyof typeof names>).forEach((key, index) => {
-          if (!skill.specializationChoices.includes(key)) return;
+          if (!skill.specializationChoices.includes(key)) { markdown.addText(`${'①②③④'.charAt(index)}${names[key]}：不适用\n`).addNewline(); return; }
           const level = Number(skill.specializations[key] ?? 1); markdown.addText(`${'①②③④'.charAt(index)}${names[key]} Lv.${level}/${skill.specializationMaxLevel} `);
           if (level < skill.specializationMaxLevel && skill.specializationUpgradeCost !== null) markdown.addButton(`[升级(SP${skill.specializationUpgradeCost})]`, { data: `/升级专精 ${skill.id} ${names[key]}`, autoEnter: false });
-          markdown.addNewline().addBlockquote(descriptions[key]).addNewline().addNewline();
+          markdown.addNewline();
+          for (const line of perLevel[key]) markdown.addBlockquote(line).addNewline();
+          markdown.addNewline();
         });
+        markdown.addText('总体变化（仅专精）\n');
+        for (const line of specializationTotalLines(skill, skill.specializationResult)) markdown.addBlockquote(line).addNewline();
       }
       markdown.addNewline().addText(`当前技能点：${skill.skillPoints}`);
       const buttons = Format.createButtonGroup().addRow().addButton('返回技能列表', '/技能列表 已学习', { type: 'command', autoEnter: true, style: 'blue' });
@@ -245,8 +248,9 @@ export const skillDetailHandler = async () => {
       markdown.addBlockquote(`等阶：${skill.tier}`).addNewline().addBlockquote(`类别：${categoryNames[skill.category]}`).addNewline().addBlockquote(`效果：${skill.description}`);
       if (skill.passiveSpecializable) {
         const level = Number(skill.specializations.potent ?? 1);
-        markdown.addNewline().addBlockquote(`强效 Lv.${level}/${skill.specializationMaxLevel}：可成长数值 ×${skill.passiveFactor.toFixed(3)}，满级至多 +15%；次数、持续时间和机制权限不增长。`);
-        if (skill.learned && level < skill.specializationMaxLevel && skill.specializationUpgradeCost !== null) markdown.addNewline().addButton(`[升级强效(SP${skill.specializationUpgradeCost})]`, { data: `/升级专精 ${skill.id} 强效`, autoEnter: false });
+        markdown.addNewline().addNewline().addText(`强效 Lv.${level}/${skill.specializationMaxLevel}\n`).addBlockquote(passiveSpecializationPerLevelLine(skill.tier, level)).addNewline();
+        if (skill.learned && level < skill.specializationMaxLevel && skill.specializationUpgradeCost !== null) markdown.addButton(`[升级强效(SP${skill.specializationUpgradeCost})]`, { data: `/升级专精 ${skill.id} 强效`, autoEnter: false }).addNewline();
+        markdown.addNewline().addText('总体变化（仅专精）\n').addBlockquote(passiveSpecializationTotalLine(skill.passiveFactor));
       } else markdown.addNewline().addBlockquote('专精：固定机制被动不放大权限、次数或资源返还；装备精通和鉴识保留专用成长。');
       if (advancedProfessionPassiveCodes.has(skill.code)) {
         const profession = worldTreeAdvancedProfessions.find(entry => entry.passive.code === skill.code);
@@ -255,7 +259,7 @@ export const skillDetailHandler = async () => {
       }
     }
     else {
-      markdown.addBlockquote(`等阶：${skill.tier}`).addNewline().addBlockquote(`类别：${categoryNames[skill.category] ?? '辅助'}`).addNewline().addBlockquote(`种类：${skill.skill_kind}`).addNewline().addBlockquote(`属性：${skill.element}`).addNewline().addBlockquote(`距离：${skill.range_type}`).addNewline().addBlockquote(`目标范围：${skill.target_scope}`).addNewline().addBlockquote(`武器限制：${skill.required_weapon_type ? `主手或副手装备${skill.required_weapon_type}` : '无（任意武器可用）'}`).addNewline().addBlockquote(`威力：${skill.actualPower}`).addNewline().addBlockquote(`蓝耗：${skill.actualManaCost}`).addNewline().addBlockquote(`冷却：${skill.actualCooldown}`).addNewline().addBlockquote(`吟唱：${skill.actualChant}`).addNewline();
+      markdown.addBlockquote(`等阶：${skill.tier}`).addNewline().addBlockquote(`类别：${categoryNames[skill.category] ?? '辅助'}`).addNewline().addBlockquote(`种类：${skill.skill_kind}`).addNewline().addBlockquote(`属性：${skill.element}`).addNewline().addBlockquote(`距离：${skill.range_type}`).addNewline().addBlockquote(`目标范围：${skill.target_scope}`).addNewline().addBlockquote(`武器限制：${skill.required_weapon_type ? `主手或副手装备${skill.required_weapon_type}` : '无（任意武器可用）'}`).addNewline().addBlockquote(`威力：${specializationNumberText(skill.specializationResult.power)}`).addNewline().addBlockquote(`蓝耗：${skill.actualManaCost}`).addNewline().addBlockquote(`冷却：${skill.actualCooldown}`).addNewline().addBlockquote(`吟唱：${skill.actualChant}`).addNewline();
       if (resourceRequirement && resource) markdown.addBlockquote(`专属资源：消耗${resourceRequirement.amount}${resource.name}。${resource.summary}`).addNewline();
       appendSkillEffectDetails(markdown, skill);
     }

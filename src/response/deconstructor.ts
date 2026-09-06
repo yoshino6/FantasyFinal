@@ -152,12 +152,11 @@ export const deconstructorProfessionFormat = async (qqUserId: string) => {
   const progress = await deconstructorProgress(qqUserId);
   const maxed = progress.required === 0;
   const filled = maxed ? 10 : Math.round(Math.max(0, Math.min(1, progress.proficiency / progress.required)) * 10);
-  const markdown = Format.createMarkdown().addTitle('副职业·解构师').addNewline().addNewline()
+  const markdown = Format.createMarkdown().addTitle('副职业·解构师').addNewline().addButton('[图纸研习]',{data:'/解构图纸研习',autoEnter:false}).addText(' ').addButton('[入门与导师]',{data:'/副职业导师',autoEnter:false}).addNewline().addNewline()
     .addText(`等级：Lv.${maxed ? 'MAX' : progress.level}\n${maxed ? '熟练度：已达上限' : `熟练度：${progress.proficiency}/${progress.required}\n${'■'.repeat(filled)}${'□'.repeat(10 - filled)}`}`).addNewline().addNewline()
     .addBlockquote(`分解产出+${progress.bonus}%`).addNewline()
     .addBlockquote('构造成功率由构造物推荐等级与当前解构师等级差决定；失败会返还部分全部投入材料。');
-  return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup()
-    .addRow().addButton('分解', '/分解', { type: 'command', autoEnter: true, style: 'blue' }).addButton('构造', '/构造', { type: 'command', autoEnter: true, style: 'blue' })
+  return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('分解','/分解',{type:'command',autoEnter:true}).addButton('构造','/构造',{type:'command',autoEnter:true})
     .addRow().addButton('前往 异工坊', '/前往 6 -189', { type: 'command', autoEnter: true, style: 'blue' }));
 };
 

@@ -4,11 +4,13 @@ import { calculateDerivedStats, experienceRequiredForLevel } from './constants';
 import { attributes, type Allocation } from './types';
 import { girlGratitudeMainQuest } from './girl-gratitude.service';
 import { activateEvolutionProfile } from './evolution.service';
+import { guildCareerMainQuest } from './career-quest.service';
 
 export type MainQuest = {
   title: string;
   description: string;
   action?: { label: string; command: string };
+  actions?: { label: string; command: string }[];
 };
 
 const barrierQuestCode = 'realm_barrier';
@@ -85,8 +87,8 @@ const createGoblinKingEncounter = async (connection: QuestConnection, ownerChara
 /** 主线只保留当前阶段，由角色等级、剧情进度与地图持有状态自动推导。 */
 export const currentMainQuest = async (qqUserId: string): Promise<MainQuest> => {
   const pool = await getPool();
-  const [rows] = await pool.execute<(RowDataPacket & { id: number; level: number; experience: number; realm_stage: number; pos_x: number; pos_y: number; forest_status: string | null; owns_forest_map: number; owns_sky_dust: number; has_appraisal: number; barrier_stage: number; evolution_stage: number; evolution_cap: number | null })[]>(`
-    SELECT c.id,c.level,c.experience,c.realm_stage,c.pos_x,c.pos_y,
+  const [rows] = await pool.execute<(RowDataPacket & { id: number; level: number; experience: number; realm_stage: number; pos_x: number; pos_y: number; adventurer_registered: number; profession_code: string | null; forest_status: string | null; owns_forest_map: number; owns_sky_dust: number; has_appraisal: number; barrier_stage: number; evolution_stage: number; evolution_cap: number | null })[]>(`
+    SELECT c.id,c.level,c.experience,c.realm_stage,c.pos_x,c.pos_y,c.adventurer_registered,c.profession_code,
       (SELECT sp.status FROM player_story_progress sp WHERE sp.character_id=c.id AND sp.story_code='forest_guide' LIMIT 1) AS forest_status,
       EXISTS(SELECT 1 FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=c.id AND i.code='map_dark_forest' AND pi.quantity>0) AS owns_forest_map,
       EXISTS(SELECT 1 FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=c.id AND i.code='sky_dust' AND pi.quantity>0) AS owns_sky_dust,
@@ -110,10 +112,19 @@ export const currentMainQuest = async (qqUserId: string): Promise<MainQuest> => 
     title: '【主线·初入异界】',
     description: `提升至Lv.5\n当前等级：Lv.${level}/5`
   };
+  if (['awaiting_arrival', 'arrival_story', 'guild_story'].includes(character.forest_status ?? '')) return {
+    title: '【主线·前往百纳镇】',
+    description: '森林史莱姆的战斗已经结束。继续入镇剧情，跟随梨子喵认识百纳镇，前往冒险者公会。',
+    action: { label: '[继续 剧情]', command: '/继续剧情' }
+  };
   if (character.forest_status !== 'completed') return {
     title: '【主线·寻找出路】',
     description: '在森林里多转转吧，寻找出路。'
   };
+  if (!Number(character.adventurer_registered) || !character.profession_code) {
+    const careerQuest = await guildCareerMainQuest(qqUserId);
+    if (careerQuest) return careerQuest;
+  }
   if (!Number(character.owns_forest_map)) return {
     title: '【主线·探索的准备】',
     description: '前往冒险者公会商店，购买【地图·幽暗密林】。',

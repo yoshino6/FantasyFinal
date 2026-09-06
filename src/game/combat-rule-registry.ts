@@ -1,8 +1,9 @@
-import { opposedChance, tenacityContest } from './combat-math';
+import { alchemyIncoming, alchemyAfterHit, alchemySaveLife, alchemyHealingFactor, alchemyStatusNames } from './alchemy-combat';
+import { bossControlChanceMultiplier, opposedChance, tenacityContest } from './combat-math';
 import { nativeSkillBalanceByCode } from './combat-skill-balance.config';
 import { residentScalablePassives } from './passive-specialization';
 import { canDispelCombatEffect, type DispelAuthority } from './combat-dispel-policy';
-import { specializeEffectValue, type SkillSpecializationResult } from './skill-specialization';
+import { specializeEffectValue, specializeEffectDuration, specializeControlChance, type SkillSpecializationResult } from './skill-specialization';
 import { residentSkillByCode, residentSkills, type ResidentSkill } from './resident-skill.config';
 
 export type RuleStatus = { code: string; value: number; until: number; source: string; debuff: boolean; stacks: number; legacyId?: number; data?: string; mechanism?: string };
@@ -19,6 +20,9 @@ export type RuleUnit = {
   passiveSpecializations?: Record<string, number>;
 };
 export type RuleHooks = {
+  beforeAction?: (unit: RuleUnit) => Promise<void>;
+  beforeHpDamage?: (unit: RuleUnit, damage: number) => Promise<number>;
+  afterDamage?: (unit: RuleUnit, damage: number, shieldBroken: boolean) => Promise<void>;
   absorb: (unit: RuleUnit, damage: number) => Promise<number>;
   legacyEffects: (unit: RuleUnit) => RuleStatus[];
   removeLegacy: (id: number) => Promise<void>;
@@ -39,6 +43,7 @@ const controls = [...hard, 'confusion', 'blind', 'silence'];
 const names: Record<string, string> = { poison: '中毒', burn: '灼烧', bleed: '流血', bleeding: '流血', sleep: '沉睡', petrify: '石化', charm: '魅惑', fear: '恐惧', confusion: '混乱', blind: '目盲', silence: '沉默', slow: '迟缓', exposed: '易伤', armor_shatter: '破甲', magic_shatter: '降魔防', enchant: '三相附锋', mirror: '法镜', shield: '生命护盾', nightmare: '梦魇' };
 const opposite: Record<string, string> = { attack: 'attack_down', attack_down: 'attack', magic: 'magic_down', magic_down: 'magic', defense: 'armor_shatter', armor_shatter: 'defense', magic_defense: 'magic_shatter', magic_shatter: 'magic_defense', speed: 'slow', slow: 'speed', accuracy: 'accuracy_down', accuracy_down: 'accuracy', reduction: 'exposed', exposed: 'reduction' };
 Object.assign(names, { speed: '疾行', accuracy: '精准', accuracy_down: '失准', reduction: '减伤', physical_reduction: '物理减伤', magic_reduction: '魔法减伤', defense: '护甲', magic_defense: '魔防', attack: '物攻强化', magic: '魔攻强化', attack_down: '物攻衰减', magic_down: '魔攻衰减', mana_discount: '法潮节流', mana_tax: '施法负担', next_damage: '蓄势', damage: '增伤', conductive: '导电', refraction: '折光', expand: '万象扩散', extra_lock: '时隙锁定', extra_block: '行动封锁', forge: '临锻回火', roots: '根系共鸣', echo: '援护回响', command: '协同号令', flank: '双锋夹角', beat: '共鸣节拍', taunted: '嘲讽', phase: '相位假身', false_shadow: '灯下假影', transfer: '借伤誓约', feign: '绝境佯死', aim: '猎人量距', blade_line: '咒刃引线', swap_magic: '低项魔攻', swap_physical: '高项物攻', shadow_mark: '影缝标记', indexed: '识破增益', false_compass: '谎言罗盘', blind_resist: '抗目盲', ember_screen: '余火护幕', iron_gate: '铁门半开', crit_bonus: '同仇刻印', fire_vulnerable: '畏火' });
+Object.assign(names, alchemyStatusNames);
 export const displayedRuleName = (state: RuleState, code: string, actual: string, turn: number, ownView: boolean) => {
   const illusion = ownView ? state.statuses.find(e => e.code === 'false_compass' && e.until >= turn) : undefined;
   if (illusion?.data?.startsWith(`${code}|`)) return illusion.data.split('|')[1] + '？';
@@ -81,10 +86,21 @@ export class CombatRules {
   lowest(items: RuleUnit[]) { return [...items].sort((a, b) => a.hp / a.hpMax - b.hp / b.hpMax || a.key.localeCompare(b.key))[0]; }
   status(unit: RuleUnit, code: string) { return this.effects(unit).find(effect => effect.code === code); }
   effects(unit: RuleUnit) { return [...unit.state.statuses.filter(effect => effect.until >= this.turn), ...this.hooks.legacyEffects(unit)]; }
-  value(unit: RuleUnit, code: string) { return this.effects(unit).filter(effect => effect.code === code).reduce((n, effect) => n + effect.value * effect.stacks, 0); }
+  value(unit: RuleUnit, code: string) {
+    const matching=this.effects(unit).filter(effect=>effect.code===code);
+    const alchemy=matching.some(effect=>effect.data?.includes('"alchemy":1'));
+    return alchemy?Math.max(0,...matching.map(effect=>effect.value*effect.stacks)):matching.reduce((n,effect)=>n+effect.value*effect.stacks,0);
+  }
+  statBonus(unit: RuleUnit, codes: string[]) {
+    const effects=this.effects(unit).filter(effect=>codes.includes(effect.code));
+    const potions=effects.filter(effect=>effect.data?.includes('"alchemy":1'));
+    if(!potions.length)return codes.reduce((sum,code)=>sum+this.value(unit,code),0);
+    const skills=effects.filter(effect=>!effect.data?.includes('"alchemy":1')).reduce((sum,effect)=>sum+effect.value*effect.stacks,0);
+    return Math.max(skills,...potions.map(effect=>effect.value*effect.stacks));
+  }
   passive(unit: RuleUnit, id: string) {
     const code = `resident_${id.toLowerCase()}`;
-    if (unit.passives.includes(code)) return residentScalablePassives.has(code) ? Math.max(1, Math.min(1.15, unit.passiveSpecializations?.[code] ?? 1)) : 1;
+    if (unit.passives.includes(code)) return residentScalablePassives.has(code) ? Math.max(1, Math.min(1.25, unit.passiveSpecializations?.[code] ?? 1)) : 1;
     return unit.state.memory.copy === id && Number(unit.state.memory.copyUntil) >= this.turn ? .4 : 0;
   }
   once(unit: RuleUnit, key: string, battle = false) {
@@ -93,13 +109,13 @@ export class CombatRules {
     unit.state.memory[key] = stamp; return true;
   }
   add(unit: RuleUnit, code: string, value: number, duration: number, source: RuleUnit, debuff = false, data?: string): RuleStatus {
-    const current = unit.state.statuses.find(effect => effect.code === code);
+    const current = unit.state.statuses.find(effect => effect.code === code && effect.until>=this.turn);
     const effect = { code, value: current ? Math.max(current.value, value) : value, until: Math.max(this.turn, this.turn + duration - (unit.state.memory.actedTurn === this.turn ? 0 : 1)), source: source.key, debuff, stacks: current?.stacks ?? 1, data };
     unit.state.statuses = unit.state.statuses.filter(item => item.code !== code); unit.state.statuses.push(effect);
     return effect;
   }
   async remove(unit: RuleUnit, predicate: (effect: RuleStatus) => boolean, limit = Infinity) {
-    const removed = this.effects(unit).filter(predicate).slice(0, limit);
+    const removed = this.effects(unit).filter(effect=>effect.code!=='alchemy_defer').filter(predicate).slice(0, limit);
     for (const effect of removed) {
       if (effect.legacyId) await this.hooks.removeLegacy(effect.legacyId);
       else unit.state.statuses = unit.state.statuses.filter(item => item !== effect);
@@ -128,14 +144,15 @@ export class CombatRules {
     return amount - remaining;
   }
   async consume(unit: RuleUnit, code: string) { const effect = this.status(unit, code); if (effect) await this.removeEffect(unit, effect); return effect; }
-  async control(source: RuleUnit, target: RuleUnit, code: string, chance: number, duration: number) {
+  async control(source: RuleUnit, target: RuleUnit, code: string, chance: number, duration: number, specialized = true) {
+    if (specialized) chance = specializeControlChance(chance, source.castSpecialization?.controlChanceFactor);
     if (target.boss && code === 'charm') return false;
     if (target.boss && code === 'fear') { this.add(target, 'slow', 20, 1, source, true); return true; }
     let pierce = source.pierce;
     if (this.passive(source, 'B08') && this.effects(target).some(effect => controls.includes(effect.code)) && this.once(source, 'listen')) pierce += 12;
     if (this.passive(source, 'J07') && this.sparLevelBand && source.level >= this.sparLevelBand[0] && source.level <= this.sparLevelBand[1] && this.once(source, 'traveller', true)) chance += 8;
     const resistance = code === 'blind' ? this.value(target, 'blind_resist') : 0;
-    const probability = tenacityContest(pierce, target.tenacity, source.level - target.level, chance).controlChance * (this.expansionScale < 1 ? .5 : 1) * (target.boss ? .4 : 1) * (1 - resistance / 100);
+    const probability = tenacityContest(pierce, target.tenacity * (1 + this.value(target, 'tenacity') / 100), source.level - target.level, chance).controlChance * (this.expansionScale < 1 ? .5 : 1) * (target.boss ? bossControlChanceMultiplier : 1) * (1 - resistance / 100);
     if (this.random() >= probability) { this.log.push(`　➥【${target.name}】抵抗了${names[code] ?? code}。`); return false; }
     if (hard.includes(code) && this.effects(target).some(effect => hard.includes(effect.code) && !canDispelCombatEffect(effect.code, 'ordinary', Boolean(effect.mechanism)))) return false;
     if (hard.includes(code)) await this.remove(target, effect => hard.includes(effect.code));
@@ -147,6 +164,8 @@ export class CombatRules {
     this.log.push(`　➥【${target.name}】陷入${names[code]}。`); return true;
   }
   async beforeAction(unit: RuleUnit) {
+    await this.hooks.beforeAction?.(unit);
+    unit.state.memory.alchemyAction=Number(unit.state.memory.alchemyAction??0)+1;
     // 转移/增层到规则状态的持续伤害每轮只结算一次；额外行动不重复结算，也不唤醒沉睡。
     if (unit.hp > 0 && this.once(unit, 'ruleDot')) for (const effect of unit.state.statuses.filter(e => e.until >= this.turn && ['poison', 'burn', 'bleed', 'bleeding'].includes(e.code))) {
       const percent = unit.boss ? Math.min(1.5, effect.value * effect.stacks) : effect.value * effect.stacks;
@@ -158,7 +177,7 @@ export class CombatRules {
     const mirror = this.status(unit, 'mirror'); if (mirror && mirror.until <= this.turn) await this.consume(unit, 'mirror');
     unit.state.memory.actedTurn = this.turn;
     if (this.status(unit, 'fear')) { if (!this.status(unit, 'fear')?.mechanism) await this.consume(unit, 'fear'); this.log.push(`➤【${unit.name}】因恐惧跳过行动。`); return false; }
-    const locked = ['sleep', 'petrify'].find(code => this.status(unit, code));
+    const locked = ['sleep', 'petrify', 'alchemy_stun'].find(code => this.status(unit, code));
     if (locked) { this.log.push(`➤【${unit.name}】处于${names[locked]}，无法行动。`); return false; }
     return true;
   }
@@ -187,7 +206,7 @@ export class CombatRules {
     let healing = (equipment ? (1 + Number(source.modifiers?.healingBonusPct ?? 0) / 100) * (1 + Number(target.modifiers?.healingReceivedPct ?? 0) / 100) : 1) * (1 + (this.allies(target).length === 1 ? this.passive(target, 'H08') * .2 : 0));
     if (source.mp / source.mpMax < .25) healing *= 1 - this.passive(source, 'D08') * .25;
     if (target.hp / target.hpMax < .25) healing *= 1 - this.passive(target, 'I08') * .2;
-    return healing;
+    return healing * alchemyHealingFactor(this, target);
   }
   async restore(source: RuleUnit, target: RuleUnit, hp: number, mp = 0, echo = false) {
     if (target.hp <= 0) return;
@@ -211,7 +230,7 @@ export class CombatRules {
   async shield(source: RuleUnit, target: RuleUnit, amount: number, duration: number) {
     if (this.status(source, 'beat')) { amount *= 1 + this.value(source, 'beat') / 100; await this.consume(source, 'beat'); }
     amount *= source.castSpecialization?.supportFactor ?? 1;
-    this.add(target, 'shield', Math.min(target.hpMax, amount), duration, source); await this.rootEcho(source);
+    this.add(target, 'shield', Math.min(target.hpMax, amount), specializeEffectDuration('shield', duration, source.castSpecialization?.durationChange), source); await this.rootEcho(source);
   }
   supportSnapshot(unit: RuleUnit) { return { hp: unit.hp, mp: unit.mp, effects: this.effects(unit).map(e => ({ ...e })) }; }
   async echoSupport(source: RuleUnit, original: RuleUnit, before: ReturnType<CombatRules['supportSnapshot']>) {
@@ -249,6 +268,7 @@ export class CombatRules {
   elementFactor(source: RuleUnit, target: RuleUnit, element: string) {
     if (!element || element === '无' || element === '奥术') return 1;
     let resistance = Number(target.resistance[element] ?? 0);
+    if (this.status(target, 'alchemy_resistance')) resistance += element === '火' ? 25 : element === '冰' ? -10 : 0;
     if (['风', '雷', '火'].includes(element) && target.hp / target.hpMax < .25) resistance += this.passive(target, 'I08') * 15;
     if (element === '火') resistance -= this.value(target, 'fire_vulnerable');
     return clamp(1 + (Number(source.mastery[element] ?? 0) - resistance) / 100, .1, 3);
@@ -264,7 +284,10 @@ export class CombatRules {
     const shield = this.status(target, 'shield'); const absorbed = Math.min(shield?.value ?? 0, damage);
     if (shield) { shield.value -= absorbed; if (shield.value <= 0) await this.consume(target, 'shield'); }
     const legacyAbsorbed = await this.hooks.absorb(target, Math.max(0, damage - absorbed));
-    target.hp = Math.max(0, target.hp - Math.max(0, damage - absorbed - legacyAbsorbed));
+    const hpDamage = await this.hooks.beforeHpDamage?.(target, Math.max(0, damage - absorbed - legacyAbsorbed)) ?? Math.max(0, damage - absorbed - legacyAbsorbed);
+    const hpBefore = target.hp;
+    target.hp = Math.max(0, target.hp - hpDamage);
+    await this.hooks.afterDamage?.(target, hpBefore - target.hp, Boolean(shield && !this.status(target, 'shield')));
     if (aliveBefore && target.hp <= 0 && this.status(target, 'feign')) { target.hp = 1; await this.consume(target, 'feign'); this.add(target, 'blind', 1, 1, target, true); }
     if (target.hp <= 0 && this.passive(target, 'M07') && this.allies(target).length && this.once(target, 'lastTorch', true)) {
       for (const ally of this.allies(target)) { this.add(ally, 'reduction', 20 * this.passive(target, 'M07'), 1, target); this.add(ally, 'damage', 15 * this.passive(target, 'M07'), 1, target); }
@@ -274,7 +297,8 @@ export class CombatRules {
       for (const enemy of this.enemies(target)) await this.secondary(target, enemy, (target.magic * .55) ** 2 / (target.magic * .55 + enemy.magicDefense), '余火护幕', '火');
     }
     if (shield && !this.status(target, 'shield') && this.passive(target, 'K08') && this.once(target, 'spare') && this.random() < .35) this.reduceCooldown(target, true);
-    return absorbed + legacyAbsorbed;
+    await alchemySaveLife(this,target);
+    return absorbed + legacyAbsorbed + Math.max(0, damage - absorbed - legacyAbsorbed - hpDamage);
   }
   async incoming(source: RuleUnit, target: RuleUnit, raw: number, element: string, magic: boolean, skill: boolean, single = true, legacyResolved = false) {
     const modifier = (unit: RuleUnit, key: string) => Number(unit.modifiers?.[key] ?? 0);
@@ -312,9 +336,10 @@ export class CombatRules {
     if (!magic && this.status(target, 'iron_gate')) this.add(source, 'slow', 20, 1, target, true);
     target.state.memory.lastDamage = this.turn;
     if (this.passive(target, 'I07') && this.once(target, 'painFocus')) target.state.memory.focus = this.turn;
-    return Math.max(0, Math.floor(dealt));
+    return Math.max(0, Math.floor(await alchemyIncoming(this,source,target,dealt,magic,skill)));
   }
   async afterHit(source: RuleUnit, target: RuleUnit, damage: number, element: string, skill: boolean, absorbed = 0, extra = false) {
+    await alchemyAfterHit(this,source,target,damage,element);
     if (this.sparLevelBand && target.side === 'target' && damage > 0 && this.elementFactor(source, target, element) > 1) source.state.memory.sparWeakness = 1;
     if (absorbed && this.passive(target, 'F07') && this.once(target, `shard${source.key}`)) { this.add(source, 'armor_shatter', 8 * this.passive(target, 'F07'), 1, target, true); this.add(source, 'magic_shatter', 8 * this.passive(target, 'F07'), 1, target, true); }
     target.state.memory.lastHitTurn = this.turn; target.state.memory.lastHitter = source.key;
@@ -350,27 +375,27 @@ export class CombatRules {
     return { forceHit, powerFactor, hitBonus, hitFactor: this.status(source, 'blind') ? .5 : 1 };
   }
   async missed(source: RuleUnit, target: RuleUnit) {
-    if (this.status(target, 'false_shadow')) await this.control(target, source, 'blind', 100, 1);
+    if (this.status(target, 'false_shadow')) await this.control(target, source, 'blind', 100, 1, false);
   }
   async strike(source: RuleUnit, original: RuleUnit, power: number, element: string, magic: boolean, extra = false, forceHit = false, secondaryScale = 1,
-    options: { skill?: boolean; redirected?: boolean; single?: boolean; damageType?: string; ranged?: boolean; hitPenalty?: number; specializedPower?: boolean } = {}) {
+    options: { skill?: boolean; redirected?: boolean; single?: boolean; damageType?: string; ranged?: boolean; hitPenalty?: number; specializedPower?: boolean; penetration?: number; finalMultiplier?: number } = {}) {
     const isSkill = options.skill !== false;
     const target = options.redirected ? original : this.redirect(source, original, true); if (target.hp <= 0) return false;
     let attack = magic ? source.magic : source.attack;
     if (this.passive(source, 'G01')) attack = Math.max(source.magic, source.attack);
     const swap = isSkill && this.status(source, magic ? 'swap_magic' : 'swap_physical'); if (swap) { attack = magic ? Math.min(source.magic, source.attack) : Math.max(source.magic, source.attack); await this.consume(source, swap.code); }
     if (this.passive(source, 'G08') && !source.weaponsDifferent) attack *= 1 + .05 * this.passive(source, 'G08');
-    attack *= 1 + (this.value(source, magic ? 'magic' : 'attack') - this.value(source, magic ? 'magic_down' : 'attack_down') + this.value(source, 'battle_cry') + this.value(source, 'power_surge')) / 100;
-    const defense = (magic ? target.magicDefense : target.defense) * (1 - clamp(this.value(target, magic ? 'magic_shatter' : 'armor_shatter') + (!magic ? this.value(target, 'vulnerability') : 0), 0, 80) / 100) * (1 + this.value(target, magic ? 'magic_defense' : 'defense') / 100);
+    attack *= 1 + (this.statBonus(source, [magic ? 'magic' : 'attack', 'battle_cry', 'power_surge']) - this.value(source, magic ? 'magic_down' : 'attack_down')) / 100;
+    const defense = (magic ? target.magicDefense : target.defense) * (1 - clamp(this.value(target, magic ? 'magic_shatter' : 'armor_shatter') + (!magic ? this.value(target, 'vulnerability') : 0), 0, 80) / 100) * (1 + this.value(target, magic ? 'magic_defense' : 'defense') / 100) * (1 - clamp(options.penetration ?? 0, 0, 50) / 100);
     const setup = await this.attackSetup(source, target, magic, isSkill, options.ranged ?? magic);
-    let hit = opposedChance(source.accuracy * (1 + (this.value(source, 'accuracy') + this.value(source, 'precision') - this.value(source, 'accuracy_down') - this.value(source, 'imbalance')) / 100 + (source.weaponsDifferent ? .08 * this.passive(source, 'G08') : 0)), target.evasion * (1 + (target.weaponsDifferent ? .08 * this.passive(target, 'G08') : 0)) * (1 - Math.min(90, this.value(target, 'bind') + this.value(target, 'evasion_down')) / 100));
+    let hit = opposedChance(source.accuracy * (1 + (this.statBonus(source, ['accuracy', 'precision']) - this.value(source, 'accuracy_down') - this.value(source, 'imbalance')) / 100 + (source.weaponsDifferent ? .08 * this.passive(source, 'G08') : 0)), target.evasion * (1 + this.value(target,'evasion') / 100 + (target.weaponsDifferent ? .08 * this.passive(target, 'G08') : 0)) * (1 - Math.min(90, this.value(target, 'bind') + this.value(target, 'evasion_down')) / 100));
     hit = (hit + setup.hitBonus - Number(options.hitPenalty ?? 0) / 100) * setup.hitFactor;
     if (!(forceHit || setup.forceHit) && this.random() >= clamp(hit, Number(source.modifiers?.minimumHitRatePct ?? 1) / 100, 1)) { this.log.push(`　➥【${target.name}】闪避了攻击。`); await this.missed(source, target); return false; }
     const critical = this.random() < opposedChance(source.crit * (1 + this.value(source, 'crit_bonus') / 100), target.critResist);
     attack *= power / 100 * (isSkill && !options.specializedPower ? source.castSpecialization?.powerFactor ?? 1 : 1);
     const single = options.single !== false;
     const raw = attack * attack / (attack + Math.max(1, defense)) * (critical ? 1 + opposedChance(source.critDamage, target.critReduction) : 1) * (.9 + this.random() * .2) * this.elementFactor(source, target, element) * secondaryScale * setup.powerFactor * (this.hooks.directMultiplier?.(source, target, element, magic, single, options.damageType ?? '打击') ?? 1);
-    const dealt = await this.incoming(source, target, raw * this.expansionScale * (isSkill ? source.castSpecialization?.damageFactor ?? 1 : 1), element, magic, isSkill, single); const absorbed = await this.take(target, dealt);
+    const dealt = await this.incoming(source, target, raw * this.expansionScale * (options.finalMultiplier ?? 1) * (isSkill ? source.castSpecialization?.damageFactor ?? 1 : 1), element, magic, isSkill, single); const absorbed = await this.take(target, dealt);
     this.log.push(`　➥${critical ? '[暴击]' : ''}【${target.name}】受到 ${dealt} 点${magic ? (element === '无' ? '奥术' : element) : '物理'}伤害${absorbed ? `（护盾吸收 ${absorbed}）` : ''}。`);
     await this.afterHit(source, target, dealt - absorbed, element, isSkill, absorbed, extra); return true;
   }
@@ -384,8 +409,8 @@ export class CombatRules {
     const foe = originalFoe && redirected ? this.redirect(source, originalFoe, true) : originalFoe;
     const supportBefore = !extra && skill.scope === 'ally' ? this.supportSnapshot(ally) : undefined;
     this.log.push(`➤【${source.name}】释放技能「${skill.name}」`);
-    const buff = (code: string, value: number, duration: number, recipient = source) => this.add(recipient, code, specializeEffectValue(code, value, source.castSpecialization?.effectFactor), duration, source);
-    const debuff = (code: string, value: number, duration: number, recipient = foe) => { if (recipient) this.add(recipient, code, specializeEffectValue(code, value, source.castSpecialization?.effectFactor), duration, source, true); };
+    const buff = (code: string, value: number, duration: number, recipient = source) => this.add(recipient, code, specializeEffectValue(code, value, source.castSpecialization?.effectFactor), specializeEffectDuration(code, duration, source.castSpecialization?.durationChange), source);
+    const debuff = (code: string, value: number, duration: number, recipient = foe) => { if (recipient) this.add(recipient, code, specializeEffectValue(code, value, source.castSpecialization?.effectFactor), specializeEffectDuration(code, duration, source.castSpecialization?.durationChange), source, true); };
     const expanded = !extra && skill.scope === 'enemy' && ['physical', 'magic'].includes(skill.category) && await this.consume(source, 'expand');
     const attack = async (power = skill.power, element = skill.element) => {
       if (!foe) return false;
@@ -439,7 +464,7 @@ export class CombatRules {
         source.state.memory.heavy = source.state.memory.heavy ? 0 : 1;
         await this.remove(source, e => e.data === 'stance' && e.source === source.key);
         const effects: Array<[string, number, boolean]> = source.state.memory.heavy ? [['speed', 25, false], ['armor_shatter', 12, true], ['magic_shatter', 12, true]] : [['defense', 18, false], ['magic_defense', 18, false], ['slow', 20, true]];
-        for (const [code, value, harmful] of effects) this.add(source, code, specializeEffectValue(code, value, source.castSpecialization?.effectFactor), 3, source, harmful, 'stance');
+        for (const [code, value, harmful] of effects) this.add(source, code, specializeEffectValue(code, value, source.castSpecialization?.effectFactor), specializeEffectDuration(code, 3, source.castSpecialization?.durationChange), source, harmful, 'stance');
         break;
       }
       case 'G06': if (foe) { await this.drainShield(foe, this.shieldValue(foe) * .3); await attack(); } break;

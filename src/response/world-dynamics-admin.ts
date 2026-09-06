@@ -24,7 +24,7 @@ const eventNames: Record<string, string> = {
 const outcomeNames: Record<string, string> = {
   initial: '初始设定', scheduled: '定时变化', anomaly: '异象变化', completed: '已完成', claimed: '已领取', accepted: '已接受',
   active: '进行中', resolved: '已结算', continued: '继续推进', recorded: '已记录', deployed: '已调度', returned: '已返回',
-  stationed: '驻守中', boss_ready: '首领可出现', site_updated: '站点已更新', spawned: '已出现', cooldown: '恢复中', failed: '未能完成',
+  stationed: '驻守中', patrolling: '正在巡游', boss_ready: '首领可出现', site_updated: '站点已更新', spawned: '已出现', cooldown: '恢复中', failed: '未能完成',
   observer: '旁观加入', witness: '见证加入', shared_reward: '共享奖励', updated: '已更新'
 };
 
@@ -46,7 +46,7 @@ export const worldManagementHandler = async () => {
     section(markdown, '区域天气', snapshot.weather.map(row => `${row.regionName}：${row.name}｜强度 ${row.intensity} 级`), '尚无区域天气记录。');
     section(markdown, '世界线', snapshot.worldlines.map(row => `${String(row.state.name ?? '未命名世界线')}：当前阶段 ${row.stage}`), '尚无世界线记录。');
     section(markdown, '首领门', snapshot.bossGates.map(row => `${row.bossName}：${worldlineNames.get(row.worldline) ?? '未命名世界线'}｜${displayStatus(row.state)}｜需推进至阶段 ${row.stageRequired}`), '暂无首领门记录。');
-    section(markdown, '巡游实体', snapshot.npcs.map(row => `${row.name}｜${row.regionName}｜${String(row.state.currentPoint ?? displayStatus(row.status))}`), '暂无巡游实体。');
+    section(markdown, '巡游实体', snapshot.npcs.map(row => `${row.name}｜${row.regionName}｜${String(row.state.currentPoint ?? displayStatus(row.status))}（${row.position.x}, ${row.position.y}, ${row.position.z}）`), '暂无巡游实体。');
     section(markdown, '特色建筑与站点', snapshot.sites.map(row => `${row.name}｜${row.regionName}｜${displayStatus(row.state.state)}`), '暂无特色建筑或站点。');
 
     await message.send({

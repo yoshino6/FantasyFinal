@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { skillSpecialization, specializationMaximum, specializationOptions, specializeEffectValue, manaTransferCost } from '../src/game/skill-specialization';
+import { skillSpecialization, specializationMaximum, specializationOptions, specializeEffectValue, specializeEffectDuration, specializeControlChance, specializeTime, manaTransferCost } from '../src/game/skill-specialization';
 import { canDispelCombatEffect } from '../src/game/combat-dispel-policy';
 import { residentSkills, residentSkillByCode } from '../src/game/resident-skill.config';
 import { nativeSkillBalance } from '../src/game/combat-skill-balance.config';
@@ -9,22 +9,77 @@ import { CombatRules, emptyRuleState, type RuleUnit } from '../src/game/combat-r
 import { initializeCombatSkillBalance } from '../src/database/combat-skill-balance';
 
 const unit = (key: string, side = 'member'): RuleUnit => ({ key, name: key, side, level: 30, boss: false, hp: 6000, hpMax: 10000, mp: 2000, mpMax: 3000, attack: 700, magic: 800, defense: 400, magicDefense: 450, accuracy: 100, evasion: 30, speed: 100, crit: 100, critResist: 100, critDamage: 100, critReduction: 100, pierce: 100, tenacity: 100, state: emptyRuleState(), cooldowns: {}, passives: [], resistance: {}, mastery: {} });
-const fixture = () => {
+const fixture = (random = () => .01) => {
   const source = unit('member:1'); const friend = unit('member:2'); const target = unit('target:3', 'target');
-  const rules = new CombatRules([source, friend, target], 1, [], { absorb: async () => 0, legacyEffects: () => [], removeLegacy: async () => {}, extraAction: () => {}, swapThreat: async () => {} }, '', undefined, () => .01);
+  const rules = new CombatRules([source, friend, target], 1, [], { absorb: async () => 0, legacyEffects: () => [], removeLegacy: async () => {}, extraAction: () => {}, swapThreat: async () => {} }, '', undefined, random);
   return { source, friend, target, rules };
 };
 const cast = (f: ReturnType<typeof fixture>, id: string, target = f.target) => f.rules.cast(f.source, target, residentSkillByCode(id)!, residentSkillByCode(id)!.mana);
 const base = { code: 'test', tier: '中位', category: 'magic', power: 150, mana_cost: 300, cooldown_turns: 5, chant_turns: 1 };
 
-test('专精10/20/40线性封顶，旧100级和异常输入不产生指数数值', () => {
+test('零值时间以1为基数，累计整回合才生效，无等阶上限', () => {
+  assert.equal(specializeTime(0, .99), 0); assert.equal(specializeTime(0, 1), 1);
+  assert.equal(specializeTime(3, .5), 5); assert.equal(specializeTime(3, 1), 7);
+  assert.equal(specializeTime(1, -.49), 1); assert.equal(specializeTime(1, -.5), 0);
+  assert.equal(specializeTime(0, -.5), 0); assert.equal(specializeTime(5, NaN), 5);
+  const zero = { ...base, tier: '基础', cooldown_turns: 0, chant_turns: 0 };
+  const both = skillSpecialization(zero, { overcharge: 10, potent: 10 });
+  assert.equal(both.cooldown, 2); assert.equal(both.chant, 2);
+  const lower = skillSpecialization({ ...base, tier: '下位', cooldown_turns: 3, chant_turns: 0 }, { overcharge: 20, potent: 20 });
+  assert.equal(lower.cooldown, 73); assert.equal(lower.chant, 17);
+});
+
+test('四项专精首点乘算与合算数值', () => {
+  const over = skillSpecialization(base, { overcharge: 2 });
+  assert.equal(over.power, 162); assert.equal(over.effectFactor, 1); assert.equal(over.mana, 348);
+  assert.equal(over.cooldown, 5); assert.equal(over.chant, 1);
+  const potent = skillSpecialization(base, { potent: 2 });
+  assert.equal(potent.power, 150); assert.equal(potent.effectFactor, 1.08); assert.ok(Math.abs(potent.durationChange - .08) < 1e-10);
+  const instant = skillSpecialization(base, { instant: 2 });
+  assert.equal(instant.power, 144); assert.equal(instant.effectFactor, .96); assert.equal(instant.timeFactor, .92);
+  assert.equal(skillSpecialization(base, { efficient: 2 }).mana, 204);
+  const all = skillSpecialization(base, { overcharge: 2, potent: 2, instant: 2, efficient: 2 });
+  assert.equal(all.powerFactor, 1.0368); assert.equal(all.effectFactor, 1.0368); assert.equal(all.mana, 275);
+  assert.equal(all.cooldown, 5); assert.equal(all.chant, 1);
+});
+
+test('瞬息实际削弱普通效果，强效延时不改机制和硬控', async () => {
+  assert.equal(specializeEffectValue('slow', 20, .8), 16);
+  assert.equal(specializeEffectDuration('slow', 3, 1), 4);
+  assert.equal(specializeEffectDuration('shield', 1, 1), 2);
+  for (const code of ['petrify', 'charm', 'sleep', 'nightmare', 'extra_lock', 'mana_regeneration']) assert.equal(specializeEffectDuration(code, 3, 1), 3);
+  const f = fixture(); f.source.castSpecialization = skillSpecialization(base, { instant: 40 });
+  await cast(f, 'F02', f.friend); assert.ok(Math.abs(f.rules.value(f.friend, 'physical_reduction') - 24 * .96 ** 39) < 1e-8);
+  const g = fixture(); g.source.castSpecialization = skillSpecialization(base, { potent: 40 });
+  await cast(g, 'F02', g.friend); assert.equal(g.rules.value(g.friend, 'physical_reduction'), 60);
+  assert.equal(g.rules.status(g.friend, 'physical_reduction')!.until, g.rules.turn + 3);
+});
+
+test('控制强效概率有界，瞬息有代价，强效不额外增伤', async () => {
+  assert.equal(specializeControlChance(70, 1.15), 75); assert.equal(specializeControlChance(100, 1.15), 100);
+  assert.equal(specializeControlChance(50, .8), 40);
+  const a = fixture(); const b = fixture(); b.source.castSpecialization = skillSpecialization(base, { potent: 40 });
+  await cast(a, 'A03'); await cast(b, 'A03'); assert.equal(a.target.hp, b.target.hp);
+});
+
+test('石化强效概率实际生效，但不延长硬控时长', async () => {
+  const normal = fixture(() => .6); const enhanced = fixture(() => .6);
+  enhanced.source.castSpecialization = skillSpecialization(base, { potent: 40 });
+  await cast(normal, 'B02'); await cast(enhanced, 'B02');
+  assert.equal(normal.rules.status(normal.target, 'petrify'), undefined);
+  assert.equal(enhanced.rules.status(enhanced.target, 'petrify')!.until, enhanced.rules.turn + 2);
+  const reduced = fixture(() => .5); reduced.source.castSpecialization = skillSpecialization(base, { instant: 40 });
+  await cast(reduced, 'B02'); assert.equal(reduced.rules.status(reduced.target, 'petrify'), undefined);
+});
+
+test('专精10/20/40限制点数，非法等级钳制，不限制合法点数的乘算惩罚', () => {
   assert.deepEqual(['基础', '下位', '中位'].map(specializationMaximum), [10, 20, 40]);
   for (const tier of ['基础', '下位', '中位']) {
     const limit = specializationMaximum(tier);
     const maximum = skillSpecialization({ ...base, tier }, { overcharge: limit, instant: limit, efficient: limit, potent: limit });
     assert.deepEqual(maximum, skillSpecialization({ ...base, tier }, { overcharge: 10000, instant: 10000, efficient: 10000, potent: 10000 }));
-    assert.ok(maximum.powerFactor <= 1.25 && maximum.supportFactor <= 1.5625 && maximum.damageFactor <= 1.1);
-    assert.equal(maximum.chant, 1);
+    assert.ok(maximum.powerFactor <= 3 && maximum.supportFactor <= 3 && maximum.damageFactor === 1);
+    assert.ok(Number.isInteger(maximum.chant) && maximum.chant >= 0);
     assert.ok(Number.isFinite(skillSpecialization({ ...base, tier }, { potent: NaN, efficient: Infinity }).mana));
   }
 });
@@ -34,30 +89,34 @@ for (const skill of [...nativeSkillBalance, ...residentSkills]) test(`分阶与�
   const bounds = skill.tier === '基础' ? [0, 1] : skill.tier === '下位' ? [1, 3] : [3, 6];
   if (!passive) assert.ok(skill.cooldown >= bounds[0] && skill.cooldown <= bounds[1]);
   const definition = { code: skill.code, category: skill.category ?? 'magic', tier: skill.tier, power: skill.power, mana_cost: skill.mana, cooldown_turns: skill.cooldown, chant_turns: skill.chant };
-  for (const levels of [{}, { overcharge: 100, instant: 100, efficient: 100, potent: 100 }, { overcharge: 100, potent: 100 }]) {
+  for (const levels of Array.from({ length: 16 }, (_, mask) => Object.fromEntries(['overcharge', 'potent', 'instant', 'efficient'].map((key, index) => [key, mask & (1 << index) ? 100 : 1])))) {
     const result = skillSpecialization(definition, levels);
-    for (const n of Object.values(result)) assert.ok(Number.isFinite(n) && n >= 0);
-    assert.ok(result.cooldown <= bounds[1]);
-    if (skill.chant) assert.ok(result.chant >= 1);
+    for (const [key, n] of Object.entries(result)) assert.ok(Number.isFinite(n) && (key === 'timeChange' || n >= 0));
+    const largestTimeChange = 1.08 ** (2 * (specializationMaximum(skill.tier) - 1)) - 1;
+    assert.ok(result.cooldown <= specializeTime(skill.cooldown, largestTimeChange));
+    assert.ok(result.chant <= specializeTime(skill.chant, largestTimeChange));
+    if (skill.mana > 0) assert.ok(result.mana >= 1);
   }
 });
 
 test('无数值落点不出售强效，纯机制不虚设成长', () => {
   assert.deepEqual(specializationOptions({ ...base, code: 'resident_d01', power: 0 }), ['instant']);
-  assert.ok(!specializationOptions({ ...base, code: 'resident_b02', power: 0 }).includes('potent'));
-  assert.ok(!specializationOptions({ ...base, cooldown_turns: 1, tier: '基础' }).includes('instant'));
+  assert.ok(specializationOptions({ ...base, code: 'resident_b02', power: 0 }).includes('potent'));
+  assert.ok(!specializationOptions({ ...base, code: 'resident_a03' }).includes('potent'));
+  assert.ok(!specializationOptions({ ...base, code: 'healing_light', power: 0 }).includes('overcharge'));
+  assert.ok(specializationOptions({ ...base, cooldown_turns: 1, tier: '基础' }).includes('instant'));
   for (const code of ['petrify', 'charm', 'nightmare', 'extra_lock', 'mana_discount', 'mirror']) assert.equal(specializeEffectValue(code, 50, 1.25), 50);
   assert.equal(specializeEffectValue('reduction', 55, 1.25), 60);
 });
 
-test('强效进入实际直伤、治疗与护盾，普攻不吃主动专精', async () => {
+test('过充增加直伤，强效只增加治疗护盾，普攻不吃主动专精', async () => {
   const normal = fixture(); const enhanced = fixture();
-  enhanced.source.castSpecialization = skillSpecialization(base, { potent: 40 });
+  enhanced.source.castSpecialization = skillSpecialization(base, { overcharge: 40 });
   await cast(normal, 'A03'); await cast(enhanced, 'A03');
   assert.ok(enhanced.target.hp < normal.target.hp);
   const f = fixture(); f.source.castSpecialization = skillSpecialization(base, { potent: 40 });
-  await f.rules.restore(f.source, f.friend, 1000); assert.equal(f.friend.hp, 7250);
-  await f.rules.shield(f.source, f.friend, 1000, 3); assert.equal(f.rules.shieldValue(f.friend), 1250);
+  await f.rules.restore(f.source, f.friend, 1000); assert.equal(f.friend.hp, 8994);
+  await f.rules.shield(f.source, f.friend, 1000, 3); assert.equal(f.rules.shieldValue(f.friend), 1000 * f.source.castSpecialization.supportFactor);
   const a = fixture(); const b = fixture(); b.source.castSpecialization = f.source.castSpecialization;
   await a.rules.strike(a.source, a.target, 100, '无', false, false, false, 1, { skill: false });
   await b.rules.strike(b.source, b.target, 100, '无', false, false, false, 1, { skill: false });
@@ -67,9 +126,9 @@ test('强效进入实际直伤、治疗与护盾，普攻不吃主动专精', as
 test('强效被动实际放大数值但不放大次数', async () => {
   const f = fixture(); f.source.passives = ['resident_i01'];
   f.source.passiveSpecializations = { resident_i01: passiveSpecializationFactor(20, '下位') };
-  assert.equal(f.rules.passive(f.source, 'I01'), 1.15);
+  assert.equal(f.rules.passive(f.source, 'I01'), passiveSpecializationFactor(20, '下位'));
   assert.ok(!residentScalablePassives.has('resident_l01'));
-  assert.equal(await f.rules.incoming(f.source, f.target, 1000, '无', true, true), 1115);
+  assert.equal(await f.rules.incoming(f.source, f.target, 1000, '无', true, true), Math.floor(1000 * (1 + .1 * passiveSpecializationFactor(20, '下位'))));
 });
 
 test('普通净化和低级控制不能解除石化魅惑，机制绑定拒绝神圣净化', async () => {
@@ -130,11 +189,11 @@ test('节拍跨正常回合可触发，选中友方优先于默认目标', async
 
 for (const skill of residentSkills.filter(skill => skill.category === 'utility')) {
   const definition = { code: skill.code, category: skill.category, tier: skill.tier, power: skill.power, mana_cost: skill.mana, cooldown_turns: skill.cooldown, chant_turns: skill.chant };
-  if (specializationOptions(definition).includes('potent')) test(`辅助强效有实际落点 ${skill.code}`, async () => {
+  if (specializationOptions(definition).includes('potent') && !['B01', 'B02', 'B03', 'L04'].includes(skill.id)) test(`辅助强效有实际落点 ${skill.code}`, async () => {
     const a = fixture(); const b = fixture();
     b.source.castSpecialization = skillSpecialization(definition, { potent: specializationMaximum(skill.tier) });
     for (const f of [a, b]) { f.rules.add(f.friend, skill.id === 'K06' ? 'sleep' : 'poison', 5, 3, f.target, true); await cast(f, skill.id, f.friend); }
-    const outcome = (f: ReturnType<typeof fixture>) => f.rules.units.map(unit => ({ hp: unit.hp, statuses: unit.state.statuses.map(e => [e.code, e.value]) }));
+    const outcome = (f: ReturnType<typeof fixture>) => f.rules.units.map(unit => ({ hp: unit.hp, statuses: unit.state.statuses.map(e => [e.code, e.value, e.until]) }));
     assert.notDeepEqual(outcome(a), outcome(b));
   });
 }
@@ -150,7 +209,7 @@ test('已算过充威力的混乱友伤分支不重复乘算专精', async () =>
   const a = fixture(); const b = fixture();
   a.source.castSpecialization = b.source.castSpecialization = skillSpecialization(base, { overcharge: 40, potent: 40 });
   await a.rules.strike(a.source, a.friend, 100, '火', true);
-  await b.rules.strike(b.source, b.friend, 125, '火', true, false, false, 1, { specializedPower: true });
+  await b.rules.strike(b.source, b.friend, 100 * b.source.castSpecialization.powerFactor, '火', true, false, false, 1, { specializedPower: true });
   assert.equal(a.friend.hp, b.friend.hp);
 });
 

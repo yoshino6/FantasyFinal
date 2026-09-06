@@ -6,7 +6,7 @@ export type ConstructionRecipe = {
   name: string;
   description: string;
   ingredients: ConstructionIngredient[];
-  outputType: 'material' | 'equipment' | 'consumable';
+  outputType: 'material' | 'equipment' | 'consumable' | 'device';
   itemCategory: string;
   constructionCategory: ConstructionCategory;
   recommendedSecondaryLevel: number;
@@ -23,7 +23,7 @@ const component = (code: string, name: string, description: string, ingredients:
   code, name, description, ingredients, recommendedSecondaryLevel: level, blueprintCode: blueprintFor(code), outputType: 'material', itemCategory: '构件', constructionCategory: '构件'
 });
 const device = (code: string, name: string, description: string, ingredients: ConstructionIngredient[], level: number, effect: Record<string, unknown> = {}): ConstructionRecipe => ({
-  code, name, description, ingredients, recommendedSecondaryLevel: level, blueprintCode: blueprintFor(code), outputType: 'equipment', itemCategory: '异械', constructionCategory: '异械', effect
+  code, name, description, ingredients, recommendedSecondaryLevel: level, blueprintCode: blueprintFor(code), outputType: 'device', itemCategory: '异械', constructionCategory: '异械', effect
 });
 
 // 基材
@@ -125,7 +125,7 @@ export const dungeonBlueprintDrops = [
 export const baseMaterialTradeValues: Record<string, number> = {
   blood_residue: 2, energy_ember: 2, magic_unit: 10,
   wood_element_dust: 3, metal_element_dust: 3, water_element_dust: 3,
-  ice_element_dust: 4, dark_element_dust: 4, fire_element_dust: 5, thunder_element_dust: 5, light_element_dust: 5
+  ice_element_dust: 3, dark_element_dust: 4, fire_element_dust: 3, thunder_element_dust: 3, light_element_dust: 5
 };
 export const constructionValueByCode = (() => {
   const values = new Map(Object.entries(baseMaterialTradeValues));

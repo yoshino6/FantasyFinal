@@ -204,7 +204,9 @@ export const pendingPartyAutoBattleActions = async (qqUserId: string) => {
     const priority = horn ?? bellows ?? chain
       ?? componentRows.find(entry => ['gruen_armor', 'valk_armor'].includes(String(entry.trait.part_key)))
       ?? componentRows.find(entry => ['gruen_arm', 'valk_chain', 'gruen_horn', 'valk_bellows'].includes(String(entry.trait.part_key)));
-    return Number(priority?.target.spawn_id ?? member.selected_target_id ?? aliveTargets[0]?.spawn_id ?? 0) || undefined;
+    // 已击破的部位仍可能留在成员的选中记录中，不能再交给切换目标接口。
+    const selected = aliveTargets.find(target => Number(target.spawn_id) === Number(member.selected_target_id));
+    return Number(priority?.target.spawn_id ?? selected?.spawn_id ?? aliveTargets[0]?.spawn_id ?? 0) || undefined;
   };
   const actions = await Promise.all(members.map(async member => {
     return { qqUserId: member.qq_user_id!, action: await configuredAutoAction(pool, member), targetId: automaticTargetFor(member) };

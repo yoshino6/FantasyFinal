@@ -4,7 +4,8 @@ import { blacksmithQuest } from '../game/blacksmith.service';
 import { alchemistQuest } from '../game/alchemist.service';
 import { deconstructorQuest } from '../game/deconstructor.service';
 import { omniscientQuest } from '../game/omniscient.service';
-import { currentMainQuest } from '../game/main-quest.service';
+import { currentMainQuest, type MainQuest } from '../game/main-quest.service';
+import { advancedProfessionMainQuest } from '../game/career-quest.service';
 import { requireNpcAtCurrentPosition } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
 import { dungeonSecretProgress, secondaryProfessionGuide } from '../game/dungeon-quest.service';
@@ -34,7 +35,7 @@ export const bountyBoardPageHandler = async () => { const [event] = useEvent(); 
 export const bountyBoardSearchHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireGuildBoard(event.current.UserId); await message.send({ format: await bountyBoardFormat(event.current.UserId, 1, String(route.param('keyword'))) }); } catch (error) { await message.send({ format: messageFormat('搜索失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 const taskCategories = ['主线', '支线', '悬赏', '委托', '其他'] as const;
 type TaskCategory = typeof taskCategories[number];
-type TaskEntry = { category: TaskCategory; title: string; description: string; location?: { regionName: string; x: number; y: number; z: number }; action?: { label: string; command: string }; abandonCommand?: string };
+type TaskEntry = MainQuest & { category: TaskCategory; location?: { regionName: string; x: number; y: number; z: number }; abandonCommand?: string };
 const sequence = '①②③④⑤';
 const commissionTravelLabel = (title: string, targetName: string) => {
   if (/封签递送|药匣急送|样本转运|余烬封存|燃料递补|回收旧信|祭仪补位|换哨交接/.test(title)) return `[送往 ${targetName}]`;
@@ -56,8 +57,8 @@ const taskButtons = (category: TaskCategory | undefined, page: number, totalPage
 };
 
 export const taskFormat = async (qqUserId: string, category?: TaskCategory, page = 1, keyword = '') => {
-  const [mainQuest, bounties, smithQuest, alchemyQuest, deconstructQuest, omniscientQuestProgress, dungeonSecret, needsSecondaryGuide, evolutionObservations, siteCommissions] = await Promise.all([currentMainQuest(qqUserId), playerBounties(qqUserId), blacksmithQuest(qqUserId), alchemistQuest(qqUserId), deconstructorQuest(qqUserId), omniscientQuest(qqUserId), dungeonSecretProgress(qqUserId), secondaryProfessionGuide(qqUserId), evolutionObservationDashboard(qqUserId).catch(() => null), playerWorldSiteCommissions(qqUserId)]);
-  const entries: TaskEntry[] = [{ category: '主线', ...mainQuest }, ...bounties.map(task => ({
+  const [mainQuest, advancedQuest, bounties, smithQuest, alchemyQuest, deconstructQuest, omniscientQuestProgress, dungeonSecret, needsSecondaryGuide, evolutionObservations, siteCommissions] = await Promise.all([currentMainQuest(qqUserId), advancedProfessionMainQuest(qqUserId), playerBounties(qqUserId), blacksmithQuest(qqUserId), alchemistQuest(qqUserId), deconstructorQuest(qqUserId), omniscientQuest(qqUserId), dungeonSecretProgress(qqUserId), secondaryProfessionGuide(qqUserId), evolutionObservationDashboard(qqUserId).catch(() => null), playerWorldSiteCommissions(qqUserId)]);
+  const entries: TaskEntry[] = [{ category: '主线', ...mainQuest }, ...(advancedQuest ? [{ category: '主线' as const, ...advancedQuest }] : []), ...bounties.map(task => ({
     category: '悬赏' as const, title: `【悬赏·${task.id}】${task.title}`,
     description: task.status === 'invalid' ? '已失效：悬赏目标已被其他冒险者完成，或该悬赏已经过期。' : `讨伐：${task.targetName} ${task.progress}/${task.requiredCount}\n报酬：铜币 ×${task.copperReward}`,
     location: task.status === 'invalid' ? undefined : task.location,
@@ -134,7 +135,8 @@ export const taskFormat = async (qqUserId: string, category?: TaskCategory, page
     } else markdown.addBlockquote(task.description).addNewline();
     if (task.location) markdown.addText('> 坐标：').addButton(`${task.location.regionName} (${task.location.x}, ${task.location.y}, ${task.location.z})`, { data: `/前往 ${task.location.x} ${task.location.y}`, autoEnter: false }).addNewline();
     if (task.action) markdown.addButton(task.action.label, { data: task.action.command, autoEnter: false });
-    else if (!task.abandonCommand) markdown.addText('进行中');
+    else if (!task.actions?.length && !task.abandonCommand) markdown.addText('进行中');
+    for (const action of task.actions ?? []) markdown.addButton(action.label, { data: action.command, autoEnter: false }).addNewline();
     markdown.addNewline().addNewline();
   }
   markdown.addText(`当前第(${currentPage}/${totalPages})页`);

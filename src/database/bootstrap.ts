@@ -227,7 +227,7 @@ const schemaStatements = [
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS item_definitions (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, code VARCHAR(64) NOT NULL, name VARCHAR(64) NOT NULL,
-    description TEXT NOT NULL, obtain_source VARCHAR(128) NOT NULL DEFAULT '未知来源', item_type ENUM('consumable','material','equipment') NOT NULL DEFAULT 'material', item_category VARCHAR(32) NOT NULL DEFAULT '特殊', weapon_type VARCHAR(32) NULL, rarity ENUM('普通','优秀','精良','稀有','传说','史诗','神器') NOT NULL DEFAULT '普通', required_level SMALLINT UNSIGNED NOT NULL DEFAULT 1, codex_id VARCHAR(16) NULL,
+    description TEXT NOT NULL, obtain_source VARCHAR(128) NOT NULL DEFAULT '未知来源', item_type ENUM('consumable','material','equipment','device') NOT NULL DEFAULT 'material', item_category VARCHAR(32) NOT NULL DEFAULT '特殊', weapon_type VARCHAR(32) NULL, rarity ENUM('普通','优秀','精良','稀有','传说','史诗','神器') NOT NULL DEFAULT '普通', required_level SMALLINT UNSIGNED NOT NULL DEFAULT 1, codex_id VARCHAR(16) NULL,
     weight DECIMAL(8,2) NOT NULL DEFAULT 0, trade_price INT UNSIGNED NOT NULL DEFAULT 0, stack_limit INT UNSIGNED NOT NULL DEFAULT 99, stackable TINYINT(1) NOT NULL DEFAULT 1, is_tradeable TINYINT(1) NOT NULL DEFAULT 1,
     effect_json JSON NULL, PRIMARY KEY (id), UNIQUE KEY uk_item_code (code)
   ) ENGINE=InnoDB`
@@ -1322,6 +1322,10 @@ const seedEpicForgeContent = async (pool: Pool) => {
 
 export const initializeSchema = async (pool: Pool) => {
   for (const statement of schemaStatements) await pool.query(statement);
+  await (await import('./alchemy-v2')).initializeAlchemyV2(pool);
+  await (await import('./inventory-binding')).initializeInventoryBinding(pool);
+  await (await import('./automaton')).initializeAutomaton(pool);
+  await (await import('./instance-market')).initializeInstanceMarket(pool);
   await seedDynamicAlchemyContent(pool);
   for (const column of [
     'main_quantity TINYINT UNSIGNED NOT NULL DEFAULT 1',
@@ -1477,6 +1481,7 @@ export const initializeSchema = async (pool: Pool) => {
   for (const column of ["item_category VARCHAR(32) NOT NULL DEFAULT '特殊'", "obtain_source VARCHAR(128) NOT NULL DEFAULT '未知来源'", "rarity ENUM('普通','优秀','精良','稀有','传说','史诗','神器') NOT NULL DEFAULT '普通'", 'required_level SMALLINT UNSIGNED NOT NULL DEFAULT 1', 'trade_price INT UNSIGNED NOT NULL DEFAULT 0', 'stackable TINYINT(1) NOT NULL DEFAULT 1', 'is_tradeable TINYINT(1) NOT NULL DEFAULT 1', 'codex_id VARCHAR(16) NULL']) {
     try { await pool.query(`ALTER TABLE item_definitions ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }
+  await pool.query("ALTER TABLE item_definitions MODIFY COLUMN item_type ENUM('consumable','material','equipment','device') NOT NULL DEFAULT 'material'");
   // 图鉴编号由分类前缀与物品 ID 组成；物品 ID 超过五位后，旧 CHAR(7) 会截断并制造重复编号。
   await pool.query('ALTER TABLE item_definitions MODIFY COLUMN codex_id VARCHAR(16) NULL');
   await pool.query('UPDATE item_definitions SET codex_id=NULL WHERE id>=100000');
@@ -2060,7 +2065,7 @@ export const initializeSchema = async (pool: Pool) => {
     WHEN 'refined_magic_wool' THEN 36 WHEN 'refined_magic_tusk' THEN 42 WHEN 'refined_magic_scale' THEN 42 WHEN 'refined_magic_claw' THEN 48 WHEN 'refined_magic_heartcore' THEN 60
     WHEN 'blood_residue' THEN 2 WHEN 'energy_ember' THEN 2 WHEN 'magic_unit' THEN 10
     WHEN 'slime_gel' THEN 1 WHEN 'red_slime_gel' THEN 3 WHEN 'orange_slime_gel' THEN 3 WHEN 'yellow_slime_gel' THEN 3 WHEN 'green_slime_gel' THEN 3 WHEN 'cyan_slime_gel' THEN 3 WHEN 'blue_slime_gel' THEN 3 WHEN 'purple_slime_gel' THEN 3 WHEN 'black_slime_gel' THEN 3
-    WHEN 'wood_element_dust' THEN 3 WHEN 'metal_element_dust' THEN 3 WHEN 'water_element_dust' THEN 3 WHEN 'ice_element_dust' THEN 4 WHEN 'dark_element_dust' THEN 4 WHEN 'fire_element_dust' THEN 5 WHEN 'thunder_element_dust' THEN 5 WHEN 'light_element_dust' THEN 5
+    WHEN 'wood_element_dust' THEN 3 WHEN 'metal_element_dust' THEN 3 WHEN 'water_element_dust' THEN 3 WHEN 'ice_element_dust' THEN 3 WHEN 'dark_element_dust' THEN 4 WHEN 'fire_element_dust' THEN 3 WHEN 'thunder_element_dust' THEN 3 WHEN 'light_element_dust' THEN 5
     WHEN 'herbal_extract' THEN 5 WHEN 'mana_dust' THEN 8 WHEN 'residue_life_potion' THEN 8 WHEN 'ember_mana_potion' THEN 8
     WHEN 'magic_branch' THEN 12 WHEN 'goblin_ear' THEN 5 WHEN 'riot_aura' THEN 50
     WHEN 'goblin_scrap_iron' THEN 18 WHEN 'goblin_whetstone' THEN 24 WHEN 'goblin_bowstring' THEN 22

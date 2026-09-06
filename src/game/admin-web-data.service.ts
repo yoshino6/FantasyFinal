@@ -1,5 +1,6 @@
 import type { RowDataPacket } from 'mysql2/promise';
-import { getPool } from '../database/pool';
+import { getPool, withTransaction } from '../database/pool';
+import { adminOperationLogs } from './admin-log.service';
 import { auditCharacter, auditInventory, auditPlayerState, auditSkills } from './admin-audit.service';
 import { setGlobalMultiplier, type GlobalMultiplierKey } from './global-management.service';
 import { recordWebOperation, webOperationJournal, type WebRole } from './operation-journal.service';
@@ -8,6 +9,10 @@ import { systemStatusSnapshot } from './system-status.service';
 export type PlayerFilters = { page?: unknown; keyword?: unknown; region?: unknown; activity?: unknown; status?: unknown };
 const pageOf = (value: unknown) => Math.max(1, Math.min(10_000, Math.floor(Number(value) || 1)));
 const asText = (value: unknown, max = 80) => String(value ?? '').trim().slice(0, max);
+const jsonObject = (value: unknown): Record<string, unknown> => {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+  try { const parsed = JSON.parse(String(value ?? '{}')); return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}; } catch { return {}; }
+};
 
 export const adminDashboard = async () => {
   const pool = await getPool(); const status = await systemStatusSnapshot();
@@ -84,3 +89,74 @@ export const runWebPlayerAudit = async (actor: { username: string; role: WebRole
 };
 
 export const adminWebJournals = (page: unknown, keyword: unknown) => webOperationJournal(pageOf(page), asText(keyword));
+
+/** 游戏内 QQ 管理面板写入的操作记录，与网页后台的审计总账分开保存。 */
+export const adminGameOperations = (page: unknown, keyword: unknown) => adminOperationLogs({ page: pageOf(page), keyword: asText(keyword) });
+
+export const adminMails = async (keyword: unknown) => {
+  const term = asText(keyword); const pool = await getPool();
+  const where = term ? 'WHERE m.title LIKE ? OR m.content LIKE ? OR c.name LIKE ? OR p.qq_user_id LIKE ?' : '';
+  const values = term ? [`%${term}%`, `%${term}%`, `%${term}%`, `%${term}%`] : [];
+  const [rows] = await pool.execute<(RowDataPacket & { id: number; character_id: number; character_name: string; qq_user_id: string; title: string; content: string; received_at: Date; claimed_at: Date | null; deleted_at: Date | null; attachments: string | null })[]>(`
+    SELECT m.id,m.character_id,c.name AS character_name,p.qq_user_id,m.title,m.content,m.received_at,m.claimed_at,m.deleted_at,
+      GROUP_CONCAT(CONCAT(i.name,' × ',a.quantity) ORDER BY a.id SEPARATOR '、') AS attachments
+    FROM player_mails m JOIN characters c ON c.id=m.character_id JOIN players p ON p.id=c.player_id
+    LEFT JOIN player_mail_attachments a ON a.mail_id=m.id LEFT JOIN item_definitions i ON i.id=a.item_id
+    ${where} GROUP BY m.id,m.character_id,c.name,p.qq_user_id,m.title,m.content,m.received_at,m.claimed_at,m.deleted_at
+    ORDER BY m.received_at DESC,m.id DESC LIMIT 100`, values);
+  return rows.map(row => ({ id: Number(row.id), characterId: Number(row.character_id), characterName: row.character_name, qqUserId: row.qq_user_id, title: row.title, content: row.content, receivedAt: row.received_at, claimedAt: row.claimed_at, deletedAt: row.deleted_at, attachments: row.attachments ?? '' }));
+};
+
+export const sendWebMail = async (actor: { username: string; role: WebRole }, body: Record<string, unknown>) => {
+  if (actor.role === 'viewer') throw new Error('只读账号不能发放邮件。');
+  const characterIdText = asText(body.characterId, 24); const title = asText(body.title, 96); const content = asText(body.content, 4_000); const reason = asText(body.reason, 500); const item = asText(body.item, 64);
+  if (!title || !content) throw new Error('邮件标题和正文均不能为空。');
+  if (!reason) throw new Error('发放邮件必须填写操作原因。');
+  if (characterIdText && (!/^\d+$/.test(characterIdText) || Number(characterIdText) < 1)) throw new Error('角色编号必须是正整数，留空才会发送给全服。');
+  const quantity = Math.floor(Number(body.quantity ?? 1));
+  if (item && (!Number.isFinite(quantity) || quantity < 1 || quantity > 999_999)) throw new Error('附件数量必须是 1 到 999999 的整数。');
+  return withTransaction(async connection => {
+    const [recipients] = await connection.execute<(RowDataPacket & { id: number })[]>(characterIdText
+      ? 'SELECT id FROM characters WHERE id=? AND npc_code IS NULL'
+      : 'SELECT id FROM characters WHERE npc_code IS NULL', characterIdText ? [Number(characterIdText)] : []);
+    if (!recipients.length) throw new Error(characterIdText ? '未找到该玩家角色。' : '当前没有可接收邮件的玩家角色。');
+    let itemId: number | null = null; let itemName: string | null = null;
+    if (item) {
+      const [items] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>('SELECT id,name FROM item_definitions WHERE id=? OR code=? OR codex_id=? OR name=? LIMIT 1', [item, item, item, item]);
+      if (!items[0]) throw new Error('未找到邮件附件物品；请填写物品编号、代号、图鉴编号或名称。');
+      itemId = Number(items[0].id); itemName = items[0].name;
+    }
+    for (const recipient of recipients) {
+      const [result] = await connection.execute<any>('INSERT INTO player_mails (character_id,title,content) VALUES (?,?,?)', [recipient.id, title, content]);
+      if (itemId) await connection.execute('INSERT INTO player_mail_attachments (mail_id,item_id,quantity) VALUES (?,?,?)', [result.insertId, itemId, quantity]);
+    }
+    const scope = characterIdText ? '单个玩家' : '全服';
+    const operation = await recordWebOperation({ actorRef: actor.username, actionType: 'mail.send', risk: 'high', reason, target: { kind: 'mail_delivery', id: characterIdText || 'all_players', characterId: characterIdText ? Number(characterIdText) : null }, request: { scope, title, attachment: itemName ? { name: itemName, quantity } : null }, result: { recipients: recipients.length } }, connection);
+    return { recipients: recipients.length, operationId: operation.id, scope, attachment: itemName ? { name: itemName, quantity } : null };
+  });
+};
+
+export const adminWorldEvents = async (keyword: unknown) => {
+  const term = asText(keyword); const pool = await getPool(); const like = `%${term}%`;
+  const sceneWhere = term ? 'WHERE t.title LIKE ? OR r.name LIKE ? OR c.name LIKE ? OR s.template_code LIKE ?' : '';
+  const encounterWhere = term ? 'WHERE t.title LIKE ? OR r.name LIKE ? OR c.name LIKE ? OR e.template_code LIKE ?' : '';
+  const ledgerWhere = term ? 'WHERE l.event_type LIKE ? OR l.source_key LIKE ? OR r.name LIKE ? OR c.name LIKE ?' : '';
+  const [scenes, encounters, ledger] = await Promise.all([
+    pool.execute<(RowDataPacket & { id: string; title: string | null; region_name: string; cell_x: number; cell_y: number; cell_z: number; discoverer: string; status: string; opened_at: Date; expires_at: Date; resolved_at: Date | null; participant_count: number; payload_json: unknown })[]>(`SELECT s.id,t.title,r.name AS region_name,s.cell_x,s.cell_y,s.cell_z,c.name AS discoverer,s.status,s.opened_at,s.expires_at,s.resolved_at,COUNT(p.character_id) AS participant_count,s.payload_json FROM world_scene_instances s LEFT JOIN dynamic_encounter_templates t ON t.code=s.template_code JOIN map_regions r ON r.id=s.region_id JOIN characters c ON c.id=s.discoverer_character_id LEFT JOIN world_scene_participants p ON p.scene_id=s.id ${sceneWhere} GROUP BY s.id,t.title,r.name,s.cell_x,s.cell_y,s.cell_z,c.name,s.status,s.opened_at,s.expires_at,s.resolved_at,s.payload_json ORDER BY s.opened_at DESC LIMIT 80`, term ? [like, like, like, like] : []),
+    pool.execute<(RowDataPacket & { id: string; title: string | null; region_name: string; character_name: string; status: string; node_code: string; opened_at: Date; expires_at: Date; resolved_at: Date | null; context_json: unknown })[]>(`SELECT e.id,t.title,r.name AS region_name,c.name AS character_name,e.status,e.node_code,e.opened_at,e.expires_at,e.resolved_at,e.context_json FROM player_encounter_instances e LEFT JOIN dynamic_encounter_templates t ON t.code=e.template_code JOIN map_regions r ON r.id=e.region_id JOIN characters c ON c.id=e.character_id ${encounterWhere} ORDER BY e.opened_at DESC LIMIT 80`, term ? [like, like, like, like] : []),
+    pool.execute<(RowDataPacket & { event_type: string; outcome: string; actor_name: string | null; region_name: string | null; payload_json: unknown; created_at: Date })[]>(`SELECT l.event_type,l.outcome,c.name AS actor_name,r.name AS region_name,l.payload_json,l.created_at FROM game_event_ledger l LEFT JOIN characters c ON c.id=l.actor_character_id LEFT JOIN map_regions r ON r.id=l.region_id ${ledgerWhere} ORDER BY l.id DESC LIMIT 100`, term ? [like, like, like, like] : [])
+  ]);
+  const weatherName = (payload: Record<string, unknown>) => String(payload.weatherName ?? payload.weather_name ?? '');
+  return {
+    scenes: scenes[0].map(row => { const payload = jsonObject(row.payload_json); return { id: row.id, title: row.title ?? '未命名公共奇遇', regionName: row.region_name, position: { x: Number(row.cell_x) * 8 + 4, y: Number(row.cell_y) * 8 + 4, z: Number(row.cell_z) }, discoverer: row.discoverer, status: row.status, openedAt: row.opened_at, expiresAt: row.expires_at, resolvedAt: row.resolved_at, participants: Number(row.participant_count), weather: weatherName(payload) }; }),
+    encounters: encounters[0].map(row => { const context = jsonObject(row.context_json); return { id: row.id, title: row.title ?? String(context.titleSnapshot ?? '未命名个人奇遇'), regionName: row.region_name, characterName: row.character_name, status: row.status, openedAt: row.opened_at, expiresAt: row.expires_at, resolvedAt: row.resolved_at, weather: weatherName(context) }; }),
+    ledger: ledger[0].map(row => { const payload = jsonObject(row.payload_json); const position = jsonObject(payload.position); return { type: row.event_type, outcome: row.outcome, actorName: row.actor_name, regionName: row.region_name, createdAt: row.created_at, subject: String(payload.name ?? ''), position: Number.isFinite(Number(position.x)) ? { x: Number(position.x), y: Number(position.y), z: Number(position.z) } : null }; })
+  };
+};
+
+export const adminPatrolEntities = async (keyword: unknown) => {
+  const term = asText(keyword); const pool = await getPool(); const values = term ? [`%${term}%`, `%${term}%`, `%${term}%`, `%${term}%`] : [];
+  const where = term ? 'WHERE d.code LIKE ? OR d.name LIKE ? OR r.name LIKE ? OR d.status LIKE ?' : '';
+  const [rows] = await pool.execute<(RowDataPacket & { code: string; name: string; region_name: string; status: string; pos_x: number | null; pos_y: number | null; pos_z: number | null; state_json: unknown; action_revision: number; last_action_at: Date; next_action_at: Date })[]>(`SELECT d.code,d.name,r.name AS region_name,d.status,n.pos_x,n.pos_y,n.pos_z,d.state_json,d.action_revision,d.last_action_at,d.next_action_at FROM world_dynamic_npc_states d JOIN map_regions r ON r.id=d.region_id LEFT JOIN map_npcs n ON n.code=d.code AND n.region_id=d.region_id AND n.interaction_kind='npc' ${where} ORDER BY r.name,d.name`, values);
+  return rows.map(row => { const state = jsonObject(row.state_json); return { name: row.name, regionName: row.region_name, status: row.status, position: row.pos_x === null ? null : { x: Number(row.pos_x), y: Number(row.pos_y), z: Number(row.pos_z) }, currentPoint: String(state.currentPoint ?? '巡游中'), homeSite: String(state.homeSite ?? ''), sceneId: state.specialSceneId ? String(state.specialSceneId) : null, revision: Number(row.action_revision), lastActionAt: row.last_action_at, nextActionAt: row.next_action_at }; });
+};

@@ -1,8 +1,15 @@
+import { alchemyTierIndex, alchemyTierValues, alchemySupportsQuality } from './alchemy-balance';
+import { alchemyTactics, type AlchemyTactic } from './alchemy-tactics';
 export type AlchemyTag = '生机' | '灵能' | '韧护' | '迅捷' | '锋锐' | '凝胶' | '潮汐' | '炎性' | '霜寒' | '雷鸣' | '光辉' | '暗蚀';
 
 export type AlchemyStatusCode = 'regeneration' | 'mana_regeneration' | 'barrier' | 'battle_cry' | 'precision' | 'critical_focus' | 'sprint' | 'alchemy_guard' | 'alchemy_evasion' | 'burn' | 'bind' | 'stun' | 'exposed' | 'imbalance' | 'alchemy_confusion';
 
 export type AlchemyConsumableEffect = {
+  tactic?: AlchemyTactic;
+  quality?: number;
+  skillReset?: boolean;
+  requiredLevel?:number;
+  tacticPotency?:number;
   healPct?: number;
   restoreMpPct?: number;
   cleanse?: boolean;
@@ -10,7 +17,7 @@ export type AlchemyConsumableEffect = {
   experienceBonusPct?: number;
   partyDropBonusPct?: number;
   target?: 'self' | 'enemy';
-  /** 敌对炼金效应不参与破韧对抗；仅以目标等级与此值比较。 */
+  /** 控制使用固定概率，不受目标等级限制；Boss 应用控制衰减。 */
   targetScope?: 'single' | 'all';
   status?: { code: AlchemyStatusCode; value: number; turns: number; chance?: number; applicableLevel?: number };
   throwable?: { damageScale: number; element: string };
@@ -98,8 +105,45 @@ const tierOutputs = Array.from({ length: 10 }, (_, index) => {
   }));
 });
 
-export const alchemyOutputDefinitions: readonly AlchemyOutputDefinition[] = [...baseOutputs, ...tierOutputs.flat()];
-export const alchemyOutputsAtOrBelow = (level: number) => alchemyOutputDefinitions.filter(output => output.level <= level);
+const statusNames: Record<string,string> = { regeneration:'每回合回复最大生命',mana_regeneration:'每回合回复最大魔力',barrier:'减伤',battle_cry:'双攻提高',alchemy_guard:'双防提高',sprint:'速度提高',precision:'命中提高',alchemy_evasion:'闪避提高',critical_focus:'暴击提高',burn:'灼烧',bind:'速度降低',stun:'眩晕',exposed:'受到直伤提高',imbalance:'命中闪避降低',alchemy_confusion:'混乱' };
+export const alchemyEffectDescription = (effect: AlchemyConsumableEffect) => {
+  if(effect.skillReset)return '战斗外使用，先确认后返还有账可查的尚未返还技能点。';
+  if(effect.tactic){const description=alchemyTactics.find(tactic=>tactic.code===effect.tactic)?.description??'战术药剂';return description+(Number(effect.tacticPotency??1)>1?` 本阶回复、护盾、直伤与储伤上限系数×${effect.tacticPotency}。`:'')+(Number(effect.quality??1)>1?` 数值品质系数×${effect.quality}；控制概率、持续时间、次数与代价不变。`:'');}
+  const lines: string[] = [];
+  if (effect.healPct) lines.push(`恢复最大生命的${effect.healPct}%`);
+  if (effect.restoreMpPct) lines.push(`恢复最大魔力的${effect.restoreMpPct}%`);
+  if (effect.cleanse) lines.push('清除普通可净化异常');
+  if (effect.throwable) lines.push(`${effect.targetScope === 'all' ? '对全体敌人' : '对当前目标'}造成${Math.round(effect.throwable.damageScale * 100)}%攻击基准的${effect.throwable.element}属性投掷伤害（结算防御与抗性）`);
+  if (effect.status) { const s = effect.status; lines.push(`${statusNames[s.code] ?? s.code}${['stun','alchemy_confusion'].includes(s.code) ? '' : ` ${s.value}%`}，持续${s.turns}回合${s.chance !== undefined ? `，概率${s.chance}%` : ''}${s.applicableLevel ? `，适用Lv.${s.applicableLevel}及以下` : ''}`); }
+  if (effect.experienceBonusPct) lines.push(`经验提高${effect.experienceBonusPct}%，持续${effect.battleCount}场战斗`);
+  if (effect.partyDropBonusPct) lines.push(`全队材料掉率提高${effect.partyDropBonusPct}%，持续${effect.battleCount}场战斗`);
+  if (effect.perBattleLimit) lines.push(`同效果族每场最多${effect.perBattleLimit}次`);
+  return lines.join('；')+'。';
+};
+const balancedOutput = (definition: AlchemyOutputDefinition): AlchemyOutputDefinition => {
+  const effect: AlchemyConsumableEffect = JSON.parse(JSON.stringify(definition.effect)); const tier = alchemyTierIndex(definition.level);effect.requiredLevel=definition.level;
+  if(effect.status){delete effect.status.applicableLevel;if(['stun','alchemy_confusion','bind','imbalance'].includes(effect.status.code))effect.status.chance??=100;}
+  if (effect.healPct && effect.restoreMpPct) { effect.healPct=alchemyTierValues.harmonyHp[tier]!; effect.restoreMpPct=alchemyTierValues.harmonyMp[tier]!; }
+  else { if(effect.healPct) effect.healPct=alchemyTierValues.life[tier]!; if(effect.restoreMpPct) effect.restoreMpPct=alchemyTierValues.mana[tier]!; }
+  if(effect.status && effect.target !== 'enemy') {
+    const status=effect.status; const values = status.code==='regeneration'||status.code==='mana_regeneration' ? alchemyTierValues.regeneration : status.code==='barrier' ? alchemyTierValues.reduction : status.code==='battle_cry' ? alchemyTierValues.attack : status.code==='alchemy_guard' ? alchemyTierValues.defense : status.code==='sprint' ? alchemyTierValues.speed : null;
+    if(values) { status.value=values[tier]!; status.turns=status.code==='barrier'?2:3; }
+  }
+  if(effect.throwable) effect.throwable.damageScale = +(effect.throwable.damageScale * 3.6).toFixed(2);
+  return { ...definition,effect,description:alchemyEffectDescription(effect) };
+};
+const tacticalOutputs: AlchemyOutputDefinition[] = [30,50,80].flatMap(level => alchemyTactics.filter(tactic=>level===30||!['quick_chant','defer'].includes(tactic.code)).map(tactic => ({ code:`alchemy_${tactic.code}_l${level}`,name:`${tactic.name}·Lv.${level}`,description:alchemyEffectDescription({tactic:tactic.code,tacticPotency:level===80?1.3:level===50?1.15:1}),level,tier:tierForLevel(level),category:tactic.enemy?'投掷物':'药剂',tags:[...tactic.tags] as AlchemyTag[],effect:{ tactic:tactic.code,quality:1,tacticPotency:level===80?1.3:level===50?1.15:1,requiredLevel:level,target:tactic.enemy?'enemy':'self' } })));
+const standardOutputs = [...baseOutputs,...tierOutputs.flat()].map(balancedOutput).concat(tacticalOutputs);
+const qualities = standardOutputs.filter(item=>alchemySupportsQuality(item.effect)).flatMap(definition => [1,2].map(quality => {
+  const factor = 1+quality*.2; const effect: AlchemyConsumableEffect = JSON.parse(JSON.stringify(definition.effect)); effect.quality=factor;
+  if(effect.healPct) effect.healPct=+Math.min(90,effect.healPct*factor).toFixed(1);
+  if(effect.restoreMpPct) effect.restoreMpPct=+Math.min(90,effect.restoreMpPct*factor).toFixed(1);
+  if(effect.throwable) effect.throwable.damageScale=+(effect.throwable.damageScale*factor).toFixed(2);
+  if(effect.status && !['stun','alchemy_confusion'].includes(effect.status.code)) effect.status.value=+Math.min(effect.status.code==='barrier'?60:60,effect.status.value*factor).toFixed(1);
+  return { ...definition,code:`${definition.code}_q${quality}`,name:`${definition.name}【${quality===1?'精制':'匠造'}】`,effect,description:effect.tactic?`${definition.description} 回复、护盾、直伤及正向属性量提高${quality*20}%；控制、次数与持续时间不变。`:alchemyEffectDescription(effect) };
+}));
+export const alchemyOutputDefinitions: readonly AlchemyOutputDefinition[] = [...standardOutputs,...qualities, { code:'alchemy_skill_reset_elixir',name:'归悟洗练露',description:'战斗外使用。有技能点明细时按尚未返还的记录回溯；无明细时撤销旧加点并将可用点数重置为角色等级。重置后点数不超过等级，保留领悟记录及免费基础能力。使用时先显示确认面板。',level:1,tier:'下位',category:'秘药',tags:['灵能','生机'],effect:{skillReset:true} }];
+export const alchemyOutputsAtOrBelow = (level: number) => standardOutputs.filter(output => output.level <= level);
 
 export const alchemyStatusDefinitions = [
   { code: 'alchemy_guard', name: '坚守', effectType: 'stat_modifier', value: 8, duration: 2, description: '双防提高，效果值为百分比。' },

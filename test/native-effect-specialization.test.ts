@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
-import { skillSpecialization, specializeEffectValue } from '../src/game/skill-specialization';
+import { skillSpecialization, specializeEffectValue, specializeEffectDuration, specializeControlChance } from '../src/game/skill-specialization';
 import { nativeCleanseLimit } from '../src/game/combat-dispel-policy';
 import { balancedSkillDescription } from '../src/game/combat-skill-balance.config';
 import { CombatRules, emptyRuleState, type RuleUnit } from '../src/game/combat-rule-registry';
@@ -25,19 +25,19 @@ const fixture = () => {
   let effect: any = { id: 1, skill_code: 'frost_barrier', code: 'life_shield', name: '护盾', effect_type: 'shield', target_scope: 'self', value: 20, duration: 3, effect_level: 1, max_stacks: 1, stackable: 0 };
   const connection = { execute: async (sql: string, args?: any[]) => { calls.push({ sql, args }); return [sql.includes('FROM skill_effects se') ? [effect] : sql.includes('SELECT sd.tier') ? [{ tier: '中位', specialization: 'potent', level: 40 }, { tier: '中位', specialization: 'overcharge', level: 40 }] : []]; } };
   const shields: any[][] = [];
-  const apply = loadFunction('applySkillEffects', { skillSpecialization, specializeEffectValue, nativeCleanseLimit, effectMessage: () => '', effectMarkerForTarget: () => '#', grantLifeShield: async (...args: any[]) => { shields.push(args); return { added: args[5] }; } });
+  const apply = loadFunction('applySkillEffects', { skillSpecialization, specializeEffectValue, specializeEffectDuration, specializeControlChance, nativeCleanseLimit, effectMessage: () => '', effectMarkerForTarget: () => '#', grantLifeShield: async (...args: any[]) => { shields.push(args); return { added: args[5] }; } });
   const invoke = () => apply(connection, 'test', 1, { id: 1, hp_max: 20000 }, 'member', { id: 2, hp_max: 10000 }, 'member', 'on_cast', [], 0, 1, rules);
   return { source, ally, rules, calls, shields, invoke, setEffect: (value: any) => { effect = { ...effect, ...value }; } };
 };
 
-test('冰霜护盾选中队友，按队友生命计算且过充/强效只乘一次', async () => {
+test('冰霜护盾按队友生命计算，强效受40%盾值上限限制、过充不增强护盾', async () => {
   const f = fixture(); await f.invoke();
   assert.equal(f.shields[0][3], 2); assert.equal(f.shields[0][4], 10000);
-  assert.equal(f.shields[0][5], 3125);
+  assert.equal(f.shields[0][5], 4000); assert.equal(f.shields[0][6], 4);
 });
 test('原生生命护盾消耗共鸣节拍并实际增加护盾', async () => {
   const f = fixture(); f.rules.add(f.source, 'beat', 20, 3, f.source); await f.invoke();
-  assert.equal(f.shields[0][5], 3750); assert.equal(f.rules.status(f.source, 'beat'), undefined);
+  assert.equal(f.shields[0][5], 4800); assert.equal(f.rules.status(f.source, 'beat'), undefined);
 });
 test('净化之光对选定友方生效，最多2层且不移除石化', async () => {
   const f = fixture(); f.setEffect({ skill_code: 'purifying_light', code: 'cleanse', effect_type: 'cleanse' });
@@ -50,7 +50,7 @@ test('原生强效普通增益落入实际状态写入，不只改详情', async
   const f = fixture(); f.setEffect({ skill_code: 'war_cry', code: 'attack', target_scope: 'ally', effect_type: 'stat_modifier', value: 20 });
   await f.invoke();
   const row = f.calls.find(call => call.sql.startsWith('INSERT INTO combat_status_effects'))!;
-  assert.equal(row.args![2], 2); assert.equal(row.args![5], 25);
+  assert.equal(row.args![2], 2); assert.equal(row.args![5], 50);
 });
 test('治疗专精在封顶前结算且只影响本次原生治疗量', async () => {
   const f = fixture(); f.ally.hp = 9900;

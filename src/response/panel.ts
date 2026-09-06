@@ -63,8 +63,11 @@ export const outsidePanel = (title: string, location: string, speed: number, ran
       markdown.addBold(point.type).addText(' ');
       markdown.addText(label);
       markdown.addText(` · ${directionText(point, x, y)}${point.distance}`);
+      // 域民只有离开驻点时才会进入野外感知；此时明确给出坐标，便于追踪巡游路线。
+      if (point.type === '域民') markdown.addText(`（${point.x}, ${point.y}）`);
       // 同格目标的“前往”只会把玩家原地送回；建筑则可直接进入，其余目标重开对应互动。
-      if (point.distance === 0 && point.interaction?.type === '建筑') markdown.addText(' ').addButton('[进入]', { data: `/建筑进入 ${point.interaction.id}`, autoEnter: false });
+      if (point.type === '怪物' && point.code) markdown.addText(' ').addButton('[交互]', { data: `/怪物交互 ${point.code}`, autoEnter: false });
+      else if (point.distance === 0 && point.interaction?.type === '建筑') markdown.addText(' ').addButton('[进入]', { data: `/建筑进入 ${point.interaction.id}`, autoEnter: false });
       else if (point.type === '玩家' && point.distance === 0 && point.code) markdown.addText(' ').addButton('[互动]', { data: `/玩家互动 ${point.code}`, autoEnter: false });
       else if (point.type === '玩家' && point.distance > 0) markdown.addText(' ').addButton('[前往]', { data: `/前往 ${point.x} ${point.y}`, autoEnter: false });
       else if (point.type !== '玩家' && point.distance === 0 && point.interaction) markdown.addText(' ').addButton('[互动]', { data: `/坐标互动 ${point.interaction.type} ${point.interaction.id}`, autoEnter: false });
@@ -130,7 +133,7 @@ export default async () => {
       if (!(error instanceof Error) || !error.message.includes('当前不在战斗中')) throw error;
       const [nearby, autoBattle, blockedDirections, movement, trace] = await Promise.all([nearbyPoints(event.current.UserId), autoBattleConfig(event.current.UserId), blockedDungeonDirections(event.current.UserId), movementProfile(event.current.UserId), omniscientTraces(event.current.UserId)]);
       const visiblePoints = movement.showPlayers ? nearby.points : nearby.points.filter(point => point.type !== '玩家');
-      const targets = visiblePoints.length ? `\n感知内目标：\n${visiblePoints.map(point => `${point.type} ${point.name} · ${directionText(point, Number(nearby.character.pos_x), Number(nearby.character.pos_y))}${point.distance}${point.distance === 0 && point.interaction?.type === '建筑' ? ' [进入]' : point.type === '玩家' && point.distance === 0 ? ' [互动]' : point.type === '玩家' && point.distance > 0 ? ' [前往]' : point.type !== '玩家' && point.distance === 0 && point.interaction ? ' [互动]' : point.type !== '玩家' && point.distance > 0 && movement.maximum >= point.distance ? ' [前往]' : ''}`).join('\n')}` : '\n感知内目标：\n空空如也';
+      const targets = visiblePoints.length ? `\n感知内目标：\n${visiblePoints.map(point => `${point.type} ${point.name} · ${directionText(point, Number(nearby.character.pos_x), Number(nearby.character.pos_y))}${point.distance}${point.type === '怪物' && point.code ? ` [交互：/怪物交互 ${point.code}] [攻击：/怪物攻击 ${point.code}]` : point.distance === 0 && point.interaction?.type === '建筑' ? ' [进入]' : point.type === '玩家' && point.distance === 0 ? ' [互动]' : point.type === '玩家' && point.distance > 0 ? ' [前往]' : point.type !== '玩家' && point.distance === 0 && point.interaction ? ' [互动]' : point.type !== '玩家' && point.distance > 0 && movement.maximum >= point.distance ? ' [前往]' : ''}`).join('\n')}` : '\n感知内目标：\n空空如也';
       const x = Number(nearby.character.pos_x); const y = Number(nearby.character.pos_y);
       const location = currentLocationText(nearby.character);
       const resting = nearby.character.activity_status !== 'active';

@@ -1,3 +1,4 @@
+import { consumeInventory, grantInventory } from './inventory-binding';
 import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 
@@ -13,8 +14,8 @@ type OrderRow = RowDataPacket & {
 };
 
 const eligible = `i.is_tradeable=1 AND i.stackable=1 AND i.trade_price>0
-  AND i.item_type IN ('material','consumable')
-  AND i.item_category NOT IN ('特殊','地图','货币','任务','剧情','图纸','礼物','家具')`;
+  AND i.item_type IN ('material','consumable') AND COALESCE(JSON_EXTRACT(i.effect_json,'$.personalOnly'),0)=0
+  AND i.item_category NOT IN ('地图','货币','任务','剧情')`;
 
 const number = (value: unknown) => Number(value ?? 0);
 const integer = (value: number, label: string, min = 1, max = 999) => {
@@ -99,7 +100,7 @@ const settleMatch = async (connection: PoolConnection, sell: OrderRow, buy: Orde
   const sellerWeek = await weeklySales(connection, number(sell.character_id));
   const fee = feeForSale(sellerWeek.gross, gross);
   const refund = Math.max(0, number(buy.unit_price) - price) * quantity;
-  await addInventory(connection, number(buy.character_id), number(buy.item_id), quantity);
+  await grantInventory(connection, number(buy.character_id), number(buy.item_id), {unbound:0,personal:0,trade:quantity});
   await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [gross - fee, sell.character_id]);
   if (refund) await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [refund, buy.character_id]);
   await connection.execute('UPDATE market_weekly_volume SET gross_sales=gross_sales+?,fee_paid=fee_paid+? WHERE character_id=? AND week_key=?', [gross, fee, sell.character_id, sellerWeek.key]);
@@ -161,10 +162,10 @@ export const marketCatalog = async (qqUserId: string, page = 1, type = '全部',
 
 export const marketSellable = async (qqUserId: string, page = 1, keyword = '') => {
   const pool = await getPool(); const character = await characterFor(pool, qqUserId); const term = `%${keyword.trim()}%`;
-  const where = `pi.character_id=? AND pi.quantity>0 AND ${eligible} AND i.name LIKE ?`;
+  const where = `pi.character_id=? AND pi.quantity-pi.trade_bound_quantity-pi.personal_bound_quantity>0 AND ${eligible} AND i.name LIKE ?`;
   const [countRows] = await pool.execute<(RowDataPacket & { total: number })[]>(`SELECT COUNT(*) AS total FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE ${where}`, [character.id, term]);
   const paging = pageInfo(page, number(countRows[0]?.total));
-  const [rows] = await pool.execute<(ItemRow & { quantity: number; reference_price: number | null })[]>(`SELECT i.id,i.name,i.item_category,i.description,i.trade_price,i.stack_limit,pi.quantity,ms.reference_price
+  const [rows] = await pool.execute<(ItemRow & { quantity: number; reference_price: number | null })[]>(`SELECT i.id,i.name,i.item_category,i.description,i.trade_price,i.stack_limit,(pi.quantity-pi.trade_bound_quantity-pi.personal_bound_quantity) AS quantity,ms.reference_price
     FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id LEFT JOIN market_item_state ms ON ms.item_id=i.id WHERE ${where} ORDER BY i.item_category,i.name LIMIT ? OFFSET ?`, [character.id, term, MARKET_PAGE_SIZE, (paging.page - 1) * MARKET_PAGE_SIZE]);
   return { ...paging, keyword: keyword.trim(), items: rows.map(row => ({ id: number(row.id), name: row.name, category: row.item_category, quantity: number(row.quantity), reference: number(row.reference_price) || Math.max(1, Math.round(number(row.trade_price) * 2)) })) };
 };
@@ -201,7 +202,7 @@ const createOrder = async (qqUserId: string, itemId: number, unitPrice: number, 
   if (side === 'sell') {
     const [inventory] = await connection.execute<(RowDataPacket & { quantity: number })[]>('SELECT quantity FROM player_inventory WHERE character_id=? AND item_id=? FOR UPDATE', [character.id, itemId]);
     if (number(inventory[0]?.quantity) < amount) throw new Error('背包中的物品数量不足。');
-    await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [amount, character.id, itemId]);
+    await consumeInventory(connection, character.id, itemId, amount, true);
     await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, itemId]);
   } else {
     reserved = price * amount;
@@ -261,3 +262,5 @@ export const marketFeeProfile = async (qqUserId: string) => {
   const gross = number(rows[0]?.gross_sales); const nextRate = gross < 10000 ? 3 : gross < 50000 ? 5 : gross < 150000 ? 8 : gross < 500000 ? 12 : 16;
   return { gross, fees: number(rows[0]?.fee_paid), cancellations: number(rows[0]?.cancellation_count), nextRate };
 };
+
+export { characterFor as marketCharacterFor, weeklySales as marketWeeklySales, feeForSale as marketFeeForSale };

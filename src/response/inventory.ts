@@ -3,14 +3,15 @@ import { inventoryView } from '../game/adventure.service';
 import { clearQuickItem, quickItemConfig, setQuickItem, toggleQuickItem } from '../game/quick-item.service';
 import { currentMainQuest } from '../game/main-quest.service';
 import { messageFormat } from '../game/message';
-import { activateDevice, activeDeviceList, clearDeviceQuickSlot, deactivateDevice, deviceQuickConfig, setDeviceQuickSlot } from '../game/device.service';
+import { activateDevice, activeDeviceList, clearDeviceQuickSlot, deactivateDevice, deviceDetail, deviceQuickConfig, deviceSkillDetail, setDeviceQuickSlot } from '../game/device.service';
 import { discardMaterial } from '../game/inventory.service';
+import {appendItemUse} from './item-use';
 
 type InventoryCategory = '装备' | '道具' | '材料';
 const categories: InventoryCategory[] = ['装备', '道具', '材料'];
 const subcategories: Record<InventoryCategory, string[]> = {
-  装备: ['全部', '武器', '头肩', '上装', '腰部', '下装', '脚部', '项链', '手镯', '戒指', '异械'],
-  道具: ['全部', '药剂', '食物', '特殊', '地图', '图纸'],
+  装备: ['全部', '武器', '头肩', '上装', '腰部', '下装', '脚部', '项链', '手镯', '戒指'],
+  道具: ['全部', '药剂', '秘药', '投掷物', '符咒', '食物', '特殊', '地图', '图纸', '技能书'],
   材料: ['全部', '怪材', '建材', '锻材', '粒子', '基材', '构件', '炼材', '食材', '草药', '货币']
 };
 
@@ -66,6 +67,7 @@ const inventoryFormat = async (qqUserId: string, category?: InventoryCategory, p
     if (!result.recent.length) markdown.addText('暂无获得记录。');
     for (const item of result.recent) {
       markdown.addButton(`[${item.item_category}]${item.name}`, { data: `/物品图鉴 ${item.codex_id}`, autoEnter: false });
+      appendItemUse(markdown,item);
       if (canContemplate && item.code === 'sky_dust') markdown.addText(' ').addButton('[窥探]', { data: '/窥探天空粉尘', autoEnter: false });
       if (canContemplateEvolution && item.code === 'evolution_seed') markdown.addText(' ').addButton('[感悟]', { data: '/感悟进化之种', autoEnter: false });
       markdown.addNewline();
@@ -95,10 +97,11 @@ const inventoryFormat = async (qqUserId: string, category?: InventoryCategory, p
     markdown.addBlockquote('');
     if (item.type === 'instance') {
       markdown.addButton(`[${item.item_category}]${item.name}`, { data: `/装备详情 ${item.id}`, autoEnter: false })
-        .addText(`｜品质 ${Number(item.quality).toFixed(2)}%｜耐久 ${item.durability}/${item.durability_max}`);
+        .addText(`｜品质 ${Number(item.quality).toFixed(2)}%｜耐久 ${item.durability}/${item.durability_max}｜${item.bound_kind==='none'?'未绑定':'已绑定'}${item.market_listing_id?'｜寄售中':''}`);
     } else {
-      markdown.addButton(`[${item.item_category}]${item.name}`, { data: `/物品图鉴 ${item.codex_id}`, autoEnter: false }).addText(` × ${item.quantity}`);
-      if (item.item_category === '技能书') markdown.addText(' ').addButton('[研读]', { data: `/研读技能书 ${item.id}`, autoEnter: false });
+      markdown.addButton(`[${item.item_category}]${item.name}`, { data: `/物品图鉴 ${item.codex_id}`, autoEnter: false }).addText(` × ${item.quantity}｜绑定 ${Number(item.trade_bound_quantity??0)+Number(item.personal_bound_quantity??0)}／未绑定 ${Number(item.quantity)-Number(item.trade_bound_quantity??0)-Number(item.personal_bound_quantity??0)}`);
+      if(item.code.startsWith('automaton_feed_'))markdown.addText(' ').addButton('[使用]',{data:`/机巧 选人偶 0 ${item.code.slice(15)}`,autoEnter:false});
+      appendItemUse(markdown,item);
       if (canContemplate && item.code === 'sky_dust') markdown.addText(' ').addButton('[窥探]', { data: '/窥探天空粉尘', autoEnter: false });
       if (canContemplateEvolution && item.code === 'evolution_seed') markdown.addText(' ').addButton('[感悟]', { data: '/感悟进化之种', autoEnter: false });
       if (category === '材料') markdown.addText(' ').addButton('[丢弃]', { data: `/丢弃材料 ${item.id} `, autoEnter: false });
@@ -112,13 +115,13 @@ const inventoryFormat = async (qqUserId: string, category?: InventoryCategory, p
 const deviceFormat = async (qqUserId: string, page = 1, keyword = '') => {
   const normalizedKeyword = keyword.trim(); const items = (await activeDeviceList(qqUserId)).filter(item => !normalizedKeyword || item.name.includes(normalizedKeyword));
   const totalPages = Math.max(1, Math.ceil(items.length / 10)); const currentPage = Math.min(Math.max(1, page), totalPages); const displayed = items.slice((currentPage - 1) * 10, currentPage * 10);
-  const markdown = Format.createMarkdown().addTitle('异械').addNewline().addNewline().addText('辅助器材：').addNewline();
+  const markdown = Format.createMarkdown().addTitle('异械').addNewline().addNewline().addText('已拥有异械：').addNewline();
   if (!displayed.length) markdown.addText(normalizedKeyword ? '没有找到符合条件的异械。' : '暂无异械。');
   for (const item of displayed) {
-    const activeText = item.activeDefinition ? `｜主动异械${item.quickSlot ? `｜已配置异械${'①②③④'.charAt(item.quickSlot - 1)}` : ''}` : '｜被动异械';
-    markdown.addBlockquote('').addButton(`【异械】${item.name}`, { data: `/装备详情 ${item.id}`, autoEnter: false })
-      .addText(`｜品质 ${item.quality.toFixed(2)}%｜耐久 ${item.durability}/${item.durabilityMax}｜${item.active ? '已生效' : '未生效'}${activeText} `)
-      .addButton(item.active ? '[解除]' : '[生效]', { data: `${item.active ? '/异械解除' : '/异械生效'} ${item.id}`, autoEnter: false });
+    const activeText = item.activeDefinition ? `主动异械${item.quickSlot ? `｜已配置异械${'①②③④'.charAt(item.quickSlot - 1)}` : ''}` : '被动异械';
+    markdown.addBlockquote('').addButton(`【${item.name}】`, { data: `/异械详情 ${item.id}`, autoEnter: false })
+      .addText(`｜${item.active ? '已生效' : '未生效'}｜${activeText} `)
+      .addButton(item.active ? '[解除]' : '[激活]', { data: `${item.active ? '/异械解除' : '/异械生效'} ${item.id}`, autoEnter: false });
     if (item.active && item.activeDefinition) markdown.addText(' ').addButton('[配置]', { data: `/异械配置设置 ${item.id}`, autoEnter: false });
     markdown.addNewline();
   }
@@ -128,7 +131,40 @@ const deviceFormat = async (qqUserId: string, page = 1, keyword = '') => {
     .addButton('上一页', command(Math.max(1, currentPage - 1)), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined })
     .addButton('搜索', '/异械搜索 ', { type: 'command', autoEnter: false })
     .addButton('下一页', command(Math.min(totalPages, currentPage + 1)), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined })
-    .addRow().addButton('主动配置', '/异械配置', { type: 'command', autoEnter: true, style: 'blue' }).addButton('背包', '/背包 装备', { type: 'command', autoEnter: true });
+    .addRow().addButton('主动配置', '/异械配置', { type: 'command', autoEnter: true, style: 'blue' }).addButton('背包', '/背包', { type: 'command', autoEnter: true });
+  return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
+};
+
+const deviceTargetScopeText: Record<string, string> = { self: '自身', ally: '友方单体', enemy: '敌方单体', all_allies: '全体友方', all_enemies: '全体敌方', any: '任意单位' };
+
+const deviceDetailFormat = async (qqUserId: string, instanceId: number) => {
+  const device = await deviceDetail(qqUserId, instanceId);
+  const markdown = Format.createMarkdown().addTitle('异械详情').addNewline().addNewline()
+    .addText(`【${device.name}】\n类别：${device.activeDefinition ? '主动异械' : '被动异械'}\n状态：${device.active ? '已生效' : '未生效'}${device.activeDefinition && device.quickSlot ? `｜已配置异械${'①②③④'.charAt(device.quickSlot - 1)}` : ''}`).addNewline().addNewline()
+    .addText('简介：').addNewline().addBlockquote(device.description).addNewline();
+  markdown.addNewline().addText('实际效果：').addNewline();
+  for (const effect of device.actualEffects) markdown.addBlockquote(effect).addNewline();
+  if (!device.activeDefinition) {
+    if (!device.actualEffects.length) markdown.addBlockquote('该异械生效后自动发挥作用，无需配置到异械栏位。');
+  } else {
+    for (const skill of device.activeDefinition.skills) {
+      markdown.addBlockquote('').addButton(skill.name, { data: `/异械技能详情 ${device.id} ${skill.code}`, autoEnter: false })
+        .addText(`：${skill.description}`).addNewline()
+        .addBlockquote(`充能 ${skill.energyCost}/${device.activeDefinition.maxEnergy}｜冷却 ${skill.cooldownTurns || '无'}${skill.cooldownTurns ? '回合' : ''}｜目标 ${deviceTargetScopeText[skill.targetScope] ?? skill.targetScope}`).addNewline();
+    }
+  }
+  const buttons = Format.createButtonGroup().addRow().addButton('返回 异械', '/异械', { type: 'command', autoEnter: true });
+  if (device.active && device.activeDefinition) buttons.addButton('主动配置', `/异械配置设置 ${device.id}`, { type: 'command', autoEnter: true, style: 'blue' });
+  return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
+};
+
+const deviceSkillDetailFormat = async (qqUserId: string, instanceId: number, skillCode: string) => {
+  const { device, skill, maxEnergy } = await deviceSkillDetail(qqUserId, instanceId, skillCode);
+  const markdown = Format.createMarkdown().addTitle(`异械技·${skill.name}`).addNewline().addNewline()
+    .addText(`所属异械：【${device.name}】\n充能消耗：${skill.energyCost}/${maxEnergy}\n冷却：${skill.cooldownTurns ? `${skill.cooldownTurns} 回合` : '无'}\n目标：${deviceTargetScopeText[skill.targetScope] ?? skill.targetScope}`).addNewline().addNewline()
+    .addText('效果：').addNewline().addBlockquote(skill.description).addNewline().addNewline()
+    .addBlockquote('异械充能不会随回合自然恢复；能量不足时，使用该异械会消耗本回合为其充能 30 点。');
+  const buttons = Format.createButtonGroup().addRow().addButton('异械详情', `/异械详情 ${device.id}`, { type: 'command', autoEnter: true }).addButton('主动配置', '/异械配置', { type: 'command', autoEnter: true, style: device.active ? 'blue' : undefined });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 
@@ -138,16 +174,18 @@ const deviceQuickConfigFormat = async (qqUserId: string) => {
     .addBlockquote('仅已生效的主动异械可配置。这里独立于 /技能列表；战斗中配置至少一件后才显示第三排【异械①-④】按键。').addNewline().addNewline();
   for (const slot of [1, 2, 3, 4]) {
     const current = slots.get(slot);
-    markdown.addText(`异械${'①②③④'.charAt(slot - 1)}：${current ? `【${current.name}】` : '未配置'} `);
+    markdown.addText(`异械${'①②③④'.charAt(slot - 1)}：${current ? current.activeDefinition?.skills[0]?.name ?? current.name : '未配置'} `);
     if (current) markdown.addButton('[取消]', { data: `/异械配置取消 ${slot}`, autoEnter: false });
     markdown.addNewline();
   }
-  markdown.addNewline().addText('可配置的已生效主动异械：').addNewline();
+  markdown.addNewline().addText('可配置的生效异械：').addNewline();
   if (!data.candidates.length) markdown.addBlockquote('暂无已生效主动异械。').addNewline();
   for (const device of data.candidates) {
-    const skills = device.activeDefinition!.skills.map(skill => `${skill.name}（${skill.energyCost}能量）`).join('／');
-    markdown.addBlockquote(`【${device.name}】${device.quickSlot ? `当前异械${'①②③④'.charAt(device.quickSlot - 1)}` : '未配置'}｜${skills}`).addText(' ')
-      .addButton('[配置]', { data: `/异械配置设置 ${device.id}`, autoEnter: false }).addNewline();
+    for (const [index, skill] of device.activeDefinition!.skills.entries()) {
+      markdown.addBlockquote('').addButton(`${skill.name}（${skill.energyCost}/${device.activeDefinition!.maxEnergy}）`, { data: `/异械技能详情 ${device.id} ${skill.code}`, autoEnter: false });
+      if (index === 0) markdown.addText(' ').addButton('[配置]', { data: `/异械配置设置 ${device.id}`, autoEnter: false });
+      markdown.addNewline();
+    }
   }
   return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('返回 异械', '/异械', { type: 'command', autoEnter: true }));
 };
@@ -269,6 +307,18 @@ export const deviceSearchHandler = async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
   try { await message.send({ format: await deviceFormat(event.current.UserId, 1, String(route.param('keyword') ?? '')) }); }
   catch (error) { await message.send({ format: messageFormat('搜索失败', error instanceof Error ? error.message : '请稍后重试。') }); }
+};
+
+export const deviceDetailHandler = async () => {
+  const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
+  try { await message.send({ format: await deviceDetailFormat(event.current.UserId, Number(route.param('id'))) }); }
+  catch (error) { await message.send({ format: messageFormat('异械详情', error instanceof Error ? error.message : '请稍后重试。') }); }
+};
+
+export const deviceSkillDetailHandler = async () => {
+  const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
+  try { await message.send({ format: await deviceSkillDetailFormat(event.current.UserId, Number(route.param('id')), String(route.param('skillCode'))) }); }
+  catch (error) { await message.send({ format: messageFormat('异械技能详情', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
 
 export const activateDeviceHandler = async () => {

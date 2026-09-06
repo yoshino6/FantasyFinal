@@ -3,6 +3,9 @@ import { itemCodex } from '../game/adventure.service';
 import { forgePrimaryKeys } from '../game/blacksmith.service';
 import { getPool } from '../database/pool';
 import { messageFormat } from '../game/message';
+import {appendItemUse} from './item-use';
+import {itemUsePolicy} from '../game/item-use-policy';
+import {discoverSecondaryFinished} from '../game/secondary-shop.service';
 
 const artifactEffects: Record<string, string[]> = {
   holy_sword: ['普攻与斩击技能恒为物理伤害。', '普攻或斩击技能暴击时，给予目标1层[破甲剑痕]。', '$破甲剑痕$目标物理防御降低16%，持续3回合，可叠加。'],
@@ -95,7 +98,9 @@ const foodBuffText = (value: unknown) => {
 export default async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
   try {
-    const item = await itemCodex(event.current.UserId, String(route.param('id')));
+    const codexId=String(route.param('id'));
+    if(route.param('shop'))await discoverSecondaryFinished(event.current.UserId,String(route.param('shop')),codexId);
+    const item = await itemCodex(event.current.UserId, codexId);
     const title = item.item_type === 'equipment' ? `【${item.item_category}】${item.name}` : item.name;
     const markdown = Format.createMarkdown().addTitle(title).addNewline().addNewline()
       .addText(`图鉴ID：${item.codex_id}\n重量：${Number(item.weight).toFixed(2)}`);
@@ -109,7 +114,10 @@ export default async () => {
     }
     if (item.item_type === 'consumable') {
       const details = consumableEffects(item.effect_json);
-      markdown.addText('\n\n效果：\n');
+      if(details.effect.alchemyOutput) details.lines=[item.description];
+      appendItemUse(markdown,item);
+      markdown.addNewline().addText(`使用方式：${itemUsePolicy(item).reason}`);
+      markdown.addText(`\n使用等级：Lv.${item.required_level}\n\n效果：\n`);
       for (const effect of details.lines.length ? details.lines : ['使用后会产生特殊效果。']) markdown.addBlockquote(effect).addNewline();
       const book = await skillBookDetails(item.effect_json);
       if (book) {
