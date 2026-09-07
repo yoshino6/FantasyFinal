@@ -1,3 +1,4 @@
+import { consumeInventory, grantInventory } from './inventory-binding';
 import { useAlchemyCombat, alchemyEndTurn, consumeAlchemyChant } from './alchemy-combat';
 import { randomUUID } from 'node:crypto';
 import { skillSpecialization, type SkillSpecializationResult } from './skill-specialization';
@@ -284,7 +285,7 @@ export const settlePvpDefeat = async (connection: PoolConnection, winnerId: numb
   for (const loot of stolen) {
     const heldQuantity = Math.min(Number(loot.quantity), Number(loot.held_quantity));
     if (loot.item_id && Number(loot.quantity) > 0) {
-      await creditItem(connection, Number(loot.original_owner_character_id), Number(loot.item_id), Number(loot.quantity));
+      await grantInventory(connection,Number(loot.original_owner_character_id),Number(loot.item_id),{trade:Number(loot.quantity),personal:0,unbound:0});
       if (heldQuantity) await connection.execute('UPDATE player_inventory SET quantity=GREATEST(0,quantity-?) WHERE character_id=? AND item_id=?', [heldQuantity, loserId, loot.item_id]);
       await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [loserId, loot.item_id]);
       returnedItems += Number(loot.quantity);
@@ -333,7 +334,7 @@ export const settleCityPursuitDefeat = async (connection: PoolConnection, loserI
   for (const loot of stolen) {
     const heldQuantity = Math.min(Number(loot.quantity), Number(loot.held_quantity));
     if (loot.item_id && Number(loot.quantity) > 0) {
-      await creditItem(connection, Number(loot.original_owner_character_id), Number(loot.item_id), Number(loot.quantity));
+      await grantInventory(connection,Number(loot.original_owner_character_id),Number(loot.item_id),{trade:Number(loot.quantity),personal:0,unbound:0});
       if (heldQuantity) await connection.execute('UPDATE player_inventory SET quantity=GREATEST(0,quantity-?) WHERE character_id=? AND item_id=?', [heldQuantity, loserId, loot.item_id]);
       await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [loserId, loot.item_id]);
       returnedItems += Number(loot.quantity);
@@ -354,14 +355,14 @@ export const settleCityPursuitDefeat = async (connection: PoolConnection, loserI
 };
 
 const stealFromLoser = async (connection: PoolConnection, winner: PvpCharacter, loser: PvpCharacter, extra = false) => {
-  const [items] = await connection.execute<(RowDataPacket & { item_id: number; name: string; quantity: number; trade_price: number })[]>('SELECT pi.item_id,i.name,pi.quantity,i.trade_price FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0 AND i.item_category NOT IN (\'特殊\',\'地图\',\'货币\') FOR UPDATE', [loser.id]);
-  const weighted = items.flatMap(item => Array.from({ length: Math.max(1, Math.min(100, Number(item.trade_price) * Number(item.quantity))) }, () => item));
+  const [items] = await connection.execute<(RowDataPacket & { item_id: number; name: string; quantity: number; trade_price: number })[]>('SELECT pi.item_id,i.name,pi.quantity-pi.trade_bound_quantity-pi.personal_bound_quantity AS quantity,i.trade_price FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.quantity>pi.trade_bound_quantity+pi.personal_bound_quantity AND i.is_tradeable=1 AND i.trade_price>0 AND i.item_category NOT IN (\'特殊\',\'地图\',\'货币\') FOR UPDATE', [loser.id]);
+  let weighted = items.flatMap(item => Array.from({ length: Math.max(1, Math.min(100, Number(item.trade_price) * Number(item.quantity))) }, () => item));
   const taken: string[] = [];
   for (let count = 0; count < (extra ? 2 : 1) && weighted.length; count += 1) {
     const item = random(weighted); const quantity = Math.max(1, Math.min(Number(item.quantity), extra ? 2 : 1));
-    await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [quantity, loser.id, item.item_id]);
-    await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [loser.id, item.item_id]);
-    await creditItem(connection, winner.id, Number(item.item_id), quantity);
+    await consumeInventory(connection,Number(loser.id),Number(item.item_id),quantity,true);
+    await grantInventory(connection,Number(winner.id),Number(item.item_id),{trade:quantity,personal:0,unbound:0});
+    item.quantity=Number(item.quantity)-quantity;if(!item.quantity)weighted=weighted.filter(candidate=>candidate!==item);
     await transferStolenItem(connection, Number(loser.id), Number(winner.id), Number(item.item_id), quantity);
     taken.push(`【${item.name}】×${quantity}`);
   }

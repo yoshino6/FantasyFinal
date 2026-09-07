@@ -1,4 +1,5 @@
-import { useMessage, useRoute } from 'alemonjs';
+import { useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { giftFormat, giftText, sendWithTextFallback } from '../game/message';
 
 export default async () => {

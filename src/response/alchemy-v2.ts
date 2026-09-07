@@ -1,10 +1,12 @@
 import { alchemyEffectDescription, alchemyOutputDefinitions, type AlchemyConsumableEffect } from '../game/alchemy-catalog';
-import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { executeAlchemy, randomAlchemyFormula, alchemyJournalReload } from '../game/alchemist.service';
 import { alchemyJournalPage, alchemyJournalDetail, cancelCraftPreview, craftCharacterId, craftRequestFor } from '../game/alchemy-journal.service';
 import { alchemyRuleVersion } from '../game/alchemy-journal';
 import { withTransaction } from '../database/pool';
 import { messageFormat } from '../game/message';
+import { alchemyCreationQuest } from '../game/alchemy-creation-quest.service';
 
 type AlchemyResult = Awaited<ReturnType<typeof executeAlchemy>>;
 export const alchemyResultFormat = (result: AlchemyResult) => {
@@ -66,7 +68,7 @@ export const alchemyJournalHandler = async () => respond(async (user, route) => 
     if (stats?.stable) md.addText(`稳定记录：${stats.batches} 批成功 ${stats.successes} 批；其中 ${stats.count} 批获得常见成果（${(stats.count / stats.successes * 100).toFixed(1)}%）。`).addNewline();
     if (record.snapshot.version !== alchemyRuleVersion) md.addText('旧条件记录，当前版本结果可能变化。').addNewline();
     md.addButton('[查看详情]', { data: `/炼金手记详情 ${record.id}`, autoEnter: false });
-    if (record.snapshot.kind !== 'purification') md.addText(' ').addButton('[再次投料]', { data: record.snapshot.source==='automaton'?`/机巧 配方 0 ${record.snapshot.conditions} 1`:`/炼金手记投料 ${record.id}`, autoEnter: false });
+    if (record.snapshot.kind !== 'purification') md.addText(' ').addButton('[再次投料]', { data: record.snapshot.source==='automaton'?`/炼金 配方 0 ${record.snapshot.conditions} 1`:`/炼金手记投料 ${record.id}`, autoEnter: false });
     md.addNewline().addNewline();
   }
   md.addText(`当前第 ${data.page} / ${data.pages} 页`);
@@ -78,7 +80,8 @@ export const alchemyJournalHandler = async () => respond(async (user, route) => 
     .addRow().addButton('全部记录', command(1, '全部记录'), { type: 'command', autoEnter: true }).addButton('稳定组合', command(1, '稳定组合'), { type: 'command', autoEnter: true })
     .addRow().addButton('全部字段', command(1, data.scope, '全部'), { type: 'command', autoEnter: true }).addButton('耗材', command(1, data.scope, '耗材'), { type: 'command', autoEnter: true }).addButton('成果', command(1, data.scope, '成果'), { type: 'command', autoEnter: true })
     .addRow().addButton('清除筛选', '/炼金手记', { type: 'command', autoEnter: true }).addButton('返回炼金', '/继续炼金', { type: 'command', autoEnter: true });
-  md.addNewline();for(const scope of ['造物','育成','成功','失败'])md.addButton(`[${scope}]`,{data:`/炼金手记页 1 ${scope} 全部 0`,autoEnter:false}).addText(' ');
+  const creationQuest=await alchemyCreationQuest(user);
+  md.addNewline();for(const scope of [...(creationQuest.unlocked?['点灵','育成']:[]),'成功','失败'])md.addButton(`[${scope}]`,{data:`/炼金手记页 1 ${scope} 全部 0`,autoEnter:false}).addText(' ');
   return Format.create().addMarkdown(md).addButtonGroup(buttons);
 });
 export const alchemyJournalDetailHandler = async () => respond(async (user, route) => {
@@ -101,7 +104,7 @@ export const alchemyJournalDetailHandler = async () => respond(async (user, rout
   md.addText(record.snapshot.cost===undefined?'投入价值：未估价':`本次每批投入价值：${record.snapshot.cost.toFixed(2)}；期望单件成本：${Number(record.result.averageCost??0)>0?Number(record.result.averageCost).toFixed(2):'未估价'}`).addNewline();
   md.addText(`批次第 ${page}/${pages} 页`);
   const buttons = Format.createButtonGroup().addRow().addButton('上一页', `/炼金手记详情 ${record.id} ${Math.max(1, page - 1)}`, { type: 'command', autoEnter: true }).addButton('下一页', `/炼金手记详情 ${record.id} ${Math.min(pages, page + 1)}`, { type: 'command', autoEnter: true });
-  if (record.snapshot.kind !== 'purification') buttons.addRow().addButton('再次投料', record.snapshot.source==='automaton'?`/机巧 配方 0 ${record.snapshot.conditions} 1`:`/炼金手记投料 ${record.id}`, { type: 'command', autoEnter: true });
+  if (record.snapshot.kind !== 'purification') buttons.addRow().addButton('再次投料', record.snapshot.source==='automaton'?`/炼金 配方 0 ${record.snapshot.conditions} 1`:`/炼金手记投料 ${record.id}`, { type: 'command', autoEnter: true });
   buttons.addRow().addButton('返回手记', '/炼金手记', { type: 'command', autoEnter: true });
   return Format.create().addMarkdown(md).addButtonGroup(buttons);
 });

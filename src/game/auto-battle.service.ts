@@ -1,6 +1,7 @@
-import type { RowDataPacket } from 'mysql2/promise';
+import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { readRuleState, visibleResidentBuff } from './combat-rule-registry';
+import { assertCombatLoadoutMutable } from './combat-loadout-lock.service';
 
 type CharacterRow = RowDataPacket & { id: number };
 type ActionRow = RowDataPacket & { sequence_no: number; skill_id: number | null; name: string | null };
@@ -19,6 +20,14 @@ const characterIdFor = async (qqUserId: string) => {
   return Number(rows[0].id);
 };
 
+const mutableCharacterIdFor = async (connection: PoolConnection, qqUserId: string) => {
+  const [rows] = await connection.execute<CharacterRow[]>('SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE', [qqUserId]);
+  if (!rows[0]) throw new Error('请先发送“注册”创建角色。');
+  const characterId = Number(rows[0].id);
+  await assertCombatLoadoutMutable(connection, characterId);
+  return characterId;
+};
+
 const ensureSettings = async (characterId: number, mode: AutoBattleMode = 'pve') => {
   const pool = await getPool();
   await pool.execute(`INSERT IGNORE INTO ${autoTables(mode).settings} (character_id) VALUES (?)`, [characterId]);
@@ -33,17 +42,14 @@ export const autoBattleConfig = async (qqUserId: string, mode: AutoBattleMode = 
 };
 
 export const setAutoBattleEnabled = async (qqUserId: string, enabled: boolean, mode: AutoBattleMode = 'pve') => withTransaction(async connection => {
-  const [rows] = await connection.execute<CharacterRow[]>('SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE', [qqUserId]);
-  if (!rows[0]) throw new Error('请先发送“注册”创建角色。');
-  await connection.execute(`INSERT INTO ${autoTables(mode).settings} (character_id,enabled) VALUES (?,?) ON DUPLICATE KEY UPDATE enabled=VALUES(enabled)`, [rows[0].id, enabled ? 1 : 0]);
+  const characterId = await mutableCharacterIdFor(connection, qqUserId);
+  await connection.execute(`INSERT INTO ${autoTables(mode).settings} (character_id,enabled) VALUES (?,?) ON DUPLICATE KEY UPDATE enabled=VALUES(enabled)`, [characterId, enabled ? 1 : 0]);
   return enabled;
 });
 
 /** PVE 自动寻怪遇敌时的默认决策；PVP 不使用该配置。 */
 export const toggleAutoBattleEncounterAction = async (qqUserId: string) => withTransaction(async connection => {
-  const [rows] = await connection.execute<CharacterRow[]>('SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE', [qqUserId]);
-  if (!rows[0]) throw new Error('请先发送“注册”创建角色。');
-  const characterId = Number(rows[0].id);
+  const characterId = await mutableCharacterIdFor(connection, qqUserId);
   await connection.execute('INSERT IGNORE INTO player_auto_battle_settings (character_id) VALUES (?)', [characterId]);
   await connection.execute("UPDATE player_auto_battle_settings SET default_encounter_action=IF(default_encounter_action='battle','persuade','battle') WHERE character_id=?", [characterId]);
   const [settings] = await connection.execute<(RowDataPacket & { default_encounter_action: 'battle' | 'persuade' })[]>('SELECT default_encounter_action FROM player_auto_battle_settings WHERE character_id=?', [characterId]);
@@ -51,9 +57,8 @@ export const toggleAutoBattleEncounterAction = async (qqUserId: string) => withT
 });
 
 export const setAutoPotionEnabled = async (qqUserId: string, enabled: boolean, mode: AutoBattleMode = 'pve') => withTransaction(async connection => {
-  const [rows] = await connection.execute<CharacterRow[]>('SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE', [qqUserId]);
-  if (!rows[0]) throw new Error('请先发送“注册”创建角色。');
-  await connection.execute(`INSERT INTO ${autoTables(mode).settings} (character_id,auto_potion_enabled) VALUES (?,?) ON DUPLICATE KEY UPDATE auto_potion_enabled=VALUES(auto_potion_enabled)`, [rows[0].id, enabled ? 1 : 0]);
+  const characterId = await mutableCharacterIdFor(connection, qqUserId);
+  await connection.execute(`INSERT INTO ${autoTables(mode).settings} (character_id,auto_potion_enabled) VALUES (?,?) ON DUPLICATE KEY UPDATE auto_potion_enabled=VALUES(auto_potion_enabled)`, [characterId, enabled ? 1 : 0]);
   return enabled;
 });
 
@@ -72,34 +77,36 @@ const assertSkill = async (connection: any, characterId: number, skillId: number
 };
 
 export const saveAutoBattleAction = async (qqUserId: string, sequence: number, skillId: number | null, mode: AutoBattleMode = 'pve') => withTransaction(async connection => {
-  const [rows] = await connection.execute<CharacterRow[]>('SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE', [qqUserId]);
-  if (!rows[0]) throw new Error('请先发送“注册”创建角色。'); const characterId = Number(rows[0].id);
+  const characterId = await mutableCharacterIdFor(connection, qqUserId);
   if (!Number.isInteger(sequence) || sequence < 1 || sequence > 30) throw new Error('出招位置需在 1 至 30 之间。');
   await assertSkill(connection, characterId, skillId);
   await connection.execute(`INSERT INTO ${autoTables(mode).actions} (character_id,sequence_no,skill_id) VALUES (?,?,?) ON DUPLICATE KEY UPDATE skill_id=VALUES(skill_id)`, [characterId, sequence, skillId]);
 });
 
 export const deleteAutoBattleAction = async (qqUserId: string, sequence: number, mode: AutoBattleMode = 'pve') => withTransaction(async connection => {
-  const [rows] = await connection.execute<CharacterRow[]>('SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE', [qqUserId]); if (!rows[0]) throw new Error('请先发送“注册”创建角色。');
-  await connection.execute(`DELETE FROM ${autoTables(mode).actions} WHERE character_id=? AND sequence_no=?`, [rows[0].id, sequence]);
+  const characterId = await mutableCharacterIdFor(connection, qqUserId);
+  await connection.execute(`DELETE FROM ${autoTables(mode).actions} WHERE character_id=? AND sequence_no=?`, [characterId, sequence]);
 });
 
 export const beginAutoBattleQuickSetup = async (qqUserId: string, mode: AutoBattleMode = 'pve') => withTransaction(async connection => {
-  const [rows] = await connection.execute<CharacterRow[]>('SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE', [qqUserId]); if (!rows[0]) throw new Error('请先发送“注册”创建角色。');
-  const tables = autoTables(mode); await connection.execute(`DELETE FROM ${tables.actions} WHERE character_id=?`, [rows[0].id]);
-  await connection.execute(`INSERT INTO ${tables.quick} (character_id,next_sequence) VALUES (?,1) ON DUPLICATE KEY UPDATE next_sequence=1`, [rows[0].id]);
+  const characterId = await mutableCharacterIdFor(connection, qqUserId);
+  const tables = autoTables(mode); await connection.execute(`DELETE FROM ${tables.actions} WHERE character_id=?`, [characterId]);
+  await connection.execute(`INSERT INTO ${tables.quick} (character_id,next_sequence) VALUES (?,1) ON DUPLICATE KEY UPDATE next_sequence=1`, [characterId]);
   return 1;
 });
 
 export const saveQuickAutoBattleAction = async (qqUserId: string, skillId: number | null, mode: AutoBattleMode = 'pve') => withTransaction(async connection => {
-  const [rows] = await connection.execute<CharacterRow[]>('SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE', [qqUserId]); if (!rows[0]) throw new Error('请先发送“注册”创建角色。'); const characterId = Number(rows[0].id);
+  const characterId = await mutableCharacterIdFor(connection, qqUserId);
   const tables = autoTables(mode); const [setup] = await connection.execute<(RowDataPacket & { next_sequence: number })[]>(`SELECT next_sequence FROM ${tables.quick} WHERE character_id=? FOR UPDATE`, [characterId]); if (!setup[0]) throw new Error('请先点击“快速配置”。');
   const sequence = Number(setup[0].next_sequence); await assertSkill(connection, characterId, skillId);
   await connection.execute(`INSERT INTO ${tables.actions} (character_id,sequence_no,skill_id) VALUES (?,?,?)`, [characterId, sequence, skillId]);
   await connection.execute(`UPDATE ${tables.quick} SET next_sequence=next_sequence+1 WHERE character_id=?`, [characterId]); return sequence + 1;
 });
 
-export const finishAutoBattleQuickSetup = async (qqUserId: string, mode: AutoBattleMode = 'pve') => { const characterId = await characterIdFor(qqUserId); const pool = await getPool(); await pool.execute(`DELETE FROM ${autoTables(mode).quick} WHERE character_id=?`, [characterId]); };
+export const finishAutoBattleQuickSetup = async (qqUserId: string, mode: AutoBattleMode = 'pve') => withTransaction(async connection => {
+  const characterId = await mutableCharacterIdFor(connection, qqUserId);
+  await connection.execute(`DELETE FROM ${autoTables(mode).quick} WHERE character_id=?`, [characterId]);
+});
 
 export const autoPotionItems = async (qqUserId: string, page = 1, keyword = '') => {
   const characterId = await characterIdFor(qqUserId); const pool = await getPool(); const [rows] = await pool.execute<(RowDataPacket & { id: number; name: string })[]>('SELECT i.id,i.name FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type=\'consumable\' AND i.name LIKE ? ORDER BY i.id', [characterId, `%${keyword}%`]);
@@ -107,13 +114,13 @@ export const autoPotionItems = async (qqUserId: string, page = 1, keyword = '') 
 };
 
 export const setAutoPotionThreshold = async (qqUserId: string, kind: 'hp' | 'mp', threshold: number, mode: AutoBattleMode = 'pve') => withTransaction(async connection => {
-  const [rows] = await connection.execute<CharacterRow[]>('SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE', [qqUserId]); if (!rows[0]) throw new Error('请先发送“注册”创建角色。');
+  const characterId = await mutableCharacterIdFor(connection, qqUserId);
   if (!Number.isInteger(threshold) || threshold < 1 || threshold > 99) throw new Error('门槛需要是 1 至 99 的整数百分比。');
-  await connection.execute(`INSERT INTO ${autoTables(mode).settings} (character_id,${kind}_threshold) VALUES (?,?) ON DUPLICATE KEY UPDATE ${kind}_threshold=VALUES(${kind}_threshold)`, [rows[0].id, threshold]);
+  await connection.execute(`INSERT INTO ${autoTables(mode).settings} (character_id,${kind}_threshold) VALUES (?,?) ON DUPLICATE KEY UPDATE ${kind}_threshold=VALUES(${kind}_threshold)`, [characterId, threshold]);
 });
 
 export const setAutoPotionItem = async (qqUserId: string, kind: 'hp' | 'mp', itemId: number | null, mode: AutoBattleMode = 'pve') => withTransaction(async connection => {
-  const [rows] = await connection.execute<CharacterRow[]>('SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE', [qqUserId]); if (!rows[0]) throw new Error('请先发送“注册”创建角色。'); const characterId = Number(rows[0].id);
+  const characterId = await mutableCharacterIdFor(connection, qqUserId);
   if (itemId !== null) { const [items] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.id=? AND i.item_type=\'consumable\'', [characterId, itemId]); if (!items[0]) throw new Error('背包中没有该可使用道具。'); }
   await connection.execute(`INSERT INTO ${autoTables(mode).settings} (character_id,${kind}_item_id) VALUES (?,?) ON DUPLICATE KEY UPDATE ${kind}_item_id=VALUES(${kind}_item_id)`, [characterId, itemId]);
 });

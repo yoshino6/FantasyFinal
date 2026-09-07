@@ -1,4 +1,5 @@
-import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { addNpcAffinity, grantNpcAffinity, nearbyPoints, requireNpcAtCurrentPosition } from '../game/adventure.service';
 import { acceptBlacksmithQuest, armorClassEffectText, blacksmithFusionEquipment, blacksmithMaxLevel, blacksmithProgress, blacksmithQuest, blacksmithWeapons, claimBlacksmithQuest, craftEpicForgeEquipment, craftForgeEquipment, epicForgeBlueprints, epicForgePreview, forgeFee, forgeRarityWeights, forgeState, fuseWeapon, fusionMaterials, refineWeapon, refinementMaterials, resetForgeSession, selectForgeCategory, selectForgeLevel, selectForgeSubtype } from '../game/blacksmith.service';
 import { messageFormat } from '../game/message';

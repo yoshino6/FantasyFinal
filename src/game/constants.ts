@@ -77,7 +77,7 @@ export const forgedEquipmentBase = (level: number, category: '武器' | '防具'
     : (physicalDefense + magicDefense) / 4) * levelMultiplier;
 };
 
-// 六维均分时各档成长严格为 4.3 : 8.6 : 34.4 = 1 : 2 : 8。
+// 副词条独立于六维成长：攻防 : 命闪等 : 生命魔力 = 1 : 2 : 4。
 const affixCapMultiplier: Record<string, number> = {
   physicalAttack: .5,
   magicAttack: .5,
@@ -92,8 +92,8 @@ const affixCapMultiplier: Record<string, number> = {
   critDamageReductionBp: 1,
   tenacity: 1,
   speed: 1,
-  hpMax: 4,
-  mpMax: 4
+  hpMax: 2,
+  mpMax: 2
 };
 const standardAffixes = ['hpMax', 'mpMax', 'physicalAttack', 'magicAttack', 'physicalDefense', 'magicDefense', 'accuracy', 'evasion', 'critRateBp', 'critDamageBp', 'critResistBp', 'critDamageReductionBp', 'tenacity', 'tenacityPierce', 'speed'];
 const elementNames = ['水', '火', '土', '木', '风', '冰', '雷', '光', '暗'];

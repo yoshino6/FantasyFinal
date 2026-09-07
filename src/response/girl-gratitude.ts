@@ -1,4 +1,5 @@
-import { Format, useEvent, useMessage } from 'alemonjs';
+import { Format, useEvent } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { continueGirlGratitude, girlGratitudeStage, receiveGirlGratitudeGift, returnToBainaTown, startGirlGratitude, teleportToWorldTree } from '../game/girl-gratitude.service';
 import { messageFormat } from '../game/message';
 

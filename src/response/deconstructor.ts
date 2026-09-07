@@ -1,4 +1,5 @@
-import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { addNpcAffinity, grantNpcAffinity, nearbyPoints, requireNpcAtCurrentPosition } from '../game/adventure.service';
 import { acceptDeconstructorQuest, claimDeconstructorQuest, claimVivianCourseBlueprints, constructItem, constructionRecipesFor, deconstructItems, deconstructionItems, deconstructorProgress, deconstructorQuest, type ConstructionCategory } from '../game/deconstructor.service';
 import { oddWorkshopSellCatalog, sellOddWorkshopItem } from '../game/oddworkshop-shop.service';
@@ -189,11 +190,13 @@ const constructionFormat = async (qqUserId: string, category: ConstructionCatego
   const filtered = recipes.filter(recipe => recipe.constructionCategory === category && recipe.unlocked && (!keyword || recipe.name.includes(keyword)));
   const totalPages = Math.max(1, Math.ceil(filtered.length / 10)); const currentPage = Math.min(Math.max(1, page), totalPages);
   const entries = filtered.slice((currentPage - 1) * 10, currentPage * 10);
+  const progress=await deconstructorProgress(qqUserId);
   const markdown = Format.createMarkdown().addTitle('解构师·构造').addNewline().addNewline().addText('分类：').addText(' ')
     .addButton('[基材]', { data: '/构造页 基材 1', autoEnter: false }).addText(' ')
     .addButton('[构件]', { data: '/构造页 构件 1', autoEnter: false }).addText(' ')
     .addButton('[异械]', { data: '/构造页 异械 1', autoEnter: false }).addNewline().addNewline()
     .addText(`${category}：`).addNewline();
+  if(progress.level>=4)markdown.addNewline().addButton('[灵枢素体]',{data:'/机巧 构造',autoEnter:false}).addNewline();
   if (!entries.length) markdown.addBlockquote('当前分类没有已掌握图纸的构造配方。').addNewline();
   for (const [index, recipe] of entries.entries()) {
     markdown.addText(`${numberMark.charAt(index)}【${recipe.name}】 `);

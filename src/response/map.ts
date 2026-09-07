@@ -1,4 +1,5 @@
-import { Format, logger, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, logger, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { getCharacter } from '../game/character.service';
 import { inventory } from '../game/adventure.service';
 import { getPool } from '../database/pool';
@@ -9,7 +10,6 @@ import { markerName, sortMapMarkers } from '../game/map-marker.service';
 
 type OwnedMap = RowDataPacket & { code: string; name: string; description: string; region_code: string | null; region_name: string | null; region_description: string | null; region_danger: number | null };
 type MapTarget = RowDataPacket & { code: string; name: string; x: number; y: number; siteType?: string | null };
-type PatrolTarget = RowDataPacket & { code: string; name: string; x: number; y: number; status: 'patrolling' | 'responding'; currentPoint: string | null };
 
 const displayName = (map: OwnedMap) => (map.region_name ?? map.name).replace(/^地图[·・：:\s]*/, '');
 const regionOverview: Record<string, string> = {
@@ -117,21 +117,6 @@ export default async () => {
         }
       } else {
         markdown.addBlockquote('这片区域暂未发现可直接前往的建筑站点。');
-      }
-      // 常驻域民仍不作为地图标识；只有离开驻点的巡游者与响应公共现场者才公开当前坐标。
-      const [patrols] = await pool.execute<PatrolTarget[]>(`SELECT d.code,d.name,n.pos_x AS x,n.pos_y AS y,d.status,
-          JSON_UNQUOTE(JSON_EXTRACT(d.state_json,'$.currentPoint')) AS currentPoint
-        FROM world_dynamic_npc_states d
-        JOIN map_npcs n ON n.code=d.code AND n.interaction_kind='npc'
-        WHERE d.region_id=(SELECT id FROM map_regions WHERE code=?) AND d.status IN ('patrolling','responding')
-        ORDER BY d.status,d.name`, [selectedMap.region_code]);
-      if (patrols.length) {
-        markdown.addNewline().addText('巡游域民').addNewline();
-        for (const patrol of patrols) {
-          const seconds = estimateSeconds(x, y, patrol, bag.movementSpeed);
-          const action = patrol.status === 'responding' ? '正赶往奇遇现场' : `巡游至${patrol.currentPoint ?? '野外'}`;
-          markdown.addText('> ').addButton(`🧭 ${patrol.name}`, { data: `/前往 ${patrol.x} ${patrol.y}`, autoEnter: false }).addText(`（${patrol.x}, ${patrol.y}）[${action}｜预计${durationText(seconds)}]`).addNewline();
-        }
       }
     }
     await message.send({ format: Format.create().addMarkdown(markdown) });

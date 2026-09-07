@@ -1,4 +1,5 @@
-import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { selectPvpBattleOption } from '../game/pvp.service';
 import { battleStatus } from '../game/adventure.service';
 import { selectCombatEnchantment } from '../game/adventure.service';

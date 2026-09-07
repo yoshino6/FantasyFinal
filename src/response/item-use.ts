@@ -1,5 +1,6 @@
 import {randomUUID} from 'node:crypto';
-import {Format,useEvent,useMessage,useRoute} from 'alemonjs';
+import { Format, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import {useInventoryItem} from '../game/item-use.service';
 import {itemUsePolicy} from '../game/item-use-policy';
 import {messageFormat} from '../game/message';

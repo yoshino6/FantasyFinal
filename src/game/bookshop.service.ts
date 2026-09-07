@@ -1,3 +1,4 @@
+import { grantInventory } from './inventory-binding';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { recordPvpLootSale } from './pvp.service';
@@ -41,7 +42,7 @@ export const buyBookshopItem = async (qqUserId: string, itemId: number, quantity
   const price = Number(item.buy_price) * amount; if (Number(character.copper_coins) < price) throw new Error(`铜币不足，需要 ${price} 铜币。`);
   await connection.execute('UPDATE characters SET copper_coins=copper_coins-? WHERE id=?', [price, character.id]);
   await connection.execute('UPDATE bookshop_items SET stock_quantity=stock_quantity-? WHERE item_id=?', [amount, itemId]);
-  await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),acquired_at=NOW()', [character.id, itemId, amount]);
+  await grantInventory(connection,Number(character.id),Number(itemId),{trade:amount,personal:0,unbound:0});
   await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [character.id, itemId]);
   return { name: item.name, quantity: amount, price };
 });

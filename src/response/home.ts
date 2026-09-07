@@ -1,4 +1,5 @@
-import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { craftFurniture, enterHome, expandHome, homePanel, leaveHome, listFurniture, purchaseHome, removeFurniture, renameHome, upgradeHome } from '../game/home.service';
 import { homeFloorImage } from '../game/home-render.service';
 import { moveTo } from '../game/adventure.service';

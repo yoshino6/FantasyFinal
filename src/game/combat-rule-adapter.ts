@@ -31,7 +31,7 @@ export const createCombatRules = async (connection: PoolConnection, sessionId: s
     if (nightmare?.breakComponent) state.memory.nightmareMechanism = `target:${row.id}:${nightmare.breakComponent}`;
     const stats = kind === 'target' ? statsForTarget(row) : { physicalAttack: Number(row.physical_attack), magicAttack: Number(row.magic_attack), physicalDefense: Number(row.physical_defense), magicDefense: Number(row.magic_defense), accuracy: Number(row.accuracy), evasion: Number(row.evasion), speed: Number(row.speed), crit: Number(row.crit_rate_bp), critResist: Number(row.crit_resist_bp), critDamage: Number(row.crit_damage_bp), critReduction: Number(row.crit_damage_reduction_bp), tenacityPierce: Number(row.tenacity_pierce), tenacity: Number(row.tenacity) };
     return {
-      key: `${kind}:${row.id}`, name: profile?.name ?? row.name, side: kind, level: Number(row.level), boss: !profile && row.monster_class === 'boss',
+      key: `${kind}:${row.id}`, name: profile?.name ?? row.name, companion: kind === 'member' && Boolean(row.npc_code), side: kind, level: Number(row.level), boss: !profile && row.monster_class === 'boss',
       get hp() { return Number(row.current_hp); }, set hp(value) { row.current_hp = Math.max(0, Math.floor(value)); row.is_defeated = row.current_hp <= 0 ? 1 : 0; },
       hpMax: Number(row.hp_max), get mp() { return Number(row.current_mp); }, set mp(value) { row.current_mp = Math.max(0, Math.floor(value)); }, mpMax: Number(profile?.stats.mpMax ?? (kind === 'target' ? statsForTarget(row).mpMax : row.mp_max)),
       attack: stats.physicalAttack, magic: stats.magicAttack, defense: stats.physicalDefense, magicDefense: stats.magicDefense,

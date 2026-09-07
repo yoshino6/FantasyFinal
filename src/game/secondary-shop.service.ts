@@ -1,3 +1,4 @@
+import { grantInventory } from './inventory-binding';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { requireNpcAtCurrentPosition } from './adventure.service';
@@ -69,8 +70,8 @@ const buyFinishedFor = async (connection:PoolConnection,user:string,shop:Seconda
   const [paid]=await connection.execute<any>('UPDATE characters SET copper_coins=copper_coins-? WHERE id=? AND copper_coins>=?',[price,id,price]);
   if(!paid.affectedRows) throw new Error(`铜币不足，需要 ${price} 铜币。`);
   await connection.execute('UPDATE secondary_finished_stock SET quantity=quantity-? WHERE shop_code=? AND item_id=?',[quantity,shop,itemId]);
-  if(item.item_type==='device') for(let count=0;count<quantity;count++) await connection.execute('INSERT INTO player_item_instances (character_id,item_id) VALUES (?,?)',[id,itemId]);
-  else await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity)',[id,itemId,quantity]);
+  if(item.item_type==='device'||item.item_type==='equipment') for(let count=0;count<quantity;count++) await connection.execute("INSERT INTO player_item_instances (character_id,item_id,bound_kind,bound_at,bound_reason) VALUES (?,?,'trade',NOW(),'npc_purchase')",[id,itemId]);
+  else await grantInventory(connection,id,itemId,{personal:0,trade:quantity,unbound:0});
   await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)',[id,itemId]);
   return { name:String(item.name),quantity,price };
 };

@@ -299,7 +299,7 @@ export const constructionRecipesFor = async (qqUserId: string) => {
   }));
 };
 
-export const constructItem = async (qqUserId: string, recipeCode: string) => withTransaction(async connection => {
+export const constructItemFor = async (connection:PoolConnection,qqUserId:string,recipeCode:string) => {
   const recipe = constructionRecipeByCode.get(recipeCode);
   if (!recipe) throw new Error('未找到该构造配方。');
   const characterId = await characterIdFor(connection, qqUserId, true);
@@ -350,7 +350,7 @@ export const constructItem = async (qqUserId: string, recipeCode: string) => wit
   const output = definitions[0];
   if (!output) throw new Error('构造产物尚未初始化，请重启机器人后重试。');
   if (recipe.outputType === 'device') {
-    const [instance] = await connection.execute<any>('INSERT INTO player_item_instances (character_id,item_id,effect_json) VALUES (?,?,?)', [characterId, output.id, JSON.stringify(recipe.effect ?? {})]);
+    const [instance] = await connection.execute<any>('INSERT INTO player_item_instances (character_id,item_id,effect_json,bound_kind) VALUES (?,?,?,?)', [characterId, output.id, JSON.stringify(recipe.effect ?? {}),usedBinding.personal?'personal':'none']);
     await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [characterId, output.id]);
     return { success: true as const, recipe, successRate, outputName: output.name, instanceId: Number(instance.insertId), proficiencyGain, progress: next };
   }
@@ -361,7 +361,8 @@ export const constructItem = async (qqUserId: string, recipeCode: string) => wit
     await completeDungeonSecretPurchase(connection, characterId);
   }
   return { success: true as const, recipe, successRate, outputName: output.name, proficiencyGain, progress: next };
-});
+};
+export const constructItem = async (qqUserId:string,recipeCode:string)=>withTransaction(connection=>constructItemFor(connection,qqUserId,recipeCode));
 
 export const deconstructionItems = async (qqUserId: string, category: DeconstructionCategory = '材料') => {
   const pool = await getPool(); const characterId = await characterIdFor(pool, qqUserId); await deconstructorProgressFor(pool, characterId);

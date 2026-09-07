@@ -1,4 +1,5 @@
-import { useEvent, useMessage, useRoute } from 'alemonjs';
+import { useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { chooseDestination } from '../game/character.service';
 import { dangerFormat, dangerText, heavenFormat, heavenText, messageFormat, sendWithTextFallback } from '../game/message';
 

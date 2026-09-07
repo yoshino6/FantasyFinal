@@ -1,4 +1,5 @@
-import { Format, useMessage } from 'alemonjs';
+import { Format } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { menuCardImage } from '../game/menu-card.service';
 
 const sendMenu = async (page: 1 | 2) => {

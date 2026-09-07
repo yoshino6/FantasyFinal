@@ -1,4 +1,5 @@
-import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { friendDetail, friendList, friendRequests, acceptFriendRequest, rejectFriendRequest, giveAffinityGift, requestOath, oathRequests, acceptOath, rejectOath, oathStatus, recordOathMemory, requestOathRelease, acceptOathRelease, rejectOathRelease, oathReleaseRequests, startOathCeremony } from '../game/social.service';
 import { messageFormat } from '../game/message';
 

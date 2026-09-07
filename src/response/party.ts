@@ -1,4 +1,5 @@
-import { Format, logger, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, logger, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { createParty, joinParty } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
 

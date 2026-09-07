@@ -1,4 +1,5 @@
-import { Format, logger, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, logger, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { inventoryView } from '../game/adventure.service';
 import { clearQuickItem, quickItemConfig, setQuickItem, toggleQuickItem } from '../game/quick-item.service';
 import { currentMainQuest } from '../game/main-quest.service';
@@ -33,10 +34,10 @@ const matchesSubcategory = (category: InventoryCategory, subcategory: string, it
 };
 
 const appendSubcategoryLinks = (markdown: ReturnType<typeof Format.createMarkdown>, category: InventoryCategory) => {
-  markdown.addBlockquote('');
+  markdown.addText('> ');
   for (const [index, subcategory] of subcategories[category].entries()) {
     markdown.addButton(`[${subcategory}]`, { data: `/背包分类 ${category} ${subcategory} 1`, autoEnter: false });
-    if ((index + 1) % 5 === 0 && index + 1 < subcategories[category].length) markdown.addNewline().addBlockquote(''); else markdown.addText(' ');
+    if ((index + 1) % 5 === 0 && index + 1 < subcategories[category].length) markdown.addNewline().addText('> '); else markdown.addText(' ');
   }
   // 用空行结束引用块，后续的分隔线与页码必须保持正文样式。
   markdown.addNewline().addNewline();
@@ -64,8 +65,9 @@ const inventoryFormat = async (qqUserId: string, category?: InventoryCategory, p
   const markdown = Format.createMarkdown();
   if (!category) {
     markdown.addTitle('背包').addText('\n\n最近获得：\n');
-    if (!result.recent.length) markdown.addText('暂无获得记录。');
+    if (!result.recent.length) markdown.addBlockquote('暂无获得记录。');
     for (const item of result.recent) {
+      markdown.addText('> ');
       markdown.addButton(`[${item.item_category}]${item.name}`, { data: `/物品图鉴 ${item.codex_id}`, autoEnter: false });
       appendItemUse(markdown,item);
       if (canContemplate && item.code === 'sky_dust') markdown.addText(' ').addButton('[窥探]', { data: '/窥探天空粉尘', autoEnter: false });
@@ -92,9 +94,9 @@ const inventoryFormat = async (qqUserId: string, category?: InventoryCategory, p
   markdown.addNewline().addNewline().addText('子分类：').addNewline();
   appendSubcategoryLinks(markdown, category);
   markdown.addText(`当前子分类：${subcategory}`).addNewline().addNewline();
-  if (!displayed.length) markdown.addText(normalizedKeyword ? '没有找到符合条件的物品。' : '该分类暂无物品。');
+  if (!displayed.length) markdown.addBlockquote(normalizedKeyword ? '没有找到符合条件的物品。' : '该分类暂无物品。');
   for (const item of displayed) {
-    markdown.addBlockquote('');
+    markdown.addText('> ');
     if (item.type === 'instance') {
       markdown.addButton(`[${item.item_category}]${item.name}`, { data: `/装备详情 ${item.id}`, autoEnter: false })
         .addText(`｜品质 ${Number(item.quality).toFixed(2)}%｜耐久 ${item.durability}/${item.durability_max}｜${item.bound_kind==='none'?'未绑定':'已绑定'}${item.market_listing_id?'｜寄售中':''}`);

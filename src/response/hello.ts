@@ -1,4 +1,5 @@
-import { logger, useMention, useMessage } from 'alemonjs';
+import { logger, useMention } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { messageFormat } from '../game/message';
 
 export default async () => {

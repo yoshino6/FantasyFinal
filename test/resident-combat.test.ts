@@ -8,6 +8,7 @@ import { buildNpcSparProfile, carriedSparSkills, sparRegionBands } from '../src/
 import { worldTreeAdvancedProfessions, cachedAdvancedPassiveEffectFor } from '../src/game/advanced-profession.config';
 import { calculateDerivedStats, virtualEquipmentStats } from '../src/game/constants';
 import { applyEvolutionBaseStats } from '../src/game/evolution.service';
+import { calculatePanelStats } from '../src/game/panel-stat-formula';
 
 const unit = (key: string, side = 'member'): RuleUnit => ({ key, name: key, side, level: 30, boss: false, hp: 6000, hpMax: 10000, mp: 2000, mpMax: 3000, attack: 700, magic: 800, defense: 400, magicDefense: 450, accuracy: 100, evasion: 30, speed: 100, crit: 100, critResist: 100, critDamage: 100, critReduction: 100, pierce: 100, tenacity: 100, state: emptyRuleState(), cooldowns: {}, passives: [], resistance: {}, mastery: {} });
 const fixture = (rng = () => .01) => {
@@ -75,8 +76,7 @@ test('NPC profiles use the player formula once, including equipment, evolution a
     assert.ok(profile.level >= 30); assert.equal(profile.advancedCode, profession.code); assert.ok(profile.profession); assert.ok(profile.injections > 0);
     let expected = applyEvolutionBaseStats(calculateDerivedStats(profile.trainedAttributes), profile.evolution);
     const gear = virtualEquipmentStats(profile.equipment.level, 'normal', expected.physicalAttack, expected.magicAttack, profile.equipment);
-    for (const key of Object.keys(expected) as Array<keyof typeof expected>) expected[key] += gear[key];
-    expected = applyEvolutionBaseStats(expected, cachedAdvancedPassiveEffectFor(profile.advancedCode)); assert.deepEqual(profile.stats, expected);
+    expected = calculatePanelStats(calculatePanelStats(calculateDerivedStats(profile.trainedAttributes), gear, profile.evolution), {}, cachedAdvancedPassiveEffectFor(profile.advancedCode)); assert.deepEqual(profile.stats, expected);
   }
 });
 test('low-level NPCs have low rarity, no evolution/second advancement; high-level rarity is varied and stable', () => {

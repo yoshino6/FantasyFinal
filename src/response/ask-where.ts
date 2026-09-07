@@ -1,4 +1,5 @@
-import { useEvent, useMessage } from 'alemonjs';
+import { useEvent } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { askWhereAmI } from '../game/character.service';
 import { messageFormat, questionFormat, questionText, sendWithTextFallback } from '../game/message';
 

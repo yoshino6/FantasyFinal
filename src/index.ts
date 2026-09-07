@@ -31,6 +31,8 @@ const router = Router.create({
 
 // 顶层登记群 group_openid；必须在具体命令处理前执行，私聊触发时才能找到公告目标群。
 router.res({}, () => import('./middleware/remember-group-channel'));
+// 上传等待在命令解析前接收纯图片消息；无等待或不同会话正常放行。
+router.res({}, () => import('./middleware/automaton-portrait-upload'));
 router.res({}, () => import('./middleware/warrant-passive-notice'));
 router.res({}, () => import('./middleware/pvp-defeat-notice'));
 
@@ -70,6 +72,7 @@ appGroup.use('地图', () => import('./response/map'))
 appGroup.use({ path: '地图区域', schema: { usage: '/地图区域 <地图代号>', args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/map'))
 appGroup.use('天气', () => import('./response/world-dynamics').then(module => ({ default: module.weatherHandler })))
 appGroup.use('奇遇', () => import('./response/world-dynamics').then(module => ({ default: module.dynamicEncounterHandler })))
+appGroup.use({ path: '巡游奇遇', schema: { usage: '/巡游奇遇 <域民编号> <行程编号>', args: [{ name: 'code', rules: [{ required: true }] }, { name: 'revision', rules: [{ required: true, type: 'number', min: 0 }] }] } }, () => import('./response/world-dynamics').then(module => ({ default: module.patrolEncounterHandler })))
 appGroup.use({ path: '奇遇选择', schema: { usage: '/奇遇选择 <奇遇实例ID> <选项>', args: [{ name: 'id', rules: [{ required: true }] }, { name: 'choice', rules: [{ required: true }] }] } }, () => import('./response/world-dynamics').then(module => ({ default: module.dynamicEncounterChoiceHandler })))
 appGroup.use('附近奇遇', () => import('./response/world-dynamics').then(module => ({ default: module.nearbyDynamicSceneHandler })))
 appGroup.use({ path: '参与奇遇', schema: { usage: '/参与奇遇 <公共奇遇ID>', args: [{ name: 'id', rules: [{ required: true }] }] } }, () => import('./response/world-dynamics').then(module => ({ default: module.joinDynamicSceneHandler })))
@@ -302,6 +305,7 @@ appGroup.use({ path: '建筑区域', schema: { usage: '/建筑区域 <编号> <�
 appGroup.use({ path: '站点行动', schema: { usage: '/站点行动 <站点编号> <委托|预报|交换|线索|庇护>', args: [{ name: 'code', rules: [{ required: true }] }, { name: 'action', rules: [{ required: true, type: 'enum', enum: ['委托', '预报', '交换', '线索', '庇护', 'commission', 'forecast', 'exchange', 'clues', 'shelter'] }] }] } }, () => import('./response/world-site').then(module => ({ default: module.worldSiteActionHandler })))
 appGroup.use({ path: '接取站点委托', schema: { usage: '/接取站点委托 <站点编号> <前台域民编号>', args: [{ name: 'code', rules: [{ required: true }] }, { name: 'npc', rules: [{ required: true }] }] } }, () => import('./response/world-site').then(module => ({ default: module.acceptWorldSiteCommissionHandler })))
 appGroup.use({ path: '领取站点委托', schema: { usage: '/领取站点委托 <委托编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/world-site').then(module => ({ default: module.claimWorldSiteCommissionHandler })))
+appGroup.use({ path: '提交站点委托', schema: { usage: '/提交站点委托 <委托编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/world-site').then(module => ({ default: module.submitWorldSiteCommissionHandler })))
 appGroup.use('公会注册', () => import('./response/adventure').then(module => ({ default: module.guildRegistrationHandler })))
 appGroup.use('悬赏板', () => import('./response/bounty').then(module => ({ default: module.bountyBoardHandler })))
 appGroup.use({ path: '悬赏板页', schema: { usage: '/悬赏板页 <页码> [关键词]', args: [{ name: 'page', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'keyword' }] } }, () => import('./response/bounty').then(module => ({ default: module.bountyBoardPageHandler })))
@@ -476,7 +480,9 @@ appGroup.use('提纯删除', () => import('./response/alchemist').then(module =>
 appGroup.use({path:'开始提纯',schema:{args:[{name:'token'}]}}, () => import('./response/alchemist').then(module => ({ default: module.purificationExecuteHandler })))
 appGroup.use('一键提纯', () => import('./response/alchemist').then(module => ({ default: module.bulkPurificationPreviewHandler })))
 appGroup.use({path:'确认一键提纯',schema:{args:[{name:'token'}]}}, () => import('./response/alchemist').then(module => ({ default: module.bulkPurificationExecuteHandler })))
-appGroup.use('炼金', () => import('./response/alchemist').then(module => ({ default: module.alchemyHandler })))
+appGroup.use({ path: '炼金', schema: { args: ['action','id','a','b','c','d','e','f','g','h'].map(name => ({ name })) } }, () => import('./response/alchemist').then(module => ({ default: module.alchemyHandler })))
+appGroup.use('晴儿 关于造物与育成', () => import('./response/alchemist').then(module => ({ default: module.alchemyCreationLessonHandler })))
+appGroup.use('晴儿 关于点灵与育成', () => import('./response/alchemist').then(module => ({ default: module.alchemyCreationLessonHandler })))
 appGroup.use('糖水屋炼金', () => import('./response/alchemist').then(module => ({ default: module.sweetshopAlchemyHandler })))
 appGroup.use('继续炼金', () => import('./response/alchemist').then(module => ({ default: module.alchemyContinueHandler })))
 appGroup.use({ path: '炼金材料页', schema: { usage: '/炼金材料页 <页码> [关键词]', args: [{ name: 'page', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'keyword' }] } }, () => import('./response/alchemist').then(module => ({ default: module.alchemyMaterialPageHandler })))

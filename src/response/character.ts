@@ -1,4 +1,5 @@
-import { Format, logger, useEvent, useMessage } from 'alemonjs';
+import { Format, logger, useEvent } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { getCharacter, type CharacterView } from '../game/character.service';
 import { experienceRequiredForLevel } from '../game/constants';
 import { messageFormat } from '../game/message';

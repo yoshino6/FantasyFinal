@@ -1,3 +1,4 @@
+import { consumeInventory } from './inventory-binding';
 import { forgeMaterialValue } from './forge-material-values';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
@@ -139,15 +140,14 @@ export const refineWeapon = async (qqUserId: string, instanceId: number, materia
   const [materials] = await connection.execute<(MaterialRow & { code: string })[]>(`SELECT i.id,i.code,i.name,i.item_category,pi.quantity,rm.min_gain,rm.max_gain FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id JOIN blacksmith_refinement_materials rm ON rm.item_id=i.id WHERE pi.character_id=? AND i.id=? FOR UPDATE`, [characterId, materialId]);
   const material = materials[0]; if (!material || Number(material.quantity) < 1) throw new Error('没有可用的精炼材料。');
   if (material.code !== refinementMaterialCode(Number(weapon.required_level))) throw new Error(`该装备只能使用【${forgeMaterialName(refinementMaterialCode(Number(weapon.required_level)))}】精炼。`);
-  await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=?', [characterId, materialId]);
-  await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [characterId, materialId]);
+  const binding=await consumeInventory(connection,characterId,materialId,1);
   const quality = Number(weapon.quality); const failed = quality >= 90 && Math.random() >= Math.max(.35, .8 - (quality - 90) * .045);
   if (failed) {
     const progress = await addBlacksmithProficiency(connection, characterId);
     return { name: weapon.name, material: material.name, oldQuality: quality, newQuality: quality, gain: 0, failed: true, great: false, progress };
   }
   const great = Math.random() < Math.min(1, .03 + profession.bonus / 100); const gain = Math.min(100 - quality, refinementGain(Number(material.min_gain), Number(material.max_gain), quality) * (great ? 2 : 1)); const newQuality = Math.round((quality + gain) * 100) / 100;
-  await connection.execute('UPDATE player_item_instances SET quality=? WHERE id=?', [newQuality, instanceId]);
+  await connection.execute("UPDATE player_item_instances SET quality=?,bound_kind=IF(?,'personal',bound_kind),bound_at=IF(?,COALESCE(bound_at,NOW()),bound_at) WHERE id=?",[newQuality,binding.personal>0,binding.personal>0,instanceId]);
   await recalculateCharacterStats(connection, characterId);
   const progress = await addBlacksmithProficiency(connection, characterId);
   return { name: weapon.name, material: material.name, oldQuality: quality, newQuality, gain, failed: false, great, progress };
@@ -172,9 +172,8 @@ export const fuseWeapon = async (qqUserId: string, instanceId: number, materialI
   const usableKeys = usableMaterialKeys(profile, weapon.item_category, weapon.weapon_type, primaryKeys, Number(weapon.required_level), weapon.rarity).filter(key => primaryKeys.includes(key) || Number(current[key] ?? 0) !== 0 || existingSecondary < secondaryAffixCount(weapon.rarity));
   if (!usableKeys.length) throw new Error(`熔铸材料【${material.name}】不能用于${weapon.item_category}。`);
   const success = Math.min(100, 70 + profession.bonus);
-  const added = Object.fromEntries(usableKeys.map(key => [key, materialGain(profile)]));
-  await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=?', [characterId, materialId]);
-  await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [characterId, materialId]);
+  const added = Object.fromEntries(usableKeys.map(key => [key, Math.round(materialGain(profile) * (key === 'hpMax' || key === 'mpMax' ? .5 : 1) * 100) / 100]));
+  const binding=await consumeInventory(connection,characterId,materialId,1);
   if (Math.random() * 100 >= success) {
     const progress = await addBlacksmithProficiency(connection, characterId);
     return { name: weapon.name, material: material.name, effect: {}, count: Number(weapon.fusion_count), limit, failed: true, success, progress };
@@ -186,7 +185,7 @@ export const fuseWeapon = async (qqUserId: string, instanceId: number, materialI
   for (const [key, value] of Object.entries(original)) if (typeof value !== 'number') merged[key] = value;
   for (const [key, value] of Object.entries(added)) merged[key] = Math.round((Number(merged[key] ?? 0) + Number(value)) * 100) / 100;
   capAdditionalEquipmentEffect(merged, weapon.item_category, weapon.weapon_type, Number(weapon.required_level), weapon.rarity);
-  await connection.execute('UPDATE player_item_instances SET effect_json=? WHERE id=?', [JSON.stringify(merged), instanceId]);
+  await connection.execute("UPDATE player_item_instances SET effect_json=?,bound_kind=IF(?,'personal',bound_kind),bound_at=IF(?,COALESCE(bound_at,NOW()),bound_at) WHERE id=?",[JSON.stringify(merged),binding.personal>0,binding.personal>0,instanceId]);
   await connection.execute('INSERT INTO equipment_fusions (instance_id,material_item_id,effect_json) VALUES (?,?,?)', [instanceId, materialId, JSON.stringify(added)]);
   await recalculateCharacterStats(connection, characterId);
   const progress = await addBlacksmithProficiency(connection, characterId);
@@ -416,7 +415,7 @@ export const craftForgeEquipment = async (qqUserId: string, _confirmed = false) 
   const success = 100;
   const primaryKeys = forgePrimaryKeys(session.equipment_category, session.subtype);
   const fee = forgeFee(requirements); const [coins] = await connection.execute<(RowDataPacket & { copper_coins: number })[]>('SELECT copper_coins FROM characters WHERE id=? FOR UPDATE', [characterId]); if (Number(coins[0]?.copper_coins ?? 0) < fee) throw new Error(`铜币不足，打造手续费需要 ${fee} 铜币。`);
-  for (const material of materials) await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [material.selected_quantity, characterId, material.id]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND quantity<=0', [characterId]); await connection.execute('UPDATE characters SET copper_coins=copper_coins-? WHERE id=?', [fee, characterId]); await connection.execute('DELETE FROM player_forge_materials WHERE character_id=?', [characterId]);
+  let personalInput=false;for (const material of materials){const binding=await consumeInventory(connection,characterId,Number(material.id),Number(material.selected_quantity));personalInput ||= binding.personal>0;} await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND quantity<=0', [characterId]); await connection.execute('UPDATE characters SET copper_coins=copper_coins-? WHERE id=?', [fee, characterId]); await connection.execute('DELETE FROM player_forge_materials WHERE character_id=?', [characterId]);
   const rarity = forgeRarity(profession.level);
   const level = Number(session.target_level); const kind = equipmentKind(session.equipment_category, session.subtype);
   const effect = Object.fromEntries(Object.entries(baseForgeEffect(session.equipment_category, session.subtype, level, rarity)).map(([key, value]) => [key, session.equipment_category === '武器' && session.subtype !== '盾牌' ? randomWeaponPrimary(Number(value)) : Number(value)])) as Record<string, number>;

@@ -1,3 +1,4 @@
+import { consumeInventory } from './inventory-binding';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { BAINA_GUILD_POSITION, BAINA_RESIDENCE_CODE, homeCosts, homePlotDistance, slotsPerFloor } from './home.constants';
@@ -298,8 +299,7 @@ export const depositHomeStorage = async (qqUserId: string, itemId: number, quant
   const item = rows[0]; if (!item) throw new Error('背包中没有可放入的该物品。'); if (Number(item.quantity) < quantity) throw new Error(`背包数量不足，当前仅有 ${item.quantity} 个。`);
   const usedWeight = await homeStorageWeightFor(connection, Number(home.id)); const addedWeight = Number(item.weight) * quantity;
   if (usedWeight + addedWeight > capacity + 0.000001) throw new Error(`仓储容量不足，还可放入 ${Math.max(0, capacity - usedWeight).toFixed(2)} kg。`);
-  await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [quantity, character.id, item.item_id]);
-  await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, item.item_id]);
-  await connection.execute('INSERT INTO player_home_storage_items (home_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),stored_at=NOW()', [home.id, item.item_id, quantity]);
+  const binding=await consumeInventory(connection,Number(character.id),Number(item.item_id),quantity);
+  await connection.execute('INSERT INTO player_home_storage_items (home_id,item_id,quantity,trade_bound_quantity,personal_bound_quantity) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),trade_bound_quantity=trade_bound_quantity+VALUES(trade_bound_quantity),personal_bound_quantity=personal_bound_quantity+VALUES(personal_bound_quantity),stored_at=NOW()', [home.id,item.item_id,quantity,binding.trade,binding.personal]);
   return { name: item.name, quantity, usedWeight: usedWeight + addedWeight, capacity };
 });

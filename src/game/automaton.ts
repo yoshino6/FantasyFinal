@@ -10,6 +10,10 @@ export type AutomatonState = {
   stats: number[]; hp: number; mp: number; levels: AutomatonLevel[]; progress: AutomatonFeedChunk[]; reserve: AutomatonFeedChunk[];
   learned: string[]; equipped: string[]; pendingSpecial: number; intimacy: number;
   ownerAddress: string; selfAddress: string; publicQuotes: boolean; greeting: boolean; guard: boolean;
+  participation?: '参战' | '陪伴'; appearance?: string;
+  archived?: boolean; named?: boolean; renameDay?: string; renameCount?: number;
+  lastInteractionAt?: string;
+  portrait?: {key:string;width:number;height:number;url?:string};
   strategy: '性格' | '进攻' | '守护' | '节能'; customQuotes: Record<string,string[]>; preferences: Record<string,number>;
 };
 export const createAutomaton = (seed: string): AutomatonState => {
@@ -18,7 +22,7 @@ export const createAutomaton = (seed: string): AutomatonState => {
   const count = automatonRandom(seed,'birth-count') < .6 ? 1 : 2;
   for (let i = 0; i < count; i++) { const skill = drawAutomatonSkill(seed,`birth-skill:${i}`,personality,learned,false,i === 0); if (skill) learned.push(skill); }
   const state: AutomatonState = {version:3,seed,name:'机巧人偶',personality,level:1,stats,hp:stats[0]!,mp:stats[1]!,levels:[],progress:[],reserve:[],learned,equipped:[],pendingSpecial:0,intimacy:0,
-    ownerAddress:personality.ownerAddress,selfAddress:personality.selfAddress,publicQuotes:false,greeting:true,guard:true,strategy:'性格',customQuotes:{},preferences:{}};
+    ownerAddress:personality.ownerAddress,selfAddress:personality.selfAddress,publicQuotes:false,greeting:true,guard:true,participation:'参战',strategy:'性格',customQuotes:{},preferences:{}};
   autoEquipAutomaton(state);
   return state;
 };
@@ -48,8 +52,8 @@ const append = (chunks: AutomatonFeedChunk[], next: AutomatonFeedChunk) => {
   if (last?.code === next.code) last.xp += next.xp; else chunks.push({...next});
 };
 const preserveRatio = (state: AutomatonState, oldStats: number[], oldHp: number, oldMp: number) => {
-  state.hp = oldHp > 0 ? Math.max(1,Math.floor(oldHp / oldStats[0]! * Math.floor(state.stats[0]!))) : 0;
-  state.mp = Math.floor(oldMp / oldStats[1]! * Math.floor(state.stats[1]!));
+  state.hp = oldHp > 0 ? Math.max(1,Math.floor(oldHp / Math.floor(oldStats[0]!) * Math.floor(state.stats[0]!))) : 0;
+  state.mp = Math.floor(oldMp / Math.floor(oldStats[1]!) * Math.floor(state.stats[1]!));
 };
 /** 仅处理已扣除的材料流；封顶时保留带类型的余额，不制造无类型经验。 */
 export const cultivateAutomaton = (original: AutomatonState, bottles: {code:string;count:number}[], cap: number, stopAt = cap) => {
@@ -61,7 +65,7 @@ export const cultivateAutomaton = (original: AutomatonState, bottles: {code:stri
   const queue = [...state.reserve.map(c => ({...c})),...bottles.map(b => ({code:feedDefinition(b.code).code,xp:b.count*100}))];
   if (!queue.length) throw new Error('没有可用原液或培养余额。');
   state.reserve = [];
-  const oldStats = [...state.stats], oldHp = state.hp, oldMp = state.mp;
+
   for (const chunk of queue) {
     let remaining = chunk.xp;
     while (remaining > 0 && state.level < maximum) {
@@ -74,12 +78,14 @@ export const cultivateAutomaton = (original: AutomatonState, bottles: {code:stri
         if (level % 10 === 0) { const id = drawAutomatonSkill(state.seed,`special:${level}`,state.personality,state.learned,true); if(id) {state.learned.push(id); learned.push(id);} else state.pendingSpecial++; }
         state.levels.push({level,contributions:state.progress,vector,gain:growth.values,counts:growth.counts,skills:learned});
         state.progress = []; state.level = level;
+        const oldStats=[...state.stats],oldHp=state.hp,oldMp=state.mp;
         growth.values.forEach((v,i) => {state.stats[i]! += v;});
+        preserveRatio(state,oldStats,oldHp,oldMp);
       }
     }
     append(state.reserve,{code:chunk.code,xp:remaining});
   }
-  preserveRatio(state,oldStats,oldHp,oldMp); autoEquipAutomaton(state);
+  autoEquipAutomaton(state);
   return state;
 };
 export const respecAutomaton = (original: AutomatonState, levels: number[], replacement: AutomatonFeedChunk[]) => {
@@ -104,3 +110,24 @@ export const respecAutomaton = (original: AutomatonState, levels: number[], repl
   return {state,required,fee:Math.max(100,Math.ceil(required*.1))};
 };
 export const automatonPanel = (state: AutomatonState) => Object.fromEntries(keys.map((key,i) => [key,Math.floor(state.stats[i]!+1e-9)]));
+
+/** 主人等级回退仅限制当场面板，保留实例的原始成长与随机结果。 */
+export const effectiveAutomatonState = (original: AutomatonState, ownerCap: number) => {
+  const state = structuredClone(original);
+  const cap = Math.max(1,Math.min(50,Math.floor(ownerCap),state.level));
+  if (cap === state.level) return state;
+  const unavailable = state.levels.filter(l => l.level > cap);
+  for (const level of unavailable) level.gain.forEach((v,i) => {state.stats[i]! -= v;});
+  const unavailableSkills = new Set(unavailable.flatMap(l => l.skills));
+  state.learned = state.learned.filter(id => !unavailableSkills.has(id));
+  state.levels = state.levels.filter(l => l.level <= cap); state.level = cap;
+  const limits = automatonSkillSlots(cap), counts: Record<string,number> = {};
+  state.equipped = state.equipped.filter(id => {
+    const kind = automatonSkills.find(s => s.id === id)!.kind;
+    if(!state.learned.includes(id))return false;
+    counts[kind] = (counts[kind] ?? 0) + 1;
+    return counts[kind]! <= limits[kind as keyof typeof limits];
+  });
+  preserveRatio(state,original.stats,original.hp,original.mp);
+  return state;
+};

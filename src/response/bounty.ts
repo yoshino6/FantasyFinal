@@ -1,4 +1,6 @@
-import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
+import { alchemyCreationQuest, alchemyCreationQuestTitle } from '../game/alchemy-creation-quest.service';
+import { Format, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { abandonBounty, abandonSecondaryQuest, acceptBounty, bountyBoard, claimBounty, clearInvalidBounty, playerBounties } from '../game/bounty.service';
 import { blacksmithQuest } from '../game/blacksmith.service';
 import { alchemistQuest } from '../game/alchemist.service';
@@ -10,7 +12,7 @@ import { requireNpcAtCurrentPosition } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
 import { dungeonSecretProgress, secondaryProfessionGuide } from '../game/dungeon-quest.service';
 import { evolutionObservationDashboard } from '../game/evolution.service';
-import { playerWorldSiteCommissions } from '../game/world-dynamics.service';
+import { playerWorldSiteCommissions, currentDynamicEncounter } from '../game/world-dynamics.service';
 import { taskPanelObjectiveForSiteCommission } from '../game/world-dynamics.content';
 
 export const bountyBoardFormat = async (qqUserId: string, page = 1, keyword = '') => {
@@ -57,7 +59,7 @@ const taskButtons = (category: TaskCategory | undefined, page: number, totalPage
 };
 
 export const taskFormat = async (qqUserId: string, category?: TaskCategory, page = 1, keyword = '') => {
-  const [mainQuest, advancedQuest, bounties, smithQuest, alchemyQuest, deconstructQuest, omniscientQuestProgress, dungeonSecret, needsSecondaryGuide, evolutionObservations, siteCommissions] = await Promise.all([currentMainQuest(qqUserId), advancedProfessionMainQuest(qqUserId), playerBounties(qqUserId), blacksmithQuest(qqUserId), alchemistQuest(qqUserId), deconstructorQuest(qqUserId), omniscientQuest(qqUserId), dungeonSecretProgress(qqUserId), secondaryProfessionGuide(qqUserId), evolutionObservationDashboard(qqUserId).catch(() => null), playerWorldSiteCommissions(qqUserId)]);
+  const [mainQuest, advancedQuest, bounties, smithQuest, alchemyQuest, deconstructQuest, omniscientQuestProgress, dungeonSecret, needsSecondaryGuide, evolutionObservations, siteCommissions, creationQuest] = await Promise.all([currentMainQuest(qqUserId), advancedProfessionMainQuest(qqUserId), playerBounties(qqUserId), blacksmithQuest(qqUserId), alchemistQuest(qqUserId), deconstructorQuest(qqUserId), omniscientQuest(qqUserId), dungeonSecretProgress(qqUserId), secondaryProfessionGuide(qqUserId), evolutionObservationDashboard(qqUserId).catch(() => null), playerWorldSiteCommissions(qqUserId), alchemyCreationQuest(qqUserId)]);
   const entries: TaskEntry[] = [{ category: '主线', ...mainQuest }, ...(advancedQuest ? [{ category: '主线' as const, ...advancedQuest }] : []), ...bounties.map(task => ({
     category: '悬赏' as const, title: `【悬赏·${task.id}】${task.title}`,
     description: task.status === 'invalid' ? '已失效：悬赏目标已被其他冒险者完成，或该悬赏已经过期。' : `讨伐：${task.targetName} ${task.progress}/${task.requiredCount}\n报酬：铜币 ×${task.copperReward}`,
@@ -74,6 +76,10 @@ export const taskFormat = async (qqUserId: string, category?: TaskCategory, page
     category: '支线', title: '【副职业·炼金师入门】', description: `收集微光草药：${alchemyQuest.herbs}/3`,
     action: alchemyQuest.status === 'completed' ? { label: '[前往提交 糖水屋(-12,-196)]', command: '/前往 -12 -196' } : undefined,
     abandonCommand: '/放弃副职业任务 alchemist_apprentice'
+  });
+  if (creationQuest.pending) entries.push({
+    category: '支线', title: '【支线·' + alchemyCreationQuestTitle + '】', description: '炼金已达四级，药瓶里的变化已难不倒你。去糖水屋找晴儿，向她请教点灵与育成，推开炼金世界的另一扇门。',
+    action: { label: '[前往 糖水屋(-12,-196)]', command: '/前往 -12 -196' }
   });
   if (deconstructQuest.status === 'accepted' || deconstructQuest.status === 'completed') entries.push({
     category: '支线', title: '【副职业·解构师入门】', description: `收集兽核：${deconstructQuest.cores}/1`,
@@ -102,7 +108,8 @@ export const taskFormat = async (qqUserId: string, category?: TaskCategory, page
     category: '委托', title: `【站点委托·${commission.id}】${commission.title}`,
     description: `目标：${taskPanelObjectiveForSiteCommission(commission.objectiveText, commission.targetName)}`,
     location: commission.location,
-    action: commission.status === 'completed' ? { label: '[领取委托]', command: `/领取站点委托 ${commission.id}` } : { label: commissionTravelLabel(commission.title, commission.targetName), command: `/前往 ${commission.location.x} ${commission.location.y}` }
+    action: commission.status === 'completed' ? { label: '[领取委托]', command: `/领取站点委托 ${commission.id}` } : { label: commissionTravelLabel(commission.title, commission.targetName), command: `/前往 ${commission.location.x} ${commission.location.y}` },
+    actions: commission.status === 'accepted' ? [{ label: '[提交交接]', command: `/提交站点委托 ${commission.id}` }] : undefined
   });
   if (dungeonSecret.status === 'accepted' && dungeonSecret.stage > 0 && dungeonSecret.stage < 7) {
     const details: Record<number, string> = {
@@ -114,6 +121,13 @@ export const taskFormat = async (qqUserId: string, category?: TaskCategory, page
       6: '进入地下迷宫第一层，寻找并击败这一层的小头目。'
     };
     entries.push({ category: '支线', title: '【支线·地下的秘密】', description: details[dungeonSecret.stage] ?? '继续追查地下迷宫的秘密。', action: dungeonSecret.stage === 1 ? { label: '[前往 冒险者公会(-2,-181)]', command: '/前往 -2 -181' } : dungeonSecret.stage === 2 || dungeonSecret.stage === 3 ? { label: '[前往 异工坊(6,-189)]', command: '/前往 6 -189' } : undefined });
+  }
+  const encounter = await currentDynamicEncounter(qqUserId);
+  if (encounter?.patrol && encounter.objective) {
+    const target = encounter.objective.location;
+    entries.push({ category: '支线', title: `【巡游奇遇】${encounter.title}`, description: encounter.objective.text,
+      location: { regionName: encounter.regionName, x: target.x, y: target.y, z: target.z },
+      actions: [{ label: `[前往 ${target.name}]`, command: `/前往 ${target.x} ${target.y}` }, { label: '[继续处理]', command: '/奇遇' }] });
   }
   const normalizedKeyword = keyword.trim();
   const filtered = entries.filter(task => (!category || task.category === category) && (!normalizedKeyword || `${task.title}\n${task.description}`.includes(normalizedKeyword)));

@@ -1,4 +1,5 @@
-import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { addNpcAffinity, battleStatus, chooseTarget } from '../game/adventure.service';
 import { advancedProfessionReveal, mentorChatDialogue, mentorDialogues } from '../game/advanced-profession.dialogue';
 import { advancedProfessionView, beginAdvancedProfession, beginAdvancedProfessionTrial, advanceAdvancedProfessionStage, submitAdvancedProfessionProof } from '../game/advanced-profession.service';

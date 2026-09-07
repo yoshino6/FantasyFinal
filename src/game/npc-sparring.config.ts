@@ -1,5 +1,6 @@
 import { calculateDerivedStats, virtualEquipmentStats, type VirtualEquipmentLoadout } from './constants';
 import { applyEvolutionBaseStats } from './evolution.service';
+import { calculatePanelStats } from './panel-stat-formula';
 import { advancedProfessionByMentor, advancedProfessionByCode, cachedAdvancedPassiveEffectFor } from './advanced-profession.config';
 import { dynamicNpcProfile } from './dynamic-npc-dialogue.service';
 import { attributes, type Allocation } from './types';
@@ -53,8 +54,7 @@ export const buildNpcSparProfile = (npc: { code: string; name: string; descripti
   const equipment: VirtualEquipmentLoadout = { rarity, quality: level < 10 ? 30 : level < 20 ? 60 : 80, secondaryAffixes: rarity === '普通' ? 0 : rarity === '优秀' ? 1 : rarity === '精良' ? 2 : 3 };
   const equipmentLevel = Math.max(1, level - (seed % 4));
   const gear = virtualEquipmentStats(equipmentLevel, 'normal', stats.physicalAttack, stats.magicAttack, equipment);
-  for (const key of Object.keys(stats) as Array<keyof typeof stats>) stats[key] += gear[key];
-  stats = applyEvolutionBaseStats(stats, cachedAdvancedPassiveEffectFor(advancedCode));
+  stats = calculatePanelStats(calculatePanelStats(calculateDerivedStats(trained), gear, evolution), {}, cachedAdvancedPassiveEffectFor(advancedCode));
   const families = familiesFor(role); if (mentor) families.push('M');
   const allowed = residentSkills.filter(skill => families.includes(skill.id[0]) && (skill.tier !== '中位' || level >= 25) && (skill.tier !== '下位' || level >= 6));
   // 流派仅用于生成此人的构筑，不是领悟池。低级携带2主动，高级最多4主动。

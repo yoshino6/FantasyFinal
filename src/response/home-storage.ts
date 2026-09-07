@@ -1,4 +1,5 @@
-import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { depositHomeStorage, homeStorageView, type HomeStorageCategory, type HomeStorageScope } from '../game/home.service';
 import { messageFormat } from '../game/message';
 

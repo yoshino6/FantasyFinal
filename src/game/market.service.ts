@@ -48,7 +48,8 @@ const typeCondition = (type: string) => {
 };
 
 const ensureState = async (connection: PoolConnection, itemId: number, anchor: number) => {
-  const initial = Math.max(1, Math.round(anchor * 2));
+  const [definitions]=await connection.execute<RowDataPacket[]>("SELECT JSON_EXTRACT(effect_json,'$.referencePrice') reference_price FROM item_definitions WHERE id=?",[itemId]);
+  const initial = Math.max(1, Math.round(Number(definitions[0]?.reference_price)||anchor * 2));
   await connection.execute(`INSERT IGNORE INTO market_item_state (item_id,reference_price,npc_anchor_price) VALUES (?,?,?)`, [itemId, initial, Math.max(1, anchor)]);
   const [rows] = await connection.execute<(RowDataPacket & { reference_price: number; npc_anchor_price: number })[]>('SELECT reference_price,npc_anchor_price FROM market_item_state WHERE item_id=? LIMIT 1 FOR UPDATE', [itemId]);
   return { reference: number(rows[0]?.reference_price) || initial, anchor: number(rows[0]?.npc_anchor_price) || Math.max(1, anchor) };
@@ -98,6 +99,9 @@ const addInventory = (connection: PoolConnection, characterId: number, itemId: n
 const settleMatch = async (connection: PoolConnection, sell: OrderRow, buy: OrderRow, quantity: number, price: number, reference: number) => {
   const gross = price * quantity;
   const sellerWeek = await weeklySales(connection, number(sell.character_id));
+  const [sellers]=await connection.execute<RowDataPacket[]>('SELECT created_at FROM characters WHERE id=? FOR UPDATE',[sell.character_id]);
+  const cap=Date.now()-new Date(sellers[0]!.created_at).getTime()<14*86400000?20000:300000;
+  if(sellerWeek.gross+gross>cap)throw new Error('卖家本周交易额度已满，请选择其他订单。');
   const fee = feeForSale(sellerWeek.gross, gross);
   const refund = Math.max(0, number(buy.unit_price) - price) * quantity;
   await grantInventory(connection, number(buy.character_id), number(buy.item_id), {unbound:0,personal:0,trade:quantity});
@@ -155,7 +159,7 @@ export const marketCatalog = async (qqUserId: string, page = 1, type = '全部',
   const [countRows] = await pool.execute<(RowDataPacket & { total: number })[]>(`SELECT COUNT(*) AS total ${from}`, [...filter.params, term]);
   const paging = pageInfo(page, number(countRows[0]?.total));
   const [rows] = await pool.execute<(ItemRow & { reference_price: number | null; lowest_sell: number | null; highest_buy: number | null })[]>(`SELECT i.id,i.name,i.item_category,i.description,i.trade_price,i.stack_limit,
-    COALESCE(ms.reference_price,GREATEST(1,ROUND(i.trade_price*2))) AS reference_price,sell.lowest_sell,buy.highest_buy ${from}
+    COALESCE(ms.reference_price,JSON_EXTRACT(i.effect_json,'$.referencePrice'),GREATEST(1,ROUND(i.trade_price*2))) AS reference_price,sell.lowest_sell,buy.highest_buy ${from}
     ORDER BY COALESCE(sell.lowest_sell,999999999),i.name LIMIT ? OFFSET ?`, [...filter.params, term, MARKET_PAGE_SIZE, (paging.page - 1) * MARKET_PAGE_SIZE]);
   return { ...paging, type: MARKET_TYPES.includes(type as MarketType) ? type : '全部', keyword: keyword.trim(), copper: number(character.copper_coins), items: rows.map(row => ({ id: number(row.id), name: row.name, category: row.item_category, reference: number(row.reference_price), lowestSell: row.lowest_sell === null ? null : number(row.lowest_sell), highestBuy: row.highest_buy === null ? null : number(row.highest_buy) })) };
 };
@@ -191,13 +195,15 @@ const createOrder = async (qqUserId: string, itemId: number, unitPrice: number, 
   const state = await ensureState(connection, number(item.id), number(item.trade_price)); const band = priceBand(state.reference);
   if (price < band.min || price > band.max) throw new Error(`当前参考价为 ${state.reference} 铜币，挂单单价需在 ${band.min} 至 ${band.max} 铜币之间。`);
   const [openRows] = await connection.execute<(RowDataPacket & { total: number })[]>(`SELECT COUNT(*) AS total FROM market_orders WHERE character_id=? AND status IN ('open','partial') FOR UPDATE`, [character.id]);
-  if (number(openRows[0]?.total) >= 60) throw new Error('同时进行中的市场订单最多为 60 笔。');
+  const [instances]=await connection.execute<RowDataPacket[]>("SELECT COUNT(*) total,COALESCE(SUM(price),0) reserved FROM market_instance_listings WHERE seller_id=? AND status='open'",[character.id]);
+  if (number(openRows[0]?.total)+number(instances[0]?.total) >= 60) throw new Error('同时进行中的市场订单最多为 60 笔。');
   const [dailyRows] = await connection.execute<(RowDataPacket & { total: number })[]>(`SELECT COUNT(*) AS total FROM market_orders WHERE character_id=? AND item_id=? AND created_at>=CURDATE() FOR UPDATE`, [character.id, itemId]);
   if (number(dailyRows[0]?.total) >= 20) throw new Error('同一物品每天最多发布 20 笔订单。');
   const week = await weeklySales(connection, character.id);
   const accountAgeDays = Math.floor((Date.now() - new Date(character.created_at).getTime()) / 86400000);
   const weeklyCap = accountAgeDays < 14 ? 20000 : 300000;
-  if (side === 'sell' && week.gross + price * amount > weeklyCap) throw new Error(`本周寄售额将超过 ${weeklyCap} 铜币的交易额度。`);
+  const [held]=await connection.execute<RowDataPacket[]>("SELECT COALESCE(SUM(unit_price*quantity_remaining),0) reserved FROM market_orders WHERE character_id=? AND side='sell' AND status IN ('open','partial')",[character.id]);
+  if (side === 'sell' && week.gross + number(held[0]?.reserved)+number(instances[0]?.reserved)+price * amount > weeklyCap) throw new Error(`本周寄售额将超过 ${weeklyCap} 铜币的交易额度。`);
   let reserved = 0;
   if (side === 'sell') {
     const [inventory] = await connection.execute<(RowDataPacket & { quantity: number })[]>('SELECT quantity FROM player_inventory WHERE character_id=? AND item_id=? FOR UPDATE', [character.id, itemId]);

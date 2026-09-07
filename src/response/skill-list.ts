@@ -1,4 +1,5 @@
-import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { learnSkill, skillDetail, skillList, togglePassiveLink, toggleSkillShortcut, upgradeAppraisal, upgradeSkill, upgradeSkillSpecialization } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
 import { specializationPerLevelLines, specializationTotalLines, specializationNumberText, passiveSpecializationPerLevelLine, passiveSpecializationTotalLine } from '../game/skill-specialization-presentation';

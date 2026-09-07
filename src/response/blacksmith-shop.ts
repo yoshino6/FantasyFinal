@@ -1,5 +1,6 @@
 import { secondaryShopFormat } from './secondary-shop';
-import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { addNpcAffinity, nearbyPoints, requireNpcAtCurrentPosition } from '../game/adventure.service';
 import { blacksmithSellCatalog, buyBlacksmithEquipment, sellBlacksmithEquipment, sellBlacksmithMaterial } from '../game/blacksmith-shop.service';
 import { learnXiaobeiCraftsmanship, xiaobeiCraftsmanshipStatus } from '../game/blacksmith.service';

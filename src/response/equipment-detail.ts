@@ -1,4 +1,5 @@
-import { Format, logger, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, logger, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { equipmentDetail, equippedEquipmentDetails } from '../game/adventure.service';
 import { forgePrimaryKeys } from '../game/blacksmith.service';
 import { armorClassDefenseMultiplier } from '../game/character.service';

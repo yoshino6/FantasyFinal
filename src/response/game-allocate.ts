@@ -1,4 +1,5 @@
-import { useMessage } from 'alemonjs';
+import {  } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { messageFormat } from '../game/message';
 
 const disabled = async () => {

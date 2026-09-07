@@ -1,4 +1,5 @@
-import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { autoBattleConfig, autoBattleSkills, autoPotionItems, beginAutoBattleQuickSetup, deleteAutoBattleAction, finishAutoBattleQuickSetup, saveAutoBattleAction, saveQuickAutoBattleAction, setAutoBattleEnabled, setAutoPotionEnabled, setAutoPotionItem, setAutoPotionThreshold, toggleAutoBattleEncounterAction, type AutoBattleMode } from '../game/auto-battle.service';
 import { messageFormat } from '../game/message';
 

@@ -1,4 +1,5 @@
-import { Format, useEvent, useMessage } from 'alemonjs';
+import { Format, useEvent } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { contemplateSkyDust } from '../game/main-quest.service';
 import { messageFormat } from '../game/message';
 

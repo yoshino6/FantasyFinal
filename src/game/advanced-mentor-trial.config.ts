@@ -1,7 +1,6 @@
 import { calculateDerivedStats, equipmentQualityMultiplier, forgedAffixCap, forgedEquipmentBase, forgeRarityMultiplier } from './constants';
 import { armorClassDefenseMultiplier, armorClassMobilityModifier } from './character.service';
-import { applyEvolutionBaseStats } from './evolution.service';
-import { applyWeaponMasteryStats } from './weapon-mastery.service';
+import { calculatePanelStats, panelPercentKeys } from './panel-stat-formula';
 import type { Allocation, DerivedStats } from './types';
 import type { AdvancedProfession, InheritancePassiveDefinition } from './advanced-profession.config';
 import { advancedResourceForProfession } from './advanced-resource.config';
@@ -85,8 +84,8 @@ const masteryBonusesFor = (profile: MentorProfile) => {
   return bonus;
 };
 
-const withLegendaryEquipment = (base: DerivedStats, profile: MentorProfile): { stats: DerivedStats; mastery: string[] } => {
-  const result = { ...base };
+const withLegendaryEquipment = (base: DerivedStats, profile: MentorProfile, evolution: Record<string, number>, passive: Record<string, number>): { stats: DerivedStats; mastery: string[] } => {
+  const result = Object.fromEntries(Object.keys(base).map(key => [key, 0])) as DerivedStats;
   const primaryMultiplier = (forgeRarityMultiplier['传说'] ?? 1) * equipmentQualityMultiplier(100);
   const weaponValue = forgedEquipmentBase(30, '武器') * primaryMultiplier;
   const armorValue = forgedEquipmentBase(30, '防具') * primaryMultiplier;
@@ -103,11 +102,11 @@ const withLegendaryEquipment = (base: DerivedStats, profile: MentorProfile): { s
   addSecondary(result, '防具', 'critResistBp', .6);
   addSecondary(result, '防具', 'tenacity', .6);
   addSecondary(result, '防具', 'speed', .6);
-  for (const key of ['accuracy', 'evasion', 'speed'] as const) result[key] = Math.max(0, Math.floor(result[key] * (1 + armorClassMobilityModifier(profile.armor, key) * 5 / 100)));
   const mastery = masteryBonusesFor(profile);
-  const withMastery = applyWeaponMasteryStats(result, mastery);
-  for (const key of Object.keys(withMastery) as Array<keyof DerivedStats>) withMastery[key] = Math.max(0, Math.floor(withMastery[key]));
-  return { stats: withMastery, mastery: mastery.details };
+  const masteryPercent = Object.fromEntries(Object.values(panelPercentKeys).map(key => [key, Number((mastery as unknown as Record<string, unknown>)[key] ?? 0)]));
+  const stats = calculatePanelStats(base, result, evolution, [masteryPercent]);
+  for (const key of ['accuracy', 'evasion', 'speed'] as const) stats[key] = Math.max(0, Math.floor(stats[key] * (1 + armorClassMobilityModifier(profile.armor, key) * 5 / 100)));
+  return { stats: calculatePanelStats(stats, {}, passive), mastery: mastery.details };
 };
 
 export const advancedMentorTrialBuild = (profession: AdvancedProfession, inheritance?: InheritancePassiveDefinition): AdvancedMentorTrialBuild => {
@@ -115,11 +114,9 @@ export const advancedMentorTrialBuild = (profession: AdvancedProfession, inherit
   if (!profile) throw new Error(`未配置导师构筑：${profession.code}`);
   const trainedAttributes = Object.fromEntries(Object.entries(profile.attributes).map(([key, value]) => [key, Number(value) + Number(profile.growth[key as keyof Allocation]) * 29])) as Allocation;
   const evolutionBonus = profile.evolution.reduce<EvolutionBonus>((all, entry) => ({ ...all, ...Object.fromEntries(Object.entries(entry.effect).map(([key, value]) => [key, Number(all[key] ?? 0) + Number(value)])) }), {});
-  const legendary = withLegendaryEquipment(applyEvolutionBaseStats(calculateDerivedStats(trainedAttributes), evolutionBonus), profile);
+  const legendary = withLegendaryEquipment(calculateDerivedStats(trainedAttributes), profile, evolutionBonus, profession.passive.effect);
   const stats = legendary.stats;
   const passive = profession.passive.effect;
-  stats.critRateBp = Math.floor(stats.critRateBp * (1 + Number(passive.critRatePct ?? 0) / 100));
-  stats.critDamageBp = Math.floor(stats.critDamageBp * (1 + Number(passive.critDamagePct ?? 0) / 100));
   return {
     version: 2,
     professionCode: profession.code,

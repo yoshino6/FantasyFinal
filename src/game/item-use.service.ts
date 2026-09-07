@@ -1,3 +1,4 @@
+import { consumeBinding, consumeInventory, grantInventory, productionBinding } from './inventory-binding';
 import type {RowDataPacket} from 'mysql2/promise';
 import {withTransaction} from '../database/pool';
 import {craftCharacterId,completeCraftRequest,craftJson} from './alchemy-journal.service';
@@ -15,7 +16,7 @@ export const useInventoryItem=async(user:string,itemId:number,token:string)=>wit
   const[pvp]=await connection.execute<RowDataPacket[]>("SELECT id FROM player_pvp_battle_sessions WHERE state='active' AND (attacker_character_id=? OR defender_character_id=?) LIMIT 1",[id,id]);
   if(pve.length||pvp.length)throw new Error('战斗中请使用战斗面板的道具操作，不能从背包绕过回合。');
   if(Number(character.current_hp)<=0)throw new Error('当前已经倒下，普通药剂不能代替复活。');
-  const[items]=await connection.execute<RowDataPacket[]>('SELECT i.*,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.item_id=? AND pi.quantity>0 FOR UPDATE',[id,itemId]);const item=items[0];
+  const[items]=await connection.execute<RowDataPacket[]>('SELECT i.*,pi.quantity,pi.trade_bound_quantity,pi.personal_bound_quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.item_id=? AND pi.quantity>0 FOR UPDATE',[id,itemId]);const item=items[0];
   if(!item)throw new Error('背包中没有该道具。');
   const policy=itemUsePolicy(item as any);if(policy.kind!=='direct')throw new Error(policy.reason);
   const effect=itemEffect(item as any);if(Number(character.level)<Math.max(Number(item.required_level??1),Number(effect.requiredLevel??1)))throw new Error(`角色等级不足，无法使用【${item.name}】。`);
@@ -27,7 +28,7 @@ export const useInventoryItem=async(user:string,itemId:number,token:string)=>wit
     if(!codes.length)throw new Error('盲盒缺少图纸配置，未消耗。');
     const[blueprints]=await connection.execute<RowDataPacket[]>(`SELECT i.id,i.name FROM item_definitions i WHERE i.code IN (${codes.map(()=>'?').join(',')}) AND NOT EXISTS (SELECT 1 FROM player_inventory pi WHERE pi.character_id=? AND pi.item_id=i.id AND pi.quantity>0) ORDER BY i.id`,[...codes,id]);
     if(!blueprints.length)result={consumed:false,name:String(item.name),message:'已持有该盲盒的全部图纸，未消耗盲盒。'};
-    else{const output=blueprints[Math.floor(Math.random()*blueprints.length)]!;await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,1) ON DUPLICATE KEY UPDATE quantity=quantity+1',[id,output.id]);await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)',[id,output.id]);result={consumed:true,name:String(item.name),message:`获得【${output.name}】×1。`};}
+    else{const output=blueprints[Math.floor(Math.random()*blueprints.length)]!;const used=consumeBinding({trade:Number(item.trade_bound_quantity),personal:Number(item.personal_bound_quantity),unbound:Number(item.quantity)-Number(item.trade_bound_quantity)-Number(item.personal_bound_quantity)},1);await grantInventory(connection,id,Number(output.id),productionBinding(used,1,false));await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)',[id,output.id]);result={consumed:true,name:String(item.name),message:`获得【${output.name}】×1。`};}
   }else if(effect.foodBuff){
     const[meals]=await connection.execute<RowDataPacket[]>('SELECT buff_json,duration_minutes FROM guild_restaurant_menu WHERE item_id=?',[itemId]);const meal=meals[0];if(!meal)throw new Error('该食物缺少餐食效果配置，未消耗。');
     const[old]=await connection.execute<RowDataPacket[]>('SELECT item_id FROM player_food_buffs WHERE character_id=? AND expires_at>NOW() FOR UPDATE',[id]);
@@ -40,6 +41,6 @@ export const useInventoryItem=async(user:string,itemId:number,token:string)=>wit
     if(consumed)await connection.execute("UPDATE characters SET current_hp=?,current_mp=?,activity_status=IF(activity_status IN ('resting','unconscious') AND ?>=hp_max AND ?>=mp_max,'active',activity_status) WHERE id=?",[hp,mp,hp,mp,id]);
     result={consumed,message:consumed?`HP ${character.current_hp}→${hp}｜MP ${character.current_mp}→${mp}`:'当前无需回复，未消耗道具。',name:String(item.name)};
   }
-  if(result.consumed){await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=? AND quantity>0',[id,itemId]);await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0',[id,itemId]);}
+  if(result.consumed)await consumeInventory(connection,id,itemId,1);
   await completeCraftRequest(connection,id,token,result);return result;
 });

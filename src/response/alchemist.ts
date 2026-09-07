@@ -1,5 +1,7 @@
 import { secondaryShopFormat } from './secondary-shop';
-import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
+import { alchemyCreationQuest, alchemyCreationQuestTitle, learnAlchemyCreation } from '../game/alchemy-creation-quest.service';
+import { Format, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { acceptAlchemistQuest, activatePersonalAlchemy, activateSweetshopAlchemy, alchemistProgress, alchemistQuest, alchemyFormulaList, alchemyMaterials, alchemyState, bulkPurificationPreview, claimAlchemistQuest, clearAlchemyMaterial, clearPurificationMaterial, deleteAlchemyFormula, executeBulkPurification, executePurification, loadAlchemyFormula, purificationMaterials, purificationState, renameAlchemyFormula, saveAlchemyFormula, selectAlchemyMaterial, selectPurificationMaterial } from '../game/alchemist.service';
 import { alchemistSellCatalog, buyAlchemistItem, sellAlchemistItem } from '../game/alchemist-shop.service';
 import { currentMainQuest } from '../game/main-quest.service';
@@ -30,7 +32,7 @@ const alchemistSellFormat = async (qqUserId: string, page = 1, keyword = '') => 
 };
 
 export const alchemistShopFormat = async (qqUserId: string, dialogue?: string, continuingChat = false) => {
-  const [questReady, nearby] = await Promise.all([barrierActive(qqUserId), nearbyPoints(qqUserId)]);
+  const [questReady, nearby, creationQuest] = await Promise.all([barrierActive(qqUserId), nearbyPoints(qqUserId), alchemyCreationQuest(qqUserId)]);
   const markdown = Format.createMarkdown().addTitle('百纳镇·糖水屋').addNewline().addNewline().addText('【晴儿】｜炼金师 Lv.3');
   if (nearby.npcDetailsUnlocked) markdown.addText(' ').addButton('[详情]', { data: '/域民详情 alchemy_sweetshop', autoEnter: false });
   const hour = new Date().getHours();
@@ -44,6 +46,7 @@ export const alchemistShopFormat = async (qqUserId: string, dialogue?: string, c
   const buttons = Format.createButtonGroup()
     .addRow().addButton('我要买', '/炼金商店购买', { type: 'command', autoEnter: true, style: 'blue' }).addButton('我要卖', '/炼金商店出售', { type: 'command', autoEnter: true, style: 'blue' })
     .addRow().addButton('切磋', '/切磋 alchemy_sweetshop', { type: 'command', autoEnter: true, style: 'blue' }).addButton('闲聊', '/晴儿闲聊', { type: 'command', autoEnter: true, style: 'blue' }).addButton('关于 炼金师', '/关于炼金师', { type: 'command', autoEnter: true, style: 'blue' });
+  if (creationQuest.pending) buttons.addRow().addButton(`关于 ${alchemyCreationQuestTitle}`, '/晴儿 关于点灵与育成', { type: 'command', autoEnter: true, style: 'blue' });
   if (questReady) buttons.addRow().addButton('关于 无形的禁锢', '/晴儿 关于无形的禁锢', { type: 'command', autoEnter: true, style: 'blue' });
   buttons.addRow().addButton('离开 糖水屋', `/建筑离开 ${shopCode}`, { type: 'command', autoEnter: true });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
@@ -192,12 +195,15 @@ const bulkPurificationConfirmFormat = async (qqUserId: string) => {
 };
 
 const alchemyFormat = async (qqUserId: string, page = 1, keyword = '') => {
-  const [state, materials] = await Promise.all([alchemyState(qqUserId), alchemyMaterials(qqUserId)]);
+  const [state, materials, creationQuest] = await Promise.all([alchemyState(qqUserId), alchemyMaterials(qqUserId), alchemyCreationQuest(qqUserId)]);
   const filtered = materials.filter(material => !keyword || material.name.includes(keyword) || material.category.includes(keyword));
   const totalPages = Math.max(1, Math.ceil(filtered.length / 10)); const currentPage = Math.min(Math.max(1, page), totalPages);
   const entries = filtered.slice((currentPage - 1) * 10, currentPage * 10);
   const operator = state.progress.serviceMode === 'sweetshop' ? '由【晴儿】代为炼制（炼金师 Lv.3）；不会获得个人炼金熟练度。' : '三个槽位均可放入怪材、锻材、炼材或粒子。主材与辅材决定反应方向；每槽可投入 1～99 份。';
-  const markdown = Format.createMarkdown().addTitle('炼金').addNewline().addButton('[常规]',{data:'/继续炼金',autoEnter:false}).addText(' ').addButton('[造物]',{data:'/机巧 造物',autoEnter:false}).addText(' ').addButton('[育成]',{data:'/机巧 育成',autoEnter:false}).addText(' ').addButton('[炼金手记]',{data:'/炼金手记',autoEnter:false}).addNewline().addButton('[反应说明与洗练露]',{data:'/炼金反应说明',autoEnter:false}).addNewline().addNewline().addBlockquote(operator).addNewline().addNewline();
+  const markdown = Format.createMarkdown().addTitle('炼金').addNewline().addButton('[常规]', { data: '/继续炼金', autoEnter: false }).addText(' ');
+  if (creationQuest.unlocked) markdown.addButton('[点灵]', { data: '/炼金 点灵', autoEnter: false }).addText(' ').addButton('[育成]', { data: '/炼金 育成', autoEnter: false }).addText(' ');
+  markdown.addButton('[炼金手记]', { data: '/炼金手记', autoEnter: false }).addNewline().addButton('[反应说明与洗练露]', { data: '/炼金反应说明', autoEnter: false }).addNewline().addNewline().addBlockquote(operator).addNewline().addNewline();
+  if (creationQuest.pending) markdown.addBlockquote('新支线·瓶中之外的世界：炼金已达四级，去糖水屋找晴儿，听听她尚未讲完的那堂课。').addNewline().addButton('[前往 糖水屋]', { data: '/前往 -12 -196', autoEnter: false }).addNewline().addNewline();
   const appendSlot = (label: string, role: 'main' | 'auxiliary' | 'reagent', id: number | null, name: string | null, quantity: number) => {
     markdown.addText(`${label}：`);
     if (id && name) markdown.addText(`【${name}】×${quantity} `).addButton('[移除]', { data: `/炼金移除 ${role}`, autoEnter: false });
@@ -213,13 +219,17 @@ const alchemyFormat = async (qqUserId: string, page = 1, keyword = '') => {
       .addButton('[选为辅材]', { data: `/炼金选材 辅材 ${material.id} 1`, autoEnter: false }).addText(' ')
       .addButton('[选为催化剂]', { data: `/炼金选材 反应剂 ${material.id} 1`, autoEnter: false }).addNewline();
   }
-  markdown.addText(`当前第（${currentPage}/${totalPages}）页`).addNewline();
+  // 空行结束材料引用块，避免页码被 Markdown 当作引用的延续。
+  markdown.addNewline().addText(`当前第（${currentPage}/${totalPages}）页`).addNewline();
   const previous = Math.max(1, currentPage - 1); const next = Math.min(totalPages, currentPage + 1);
   const pageCommand = (target: number) => `/炼金材料页 ${target}${keyword ? ` ${keyword}` : ''}`;
-  if (state.processing) markdown.addText('操作：').addBlockquote('炼金反应正在进行中，请等待本次结果。');
-  else markdown.addText('操作：').addText(' ').addButton('[保存配方]', { data: '/保存炼金配方', autoEnter: false }).addText(' ').addButton('[查看配方]', { data: '/炼金配方', autoEnter: false }).addText(' ').addButton('[开始炼金]', { data: '/开始炼金', autoEnter: false });
+  if (state.processing) markdown.addNewline().addText('炼金反应正在进行中，请等待本次结果。');
   const buttons = Format.createButtonGroup()
     .addRow().addButton('一键配方', '/一键配方', { type: 'command', autoEnter: true, style: 'blue' }).addButton('炼金手记', '/炼金手记', { type: 'command', autoEnter: true }).addRow().addButton('上一页', pageCommand(previous), { type: 'command', autoEnter: true, style: currentPage > 1 ? 'blue' : undefined }).addButton('搜索', '/炼金材料搜索 ', { type: 'command', autoEnter: false, style: 'blue' }).addButton('下一页', pageCommand(next), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined });
+  if (!state.processing) buttons.addRow()
+    .addButton('保存配方', '/保存炼金配方', { type: 'command', autoEnter: true })
+    .addButton('查看配方', '/炼金配方', { type: 'command', autoEnter: true })
+    .addButton('开始炼金', '/开始炼金', { type: 'command', autoEnter: true, style: 'blue' });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 export const purificationHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await activatePersonalAlchemy(event.current.UserId); await message.send({ format: await purificationFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法提纯', error instanceof Error ? error.message : '请稍后重试。') }); } };
@@ -252,7 +262,13 @@ const alchemyFormulaFormat = async (qqUserId: string, page = 1, keyword = '') =>
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 
-export const alchemyHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await activatePersonalAlchemy(event.current.UserId); await message.send({ format: await alchemyFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法炼金', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const alchemyHandler = async () => {
+  const [route] = useRoute();
+  if (route.param('action')) return (await import('./automaton')).alchemyCraftHandler();
+  const [event] = useEvent(); const [message] = useMessage();
+  try { await activatePersonalAlchemy(event.current.UserId); await message.send({ format: await alchemyFormat(event.current.UserId) }); }
+  catch (error) { await message.send({ format: messageFormat('无法炼金', error instanceof Error ? error.message : '请稍后重试。') }); }
+};
 export const sweetshopAlchemyHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await activateSweetshopAlchemy(event.current.UserId); await message.send({ format: await alchemyFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法使用晴儿的炼金服务', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const alchemyContinueHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await message.send({ format: await alchemyFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法炼金', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const alchemyMaterialPageHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await message.send({ format: await alchemyFormat(event.current.UserId, Number(route.param('page')), String(route.param('keyword') ?? '')) }); } catch (error) { await message.send({ format: messageFormat('无法查看材料', error instanceof Error ? error.message : '请稍后重试。') }); } };
@@ -271,3 +287,16 @@ export const alchemistTradeHandler = async () => { const [event] = useEvent(); c
 export const alchemistSellPageHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAlchemist(event.current.UserId); await message.send({ format: await alchemistSellFormat(event.current.UserId, Number(route.param('page') ?? 1), String(route.param('keyword') ?? '')) }); } catch (error) { await message.send({ format: messageFormat('出售列表不可用', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const alchemistSellSearchHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAlchemist(event.current.UserId); await message.send({ format: await alchemistSellFormat(event.current.UserId, 1, String(route.param('keyword'))) }); } catch (error) { await message.send({ format: messageFormat('搜索失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const alchemistSellItemHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAlchemist(event.current.UserId); const requested = String(route.param('quantity') ?? '').trim(); const result = await sellAlchemistItem(event.current.UserId, Number(route.param('id')), requested ? Number(requested) : 1); await addNpcAffinity(event.current.UserId, shopCode, 'sell'); await message.send({ format: messageFormat('出售成功', `出售【${result.name}】×${result.quantity}\n获得铜币×${result.price}`) }); await message.send({ format: await alchemistSellFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('出售失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const alchemyCreationLessonHandler = async () => {
+  const [event] = useEvent(); const [message] = useMessage();
+  try {
+    const lesson = await learnAlchemyCreation(event.current.UserId);
+    const markdown = Format.createMarkdown().addTitle(alchemyCreationQuestTitle).addNewline().addNewline().addBlockquote(lesson.story).addNewline().addNewline()
+      .addText(lesson.alreadyLearned ? '晴儿陪你重温了点灵与育成的要领。' : '支线完成，已学会点灵与育成。').addNewline()
+      .addText('灵枢素体需要四级解构师构造，可委托其他玩家制作或在交易行购入。');
+    await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow()
+      .addButton('点灵', '/炼金 点灵', { type: 'command', autoEnter: false, style: 'blue' })
+      .addButton('育成', '/炼金 育成', { type: 'command', autoEnter: false, style: 'blue' })
+      .addRow().addButton('返回炼金', '/炼金', { type: 'command', autoEnter: true }).addButton('返回糖水屋', '/糖水屋', { type: 'command', autoEnter: true })) });
+  } catch (error) { await message.send({ format: messageFormat('晴儿的课堂', error instanceof Error ? error.message : '请稍后重试。') }); }
+};

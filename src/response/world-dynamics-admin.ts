@@ -1,4 +1,5 @@
-import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { messageFormat } from '../game/message';
 import { requireAdministrator } from '../game/permission.service';
 import { setWorldContentEnabled, setWorldContentWeight, worldAdminSnapshot, worldContentPreview, worldLedger } from '../game/world-dynamics.service';

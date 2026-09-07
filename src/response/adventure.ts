@@ -1,5 +1,7 @@
+import { Format, logger, MessageDirect, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage, separateAutomatonBattleQuotes } from '../game/use-game-message';
 import { acknowledgeAutomatonBattleText } from '../game/automaton-dialogue.service';
-import { Format, logger, MessageDirect, useEvent, useMessage, useRoute } from 'alemonjs';
+import { automatonBattleInteractionText } from '../game/automaton-dialogue';
 import { readFile } from 'node:fs/promises';
 import { durationText } from '../game/time-format';
 import { continueCombatChant } from '../game/adventure.service';
@@ -27,7 +29,7 @@ import { warrantNoticeFormat } from './warrant-notice';
 import { gameAssetUrls, isPublicImageUrl } from '../config/game-assets';
 import { omniscientTraces } from '../game/omniscient.service';
 import { offerDynamicEncounter, recordExplorationMovement } from '../game/world-dynamics.service';
-import { encounterFormat } from './world-dynamics';
+import { encounterFormat, patrolMeetingFormat } from './world-dynamics';
 
 const pearGuideImagePath = decodeURIComponent(pearGuideImage).replace(/^([a-zA-Z]):(?![\\/])/, '$1:\\');
 const pearGuideImageBuffer = () => readFile(pearGuideImagePath);
@@ -123,14 +125,14 @@ const encounterButtons = (spawnId: number, canAmbush = false, occupied = false, 
 };
 export const appendBattleState = (markdown: ReturnType<typeof Format.createMarkdown>, battle: Awaited<ReturnType<typeof battleStatus>>) => {
   for (const [index, member] of battle.members.entries()) {
-    const label = `${battle.selectedAllyId === member.id ? '▶' : ''}友方${index + 1} ${member.name}`;
+    const label = `${battle.selectedAllyId === member.id ? '▶' : ''}友方${index + 1} ${member.companion?`〖${member.name}〗`:member.name}`;
     markdown.addText('> ');
     if (member.defeated) markdown.addText(label);
     else markdown.addButton(label, { data: `/切换目标 ${member.id} 友方`, autoEnter: false });
     markdown.addText(` HP ${member.hp}/${member.hpMax}｜MP ${member.mp}/${member.mpMax}${member.resource ? `｜${member.resource.name} ${member.resource.current}/${member.resource.max}` : ''}${member.defeated ? '（倒下）' : member.chanting ? `（吟唱：${member.chanting}）` : member.pending ? '（已确认）' : member.extraAction ? '（额外行动）' : ''}\n`);
     if (member.statusText) markdown.addBlockquote(`状态：${member.statusText}`).addNewline();
   }
-  if (battle.spirits.length) markdown.addBlockquote(`灵兽：${battle.spirits.map(spirit => `【${spirit.name}】HP ${spirit.hp}/${spirit.hpMax}·${spirit.remainingTurns}回合`).join('｜')}`).addNewline();
+  if (battle.spirits.length) markdown.addBlockquote(`灵兽：${battle.spirits.map(spirit => `〖${spirit.name}〗HP ${spirit.hp}/${spirit.hpMax}·${spirit.remainingTurns}回合`).join('｜')}`).addNewline();
   if (battle.mode !== 'spar' && battle.deviceSlots.length) markdown.addBlockquote(`异械：${battle.deviceSlots.map(device => `${device.deviceName} ${device.currentEnergy}/${device.maxEnergy}`).join('｜')}`).addNewline();
   markdown.addNewline();
   for (const [index, target] of battle.targets.entries()) {
@@ -411,7 +413,7 @@ const scheduleStoryNpcBattle = (message: any, qqUserId: string) => {
 };
 const sendCombatResult = async (message: any, qqUserId: string, result: Awaited<ReturnType<typeof combatAction>>, options: { omitFinalLog?: boolean } = {}) => {
   if (result.ended) {
-    if (!options.omitFinalLog) { const sent = await message.send({ format: finalBattleFormat(result.log) }); if (Array.isArray(sent) && sent.some(item => item.code === 2000)) await acknowledgeAutomatonBattleText(qqUserId, result.log); }
+    if (!options.omitFinalLog) await message.send({ format: finalBattleFormat(result.log) });
     const settlement = result.settlement;
     const victory = isVictorySettlement(settlement);
     const format = victory
@@ -447,8 +449,7 @@ const sendCombatResult = async (message: any, qqUserId: string, result: Awaited<
     return;
   }
   const battle = await battleStatus(qqUserId);
-  const sent = await message.send({ format: battleFormat(result.waiting ? '行动已确认' : '战斗回合', result.log, battle) });
-  if (Array.isArray(sent) && sent.some(item => item.code === 2000)) await acknowledgeAutomatonBattleText(qqUserId, result.log);
+  await message.send({ format: battleFormat(result.waiting ? '行动已确认' : '战斗回合', result.log, battle) });
   const continued = await continueCombatChant(qqUserId);
   if (continued) { await sendCombatResult(message, qqUserId, continued); return; }
   // 这一轮将主角击倒时，不能再等待玩家按钮；由仍存活的剧情队友每秒继续一轮。
@@ -546,7 +547,7 @@ const startAutoBattle = async (message: any, qqUserId: string, openingText = '')
   if (await isFullPartyAutoBattle(qqUserId)) {
     const full = await resolveFullAutoBattle(qqUserId);
     const fullLog = [openingText, full.log].filter(Boolean).join('\n\n');
-    if (fullLog) { const sent = await message.send({ format: fullAutoBattleFormat(fullLog) }); if (Array.isArray(sent) && sent.some(item => item.code === 2000)) await acknowledgeAutomatonBattleText(qqUserId, fullLog); }
+    if (fullLog) await message.send({ format: fullAutoBattleFormat(fullLog) });
     if (full.result?.ended) await sendCombatResult(message, qqUserId, full.result, { omitFinalLog: true });
     else if (full.result && !full.result.waiting) scheduleAutoBattle(message, qqUserId, true);
     return Boolean(full.result);
@@ -654,7 +655,16 @@ const sendAmbushDirect = async (handoff: CombatAmbushHandoff, format: any, menti
     );
     await MessageDirect.create().sendToTarget({ target, format: notice });
   }
-  await MessageDirect.create().sendToTarget({ target, format });
+  const split = separateAutomatonBattleQuotes(format instanceof Format ? format.value : format);
+  const results = await MessageDirect.create().sendToTarget({ target, format: split.quotes.length ? split.source as typeof format : format });
+  if (results.length && results.every(result => result.code === 2000)) {
+    try {
+      for (const quote of split.quotes) {
+        const sent = await MessageDirect.create().sendToTarget({ target, format: createFormatWithoutGroupMention().addMarkdown(Format.createMarkdown().addText(automatonBattleInteractionText(quote))) });
+        if (sent.length && sent.every(result => result.code === 2000)) await acknowledgeAutomatonBattleText(handoff.ambusherQqUserId, quote);
+      }
+    } catch (error) { logger.warn({ err: error }, '伏击战报已发送，机巧互动消息暂未送达'); }
+  }
 };
 
 const directAmbushMessenger = (handoff: CombatAmbushHandoff) => ({
@@ -903,6 +913,8 @@ const showMoveResult = async (message: any, qqUserId: string, result: any) => {
         }
       } catch { /* 域民已离开驻点或旧存档尚未初始化站点，按野外相遇处理。 */ }
     }
+    const patrolMeeting = await patrolMeetingFormat(qqUserId, result.npc.code, result.npc.name);
+    if (patrolMeeting) { await message.send({ format: patrolMeeting }); return; }
     const markdown = Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText(movedLocationText(result.character)).addNewline().addBlockquote(result.text).addNewline().addNewline().addText(result.npc.name);
     const buttons = Format.createButtonGroup().addRow().addButton('对话', `/NPC对话 ${result.npc.code}`, { type: 'command', autoEnter: true, style: 'blue' }).addButton('忽略', `/NPC忽略 ${result.npc.code}`, { type: 'command', autoEnter: true });
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) }); return;
@@ -1227,7 +1239,8 @@ export const npcEncounterHandler = (action: 'talk' | 'ignore') => async () => {
       await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) });
       return;
     }
-    await message.send({ format: await npcInteractionFormat(event.current.UserId, { code, name: npc.name }, text, true) });
+    const patrolMeeting = await patrolMeetingFormat(event.current.UserId, code, npc.name, true, affinity.affinity);
+    await message.send({ format: patrolMeeting ?? await npcInteractionFormat(event.current.UserId, { code, name: npc.name }, text, true) });
   } catch (error) { await fail(message, error, '对话失败'); }
 };
 const miningFormat = (kind: '矿脉' | '植被', name: string, seconds: number, remaining: number) => Format.create().addMarkdown(Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText('正在开采').addNewline().addBlockquote(`【${kind === '植被' ? '植被' : '锻材'}】${name}`).addNewline().addText(`预计耗时${durationText(seconds)}`).addNewline().addText(`当前剩余${durationText(remaining)}`)).addButtonGroup(Format.createButtonGroup().addRow().addButton('刷新开采', '/刷新开采', { type: 'command', autoEnter: true, style: 'blue' }).addButton('取消开采', '/取消开采', { type: 'command', autoEnter: true }).addRow().addButton('角色', '/角色', { type: 'command', autoEnter: true }).addButton('装备', '/装备', { type: 'command', autoEnter: true }).addButton('背包', '/背包', { type: 'command', autoEnter: true }).addButton('技能', '/技能列表', { type: 'command', autoEnter: true }).addButton('队伍', '/队伍', { type: 'command', autoEnter: true }));

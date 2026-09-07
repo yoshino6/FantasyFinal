@@ -1,6 +1,8 @@
+import { combatUnitLabel } from './combat-unit-label';
 import { bossSkyDustDrops } from './boss-sky-dust';
+import { validWorldSitePoint, type WorldArea } from './world-site-geometry';
 import { installAutomatonRules, actAutomaton } from './automaton-combat';
-import { loadCombatAutomatons, saveCombatAutomatons, finishCombatAutomatons, appendAutomatonBattleQuotes } from './automaton-combat.service';
+import { loadCombatAutomatons, saveCombatAutomatons, finishCombatAutomatons, appendAutomatonBattleQuotes, applyEnemySkillToAutomaton } from './automaton-combat.service';
 import { useAlchemyCombat, alchemyEndTurn, consumeAlchemyChant } from './alchemy-combat';
 import { randomUUID } from 'node:crypto';
 import { skillSpecialization, manaTransferCost, specializationMaximum, specializationOptions, specializeEffectValue, specializeEffectDuration, specializeControlChance, type SkillSpecializations, type SkillSpecializationResult } from './skill-specialization';
@@ -43,6 +45,7 @@ import { epicLoadoutFor, hasEpicWeaponEffect, type EpicLoadout } from './epic-eq
 import { combatEnvironmentFor, snapshotCombatEnvironment, weatherElementMultiplier as dynamicWeatherElementMultiplier } from './world-dynamics.service';
 import { dynamicNpcProfile } from './dynamic-npc-dialogue.service';
 import { activeDeviceSkillByCode, combatDeviceSlotsFor, initializeCombatDeviceEnergy, restoreCombatDeviceEnergy } from './device.service';
+import { assertCombatLoadoutMutable } from './combat-loadout-lock.service';
 import { regionalBossComponentByKey, regionalBossComponentsFor, type RegionalBossComponentKey } from './regional-boss-components.config';
 
 type CharacterRow = RowDataPacket & Allocation & Record<`${keyof Allocation}_growth`, number> & { id: number; player_id: number; npc_code: string | null; name: string; level: number; experience: number; realm_stage: number; skill_points: number; stamina: number; stamina_updated_at: Date; hp_max: number; mp_max: number; current_hp: number; current_mp: number; activity_status: 'active' | 'resting' | 'unconscious' | 'detained'; rest_started_at: Date | null; home_rest_experience_updated_at: Date | null; detained_until: Date | null; physical_attack: number; magic_attack: number; physical_defense: number; magic_defense: number; accuracy: number; evasion: number; crit_rate_bp: number; crit_damage_bp: number; crit_resist_bp: number; crit_damage_reduction_bp: number; tenacity: number; tenacity_pierce: number; speed: number; perception: number; spirit: number; intelligence: number; element_mastery_json: unknown; element_resistance_json: unknown; adventurer_registered: number; secondary_profession_code: string | null; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string };
@@ -351,17 +354,17 @@ const randomMonsterBaseAttributes = (template: MonsterAttributes & { monster_cla
   return values;
 };
 const wolfKingTraits: MonsterTrait[] = [
-  { code: 'ordinary', name: '普通的', statMultipliers: { hp: 4 } },
-  { code: 'powerful', name: '强大的', statMultiplier: 1.1, statMultipliers: { hp: 5, tenacity: 1.2 }, experiencePct: 20, dropPct: 10 },
-  { code: 'heroic', name: '英雄的', statMultiplier: 1.2, statMultipliers: { hp: 6, tenacity: 1.3 }, experiencePct: 30, dropPct: 20 },
-  { code: 'infernal', name: '深渊的', statMultiplier: 1.35, statMultipliers: { hp: 8, tenacity: 1.5 }, experiencePct: 50, dropPct: 40 },
-  { code: 'abyssal', name: '地狱的', statMultiplier: 1.5, statMultipliers: { hp: 10, tenacity: 1.8 }, experiencePct: 80, dropPct: 60 },
-  { code: 'crimson', name: '猩红的', statMultiplier: 1.5, statMultipliers: { hp: 10, tenacity: 2, physicalAttack: 2, magicAttack: 2, accuracy: 2, critRate: 2, critDamage: 2 }, experiencePct: 100, dropPct: 80 },
-  { code: 'corrupted', name: '腐化的', statMultiplier: 1.5, statMultipliers: { hp: 10, tenacity: 3, physicalDefense: 2.5, magicDefense: 2.5, critResist: 2.5, critReduction: 2.5 }, experiencePct: 100, dropPct: 80 },
-  { code: 'holy', name: '神圣的', statMultiplier: 1.5, statMultipliers: { hp: 15, tenacity: 3, evasion: 2.5 }, experiencePct: 100, dropPct: 80 },
-  { code: 'golden', name: '黄金的', statMultiplier: 1.6, statMultipliers: { hp: 12, tenacity: 5, evasion: 2.5 }, experiencePct: 150, dropPct: 100 },
-  { code: 'brilliant', name: '璀璨的', statMultiplier: 1.8, statMultipliers: { hp: 14, tenacity: 10, evasion: 2.5 }, experiencePct: 250, dropPct: 250 },
-  { code: 'dreamlike', name: '梦幻的', statMultiplier: 2, statMultipliers: { hp: 16, tenacity: 20, evasion: 2.5 }, experiencePct: 600, dropPct: 600 }
+  { code: 'ordinary', name: '普通的', statMultipliers: { hp: 3.2 } },
+  { code: 'powerful', name: '强大的', statMultiplier: 1.1, statMultipliers: { hp: 4, tenacity: 1.2 }, experiencePct: 20, dropPct: 10 },
+  { code: 'heroic', name: '英雄的', statMultiplier: 1.2, statMultipliers: { hp: 4.8, tenacity: 1.3 }, experiencePct: 30, dropPct: 20 },
+  { code: 'infernal', name: '深渊的', statMultiplier: 1.35, statMultipliers: { hp: 6.4, tenacity: 1.5 }, experiencePct: 50, dropPct: 40 },
+  { code: 'abyssal', name: '地狱的', statMultiplier: 1.5, statMultipliers: { hp: 8, tenacity: 1.8 }, experiencePct: 80, dropPct: 60 },
+  { code: 'crimson', name: '猩红的', statMultiplier: 1.5, statMultipliers: { hp: 8, tenacity: 2, physicalAttack: 2, magicAttack: 2, accuracy: 2, critRate: 2, critDamage: 2 }, experiencePct: 100, dropPct: 80 },
+  { code: 'corrupted', name: '腐化的', statMultiplier: 1.5, statMultipliers: { hp: 8, tenacity: 3, physicalDefense: 2.5, magicDefense: 2.5, critResist: 2.5, critReduction: 2.5 }, experiencePct: 100, dropPct: 80 },
+  { code: 'holy', name: '神圣的', statMultiplier: 1.5, statMultipliers: { hp: 12, tenacity: 3, evasion: 2.5 }, experiencePct: 100, dropPct: 80 },
+  { code: 'golden', name: '黄金的', statMultiplier: 1.6, statMultipliers: { hp: 9.6, tenacity: 5, evasion: 2.5 }, experiencePct: 150, dropPct: 100 },
+  { code: 'brilliant', name: '璀璨的', statMultiplier: 1.8, statMultipliers: { hp: 11.2, tenacity: 10, evasion: 2.5 }, experiencePct: 250, dropPct: 250 },
+  { code: 'dreamlike', name: '梦幻的', statMultiplier: 2, statMultipliers: { hp: 12.8, tenacity: 20, evasion: 2.5 }, experiencePct: 600, dropPct: 600 }
 ];
 const bossTraitDefinitionFor = (code: string) => wolfKingTraits.find(trait => trait.code === code);
 const bossSpawnChanceByCode: Record<string, number> = { forest_slime: .75, shadow_wolf_king: .5, goblin_king: .25 };
@@ -1287,8 +1290,8 @@ export const inventoryView = async (qqUserId: string, category?: '装备' | '道
   await pool.execute(`INSERT IGNORE INTO player_item_codex (character_id,item_id)
     SELECT ?,item_id FROM player_inventory WHERE character_id=? UNION SELECT ?,item_id FROM player_item_instances WHERE character_id=?`, [character.id, character.id, character.id, character.id]);
   const itemType = category === '装备' ? 'equipment' : category === '道具' ? 'consumable' : 'material';
-  const [stacked] = await pool.execute<(RowDataPacket & { id: number; code: string; codex_id: string; name: string; item_type:string;effect_json:unknown;item_category: string; quantity: number; description: string })[]>('SELECT i.id,i.code,i.codex_id,i.name,i.item_type,i.effect_json,i.item_category,pi.quantity,pi.trade_bound_quantity,pi.personal_bound_quantity,i.description FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type=? AND i.stackable=1 ORDER BY i.name', [character.id, itemType]);
-  const [instances] = await pool.execute<(RowDataPacket & { id: number; definition_codex_id: string; name: string; item_category: string; quality: number; durability: number; durability_max: number; description: string })[]>('SELECT ii.id,i.codex_id AS definition_codex_id,i.name,i.item_category,ii.quality,ii.durability,ii.durability_max,ii.bound_kind,ii.market_listing_id,i.description FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.character_id=? AND i.item_type=? ORDER BY ii.acquired_at DESC', [character.id, itemType]);
+  const [stacked] = await pool.execute<(RowDataPacket & { id: number; code: string; codex_id: string; name: string; item_type:string;effect_json:unknown;item_category: string; quantity: number; trade_bound_quantity:number;personal_bound_quantity:number;description: string })[]>('SELECT i.id,i.code,i.codex_id,i.name,i.item_type,i.effect_json,i.item_category,pi.quantity,pi.trade_bound_quantity,pi.personal_bound_quantity,i.description FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type=? AND i.stackable=1 ORDER BY i.name', [character.id, itemType]);
+  const [instances] = await pool.execute<(RowDataPacket & { id: number; definition_codex_id: string; name: string; item_category: string; quality: number; durability: number; durability_max: number;bound_kind:string;market_listing_id:number|null; description: string })[]>('SELECT ii.id,i.codex_id AS definition_codex_id,i.name,i.item_category,ii.quality,ii.durability,ii.durability_max,ii.bound_kind,ii.market_listing_id,i.description FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.character_id=? AND i.item_type=? ORDER BY ii.acquired_at DESC', [character.id, itemType]);
   const [recent] = await pool.execute<(RowDataPacket & { id:number;effect_json:unknown;code: string; codex_id: string; item_type: string; item_category: string; name: string })[]>(`SELECT id,effect_json,code,codex_id,item_type,item_category,name FROM (
       SELECT i.id,i.effect_json,i.code,i.codex_id,i.item_type,i.item_category,i.name,ii.acquired_at FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.character_id=?
       UNION ALL SELECT i.id,i.effect_json,i.code,i.codex_id,i.item_type,i.item_category,i.name,pi.acquired_at FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.quantity>0
@@ -1496,6 +1499,7 @@ export const learnSkill = async (qqUserId: string, skillId: number) => withTrans
 
 export const toggleSkillShortcut = async (qqUserId: string, skillId: number) => withTransaction(async connection => {
   const character = await characterFor(qqUserId);
+  await assertCombatLoadoutMutable(connection, Number(character.id));
   const [skills] = await connection.execute<(RowDataPacket & { quick_slot: number | null; name: string; category: string })[]>('SELECT ps.quick_slot,s.name,s.category FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.skill_id=? FOR UPDATE', [character.id, skillId]);
   const skill = skills[0]; if (!skill) throw new Error('尚未学习该技能。');
   if (skill.category === 'passive' || skill.category === 'bound') throw new Error('被动或绑定技能无法配置战斗快捷栏。');
@@ -2142,25 +2146,21 @@ export const moveToNearbyMonster = async (qqUserId: string, spawnId: number) => 
   if (moved.kind !== 'encounter' || !moved.spawns.some(spawn => Number(spawn.id) === spawnId)) throw new Error('该怪物已离开当前位置。');
   return { canAmbush: Boolean(moved.canAmbush) };
 });
-const mapEntryPoints: Partial<Record<string, { x: number; y: number }>> = {
-  // 百纳镇与密林深处在 y=-185..-161 重叠；入口需落在城镇南界外，才能实际进入深处区域。
-  map_dark_forest_deep: { x: -25, y: -186 }
-};
-
 export const moveToMap = async (qqUserId: string, mapCode: string) => {
   const pool = await getPool();
   const character = await characterFor(qqUserId);
-  const [rows] = await pool.execute<(RowDataPacket & { code: string; name: string; min_x: number | null; max_x: number | null; min_y: number | null; max_y: number | null })[]>(`SELECT i.code,r.name,r.min_x,r.max_x,r.min_y,r.max_y
+  const [rows] = await pool.execute<(RowDataPacket & { code: string; region_id: number | null; name: string; min_x: number | null; max_x: number | null; min_y: number | null; max_y: number | null })[]>(`SELECT i.code,r.id AS region_id,r.name,r.min_x,r.max_x,r.min_y,r.max_y
     FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id
     LEFT JOIN map_regions r ON r.code=JSON_UNQUOTE(JSON_EXTRACT(i.effect_json, '$.map'))
     WHERE pi.character_id=? AND pi.quantity>0 AND i.item_category='地图' AND i.code=? LIMIT 1`, [character.id, mapCode]);
   const map = rows[0];
   if (!map) throw new Error('尚未拥有该地图。');
-  if (map.min_x === null || map.max_x === null || map.min_y === null || map.max_y === null) throw new Error('该地图区域暂未开放。');
-  if (map.name === character.region_name) throw new Error(`你已经位于${map.name}。`);
-  const entry = mapEntryPoints[mapCode];
-  const x = entry?.x ?? Math.min(Number(map.max_x), Math.max(Number(map.min_x), Number(character.pos_x)));
-  const y = entry?.y ?? Math.min(Number(map.max_y), Math.max(Number(map.min_y), Number(character.pos_y)));
+  if (map.region_id === null || map.min_x === null || map.max_x === null || map.min_y === null || map.max_y === null) throw new Error('该地图区域暂未开放。');
+  if (Number(character.pos_z) !== 0) throw new Error('请先返回地表，再前往区域地图。');
+  if (Number(map.region_id) === Number(character.current_region_id)) throw new Error(`你已经位于${map.name}。`);
+  const [areas] = await pool.execute<(RowDataPacket & WorldArea)[]>('SELECT a.*,r.danger_level FROM map_region_areas a JOIN map_regions r ON r.id=a.region_id');
+  // 真实地图由多个矩形拼合，外围包围盒可能落入别的区域；与移动结算采用同一覆盖优先级。
+  const { x, y } = validWorldSitePoint(areas, Number(map.region_id), { x: Number(character.pos_x), y: Number(character.pos_y), z: 0 });
   return moveTo(qqUserId, x, y);
 };
 export const huntMonster = async (qqUserId: string) => withTransaction(async connection => {
@@ -2588,7 +2588,7 @@ const negotiationFailureOpening = async (qqUserId: string, spawnId: number) => {
       const count = await summonShadowWolves(connection, session.combat_id, attacker, members);
       await connection.execute('UPDATE combat_targets SET current_mp=?,cooldowns=? WHERE session_id=? AND spawn_id=?', [attacker.current_mp, JSON.stringify(cooldowns), session.combat_id, attacker.id]);
       await connection.execute('UPDATE combat_sessions SET turn_no=turn_no+1 WHERE id=?', [session.combat_id]);
-      return { started, log: `交涉失败！全队错失第一回合行动。\n【${attacker.name}】释放技能「${skill.name}」\n➥影幕翻涌，${count}只影狼加入了战斗。` };
+      return { started, log: `交涉失败！全队错失第一回合行动。\n${combatUnitLabel(attacker)}释放技能「${skill.name}」\n➥影幕翻涌，${count}只影狼加入了战斗。` };
     }
     if (skill) { attacker.current_mp -= Number(skill.mana_cost); cooldowns[skill.code] = Number(skill.cooldown_turns); attacker.cooldowns = cooldowns; }
     const monster = monsterCombatStatsForPlayer(attacker, Number(victim.level)); const attack = skill?.category === 'magic' ? monster.magicAttack : monster.physicalAttack; const kind = skill?.category === 'magic' ? '魔法' : '物理'; const multiplier = Number(skill?.power ?? 100) / 100;
@@ -2598,7 +2598,7 @@ const negotiationFailureOpening = async (qqUserId: string, spawnId: number) => {
     await connection.execute('UPDATE combat_targets SET current_mp=?,cooldowns=? WHERE session_id=? AND spawn_id=?', [attacker.current_mp, JSON.stringify(cooldowns), session.combat_id, attacker.id]);
     await connection.execute('UPDATE combat_sessions SET turn_no=turn_no+1 WHERE id=?', [session.combat_id]);
     const actionText = skill ? `释放技能「${skill.name}」` : '普通攻击';
-    const result = !strike.hit ? `【${attacker.name}】${actionText}\n➥【${victim.name}】闪避了攻击。` : `【${attacker.name}】${actionText}\n➥对【${victim.name}】造成 ${damage} 点${kind}伤害(${oldHp}→${victim.current_hp})${actionLog.length ? `\n${actionLog.join('\n')}` : ''}`;
+    const result = !strike.hit ? `${combatUnitLabel(attacker)}${actionText}\n➥${combatUnitLabel(victim)}闪避了攻击。` : `${combatUnitLabel(attacker)}${actionText}\n➥对${combatUnitLabel(victim)}造成 ${damage} 点${kind}伤害(${oldHp}→${victim.current_hp})${actionLog.length ? `\n${actionLog.join('\n')}` : ''}`;
     return { started, log: `交涉失败！全队错失第一回合行动。\n${result}` };
   });
 };
@@ -2640,7 +2640,7 @@ export const encounterAction = async (qqUserId: string, spawnId: number, action:
       const retreatText = await retreatToPreviousCell() ? '你们仍成功沿来路退回上一格。' : '你们仍成功脱离遭遇，可以继续移动。';
       if (strike.hit) await connection.execute('UPDATE characters SET current_hp=GREATEST(1,current_hp-?) WHERE id=?', [strike.damage, victim.id]);
       await clearPursuit();
-      return !strike.hit ? `躲避不及，${primary.name} 发起追击，但【${victim.name}】闪避了。\n${retreatText}` : `躲避不及，${primary.name} 发起追击，对【${victim.name}】造成 ${strike.damage} 点物理伤害。\n${retreatText}`;
+      return !strike.hit ? `躲避不及，${primary.name} 发起追击，但${combatUnitLabel(victim)}闪避了。\n${retreatText}` : `躲避不及，${primary.name} 发起追击，对${combatUnitLabel(victim)}造成 ${strike.damage} 点物理伤害。\n${retreatText}`;
     });
   }
   if (action === 'persuade') {
@@ -2668,9 +2668,9 @@ export const encounterAction = async (qqUserId: string, spawnId: number, action:
         const modifiers = await modifiersFor(connection, Number(member.id)); modifiersByMember.set(Number(member.id), modifiers);
         const gain = await awardRealmExperience(connection, member, Math.max(1, Math.floor(Number(target.experience) * .2)) * (1 + partyExperienceBonus) * modifiers.experienceMultiplier);
         if (gain.gainedPoints) await recalculateCharacterStats(connection, Number(member.id));
-        rewardLines.push(`【${member.name}】${gain.realmLocked ? realmEnergyDissipationText : `获得经验 ${gain.experience}${gain.gainedPoints ? `，升级至 Lv.${gain.level}` : ''}`}`);
+        rewardLines.push(`${combatUnitLabel(member)}${gain.realmLocked ? realmEnergyDissipationText : `获得经验 ${gain.experience}${gain.gainedPoints ? `，升级至 Lv.${gain.level}` : ''}`}`);
       }
-      for (const member of members.filter(member => !member.npc_code && !eligibility.get(Number(member.id)))) rewardLines.push(`【${member.name}】体力不足，未获得经验与战利品。`);
+      for (const member of members.filter(member => !member.npc_code && !eligibility.get(Number(member.id)))) rewardLines.push(`${combatUnitLabel(member)}体力不足，未获得经验与战利品。`);
       const randomRecipient = () => rewardMembers[random(0, rewardMembers.length - 1)]!;
       for (const drop of bossSkyDustDrops(resolvedDrops(target.drops_json), target)) {
         if (!drop.code || !rewardMembers.length) continue;
@@ -2687,7 +2687,7 @@ export const encounterAction = async (qqUserId: string, spawnId: number, action:
         }
       }
       for (const member of rewardMembers) {
-        const drops = dropsByMember.get(Number(member.id)); if (drops?.length) rewardLines.push(`【${member.name}】获得 ${drops.join('、')}`);
+        const drops = dropsByMember.get(Number(member.id)); if (drops?.length) rewardLines.push(`${combatUnitLabel(member)}获得 ${drops.join('、')}`);
       }
       await connection.execute('UPDATE monster_spawns SET current_hp=0,defeated_at=NOW() WHERE id=?', [target.id]);
       return `交涉成功！${negotiationSuccessText(target.code, target.name)}\n${rewardLines.join('\n')}`;
@@ -2733,7 +2733,7 @@ export const battleStatus = async (qqUserId: string) => {
     canEnchant: skills.some(skill => skill.code === 'resident_a02'), enchantElement: String(jsonObject(own.cooldowns).__enchantElement ?? '风'),
     sessionId: session.combat_id, mode: session.mode, environment, characterId: Number(character.id), turn: Number(session.turn_no), playerHp: Number(own.current_hp), playerHpMax: Number(character.hp_max), playerMp: Number(own.current_mp), playerMpMax: Number(character.mp_max), selectedAllyId: Number(jsonObject(own.cooldowns).__selectedAlly) || null, selectedTargetId: own.selected_target_id ? Number(own.selected_target_id) : null,
     canAct: !Boolean(own.is_defeated) && !Boolean(own.pending_action) && !readRuleState(jsonObject(own.cooldowns).__rules).cast && (!jsonObject(session.cooldowns).__bonusPhase || Boolean(jsonObject(own.cooldowns).__bonusAction)), resource: ownResource ? { professionCode: ownResource.profession_code, code: ownResource.resource_code, name: ownResource.resource_name, current: Number(ownResource.current_value), max: Number(ownResource.max_value) } : null, skillSlots: skills.map(skill => Number(skill.quick_slot)), readySkillSlots: skills.filter(skill => Number(jsonObject(own.cooldowns)[skill.code] ?? 0) <= 0).map(skill => Number(skill.quick_slot)), advancedSkills: advancedSkillRows.filter(skill => isAdvancedProfessionSkillCode(skill.code)).map(skill => ({ id: Number(skill.id), code: skill.code, name: skill.name, ready: Number(jsonObject(own.cooldowns)[skill.code] ?? 0) <= 0 })), itemSlots: items.map(item => Number(item.quick_slot)), deviceSlots: deviceSlots.map(device => ({ ...device, skills: device.skills.map(skill => ({ ...skill, ready: Number(jsonObject(own.cooldowns)[`device_${device.instanceId}_${skill.code}`] ?? 0) <= 0 })) })), appraisal: { learned: appraisal.learned, rangeLevel: appraisal.rangeLevel, informationLevel: appraisal.informationLevel },
-    members: members.map(member => { const resource = resourceFor(Number(member.id)); return { statusText: ruleStatusSummary(readRuleState(jsonObject(member.cooldowns).__rules), Number(session.turn_no)), id: Number(member.id), name: member.name, hp: Number(member.current_hp), hpMax: Number(member.hp_max), mp: Number(member.current_mp), mpMax: Number(member.mp_max), resource: resource ? { professionCode: resource.profession_code, code: resource.resource_code, name: resource.resource_name, current: Number(resource.current_value), max: Number(resource.max_value) } : null, defeated: Boolean(member.is_defeated), pending: Boolean(member.pending_action), chanting: readRuleState(jsonObject(member.cooldowns).__rules).cast?.code ? residentSkillByCode(readRuleState(jsonObject(member.cooldowns).__rules).cast!.code)?.name ?? '技能' : null, extraAction: Boolean(jsonObject(member.cooldowns).__bonusAction) }; }),
+    members: members.map(member => { const resource = resourceFor(Number(member.id)); return { statusText: ruleStatusSummary(readRuleState(jsonObject(member.cooldowns).__rules), Number(session.turn_no)), id: Number(member.id), name: member.name, companion: Boolean(member.npc_code), hp: Number(member.current_hp), hpMax: Number(member.hp_max), mp: Number(member.current_mp), mpMax: Number(member.mp_max), resource: resource ? { professionCode: resource.profession_code, code: resource.resource_code, name: resource.resource_name, current: Number(resource.current_value), max: Number(resource.max_value) } : null, defeated: Boolean(member.is_defeated), pending: Boolean(member.pending_action), chanting: readRuleState(jsonObject(member.cooldowns).__rules).cast?.code ? residentSkillByCode(readRuleState(jsonObject(member.cooldowns).__rules).cast!.code)?.name ?? '技能' : null, extraAction: Boolean(jsonObject(member.cooldowns).__bonusAction) }; }),
     spirits: spirits.map(spirit => ({ ownerCharacterId: Number(spirit.owner_character_id), code: spirit.spirit_code, name: spirit.spirit_name, hp: Number(spirit.current_hp), hpMax: Number(spirit.hp_max), remainingTurns: Number(spirit.remaining_turns) })),
     targets: targets.map(target => {
       const observer = appraisalForTarget(appraisal, Number(target.level)); const hidden = readRuleState(jsonObject(target.cooldowns).__rules).statuses.some(effect => effect.code === 'nightmare' && effect.until >= Number(session.turn_no)); const identified = !hidden && (session.mode === 'spar' || Boolean(observer));
@@ -2783,7 +2783,7 @@ export const inspectCombat = async (qqUserId: string) => {
   const lines = ['我方状态'];
   for (const member of members) {
     const resource = resources.find(item => Number(item.character_id) === Number(member.id));
-    lines.push(`【${member.name}】HP ${member.current_hp}/${member.hp_max}｜MP ${member.current_mp}/${member.mp_max}${member.is_defeated ? '（倒下）' : ''}`);
+    lines.push(`${combatUnitLabel(member)}HP ${member.current_hp}/${member.hp_max}｜MP ${member.current_mp}/${member.mp_max}${member.is_defeated ? '（倒下）' : ''}`);
     if (resource) lines.push(`二转资源：${resource.resource_name} ${resource.current_value}/${resource.max_value}｜${resource.profession_code}`);
     lines.push(`六维：体${member.constitution} 精${member.spirit} 力${member.strength} 智${member.intelligence} 敏${member.agility} 感${member.perception}`);
     lines.push(`物攻 ${member.physical_attack}｜魔攻 ${member.magic_attack}｜物防 ${member.physical_defense}｜魔防 ${member.magic_defense}`);
@@ -2798,7 +2798,7 @@ export const inspectCombat = async (qqUserId: string) => {
     if (isSummonedMonster(raw) && raw.is_defeated) continue;
     if (readRuleState(jsonObject(raw.cooldowns).__rules).statuses.some(effect => effect.code === 'nightmare' && effect.until >= Number(session.turn_no))) { lines.push('【信息被雾遮蔽】'); continue; }
     const observer = appraisalForTarget(profile, Number(raw.level)); const target = materializeMonster(raw, Number(observer?.informationLevel ?? 0) >= 2); if (!observer) { lines.push('【???】数据无法解析。'); continue; }
-    lines.push(`【${target.name}】HP ${target.current_hp}/${target.hp_max}｜MP ${target.current_mp}/${monsterCombatStats(target).mpMax}`);
+    lines.push(`${combatUnitLabel(target)}HP ${target.current_hp}/${target.hp_max}｜MP ${target.current_mp}/${monsterCombatStats(target).mpMax}`);
     const component = bossComponentDefinition(target);
     if (component) {
       const body = targets.find(candidate => Number(candidate.id) === componentBodyId(target));
@@ -3105,7 +3105,7 @@ const useCombatConsumable = async (connection: PoolConnection, sessionId: string
     const damage = directDamageVariance(Math.max(1, Math.floor(rawDamage * elemental * weather * (1 + exposed / 100) * (1 - Math.min(80, barrier) / 100) * (isBossComponent(target) ? 1 : bossBodyDamageMultiplier(target, targets)))));
     const oldTargetHp = Number(target.current_hp); const shield = await absorbLifeShield(connection, sessionId, 'target', Number(target.id), Number(target.hp_max), damage); const hpDamage = damage - shield.absorbed; target.current_hp = Math.max(0, oldTargetHp - hpDamage); if (!target.current_hp) target.is_defeated = 1;
     await connection.execute('UPDATE combat_threat SET threat=threat+? WHERE session_id=? AND spawn_id=? AND character_id=?', [damage, sessionId, target.id, member.id]);
-    messages.push(`对【${target.name}】造成 ${damage} 点${effect.throwable.element}属性直击伤害${lifeShieldAbsorptionText(shield)}(${oldTargetHp}→${target.current_hp})`);
+    messages.push(`对${combatUnitLabel(target)}造成 ${damage} 点${effect.throwable.element}属性直击伤害${lifeShieldAbsorptionText(shield)}(${oldTargetHp}→${target.current_hp})`);
   }
   if (effect.status) {
     const targetKind = effect.target === 'enemy' ? 'target' : 'member';
@@ -3114,7 +3114,7 @@ const useCombatConsumable = async (connection: PoolConnection, sessionId: string
       if (statusTarget.is_defeated) continue;
       const targetCooldowns = jsonObject(statusTarget.cooldowns);
       if (statusTarget.monster_class === 'boss' && targetCooldowns[alchemyBossResistanceKey]) {
-        messages.push(`【${statusTarget.name}】已有炼金抗性，还是别用了吧`);
+        messages.push(`${combatUnitLabel(statusTarget)}已有炼金抗性，还是别用了吧`);
         continue;
       }
       const bossControl=statusTarget.monster_class==='boss'&&['stun','alchemy_confusion','bind','imbalance'].includes(effect.status.code);
@@ -3123,7 +3123,7 @@ const useCombatConsumable = async (connection: PoolConnection, sessionId: string
       if (isAlchemyControlDebuff(effect) && statusTarget.monster_class === 'boss') {
         targetCooldowns[alchemyBossResistanceKey] = true;
         statusTarget.cooldowns = targetCooldowns;
-        messages.push(`【${statusTarget.name}】已对炼金控制与减益产生抗性`);
+        messages.push(`${combatUnitLabel(statusTarget)}已对炼金控制与减益产生抗性`);
       }
     }
   }
@@ -3462,31 +3462,31 @@ const resolveCombatSpirits = async (connection: PoolConnection, sessionId: strin
         const monster = monsterCombatStatsForPlayer(target, Number(owner.level));
         const magicDefenseReduction = effectValue('target', Number(target.id), 'magic_shatter');
         const strike = resolveStrike(stats.magicAttack * (overload ? .85 : .82), monster.magicDefense * (1 - Math.min(90, magicDefenseReduction) / 100), stats.accuracy, monster.evasion, stats.crit, monster.critResist, stats.crit, monster.critReduction, false, false);
-        if (!strike.hit) log.push(`&灵契·${spirit.spirit_name}&追击【${target.name}】，但攻击被闪避。`);
+        if (!strike.hit) log.push(`&灵契&〖${spirit.spirit_name}〗追击${combatUnitLabel(target)}，但攻击被闪避。`);
         else {
           const elemental = elementalMultiplier(owner.element_mastery_json, target.element_resistance_json, '火'); const oldHp = Number(target.current_hp);
           const weather = dynamicWeatherElementMultiplier(environment?.modifiers, '火', 'spirit', Number(owner.id)); const partAoeMultiplier = overload && isBossComponent(target) && Number(target.id) !== Number(owner.selected_target_id) ? .5 : 1; const damage = directDamageVariance(Math.max(1, Math.floor(strike.damage * elemental * weather * partAoeMultiplier * (isBossComponent(target) ? 1 : bossBodyDamageMultiplier(target, targets)) ))); const shield = await absorb(connection, sessionId, 'target', Number(target.id), Number(target.hp_max), damage); const hpDamage = damage - shield.absorbed; target.current_hp = Math.max(0, oldHp - hpDamage); if (!target.current_hp) target.is_defeated = 1;
           await connection.execute('UPDATE combat_threat SET threat=threat+? WHERE session_id=? AND spawn_id=? AND character_id=?', [damage, sessionId, target.id, owner.id]);
-          log.push(`&灵契·${spirit.spirit_name}&追击【${target.name}】，造成 ${damage} 点火属性魔法伤害${lifeShieldAbsorptionText(shield)}(${oldHp}→${target.current_hp})`);
+          log.push(`&灵契&〖${spirit.spirit_name}〗追击${combatUnitLabel(target)}，造成 ${damage} 点火属性魔法伤害${lifeShieldAbsorptionText(shield)}(${oldHp}→${target.current_hp})`);
         }
       }
     } else if (spirit.spirit_code === 'tide') {
       const allies = overload ? members.filter(member => !member.is_defeated) : [[...members].filter(member => !member.is_defeated).sort((left, right) => Number(left.current_hp) / Math.max(1, Number(left.hp_max)) - Number(right.current_hp) / Math.max(1, Number(right.hp_max)))[0]].filter(Boolean) as CombatMemberRow[];
-      for (const ally of allies) { const oldHp = Number(ally.current_hp); const amount = receivedHealingAmount(Math.max(1, Math.floor(Math.max(stats.magicAttack * .72, overload ? Number(ally.hp_max) * .08 : 0))), (await modifiersFor(connection, Number(ally.id))).healingReceivedPct); ally.current_hp = Math.min(Number(ally.hp_max), oldHp + amount); if (overload) await refreshCombatSpiritEffect(connection, sessionId, 'member', Number(ally.id), 'barrier', 8, 1); log.push(`&灵契·${spirit.spirit_name}&为【${ally.name}】恢复 ${ally.current_hp - oldHp} HP(${oldHp}→${ally.current_hp})`); }
+      for (const ally of allies) { const oldHp = Number(ally.current_hp); const amount = receivedHealingAmount(Math.max(1, Math.floor(Math.max(stats.magicAttack * .72, overload ? Number(ally.hp_max) * .08 : 0))), (await modifiersFor(connection, Number(ally.id))).healingReceivedPct); ally.current_hp = Math.min(Number(ally.hp_max), oldHp + amount); if (overload) await refreshCombatSpiritEffect(connection, sessionId, 'member', Number(ally.id), 'barrier', 8, 1); log.push(`&灵契&〖${spirit.spirit_name}〗为${combatUnitLabel(ally)}恢复 ${ally.current_hp - oldHp} HP(${oldHp}→${ally.current_hp})`); }
     } else if (spirit.spirit_code === 'bark') {
       const barrier = overload ? 14 : 8; for (const ally of members.filter(member => !member.is_defeated)) await refreshCombatSpiritEffect(connection, sessionId, 'member', Number(ally.id), 'barrier', barrier, 2);
-      log.push(`&灵契·${spirit.spirit_name}&为全队续上 ${barrier}% 减伤壁垒(2)`);
+      log.push(`&灵契&〖${spirit.spirit_name}〗为全队续上 ${barrier}% 减伤壁垒(2)`);
     } else if (spirit.spirit_code === 'gale') {
       const slow = overload ? 20 : 12; for (const target of activeTargets) await refreshCombatSpiritEffect(connection, sessionId, 'target', Number(target.id), 'slow', slow, 1);
-      if (activeTargets.length) log.push(`&灵契·${spirit.spirit_name}&以风压使 ${activeTargets.length} 名敌人迟缓 ${slow}%(1)`);
+      if (activeTargets.length) log.push(`&灵契&〖${spirit.spirit_name}〗以风压使 ${activeTargets.length} 名敌人迟缓 ${slow}%(1)`);
     } else if (spirit.spirit_code === 'moon') {
       const oldMp = Number(owner.current_mp); const amount = Math.max(1, Math.floor(Number(owner.mp_max) * (overload ? .10 : .06))); owner.current_mp = Math.min(Number(owner.mp_max), oldMp + amount);
       const target = activeTargets.find(item => Number(item.id) === Number(owner.selected_target_id)) ?? activeTargets[0];
       if (target) await refreshCombatSpiritEffect(connection, sessionId, 'target', Number(target.id), 'exposed', overload ? 20 : 12, 1);
-      log.push(`&灵契·${spirit.spirit_name}&为【${owner.name}】回流 ${owner.current_mp - oldMp} MP${target ? `，并暴露【${target.name}】(1)` : ''}`);
+      log.push(`&灵契&〖${spirit.spirit_name}〗为${combatUnitLabel(owner)}回流 ${owner.current_mp - oldMp} MP${target ? `，并暴露${combatUnitLabel(target)}(1)` : ''}`);
     }
     await gainStoredCombatResource(connection, sessionId, Number(owner.id), 15, '灵体回应', log, owner.name);
-    if (Number(spirit.remaining_turns) <= 1 || overload === 1) { await connection.execute('DELETE FROM combat_spirits WHERE session_id=? AND owner_character_id=? AND spirit_code=?', [sessionId, spirit.owner_character_id, spirit.spirit_code]); log.push(`&灵契·${spirit.spirit_name}&${overload === 1 ? '超载耗尽，' : ''}回应完毕，化作微光散去。`); }
+    if (Number(spirit.remaining_turns) <= 1 || overload === 1) { await connection.execute('DELETE FROM combat_spirits WHERE session_id=? AND owner_character_id=? AND spirit_code=?', [sessionId, spirit.owner_character_id, spirit.spirit_code]); log.push(`&灵契&〖${spirit.spirit_name}〗${overload === 1 ? '超载耗尽，' : ''}回应完毕，化作微光散去。`); }
     else await connection.execute("UPDATE combat_spirits SET remaining_turns=remaining_turns-1,stats_json=JSON_SET(stats_json,'$.overload',?) WHERE session_id=? AND owner_character_id=? AND spirit_code=?", [Math.max(0, overload - 1), sessionId, spirit.owner_character_id, spirit.spirit_code]);
   }
 };
@@ -3942,7 +3942,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
     if (!resource || Number(resource.current_value) < amount) return false;
     resource.current_value = Number(resource.current_value) - amount;
     await connection.execute('UPDATE combat_profession_resources SET current_value=? WHERE session_id=? AND character_id=?', [resource.current_value, session.combat_id, member.id]);
-    log.push(`&${resource.resource_name}&【${member.name}】施放「${skillName}」消耗 ${amount}（${resource.current_value}/${resource.max_value}）。`);
+    log.push(`&${resource.resource_name}&${combatUnitLabel(member)}施放「${skillName}」消耗 ${amount}（${resource.current_value}/${resource.max_value}）。`);
     return true;
   };
   const rewardSummonerSupport = async (reason: string) => {
@@ -3992,7 +3992,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
     const cooldowns = jsonObject(victim.cooldowns); if (cooldowns.device_inverse_buffer_triggered) return;
     cooldowns.device_inverse_buffer_triggered = 1; victim.cooldowns = cooldowns;
     await applyAdvancedStatus('member', Number(victim.id), 'barrier', 20, 2);
-    log.push(`　&逆相缓冲&【${victim.name}】生命低于30%，获得20%减伤(2)。`);
+    log.push(`　&逆相缓冲&${combatUnitLabel(victim)}生命低于30%，获得20%减伤(2)。`);
   };
   const epicSetActive = (member: CombatMemberRow, code: EpicLoadout['setCode'], pieces: number) => {
     const loadout = epicFor(member);
@@ -4009,7 +4009,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
     if (hasEpicWeaponEffect(epicFor(recipient), 'epic_mountaingate_shield') && Number(cooldowns.epic_mountaingate_ready_turn ?? 0) <= turnNo) {
       const shield = await grantLifeShield(connection, session.combat_id, 'member', Number(recipient.id), Number(recipient.hp_max), Math.floor(Number(recipient.hp_max) * .06), 1);
       cooldowns.epic_mountaingate_ready_turn = turnNo + 2;
-      if (shield.added) log.push(`&山门盾牌&【${recipient.name}】受击后获得${shield.added}点生命护盾(1)。`);
+      if (shield.added) log.push(`&山门盾牌&${combatUnitLabel(recipient)}受击后获得${shield.added}点生命护盾(1)。`);
     }
     if (epicSetActive(recipient, 'mountainheart_regalia', 3) && Number(cooldowns.epic_mountain_lock_until ?? 0) < turnNo && Number(cooldowns.epic_mountain_pressure_turn ?? 0) !== turnNo) {
       cooldowns.epic_mountain_pressure_turn = turnNo;
@@ -4018,10 +4018,10 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
         cooldowns.epic_mountain_pressure_stacks = 0; cooldowns.epic_mountain_lock_until = turnNo + 1;
         const shield = await grantLifeShield(connection, session.combat_id, 'member', Number(recipient.id), Number(recipient.hp_max), Math.floor(Number(recipient.hp_max) * .12), 2);
         await applyAdvancedStatus('member', Number(recipient.id), 'inheritance_control_resist', 20, 2);
-        log.push(`&断层壁障&【${recipient.name}】消耗3层岩压，获得${shield.added}点生命护盾与20%控制抗性(2)。`);
+        log.push(`&断层壁障&${combatUnitLabel(recipient)}消耗3层岩压，获得${shield.added}点生命护盾与20%控制抗性(2)。`);
       } else {
         cooldowns.epic_mountain_pressure_stacks = stacks;
-        log.push(`&地脉承压&【${recipient.name}】获得岩压${stacks}/3：技能直击减伤${stacks * 2}%。`);
+        log.push(`&地脉承压&${combatUnitLabel(recipient)}获得岩压${stacks}/3：技能直击减伤${stacks * 2}%。`);
       }
     }
     if (epicSetActive(recipient, 'valk_forge_regalia', 3) && Number(cooldowns.epic_valk_warmth_turn ?? 0) !== turnNo) {
@@ -4029,7 +4029,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
       const stacks = Math.min(2, Number(cooldowns.epic_valk_warmth_stacks ?? 0) + 1);
       cooldowns.epic_valk_warmth_stacks = stacks;
       await applyAdvancedStatus('member', Number(recipient.id), 'inheritance_control_resist', stacks * 10, 1);
-      log.push(`&余热铸甲&【${recipient.name}】获得余热${stacks}/2：技能直击减伤${stacks * 2}%、控制抗性${stacks * 10}%、技能直击伤害+${stacks * 2}%。`);
+      log.push(`&余热铸甲&${combatUnitLabel(recipient)}获得余热${stacks}/2：技能直击减伤${stacks * 2}%、控制抗性${stacks * 10}%、技能直击伤害+${stacks * 2}%。`);
     }
     recipient.cooldowns = cooldowns;
   };
@@ -4045,18 +4045,18 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
     const loadout = epicFor(caster); const turnNo = Number(session.turn_no);
     if (epicSetActive(caster, 'mistmother_cocoon', 3)) {
       const bonus = Math.min(Number(recipient.hp_max) - Number(recipient.current_hp), Math.floor(healed * .08));
-      if (bonus > 0) { recipient.current_hp += bonus; log.push(`&雾生灵潮&【${recipient.name}】治疗额外恢复${bonus} HP。`); }
+      if (bonus > 0) { recipient.current_hp += bonus; log.push(`&雾生灵潮&${combatUnitLabel(recipient)}治疗额外恢复${bonus} HP。`); }
     }
     const recipientCooldowns = jsonObject(recipient.cooldowns);
     if (hasEpicWeaponEffect(loadout, 'epic_threehead_grimoire') && Number(recipientCooldowns[`epic_threehead_heal_${caster.id}`] ?? 0) !== turnNo) {
       recipientCooldowns[`epic_threehead_heal_${caster.id}`] = turnNo; recipient.cooldowns = recipientCooldowns;
       await applyAdvancedStatus('member', Number(recipient.id), 'barrier', 6, 1);
-      log.push(`&三首法书&【${recipient.name}】获得6%减伤(1)。`);
+      log.push(`&三首法书&${combatUnitLabel(recipient)}获得6%减伤(1)。`);
     }
     if (hasEpicWeaponEffect(loadout, 'epic_marshmoon_orb') && lowBeforeHeal && Number(recipientCooldowns[`epic_marshmoon_heal_${caster.id}`] ?? 0) !== turnNo) {
       recipientCooldowns[`epic_marshmoon_heal_${caster.id}`] = turnNo; recipient.cooldowns = recipientCooldowns;
       const bonus = Math.min(Number(recipient.hp_max) - Number(recipient.current_hp), Math.floor(Number(recipient.hp_max) * .03));
-      if (bonus > 0) { recipient.current_hp += bonus; log.push(`&沼月回潮&【${recipient.name}】额外恢复${bonus} HP。`); }
+      if (bonus > 0) { recipient.current_hp += bonus; log.push(`&沼月回潮&${combatUnitLabel(recipient)}额外恢复${bonus} HP。`); }
     }
     if (!epicSetActive(caster, 'mistmother_cocoon', 5)) return;
     const casterCooldowns = jsonObject(caster.cooldowns); const tides = Number(casterCooldowns.epic_mist_tide_stacks ?? 0);
@@ -4066,7 +4066,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
       if (echo > 0) { recipient.current_hp += echo; log.push(`&三首潮汐&治疗回响额外恢复${echo} HP。`); }
     } else {
       casterCooldowns.epic_mist_tide_stacks = Math.min(3, tides + 1); caster.cooldowns = casterCooldowns;
-      log.push(`&三首潮汐&【${caster.name}】获得潮汐${Math.min(3, tides + 1)}/3。`);
+      log.push(`&三首潮汐&${combatUnitLabel(caster)}获得潮汐${Math.min(3, tides + 1)}/3。`);
     }
   };
   /** 导师同样使用二转辅助技，但试炼为一对多遭遇，原本的“队友”效果依法收束到导师本人与其灵契回响。 */
@@ -4173,7 +4173,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
   const consumePrecisionAim = async (victim: CombatMemberRow) => {
     if (effectValue('member', Number(victim.id), 'precision') <= 0 && effectValue('member', Number(victim.id), 'critical_focus') <= 0) return;
     await removeAdvancedStatus('member', Number(victim.id), ['precision', 'critical_focus']);
-    log.push(`　&精准瞄准&【${victim.name}】受到攻击，瞄准校正结束。`);
+    log.push(`　&精准瞄准&${combatUnitLabel(victim)}受到攻击，瞄准校正结束。`);
   };
   const dispelOneTargetBuff = async (target: CombatTargetRow) => {
     const removable = effects.find(effect => effect.target_kind === 'target' && Number(effect.target_id) === Number(target.id) && ['barrier', 'battle_cry', 'mist_veil', 'shadow_pierce', 'royal_intercept'].includes(effect.code));
@@ -4190,7 +4190,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
       if (cooldowns[key]) continue;
       cooldowns[key] = 1; owner.cooldowns = cooldowns;
       await refreshCombatSpiritEffect(connection, session.combat_id, 'member', Number(victim.id), 'barrier', value, 2);
-      log.push(`&灵契余荫&【${owner.name}】为濒危的【${victim.name}】展开 ${value}% 减伤壁垒(2)。`);
+      log.push(`&灵契余荫&${combatUnitLabel(owner)}为濒危的${combatUnitLabel(victim)}展开 ${value}% 减伤壁垒(2)。`);
     }
   };
   const triggerAegisEcho = async (victim: CombatMemberRow, hadBarrier: boolean) => {
@@ -4199,7 +4199,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
     const cooldowns = jsonObject(victim.cooldowns); const key = 'heritage_round_aegis_echo'; if (cooldowns[key]) return;
     cooldowns[key] = 1; victim.cooldowns = cooldowns;
     await refreshCombatSpiritEffect(connection, session.combat_id, 'member', Number(victim.id), 'inheritance_control_resist', value, 1);
-    log.push(`&守壁余响&【${victim.name}】的壁垒承受冲击，获得 ${value}% 控制抗性(1)。`);
+    log.push(`&守壁余响&${combatUnitLabel(victim)}的壁垒承受冲击，获得 ${value}% 控制抗性(1)。`);
   };
   /** 战斗法师的两段换挡共用一次状态迁移；具体技能再决定如何放大其治疗或增益数值。 */
   const consumeSpellbladeSupport = (member: CombatMemberRow) => {
@@ -4225,7 +4225,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
     const ally = [...members].filter(member => !member.is_defeated).sort((left, right) => Number(left.current_hp) / Math.max(1, Number(left.hp_max)) - Number(right.current_hp) / Math.max(1, Number(right.hp_max)))[0];
     if (!ally) return;
     await refreshCombatSpiritEffect(connection, session.combat_id, 'member', Number(ally.id), 'barrier', value, 1);
-    log.push(`&护阵余韵&【${holder.name}】行动结束，为生命最低的【${ally.name}】展开 ${value}% 减伤壁垒(1)。`);
+    log.push(`&护阵余韵&${combatUnitLabel(holder)}行动结束，为生命最低的${combatUnitLabel(ally)}展开 ${value}% 减伤壁垒(1)。`);
   };
   const kingbeastCores = () => targets.filter(target => isKingbeastCore(target) && ['king', 'dragon'].includes(kingbeastRole(target)));
   const kingbeastFused = () => kingbeastCores().some(target => !jsonObject(target.cooldowns).kingbeast_phase_two);
@@ -4265,7 +4265,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
   for (const member of aliveMembers) if (hasActiveDevice(member, 'rocket_propeller')) {
     const cooldowns = jsonObject(member.cooldowns); const previous = Number(cooldowns.device_rocket_boost ?? 0); const next = Math.min(100, previous + 10);
     cooldowns.device_rocket_boost = next; member.cooldowns = cooldowns;
-    if (next > previous) log.push(`&火箭推进&【${member.name}】速度提高至 +${next}%。`);
+    if (next > previous) log.push(`&火箭推进&${combatUnitLabel(member)}速度提高至 +${next}%。`);
   }
   const turns = [...combatAutomatons.filter(pet => !pet.battle.exited && pet.unit.hp > 0).map(pet => ({ kind: 'automaton' as const, id: pet.id, speed: pet.unit.speed, order: 200000000 + pet.id, pet })), ...aliveMembers.filter(member => !member.is_defeated).map(member => ({ kind: 'member' as const, id: Number(member.id), speed: Number(member.speed) * memberWeatherSpeed(Number(member.id)) * (1 - (effectValue('member', Number(member.id), 'slow') + effectValue('member', Number(member.id), 'bind')) / 100) * (1 + effectValue('member', Number(member.id), 'sprint') / 100) * (1 + Number(jsonObject(member.cooldowns).device_rocket_boost ?? 0) / 100), order: Number(member.id) })), ...combatSpirits.map((spirit, index) => ({ kind: 'spirit' as const, id: 100000000 + index, speed: storedSpiritStats(spirit).speed, order: 100000000 + index, spirit })), ...targets.filter(target => !target.is_defeated).map(target => ({ kind: 'target' as const, id: Number(target.id), speed: monsterCombatStatsForPlayer(target, lowestAliveMemberLevel).speed * targetWeatherSpeed * (1 - (effectValue('target', Number(target.id), 'slow') + effectValue('target', Number(target.id), 'bind')) / 100) * (1 + effectValue('target', Number(target.id), 'sprint') / 100), order: Number(target.id) }))].sort((a, b) => b.speed - a.speed || a.order - b.order);
   const npcExtraTurns = new Set<object>();
@@ -4324,7 +4324,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
       const spirit = turn.spirit; if (!spirit || Number(spirit.current_hp) <= 0) continue;
       if (resolvedActions > 0) log.splice(logStart, 0, '————');
       resolvedActions += 1;
-      log.push(`➤【${spirit.spirit_name}】回应灵契`);
+      log.push(`➤〖${spirit.spirit_name}〗回应灵契`);
       await resolveCombatSpirits(connection, session.combat_id, members, targets, log, spirit, absorbRuleShield);
       continue;
     }
@@ -4334,14 +4334,14 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
       if (epicSetActive(member, 'valk_forge_regalia', 5) && Number(epicCooldowns.epic_valk_warmth_stacks ?? 0) >= 2 && Number(epicCooldowns.epic_valk_set_ready_turn ?? 0) <= turnNo) {
         epicCooldowns.epic_valk_warmth_stacks = 0; epicCooldowns.epic_valk_set_ready_turn = turnNo + 3; epicCooldowns.epic_valk_forged_until = turnNo + 1; epicCooldowns.epic_valk_furnace_shield_until = turnNo + 1;
         const shield = await grantLifeShield(connection, session.combat_id, 'member', Number(member.id), Number(member.hp_max), Math.floor(Number(member.hp_max) * .10), 2);
-        log.push(`&炉壁回铸&【${member.name}】消耗余热，获得${shield.added}点炉壁护盾与炽锻(2)：每回合首次技能直击+10%、穿防8%。`);
+        log.push(`&炉壁回铸&${combatUnitLabel(member)}消耗余热，获得${shield.added}点炉壁护盾与炽锻(2)：每回合首次技能直击+10%、穿防8%。`);
       }
       if (hasEpicWeaponEffect(epicLoadout, 'epic_royal_banner_shield') && Number(epicCooldowns.epic_royal_banner_ready_turn ?? 0) <= turnNo) {
         const ally = [...members].filter(item => !item.is_defeated).sort((left, right) => Number(left.current_hp) / Math.max(1, Number(left.hp_max)) - Number(right.current_hp) / Math.max(1, Number(right.hp_max)))[0];
         if (ally && Number(ally.current_hp) / Math.max(1, Number(ally.hp_max)) < .5) {
           const shield = await grantLifeShield(connection, session.combat_id, 'member', Number(ally.id), Number(ally.hp_max), Math.floor(Number(ally.hp_max) * .05), 1);
           epicCooldowns.epic_royal_banner_ready_turn = turnNo + 2;
-          log.push(`&王旗庇护&【${member.name}】为【${ally.name}】展开${shield.added}点生命护盾(1)。`);
+          log.push(`&王旗庇护&${combatUnitLabel(member)}为${combatUnitLabel(ally)}展开${shield.added}点生命护盾(1)。`);
         }
       }
       member.cooldowns = epicCooldowns;
@@ -4352,28 +4352,28 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
       resolvedActions += 1;
       if (controlled) continue;
       const choice = jsonObject(member.pending_action) as unknown as PendingAction;
-      if (choice.type === 'escape') { log.push(`➤【${member.name}】选择撤离\n　➥等待队伍共同脱离。`); continue; }
+      if (choice.type === 'escape') { log.push(`➤${combatUnitLabel(member)}选择撤离\n　➥等待队伍共同脱离。`); continue; }
       if (choice.type === 'item') {
         const [items] = await connection.execute<(RowDataPacket & { item_id: number; quantity: number; name: string; effect_json: unknown })[]>(choice.itemId
           ? 'SELECT pi.item_id,pi.quantity,i.name,i.effect_json FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.item_id=? AND i.item_type=\'consumable\' FOR UPDATE'
           : 'SELECT pi.item_id,pi.quantity,i.name,i.effect_json FROM player_quick_items qi JOIN player_inventory pi ON pi.character_id=qi.character_id AND pi.item_id=qi.item_id JOIN item_definitions i ON i.id=pi.item_id WHERE qi.character_id=? AND qi.quick_slot=? FOR UPDATE', choice.itemId ? [member.id, Number(choice.itemId)] : [member.id, Number(choice.slot)]);
-        const item = items[0]; if (!item?.quantity) { log.push(`➤【${member.name}】使用道具\n　➥快捷栏为空。`); continue; }
+        const item = items[0]; if (!item?.quantity) { log.push(`➤${combatUnitLabel(member)}使用道具\n　➥快捷栏为空。`); continue; }
         const used = await useCombatConsumable(connection, session.combat_id, member, targets, Number(item.item_id), item.name, item.effect_json, rules);
         if (used.consumed) {
           await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=?', [member.id, item.item_id]);
           await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [member.id, item.item_id]);
         }
-        log.push(`➤【${member.name}】使用[${item.name}]\n　➥${used.message}`); continue;
+        log.push(`➤${combatUnitLabel(member)}使用[${item.name}]\n　➥${used.message}`); continue;
       }
       if (choice.type === 'device_charge') {
         const [energyRows] = await connection.execute<(RowDataPacket & { current_energy: number; max_energy: number; code: string; name: string })[]>(`SELECT energy.current_energy,energy.max_energy,i.code,i.name FROM combat_device_energy energy
           JOIN player_item_instances ii ON ii.id=energy.instance_id JOIN item_definitions i ON i.id=ii.item_id
           WHERE energy.battle_kind='pve' AND energy.session_id=? AND energy.character_id=? AND energy.instance_id=? FOR UPDATE`, [session.combat_id, member.id, Number(choice.deviceInstanceId)]);
         const energy = energyRows[0];
-        if (!energy) { log.push(`➤【${member.name}】尝试为异械充能\n　➥异械未处于本场战斗的生效状态。`); continue; }
+        if (!energy) { log.push(`➤${combatUnitLabel(member)}尝试为异械充能\n　➥异械未处于本场战斗的生效状态。`); continue; }
         const nextEnergy = Math.min(Number(energy.max_energy), Number(energy.current_energy) + 30);
         await connection.execute("UPDATE combat_device_energy SET current_energy=? WHERE battle_kind='pve' AND session_id=? AND character_id=? AND instance_id=?", [nextEnergy, session.combat_id, member.id, Number(choice.deviceInstanceId)]);
-        log.push(`➤【${member.name}】为【${energy.name}】充能\n　➥能量 ${energy.current_energy}→${nextEnergy}/${energy.max_energy}（本回合不选择目标，也不触发效果）。`);
+        log.push(`➤${combatUnitLabel(member)}为【${energy.name}】充能\n　➥能量 ${energy.current_energy}→${nextEnergy}/${energy.max_energy}（本回合不选择目标，也不触发效果）。`);
         continue;
       }
       if (choice.type === 'device') {
@@ -4382,8 +4382,8 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
           JOIN player_item_instances ii ON ii.id=energy.instance_id JOIN item_definitions i ON i.id=ii.item_id
           WHERE energy.battle_kind='pve' AND energy.session_id=? AND energy.character_id=? AND energy.instance_id=? FOR UPDATE`, [session.combat_id, member.id, Number(choice.deviceInstanceId)]);
         const energy = energyRows[0];
-        if (!deviceSkill || !energy || deviceSkill.deviceCode !== energy.code) { log.push(`➤【${member.name}】启动异械\n　➥异械配置已失效。`); continue; }
-        if (Number(energy.current_energy) < deviceSkill.energyCost) { log.push(`➤【${member.name}】启动【${energy.name}】\n　➥能量不足，本回合应改为充能。`); continue; }
+        if (!deviceSkill || !energy || deviceSkill.deviceCode !== energy.code) { log.push(`➤${combatUnitLabel(member)}启动异械\n　➥异械配置已失效。`); continue; }
+        if (Number(energy.current_energy) < deviceSkill.energyCost) { log.push(`➤${combatUnitLabel(member)}启动【${energy.name}】\n　➥能量不足，本回合应改为充能。`); continue; }
         const cooldowns = jsonObject(member.cooldowns); const cooldownKey = `device_${choice.deviceInstanceId}_${deviceSkill.code}`;
         cooldowns[cooldownKey] = deviceSkill.cooldownTurns + 1; member.cooldowns = cooldowns;
         await connection.execute("UPDATE combat_device_energy SET current_energy=current_energy-? WHERE battle_kind='pve' AND session_id=? AND character_id=? AND instance_id=?", [deviceSkill.energyCost, session.combat_id, member.id, Number(choice.deviceInstanceId)]);
@@ -4391,7 +4391,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
         const selectedAlly = members.find(candidate => !candidate.is_defeated && Number(candidate.id) === Number(choice.targetId));
         const allyTargets = deviceSkill.targetScope === 'all_allies' ? members.filter(candidate => !candidate.is_defeated) : deviceSkill.targetScope === 'self' ? [member] : choice.targetKind === 'member' && selectedAlly ? [selectedAlly] : [];
         const enemyTargets = deviceSkill.targetScope === 'all_enemies' ? targets.filter(candidate => !candidate.is_defeated) : choice.targetKind === 'target' && selectedEnemy ? [selectedEnemy] : [];
-        log.push(`➤【${member.name}】启动异械「${deviceSkill.name}」\n　➥【${energy.name}】消耗 ${deviceSkill.energyCost} 点充能。`);
+        log.push(`➤${combatUnitLabel(member)}启动异械「${deviceSkill.name}」\n　➥【${energy.name}】消耗 ${deviceSkill.energyCost} 点充能。`);
         const applyDamage = async (enemy: CombatTargetRow, magic: boolean, multiplier: number, element = '') => {
           const stats = monsterCombatStatsForPlayer(enemy, Number(member.level)); const attack = magic ? Number(member.magic_attack) : Number(member.physical_attack); const defense = magic ? stats.magicDefense : stats.physicalDefense;
           const accuracyBonus = hasActiveDevice(member, 'precision_scope') ? 10 : 0;
@@ -4412,7 +4412,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
           if (target) {
             const pool = [['precision', 30], ['critical_focus', 30], ['sprint', 30], ['barrier', 15], ['regeneration', 4], ['mana_regeneration', 8], ['slow', 30], ['evasion_down', 30], ['exposed', 15], ['bind', 20], ['burn', 3], ['poison', 2]] as const;
             const picked = [...pool].sort(() => Math.random() - .5).slice(0, 5); for (const [code, value] of picked) await applyAdvancedStatus(kind, Number(target.id), code, value, 2);
-            log.push(`　&彩蛋&【${target.name}】随机获得 5 种持续 2 回合的效应。`);
+            log.push(`　&彩蛋&${combatUnitLabel(target)}随机获得 5 种持续 2 回合的效应。`);
           }
         } else if (deviceSkill.effect === 'physical_all') for (const enemy of enemyTargets) await applyDamage(enemy, false, deviceSkill.power ?? 100);
         else if (deviceSkill.effect === 'precision_aim') { for (const ally of allyTargets) { await applyAdvancedStatus('member', Number(ally.id), 'precision', 100, 99); await applyAdvancedStatus('member', Number(ally.id), 'critical_focus', 100, 99); } }
@@ -4424,7 +4424,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
               if (negative[0]) await connection.execute('DELETE FROM combat_status_effects WHERE id=?', [negative[0].id]);
             }
             if (deviceSkill.effect === 'autonomous_repair' && await hasLifeShield('member', Number(ally.id))) await restoreCombatDeviceEnergy(connection, session.combat_id, Number(ally.id), 20);
-            log.push(`　➥【${ally.name}】HP ${before}→${ally.current_hp}。`); }
+            log.push(`　➥${combatUnitLabel(ally)}HP ${before}→${ally.current_hp}。`); }
         } else if (deviceSkill.effect === 'gravity_tether') for (const enemy of enemyTargets) await applyAdvancedStatus('target', Number(enemy.id), 'bind', 30, 2);
         else if (deviceSkill.effect === 'fold_barrier') for (const ally of allyTargets) await applyAdvancedStatus('member', Number(ally.id), 'barrier', 15, 2 + (hasActiveDevice(member, 'fold_barrier_generator') ? 1 : 0));
         else if (deviceSkill.effect === 'shock_pile') for (const enemy of enemyTargets) { await applyDamage(enemy, false, 120); if (Math.random() < .65) await applyAdvancedStatus('target', Number(enemy.id), 'stun', 1, 1); }
@@ -4437,23 +4437,23 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
         continue;
       }
       let target = targets.find(item => Number(item.id) === Number(choice.targetKind === 'target' ? choice.targetId : member.selected_target_id) && !item.is_defeated) ?? targets.find(item => !item.is_defeated); if (!target) continue;
-      if (effectValue('member', Number(member.id), 'alchemy_confusion') > 0) { const candidates = targets.filter(item => !item.is_defeated); target = candidates[random(0, candidates.length - 1)] ?? target; log.push(`#混乱#【${member.name}】的攻击目标变得随机。`); }
+      if (effectValue('member', Number(member.id), 'alchemy_confusion') > 0) { const candidates = targets.filter(item => !item.is_defeated); target = candidates[random(0, candidates.length - 1)] ?? target; log.push(`#混乱#${combatUnitLabel(member)}的攻击目标变得随机。`); }
       const counterReady = effectValue('member', Number(member.id), 'advanced_counter_ready');
       if (counterReady > 0) {
         await removeAdvancedStatus('member', Number(member.id), ['advanced_counter_ready']);
         if (Math.random() * 100 < counterReady) {
           const counterMonster = monsterCombatStatsForPlayer(target, Number(member.level)); const counterStrike = resolveStrike(Number(member.physical_attack) * .9, counterMonster.physicalDefense, Number(member.accuracy), counterMonster.evasion, Number(member.crit_rate_bp), counterMonster.critResist, Number(member.crit_damage_bp), counterMonster.critReduction, false, false);
-          if (counterStrike.hit) { const oldHp = Number(target.current_hp); const bodyMultiplier = isBossComponent(target) ? 1 : bossBodyDamageMultiplier(target, targets); const dealt = directDamageVariance(Math.max(1, Math.floor(counterStrike.damage * bodyMultiplier))); const shield = await absorbRuleShield(connection, session.combat_id, 'target', Number(target.id), Number(target.hp_max), dealt); const hpDamage = dealt - shield.absorbed; target.current_hp = Math.max(0, oldHp - hpDamage); if (!target.current_hp) target.is_defeated = 1; await connection.execute('UPDATE combat_threat SET threat=threat+? WHERE session_id=? AND spawn_id=? AND character_id=?', [dealt, session.combat_id, target.id, member.id]); log.push(`&反击架势&【${member.name}】反击【${targetName(target)}】，造成 ${dealt} 点物理伤害${lifeShieldAbsorptionText(shield)}(${oldHp}→${target.current_hp})。`); }
-          else log.push(`&反击架势&【${member.name}】的反击被【${targetName(target)}】闪避。`);
-        } else log.push(`&反击架势&【${member.name}】未能抓住反击空隙。`);
+          if (counterStrike.hit) { const oldHp = Number(target.current_hp); const bodyMultiplier = isBossComponent(target) ? 1 : bossBodyDamageMultiplier(target, targets); const dealt = directDamageVariance(Math.max(1, Math.floor(counterStrike.damage * bodyMultiplier))); const shield = await absorbRuleShield(connection, session.combat_id, 'target', Number(target.id), Number(target.hp_max), dealt); const hpDamage = dealt - shield.absorbed; target.current_hp = Math.max(0, oldHp - hpDamage); if (!target.current_hp) target.is_defeated = 1; await connection.execute('UPDATE combat_threat SET threat=threat+? WHERE session_id=? AND spawn_id=? AND character_id=?', [dealt, session.combat_id, target.id, member.id]); log.push(`&反击架势&${combatUnitLabel(member)}反击【${targetName(target)}】，造成 ${dealt} 点物理伤害${lifeShieldAbsorptionText(shield)}(${oldHp}→${target.current_hp})。`); }
+          else log.push(`&反击架势&${combatUnitLabel(member)}的反击被【${targetName(target)}】闪避。`);
+        } else log.push(`&反击架势&${combatUnitLabel(member)}未能抓住反击空隙。`);
       }
       const modifiers = persistentArtifact; const swordAction = choice.type === 'attack'; const unifiedAttack = modifiers.unifyAttack || rules.passive(ruleUnit('member', Number(member.id)), 'G01') ? Math.max(Number(member.physical_attack), Number(member.magic_attack)) : 0; let skillScale = 1; let attack = ((unifiedAttack || Number(member.physical_attack)) + modifiers.physicalAttack) * (1 + modifiers.physicalAttackPct / 100); let power = 1; let kind = '物理'; let damageType = '斩击'; let element = ''; let label = '普通攻击'; let skillId: number | undefined; let skillCode: string | undefined; let skillCategory: 'physical' | 'magic' | 'utility' | 'special' | undefined; let skillTargetScope = '单体';
       if (choice.type === 'skill') {
         const [skills] = await connection.execute<(RowDataPacket & { id: number; code: string; name: string; category: 'physical' | 'magic' | 'utility' | 'special'; damage_type: string; element: string; target_scope: string; mana_cost: number; cooldown_turns: number; cooldown_reduction_per_level: number; power: number; level: number; power_per_level: number })[]>(choice.skillId ? 'SELECT s.id,s.code,s.name,s.tier,s.category,s.damage_type,s.element,s.target_scope,s.mana_cost,s.chant_turns,s.cooldown_turns,s.cooldown_reduction_per_level,s.power,ps.level,s.power_per_level FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.skill_id=?' : 'SELECT s.id,s.code,s.name,s.tier,s.category,s.damage_type,s.element,s.target_scope,s.mana_cost,s.chant_turns,s.cooldown_turns,s.cooldown_reduction_per_level,s.power,ps.level,s.power_per_level FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.quick_slot=?', choice.skillId ? [member.id, Number(choice.skillId)] : [member.id, Number(choice.slot)]);
-        const skill = skills[0]; if (!skill) { log.push(`➤【${member.name}】释放技能\n　➥技能栏为空。`); continue; }
+        const skill = skills[0]; if (!skill) { log.push(`➤${combatUnitLabel(member)}释放技能\n　➥技能栏为空。`); continue; }
         const unit = ruleUnit('member', Number(member.id)); const resident = residentSkillByCode(skill.code);
         const casting = unit.state.cast?.code === skill.code ? unit.state.cast : undefined;
-        if (choice.chantRelease && !casting) { log.push(`➤【${member.name}】的吟唱已被打断，本次行动结束。`); continue; }
+        if (choice.chantRelease && !casting) { log.push(`➤${combatUnitLabel(member)}的吟唱已被打断，本次行动结束。`); continue; }
         if (rules.status(unit, 'silence') && !casting) { log.push('➤【' + member.name + '】处于沉默，无法使用技能。'); continue; }
         if (casting && casting.releaseTurn > Number(session.turn_no)) { log.push('➤【' + member.name + '】继续吟唱「' + skill.name + '」。。。'); continue; }
         const [specializationRows] = await connection.execute<(RowDataPacket & { specialization: string; level: number })[]>('SELECT specialization,level FROM player_skill_specializations WHERE character_id=? AND skill_id=?', [member.id, skill.id]); const specialized = skillSpecialization({ ...skill, tier: String(skill.tier), chant_turns: Number(skill.chant_turns ?? 0) }, Object.fromEntries(specializationRows.map(row => [row.specialization, Number(row.level)])) as SkillSpecializations);
@@ -4466,10 +4466,10 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
         const manaCost = casting ? 0 : transfer || rules.manaCost(unit, Math.ceil(baseManaCost * (hasDebt ? 1.4 : 1)));
         const manaGap = Math.max(0, manaCost - Number(member.current_mp));
         if (manaGap && (transfer > 0 || !modifiers.bloodForMana || Number(member.current_hp) <= manaGap)) { log.push('➤【' + member.name + '】释放技能「' + skill.name + '」\n　➥MP不足。'); continue; }
-        if (skill.code === 'nightblade_silent_finale' && effectValue('target', Number(target.id), 'advanced_hunt') <= 0) { log.push(`➤【${member.name}】释放技能「${skill.name}」\n　➥目标尚未被追猎标定。`); continue; }
-        if (skill.code === 'ranger_hundred_hunt' && effectValue('target', Number(target.id), 'advanced_hunt') <= 0) { log.push(`➤【${member.name}】释放技能「${skill.name}」\n　➥目标尚未被追猎标定。`); continue; }
+        if (skill.code === 'nightblade_silent_finale' && effectValue('target', Number(target.id), 'advanced_hunt') <= 0) { log.push(`➤${combatUnitLabel(member)}释放技能「${skill.name}」\n　➥目标尚未被追猎标定。`); continue; }
+        if (skill.code === 'ranger_hundred_hunt' && effectValue('target', Number(target.id), 'advanced_hunt') <= 0) { log.push(`➤${combatUnitLabel(member)}释放技能「${skill.name}」\n　➥目标尚未被追猎标定。`); continue; }
         const resourceRequirement = advancedResourceRequirementForSkill(skill.code);
-        if (!casting && resourceRequirement && !await spendResource(member, resourceRequirement.amount, skill.name)) { const resource = resourceFor(Number(member.id)); log.push(`➤【${member.name}】释放技能「${skill.name}」\n　➥${resource?.resource_name ?? '专属资源'}不足（需要 ${resourceRequirement.amount}）。`); continue; }
+        if (!casting && resourceRequirement && !await spendResource(member, resourceRequirement.amount, skill.name)) { const resource = resourceFor(Number(member.id)); log.push(`➤${combatUnitLabel(member)}释放技能「${skill.name}」\n　➥${resource?.resource_name ?? '专属资源'}不足（需要 ${resourceRequirement.amount}）。`); continue; }
         member.current_mp = Math.max(0, Number(member.current_mp) - manaCost);
         if (manaGap) { member.current_hp -= manaGap; log.push('&命运代偿&消耗 ' + manaGap + ' HP 补足魔力。'); }
         const cooldowns = jsonObject(member.cooldowns);
@@ -4503,7 +4503,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
         }
         if (skill.code === 'machine_echo') {
           const restored = await restoreCombatDeviceEnergy(connection, session.combat_id, Number(member.id), 25);
-          log.push(`➤【${member.name}】释放技能「万机回响」\n　&万机回响&当前角色 ${restored} 件已生效主动异械各恢复至多 25 点充能；不影响队友或未生效异械。`);
+          log.push(`➤${combatUnitLabel(member)}释放技能「万机回响」\n　&万机回响&当前角色 ${restored} 件已生效主动异械各恢复至多 25 点充能；不影响队友或未生效异械。`);
           continue;
         }
         if (skill.code === 'elementalist_cinderfrost_cycle') { const next = Number(cooldowns.advanced_elementalist_cycle ?? 0) ? 0 : 1; cooldowns.advanced_elementalist_cycle = next; element = next ? '火' : '冰'; }
@@ -4529,14 +4529,14 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
       const spirit = skillCode ? spiritDefinitionBySkill(skillCode) : undefined;
       if (spirit) {
         const result = await summonCombatSpirit(connection, session.combat_id, member, spirit);
-        log.push(`➤【${member.name}】${label}`);
-        log.push(`　&灵契&${result.refreshed ? `重新维系【${spirit.name}】（持续${spirit.duration}回合）` : `【${spirit.name}】回应召唤，灵位 ${result.active}/${result.limit}`}`);
+        log.push(`➤${combatUnitLabel(member)}${label}`);
+        log.push(`　&灵契&${result.refreshed ? `重新维系〖${spirit.name}〗（持续${spirit.duration}回合）` : `〖${spirit.name}〗回应召唤，灵位 ${result.active}/${result.limit}`}`);
         await triggerBulwarkFormation(member);
         continue;
       }
       if (skillCode === 'summoner_contract_spirit' || skillCode === 'summoner_spirit_tether' || skillCode === 'summoner_star_pact') {
         const [spirits] = await connection.execute<CombatSpiritRow[]>('SELECT owner_character_id,spirit_code,spirit_name,current_hp,hp_max,stats_json,remaining_turns FROM combat_spirits WHERE session_id=? AND owner_character_id=? AND current_hp>0 FOR UPDATE', [session.combat_id, member.id]);
-        log.push(`➤【${member.name}】${label}`);
+        log.push(`➤${combatUnitLabel(member)}${label}`);
         if (!spirits.length) {
           const refund = skillCode === 'summoner_contract_spirit' ? 300 : skillCode === 'summoner_spirit_tether' ? 110 : 650;
           member.current_mp = Math.min(Number(member.mp_max), Number(member.current_mp) + refund);
@@ -4559,7 +4559,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
       }
       if (modifiers.prayerHymn && skillCategory === 'utility') { for (const ally of members.filter(item => !item.is_defeated)) await applyArtifactEffect(connection, session.combat_id, 'prayer_hymn', 'member', Number(ally.id), [], false); log.push('#祈祷圣音#受益对象每回合恢复3.0%生命与魔力(3)'); }
       if (skillCode === 'warrior_taunt_player') {
-        log.push(`➤【${member.name}】${label}`);
+        log.push(`➤${combatUnitLabel(member)}${label}`);
         for (const target of targets.filter(item => !item.is_defeated)) {
           const [threatRows] = await connection.execute<(RowDataPacket & { character_id: number; threat: number })[]>('SELECT character_id,threat FROM combat_threat WHERE session_id=? AND spawn_id=? FOR UPDATE', [session.combat_id, target.id]);
           let transferred = 0;
@@ -4578,7 +4578,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
         const allyCooldowns = jsonObject(ally.cooldowns); allyCooldowns.advanced_guard_source = Number(member.id); ally.cooldowns = allyCooldowns;
         await applyAdvancedStatus('member', Number(ally.id), 'advanced_guard', 35, 2, true);
         await applyAdvancedStatus('member', Number(member.id), 'barrier', 20, 2, true);
-        log.push(`➤【${member.name}】${label}\n　#守护#【${ally.name}】获得守护(2)：首次单体伤害的35%将转移给【${member.name}】。\n　#代偿减伤#【${member.name}】获得20%伤害减免(2)。`);
+        log.push(`➤${combatUnitLabel(member)}${label}\n　#守护#${combatUnitLabel(ally)}获得守护(2)：首次单体伤害的35%将转移给${combatUnitLabel(member)}。\n　#代偿减伤#${combatUnitLabel(member)}获得20%伤害减免(2)。`);
         await triggerBulwarkFormation(member);
         continue;
       }
@@ -4586,7 +4586,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
         if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, 'member', member, 'member', 'on_cast', log, 0, 1, rules);
         await applyAdvancedStatus('member', Number(member.id), 'inheritance_control_resist', 20, 2, true);
         const cooldowns = jsonObject(member.cooldowns); cooldowns.advanced_bulwark_mountain = 2; cooldowns.advanced_bulwark_hits = 0; member.cooldowns = cooldowns;
-        log.push(`➤【${member.name}】${label}\n　#不动如山#减伤35%、控制抗性20%(2)。本回合承受3次攻击后，下次行动将自动反击。`);
+        log.push(`➤${combatUnitLabel(member)}${label}\n　#不动如山#减伤35%、控制抗性20%(2)。本回合承受3次攻击后，下次行动将自动反击。`);
         await triggerBulwarkFormation(member);
         continue;
       }
@@ -4599,7 +4599,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
             const oldHp = Number(ally.current_hp); ally.current_hp = Math.min(Number(ally.hp_max), oldHp + await specializedNativeHealing(member, ally, Math.floor(Number(ally.hp_max) * .08)));
           }
         }
-        log.push(`➤【${member.name}】${label}\n　#凯旋战旗#全队伤害+10%、控制抗性+15%(2)${targets.filter(item => !item.is_defeated).length >= 3 ? '，并回复8%最大生命。' : '。'}`);
+        log.push(`➤${combatUnitLabel(member)}${label}\n　#凯旋战旗#全队伤害+10%、控制抗性+15%(2)${targets.filter(item => !item.is_defeated).length >= 3 ? '，并回复8%最大生命。' : '。'}`);
         await triggerBulwarkFormation(member);
         continue;
       }
@@ -4607,7 +4607,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
         const ally = members.find(item => !item.is_defeated && choice.targetKind === 'member' && Number(item.id) === Number(choice.targetId)) ?? [...members].filter(item => !item.is_defeated).sort((left, right) => Number(left.current_hp) / Math.max(1, Number(left.hp_max)) - Number(right.current_hp) / Math.max(1, Number(right.hp_max)))[0] ?? member;
         await applyAdvancedStatus('member', Number(ally.id), 'barrier', 15, 2, true); markAegisBarrier(member, ally, 2);
         await applyAdvancedStatus('member', Number(ally.id), 'inheritance_control_resist', 20, 2, true);
-        log.push(`➤【${member.name}】${label}\n　#守望壁垒#【${ally.name}】获得15%减伤壁垒与20%控制抗性(2)。`);
+        log.push(`➤${combatUnitLabel(member)}${label}\n　#守望壁垒#${combatUnitLabel(ally)}获得15%减伤壁垒与20%控制抗性(2)。`);
         await triggerBulwarkFormation(member);
         continue;
       }
@@ -4616,35 +4616,35 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
         for (const ally of recipients) { await applyAdvancedStatus('member', Number(ally.id), 'barrier', 20, 2, true); markAegisBarrier(member, ally, 2); }
         const warrior = members.find(item => !item.is_defeated && ['bulwark_guard', 'war_lord', 'ironbreaker'].includes(String(resourceFor(Number(item.id))?.profession_code ?? '')));
         if (warrior) await gainResource(warrior, 10, '获得分担圣约支援');
-        log.push(`➤【${member.name}】${label}\n　#分担圣约#生命最低的${recipients.length}名队友获得20%减伤(2)。`);
+        log.push(`➤${combatUnitLabel(member)}${label}\n　#分担圣约#生命最低的${recipients.length}名队友获得20%减伤(2)。`);
         await triggerBulwarkFormation(member);
         continue;
       }
       if (skillCode === 'aegis_undying_dome') {
         for (const ally of members.filter(item => !item.is_defeated)) { await applyAdvancedStatus('member', Number(ally.id), 'barrier', 20, 2, true); markAegisBarrier(member, ally, 2); await applyAdvancedStatus('member', Number(ally.id), 'advanced_undying', 1, 2, true); }
-        log.push(`➤【${member.name}】${label}\n　#不灭穹顶#全队获得20%减伤壁垒(2)，期间各可触发一次濒危不倒。`);
+        log.push(`➤${combatUnitLabel(member)}${label}\n　#不灭穹顶#全队获得20%减伤壁垒(2)，期间各可触发一次濒危不倒。`);
         await triggerBulwarkFormation(member);
         continue;
       }
       if (skillCode === 'saint_healer_resonant_mass') {
-        log.push(`➤【${member.name}】${label}`);
+        log.push(`➤${combatUnitLabel(member)}${label}`);
         for (const ally of members.filter(item => !item.is_defeated)) {
           const oldHp = Number(ally.current_hp); const received = await modifiersFor(connection, Number(ally.id)); const amount = receivedHealingAmount(Math.max(1, Math.floor((Number(member.magic_attack) * .65 + Number(ally.hp_max) * .05) * (1 + modifiers.healingBonusPct / 100))), received.healingReceivedPct); ally.current_hp = Math.min(Number(ally.hp_max), oldHp + await specializedNativeHealing(member, ally, amount));
           await applyAdvancedStatus('member', Number(ally.id), 'regeneration', 6 + modifiers.regenerationBonusPct, 2, true);
           await triggerEpicEffectiveHeal(member, ally, oldHp, oldHp / Math.max(1, Number(ally.hp_max)) < .5);
           if (oldHp / Math.max(1, Number(ally.hp_max)) < .4) await applyAdvancedStatus('member', Number(ally.id), 'advanced_prayer', 1, 3, true);
-          log.push(`　➥【${ally.name}】恢复 ${ally.current_hp - oldHp} HP，并获得${6 + modifiers.regenerationBonusPct}%再生(2)(${oldHp}→${ally.current_hp})`);
+          log.push(`　➥${combatUnitLabel(ally)}恢复 ${ally.current_hp - oldHp} HP，并获得${6 + modifiers.regenerationBonusPct}%再生(2)(${oldHp}→${ally.current_hp})`);
         }
         await triggerBulwarkFormation(member);
         continue;
       }
       if (skillCode === 'saint_healer_revival_sanctuary') {
-        log.push(`➤【${member.name}】${label}`);
+        log.push(`➤${combatUnitLabel(member)}${label}`);
         for (const ally of members.filter(item => !item.is_defeated)) {
           const oldHp = Number(ally.current_hp); ally.current_hp = Math.min(Number(ally.hp_max), oldHp + await specializedNativeHealing(member, ally, Math.floor(Number(ally.hp_max) * .18 * (1 + modifiers.healingBonusPct / 100))));
           if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, 'member', ally, 'member', 'on_cast', [], 0, 1, rules);
           await triggerEpicEffectiveHeal(member, ally, oldHp, oldHp / Math.max(1, Number(ally.hp_max)) < .5);
-          log.push(`　➥【${ally.name}】恢复 ${ally.current_hp - oldHp} HP，并净化1个异常、获得再生(2)。`);
+          log.push(`　➥${combatUnitLabel(ally)}恢复 ${ally.current_hp - oldHp} HP，并净化1个异常、获得再生(2)。`);
         }
         await triggerBulwarkFormation(member);
         continue;
@@ -4654,14 +4654,14 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
           await applyAdvancedStatus('member', Number(ally.id), 'barrier', 10, 1, true); markAegisBarrier(member, ally, 1); await applyAdvancedStatus('member', Number(ally.id), 'regeneration', 5, 1, true);
           const cooldowns = jsonObject(ally.cooldowns); cooldowns.advanced_aegis_echo = 1; ally.cooldowns = cooldowns;
         }
-        log.push(`➤【${member.name}】${label}\n　#光幕回响#全队获得10%减伤壁垒与再生(1)。壁垒首次承伤后回复7%最大生命。`);
+        log.push(`➤${combatUnitLabel(member)}${label}\n　#光幕回响#全队获得10%减伤壁垒与再生(1)。壁垒首次承伤后回复7%最大生命。`);
         await triggerBulwarkFormation(member);
         continue;
       }
       if (skillCode === 'ranger_guiding_smoke') {
         for (const ally of members.filter(item => !item.is_defeated)) { if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, 'member', ally, 'member', 'on_cast', [], 0, 1, rules); await applyAdvancedStatus('member', Number(ally.id), 'alchemy_evasion', 20, 1, true); }
         for (const enemy of targets.filter(item => !item.is_defeated)) await applyAdvancedStatus('target', Number(enemy.id), 'imbalance', 15, 1, true);
-        log.push(`➤【${member.name}】${label}\n　#诱导烟幕#全队闪避+20%、减伤15%(1)，敌方全体命中-15%(1)。`);
+        log.push(`➤${combatUnitLabel(member)}${label}\n　#诱导烟幕#全队闪避+20%、减伤15%(1)，敌方全体命中-15%(1)。`);
         await triggerBulwarkFormation(member);
         continue;
       }
@@ -4671,7 +4671,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
         const healingScale = skillCode === 'healing_prayer' ? 1.35 : skillCode === 'saint_healer_mending_prayer' ? .9 : skillCode === 'saint_healer_absolution_hand' ? .6 : 1;
         const spellbladeSupport = consumeSpellbladeSupport(member);
         const oldHp = Number(ally.current_hp); const hpRatioBeforeHeal = oldHp / Math.max(1, Number(ally.hp_max)); const lowHpForFaith = hpRatioBeforeHeal < .5; const lowHpForSaintInheritance = hpRatioBeforeHeal < .4; const controlBefore = rules.effects(ruleUnit('member', Number(ally.id))).filter(effect => ['stun', 'sleep', 'fear', 'confusion', 'blind', 'silence', 'bind'].includes(effect.code) && canDispelCombatEffect(effect.code, 'ordinary', Boolean(effect.mechanism))).map(effect => effect.code); const flatBonus = skillCode === 'saint_healer_mending_prayer' ? Math.floor(Number(ally.hp_max) * .08) : 0; const amount = Math.max(1, Math.floor((Number(member.magic_attack) * healingScale + flatBonus) * (1 + modifiers.healingBonusPct / 100) * (1 + received.healingReceivedPct / 100) * (1 + spellbladeSupport / 100))); ally.current_hp = Math.min(Number(ally.hp_max), oldHp + await specializedNativeHealing(member, ally, amount));
-        log.push(`➤【${member.name}】${label}`); log.push(`　➥【${ally.name}】恢复 ${ally.current_hp - oldHp} HP(${oldHp}→${ally.current_hp})`);
+        log.push(`➤${combatUnitLabel(member)}${label}`); log.push(`　➥${combatUnitLabel(ally)}恢复 ${ally.current_hp - oldHp} HP(${oldHp}→${ally.current_hp})`);
         if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, 'member', ally, 'member', 'on_cast', log, spellbladeSupport, 1, rules);
         await triggerEpicEffectiveHeal(member, ally, oldHp, hpRatioBeforeHeal < .5);
         if (skillCode === 'saint_healer_absolution_hand' && controlBefore.some(code => !rules.status(ruleUnit('member', Number(ally.id)), code))) { await applyAdvancedStatus('member', Number(ally.id), 'barrier', 10, 1, true); await gainResource(member, 20, '净化控制效果'); }
@@ -4680,13 +4680,13 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
         if (skillCode === 'saint_healer_mending_prayer' || skillCode === 'saint_healer_absolution_hand') for (const dawn of members.filter(item => resourceFor(Number(item.id))?.profession_code === 'dawn_inquisitor')) await gainResource(dawn, 10, '队友获得祷言');
         if (spellbladeSupport) log.push(`&攻势换挡&本次治疗强化 ${spellbladeSupport}%，下一次伤害技能已蓄势。`);
         const saintValue = inheritanceValue(Number(member.id), 'saint_healer');
-        if (lowHpForSaintInheritance && saintValue) { await refreshCombatSpiritEffect(connection, session.combat_id, 'member', Number(ally.id), 'barrier', saintValue, 1); log.push(`&余辉援护&为低血的【${ally.name}】追加 ${saintValue}% 减伤壁垒(1)。`); }
+        if (lowHpForSaintInheritance && saintValue) { await refreshCombatSpiritEffect(connection, session.combat_id, 'member', Number(ally.id), 'barrier', saintValue, 1); log.push(`&余辉援护&为低血的${combatUnitLabel(ally)}追加 ${saintValue}% 减伤壁垒(1)。`); }
         if (ally.current_hp > oldHp) await rewardSummonerSupport('队友获得治疗');
         await triggerBulwarkFormation(member);
         continue;
       }
       if (skillCode === 'blessing_aegis') {
-        log.push(`➤【${member.name}】${label}`);
+        log.push(`➤${combatUnitLabel(member)}${label}`);
         const spellbladeSupport = consumeSpellbladeSupport(member);
         for (const ally of members.filter(item => !item.is_defeated)) {
           if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, 'member', ally, 'member', 'on_cast', [], spellbladeSupport, 1, rules);
@@ -4697,7 +4697,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
         continue;
       }
       if (skillCode === 'mana_benediction') {
-        log.push(`➤【${member.name}】${label}`);
+        log.push(`➤${combatUnitLabel(member)}${label}`);
         const spellbladeSupport = consumeSpellbladeSupport(member);
         for (const ally of members.filter(item => !item.is_defeated)) if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, 'member', ally, 'member', 'on_cast', [], spellbladeSupport, 1, rules);
         log.push(`#回流#全队每回合恢复${(5 * (1 + spellbladeSupport / 100)).toFixed(1)}%魔力(3)${spellbladeSupport ? `｜攻势换挡使增益提高${spellbladeSupport}%` : ''}`);
@@ -4705,7 +4705,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
         continue;
       }
       if (skillCode === 'war_cry') {
-        log.push(`➤【${member.name}】${label}`);
+        log.push(`➤${combatUnitLabel(member)}${label}`);
         const spellbladeSupport = consumeSpellbladeSupport(member);
         for (const ally of members.filter(item => !item.is_defeated)) if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, 'member', ally, 'member', 'on_cast', [], spellbladeSupport, 1, rules);
         log.push(`#战吼#全队物攻、魔攻提高${(10 * (1 + spellbladeSupport / 100)).toFixed(1)}%(2)${spellbladeSupport ? `｜攻势换挡使增益提高${spellbladeSupport}%` : ''}`);
@@ -4713,7 +4713,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
         continue;
       }
       if (skillCategory === 'utility') {
-        log.push(`➤【${member.name}】${label}`);
+        log.push(`➤${combatUnitLabel(member)}${label}`);
         const recipients = skillTargetScope === '全体' ? members.filter(ally => !ally.is_defeated) : skillTargetScope === '自身' ? [member] : [members.find(ally => !ally.is_defeated && choice.targetKind === 'member' && Number(ally.id) === Number(choice.targetId)) ?? member];
         const spellbladeSupport = consumeSpellbladeSupport(member);
         for (const [index, ally] of recipients.entries()) if (skillId) await applySkillEffects(connection, session.combat_id, skillId, member, 'member', ally, 'member', 'on_cast', index === 0 ? log : [], spellbladeSupport, 1, rules);
@@ -4724,7 +4724,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
           const taunt = Number(member.physical_defense) + Number(member.magic_defense);
           await connection.execute('UPDATE combat_threat SET threat=threat+? WHERE session_id=? AND character_id=?', [taunt, session.combat_id, member.id]);
           if (hasInheritance(Number(member.id), 'bulwark_guard')) { const cooldowns = jsonObject(member.cooldowns); cooldowns.heritage_round_taunt = 1; member.cooldowns = cooldowns; await gainResource(member, 20, '使用嘲讽'); }
-          log.push(`　$挑衅$全体怪物对【${member.name}】的仇恨提高 ${taunt}`);
+          log.push(`　$挑衅$全体怪物对${combatUnitLabel(member)}的仇恨提高 ${taunt}`);
         }
         if (skillCode === 'spellblade_phase_guard') {
           const cooldowns = jsonObject(member.cooldowns); cooldowns.advanced_phase_guard = 1; member.cooldowns = cooldowns;
@@ -4760,7 +4760,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
       const affectedTargets = skillTargetScope === '全体' ? targets.filter(item => !item.is_defeated) : [target]; const surge = effectValue('member', Number(member.id), 'demon_surge'); const mistVeil = effectValue('member', Number(member.id), 'mist_veil'); const shadowPierce = effectValue('member', Number(member.id), 'shadow_pierce'); const battleCry = effectValue('member', Number(member.id), 'battle_cry'); const imbalance = effectValue('member', Number(member.id), 'imbalance'); const precision = effectValue('member', Number(member.id), 'precision'); const criticalFocus = effectValue('member', Number(member.id), 'critical_focus'); const physicalAttack = kind === '物理';
       let elementalistRestored = false; let elementalistMarkResourceGained = false; let warlordMarked = false; let spellbladeDamageSpent = false;
       let ironbreakerTriggered = false; let venomancerTriggered = false; let rangerTriggered = false;
-      log.push(`➤【${member.name}】${label}`); if (nextActionEffects.length) await connection.execute(`DELETE FROM combat_status_effects WHERE id IN (${nextActionEffects.map(() => '?').join(',')})`, nextActionEffects.map(effect => effect.id));
+      log.push(`➤${combatUnitLabel(member)}${label}`); if (nextActionEffects.length) await connection.execute(`DELETE FROM combat_status_effects WHERE id IN (${nextActionEffects.map(() => '?').join(',')})`, nextActionEffects.map(effect => effect.id));
       for (const struckTarget of affectedTargets) {
         const targetCooldowns = jsonObject(struckTarget.cooldowns); const markedWarlords = Object.keys(targetCooldowns).filter(key => key.startsWith('heritage_round_warlord_')).map(key => Number(key.slice('heritage_round_warlord_'.length))).filter(ownerId => ownerId !== Number(member.id));
         const hadArmorBefore = effectValue('target', Number(struckTarget.id), 'armor_shatter') > 0;
@@ -4860,7 +4860,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
           const ally = members.filter(item => !item.is_defeated && Number(item.id) !== Number(member.id)).sort((left, right) => Number(right.speed) - Number(left.speed) || Number(left.id) - Number(right.id))[0];
           if (ally) {
             const monster = monsterCombatStatsForPlayer(struckTarget, Number(ally.level)); const cooperation = resolveStrike(Number(ally.physical_attack) * .7, monster.physicalDefense, Number(ally.accuracy), monster.evasion, 0, monster.critResist, Number(ally.crit_damage_bp), monster.critReduction, false, false);
-            if (cooperation.hit) { const oldHp = Number(struckTarget.current_hp); const followUp = directDamageVariance(Math.max(1, cooperation.damage)); const shield = await absorbRuleShield(connection, session.combat_id, 'target', Number(struckTarget.id), Number(struckTarget.hp_max), followUp); const hpDamage = followUp - shield.absorbed; struckTarget.current_hp = Math.max(0, oldHp - hpDamage); if (!struckTarget.current_hp) struckTarget.is_defeated = 1; log.push(`　&协同追击&【${ally.name}】追加 ${followUp} 点基础物理伤害${lifeShieldAbsorptionText(shield)}(${oldHp}→${struckTarget.current_hp})。`); }
+            if (cooperation.hit) { const oldHp = Number(struckTarget.current_hp); const followUp = directDamageVariance(Math.max(1, cooperation.damage)); const shield = await absorbRuleShield(connection, session.combat_id, 'target', Number(struckTarget.id), Number(struckTarget.hp_max), followUp); const hpDamage = followUp - shield.absorbed; struckTarget.current_hp = Math.max(0, oldHp - hpDamage); if (!struckTarget.current_hp) struckTarget.is_defeated = 1; log.push(`　&协同追击&${combatUnitLabel(ally)}追加 ${followUp} 点基础物理伤害${lifeShieldAbsorptionText(shield)}(${oldHp}→${struckTarget.current_hp})。`); }
           }
         }
         if (skillCode === 'nightblade_silent_finale' && struckTarget.is_defeated) { member.current_mp = Math.min(Number(member.mp_max), Number(member.current_mp) + 50); log.push('　&无声终章&完成斩杀，返还 50 MP。'); }
@@ -4907,7 +4907,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
           const cooldowns = jsonObject(member.cooldowns); cooldowns.epic_mist_tide_stacks = 0; member.cooldowns = cooldowns;
           if (!struckTarget.is_defeated) { const echo = Math.max(1, Math.floor(damage * .35)); const oldHp = Number(struckTarget.current_hp); const shield = await absorbRuleShield(connection, session.combat_id, 'target', Number(struckTarget.id), Number(struckTarget.hp_max), echo); const hpDamage = echo - shield.absorbed; struckTarget.current_hp = Math.max(0, oldHp - hpDamage); if (!struckTarget.current_hp) struckTarget.is_defeated = 1; log.push(`&三首潮汐&魔法潮汐回响造成${echo}点伤害${lifeShieldAbsorptionText(shield)}(${oldHp}→${struckTarget.current_hp})。`); }
         } else if (isSkillDirect && skillCategory === 'magic' && epicSetActive(member, 'mistmother_cocoon', 5)) {
-          const cooldowns = jsonObject(member.cooldowns); const stacks = Math.min(3, Number(cooldowns.epic_mist_tide_stacks ?? 0) + 1); cooldowns.epic_mist_tide_stacks = stacks; member.cooldowns = cooldowns; log.push(`&三首潮汐&【${member.name}】获得潮汐${stacks}/3。`);
+          const cooldowns = jsonObject(member.cooldowns); const stacks = Math.min(3, Number(cooldowns.epic_mist_tide_stacks ?? 0) + 1); cooldowns.epic_mist_tide_stacks = stacks; member.cooldowns = cooldowns; log.push(`&三首潮汐&${combatUnitLabel(member)}获得潮汐${stacks}/3。`);
         }
         if (skillCode === 'venomancer_corrosion_mist' && effectValue('target', Number(struckTarget.id), 'poison') > 0) {
           await addCorrosionPoisonStack(effectCaster, struckTarget);
@@ -5067,7 +5067,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
       if (effectValue('target', Number(monsterTarget.id), 'advanced_taunt') > 0) {
         const tauntSourceId = Number(jsonObject(monsterTarget.cooldowns).advanced_taunt_source ?? 0);
         const tauntSource = members.find(member => !member.is_defeated && Number(member.id) === tauntSourceId);
-        if (tauntSource) { victim = tauntSource; log.push(`$盾墙嘲讽$【${targetName(monsterTarget)}】被迫锁定【${victim.name}】。`); }
+        if (tauntSource) { victim = tauntSource; log.push(`$盾墙嘲讽$【${targetName(monsterTarget)}】被迫锁定${combatUnitLabel(victim)}。`); }
       }
       const [templateRows] = await connection.execute<(RowDataPacket & { code: string })[]>('SELECT code FROM monster_templates WHERE id=?', [Number(monsterTarget.template_id)]); const templateCode = templateRows[0]?.code ?? ''; const isWolfKing = templateCode === 'shadow_wolf_king'; const isScholarGa = templateCode === 'scholar_ga'; const isDungeonBoss = ['black_slime', 'skeleton_general', 'death_knight', 'necromancer_uz'].includes(templateCode); const isGoblinColonel = templateCode === 'goblin_colonel'; const isBoss = monsterTarget.monster_class === 'boss'; const isKingbeast = isKingbeastCore(monsterTarget); const fusedKingbeast = isKingbeast && kingbeastFused();
       if (isBossComponent(monsterTarget)) {
@@ -5078,10 +5078,10 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
         const componentCooldowns = jsonObject(monsterTarget.cooldowns); const bodyCooldowns = jsonObject(body.cooldowns); const turnNo = Number(session.turn_no);
         const componentHit = async (target: CombatMemberRow, scale: number, label: string) => {
           const stats = monsterCombatStatsForPlayer(monsterTarget, Number(target.level)); const strike = resolveStrike(Math.max(1, stats.physicalAttack * scale), Number(target.physical_defense), stats.accuracy, Number(target.evasion), 0, Number(target.crit_resist_bp), stats.critDamage, Number(target.crit_damage_reduction_bp), false, false);
-          if (!strike.hit) { log.push(`　➥【${target.name}】闪避了${label}`); return false; }
+          if (!strike.hit) { log.push(`　➥${combatUnitLabel(target)}闪避了${label}`); return false; }
           const barrier = effectValue('member', Number(target.id), 'barrier'); const dealt = directDamageVariance(Math.max(1, Math.floor(strike.damage * (1 - Math.min(80, barrier) / 100)))); const oldHp = Number(target.current_hp); const shield = await absorbRuleShield(connection, session.combat_id, 'member', Number(target.id), Number(target.hp_max), dealt); const hpDamage = dealt - shield.absorbed;
           target.current_hp = Math.max(0, oldHp - hpDamage); if (!target.current_hp) target.is_defeated = 1;
-          log.push(`　➥${label}对【${target.name}】造成 ${dealt} 点物理伤害${lifeShieldAbsorptionText(shield)}(${oldHp}→${target.current_hp})`); return true;
+          log.push(`　➥${label}对${combatUnitLabel(target)}造成 ${dealt} 点物理伤害${lifeShieldAbsorptionText(shield)}(${oldHp}→${target.current_hp})`); return true;
         };
         if (definition.key === 'gruen_armor' && turnNo - Number(componentCooldowns.boss_component_last_active_turn ?? 0) >= 3 && !Number(bodyCooldowns.boss_component_gruen_armor_guard ?? 0)) {
           componentCooldowns.boss_component_last_active_turn = turnNo; bodyCooldowns.boss_component_gruen_armor_guard = 2;
@@ -5554,7 +5554,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
       };
       const preserveAdvancedUndying = async (recipient: CombatMemberRow) => {
         if (!recipient.is_defeated || effectValue('member', Number(recipient.id), 'advanced_undying') <= 0) return false;
-        recipient.current_hp = 1; recipient.is_defeated = 0; await removeAdvancedStatus('member', Number(recipient.id), ['advanced_undying']); log.push(`&濒危不倒&【${recipient.name}】被不灭穹顶托住，生命保留为1。`); return true;
+        recipient.current_hp = 1; recipient.is_defeated = 0; await removeAdvancedStatus('member', Number(recipient.id), ['advanced_undying']); log.push(`&濒危不倒&${combatUnitLabel(recipient)}被不灭穹顶托住，生命保留为1。`); return true;
       };
       const rewardDefensiveResource = async (recipient: CombatMemberRow, counterActive: boolean, primaryTarget: boolean) => {
         if (resourceFor(Number(recipient.id))?.profession_code === 'bulwark_guard' && primaryTarget) await gainResource(recipient, 20, '成为敌方主目标');
@@ -5566,13 +5566,13 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
         const priest = sourceId ? members.find(member => Number(member.id) === sourceId && resourceFor(Number(member.id))?.profession_code === 'aegis_priest') : undefined;
         if (!priest || cooldowns.advanced_aegis_barrier_faith) return;
         cooldowns.advanced_aegis_barrier_faith = 1; recipient.cooldowns = cooldowns;
-        await gainResource(priest, 10, `【${recipient.name}】的壁垒承伤`);
+        await gainResource(priest, 10, `${combatUnitLabel(recipient)}的壁垒承伤`);
       };
       const afterAdvancedDamage = async (recipient: CombatMemberRow, rawDamage: number, barrier: number, counterActive: boolean, primaryTarget: boolean, split: Awaited<ReturnType<typeof splitAdvancedGuard>>) => {
         if (split.guardian) {
           await preserveAdvancedUndying(split.guardian);
           await rewardAegisBarrierFaith(split.guardian, effectValue('member', Number(split.guardian.id), 'barrier'), split.transferredRaw);
-          log.push(`　&守护分担&【${split.guardian.name}】承受 ${split.transferred} 点转移伤害${split.guardianShield ? lifeShieldAbsorptionText(split.guardianShield) : ''}(${split.guardianHpBefore}→${split.guardian.current_hp})。`);
+          log.push(`　&守护分担&${combatUnitLabel(split.guardian)}承受 ${split.transferred} 点转移伤害${split.guardianShield ? lifeShieldAbsorptionText(split.guardianShield) : ''}(${split.guardianHpBefore}→${split.guardian.current_hp})。`);
           await removeAdvancedStatus('member', Number(recipient.id), ['advanced_guard']);
           const recipientCooldowns = jsonObject(recipient.cooldowns); delete recipientCooldowns.advanced_guard_source; recipient.cooldowns = recipientCooldowns;
           effects = await activeCombatEffects(connection, session.combat_id);
@@ -5583,11 +5583,11 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
         const cooldowns = jsonObject(recipient.cooldowns);
         if (barrier > 0 && cooldowns.advanced_aegis_echo && rawDamage > 0) {
           const oldHp = Number(recipient.current_hp); const restored = Math.max(1, Math.floor(Number(recipient.hp_max) * .07)); recipient.current_hp = Math.min(Number(recipient.hp_max), oldHp + restored); delete cooldowns.advanced_aegis_echo; recipient.cooldowns = cooldowns;
-          if (recipient.current_hp > oldHp) log.push(`　&光幕回响&【${recipient.name}】的壁垒碎光回流，恢复 ${recipient.current_hp - oldHp} HP(${oldHp}→${recipient.current_hp})。`);
+          if (recipient.current_hp > oldHp) log.push(`　&光幕回响&${combatUnitLabel(recipient)}的壁垒碎光回流，恢复 ${recipient.current_hp - oldHp} HP(${oldHp}→${recipient.current_hp})。`);
         }
         if (primaryTarget && rawDamage > 0 && cooldowns.advanced_bulwark_mountain && !recipient.is_defeated) {
           const hits = Number(cooldowns.advanced_bulwark_hits ?? 0) + 1; cooldowns.advanced_bulwark_hits = hits;
-          if (hits >= 3) { cooldowns.advanced_bulwark_mountain = 0; cooldowns.advanced_bulwark_hits = 0; await applyAdvancedStatus('member', Number(recipient.id), 'advanced_counter_ready', 90, 1); log.push(`　&不动如山&【${recipient.name}】扛住三次攻击，反击架势已就绪。`); }
+          if (hits >= 3) { cooldowns.advanced_bulwark_mountain = 0; cooldowns.advanced_bulwark_hits = 0; await applyAdvancedStatus('member', Number(recipient.id), 'advanced_counter_ready', 90, 1); log.push(`　&不动如山&${combatUnitLabel(recipient)}扛住三次攻击，反击架势已就绪。`); }
           recipient.cooldowns = cooldowns;
         }
       };
@@ -5599,11 +5599,13 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
       const [humanThreat] = await connection.execute<RowDataPacket[]>('SELECT COALESCE(SUM(threat),0) total FROM combat_threat WHERE session_id=? AND spawn_id=?', [session.combat_id, monsterTarget.id]);
       const petThreat = livingAutomatons.reduce((sum, pet) => sum + Math.max(1, pet.battle.threat[`target:${monsterTarget.id}`] ?? 1), 0);
       const areaAttack = skill?.target_scope === '全体';
-      const choosePet = !areaAttack && livingAutomatons.length > 0 && Math.random() < petThreat / Math.max(1, petThreat + Number(humanThreat[0]?.total ?? 1));
-      const petVictims = areaAttack ? livingAutomatons : choosePet ? [livingAutomatons[Math.floor(Math.random() * livingAutomatons.length)]!] : [];
+      const choosePet = !areaAttack && livingAutomatons.length > 0 && Math.random() < petThreat / Math.max(1, petThreat + Math.max(members.filter(m=>!m.is_defeated).length,Number(humanThreat[0]?.total ?? 0)));
+      let petRoll=Math.random()*petThreat;const chosenPet=livingAutomatons.find(p=>{petRoll-=Math.max(1,p.battle.threat[`target:${monsterTarget.id}`]??1);return petRoll<0;});
+      const petVictims = areaAttack ? livingAutomatons : choosePet&&chosenPet ? [chosenPet] : [];
       for (const pet of petVictims) {
         const attacker = ruleUnit('target', Number(monsterTarget.id));
-        if (skill?.category !== 'utility') await rules.strike(attacker, pet.unit, multiplier * 100, String(skill?.element ?? '无'), skill?.category === 'magic', false, false, 1, { skill: Boolean(skill), single: !areaAttack });
+        if(skill)await applyEnemySkillToAutomaton(connection,rules,attacker,pet.unit,Number(skill.id),'on_cast',choosePet);
+        if (skill?.category !== 'utility')for(let hit=0;hit<(pounce?3:1)&&pet.unit.hp>0;hit++){const landed=await rules.strike(attacker, pet.unit, multiplier * 100, String(skill?.element ?? '无'), skill?.category === 'magic', false, false, 1, { skill: Boolean(skill), single: !areaAttack });if(landed&&skill)await applyEnemySkillToAutomaton(connection,rules,attacker,pet.unit,Number(skill.id),'on_hit',choosePet);}
       }
       if (choosePet) continue;
       const spiritVictim = !spiritTargets.length || skill?.target_scope === '全体' || Math.random() >= .28 ? undefined : spiritTargets[random(0, spiritTargets.length - 1)];
@@ -5611,12 +5613,12 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
         const spiritStats = storedSpiritStats(spiritVictim); const pressuredMonster = monsterCombatStatsForPlayer(monsterTarget, lowestAliveMemberLevel);
         const spiritDefense = skill?.category === 'magic' ? spiritStats.magicDefense : spiritStats.physicalDefense;
         const strike = resolveStrike(monsterAttack * multiplier * (1 + curse / 400) * (1 + battleCry / 100), spiritDefense * (1 - curse / 400), pressuredMonster.accuracy, spiritStats.evasion, pressuredMonster.crit, spiritStats.crit, pressuredMonster.critDamage, spiritStats.crit, false, fang || shadowPierce > 0);
-        if (!strike.hit) log.push(`　➥【${spiritVictim.spirit_name}】闪避了攻击`);
+        if (!strike.hit) log.push(`　➥〖${spiritVictim.spirit_name}〗闪避了攻击`);
         else {
           const oldHp = Number(spiritVictim.current_hp); const dealt = directDamageVariance(Math.max(1, strike.damage)); const currentHp = Math.max(0, oldHp - dealt);
           await connection.execute('UPDATE combat_spirits SET current_hp=? WHERE session_id=? AND owner_character_id=? AND spirit_code=?', [currentHp, session.combat_id, spiritVictim.owner_character_id, spiritVictim.spirit_code]);
-          log.push(`　➥对【${spiritVictim.spirit_name}】造成 ${dealt} 点${skill?.category === 'magic' ? '魔法' : '物理'}伤害(${oldHp}→${currentHp})`);
-          if (!currentHp) { await connection.execute('DELETE FROM combat_spirits WHERE session_id=? AND owner_character_id=? AND spirit_code=?', [session.combat_id, spiritVictim.owner_character_id, spiritVictim.spirit_code]); log.push(`　&灵兽退场&【${spiritVictim.spirit_name}】灵力耗尽，退回灵契。`); }
+          log.push(`　➥对〖${spiritVictim.spirit_name}〗造成 ${dealt} 点${skill?.category === 'magic' ? '魔法' : '物理'}伤害(${oldHp}→${currentHp})`);
+          if (!currentHp) { await connection.execute('DELETE FROM combat_spirits WHERE session_id=? AND owner_character_id=? AND spirit_code=?', [session.combat_id, spiritVictim.owner_character_id, spiritVictim.spirit_code]); log.push(`　&灵兽退场&〖${spiritVictim.spirit_name}〗灵力耗尽，退回灵契。`); }
         }
         continue;
       }
@@ -5628,16 +5630,16 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
       if (pounce) {
         for (let index = 0; index < 3 && !victim.is_defeated; index += 1) {
           await consumePrecisionAim(victim);
-          if ((skill?.category ?? 'physical') !== 'magic' && effectValue('member', Number(victim.id), 'device_physical_evade') > 0) { await removeAdvancedStatus('member', Number(victim.id), ['device_physical_evade']); log.push(`　#物理闪避#【${victim.name}】避开了这次物理攻击。`); continue; }
+          if ((skill?.category ?? 'physical') !== 'magic' && effectValue('member', Number(victim.id), 'device_physical_evade') > 0) { await removeAdvancedStatus('member', Number(victim.id), ['device_physical_evade']); log.push(`　#物理闪避#${combatUnitLabel(victim)}避开了这次物理攻击。`); continue; }
           const strike = await resolveMonsterStrike(victim);
-          if (!strike.hit) { const cooldowns = jsonObject(victim.cooldowns); if (cooldowns.advanced_phase_guard) { delete cooldowns.advanced_phase_guard; victim.cooldowns = cooldowns; await gainResource(victim, 30, '相位格挡成功闪避'); } log.push(`　➥【${victim.name}】闪避了攻击`); continue; }
+          if (!strike.hit) { const cooldowns = jsonObject(victim.cooldowns); if (cooldowns.advanced_phase_guard) { delete cooldowns.advanced_phase_guard; victim.cooldowns = cooldowns; await gainResource(victim, 30, '相位格挡成功闪避'); } log.push(`　➥${combatUnitLabel(victim)}闪避了攻击`); continue; }
           const barrier = effectValue('member', Number(victim.id), 'barrier'); const guard = effectValue('member', Number(victim.id), 'shield_guard'); const exposed = effectValue('member', Number(victim.id), 'exposed'); const phaseDecoy = effectValue('member', Number(victim.id), 'phase_decoy'); const elemental = elementalMultiplier(monsterTarget.element_mastery_json, victim.element_resistance_json, String(skill?.element ?? '')); const weatherElement = weatherElementMultiplier(String(skill?.element ?? '')); const artifactReduction = skill?.category === 'magic' ? victimModifiers.magicDamageReductionPct : victimModifiers.physicalDamageReductionPct; const damageReduction = Math.min(90, artifactReduction + victimModifiers.damageReductionPct + epicIncomingSkillReduction(victim)); const timeGuarded = effectValue('member', Number(victim.id), 'time_guard') > 0; const counter = await shieldCounterDamage(victim, strike.damage); const damage = timeGuarded ? 0 : directDamageVariance(Math.max(1, Math.floor(strike.damage * elemental * weatherElement * (1 + exposed / 100) * (1 - phaseDecoy / 100) * (1 - counter.damageReductionPct / 100) * (1 - Math.min(80, barrier) / 100) * (1 - Math.min(90, guard) / 100) * (1 - damageReduction / 100))));
           const split = await splitAdvancedGuard(victim, await rules.incoming(ruleUnit('target', Number(monsterTarget.id)), ruleUnit('member', Number(victim.id)), damage, String(skill?.element ?? '无'), skill?.category === 'magic', Boolean(skill), true, true), true); const dealt = split.recipientDamage; const oldHp = Number(victim.current_hp); const shield = await ruleTakeDamage('member', Number(victim.id), dealt); const hpDamage = dealt - shield.absorbed;
           await rules.afterHit(ruleUnit('target', Number(monsterTarget.id)), ruleUnit('member', Number(victim.id)), hpDamage, String(skill?.element ?? '无'), Boolean(skill), shield.absorbed);
           if (phaseDecoy > 0) { await removeAdvancedStatus('member', Number(victim.id), ['phase_decoy']); log.push(`　#相位诱饵#本次直接伤害降低${phaseDecoy}%。`); }
           const furnaceCooldowns = jsonObject(victim.cooldowns); if (shield.broken && Number(furnaceCooldowns.epic_valk_furnace_shield_until ?? 0) >= Number(session.turn_no)) { const relief = Math.floor(hpDamage * .20); if (relief) { victim.current_hp = Math.min(oldHp, Number(victim.current_hp) + relief); victim.is_defeated = victim.current_hp > 0 ? 0 : victim.is_defeated; log.push(`&余烬急锻&炉壁破裂，剩余伤害降低${relief}点；下次技能直击+8%。`); } furnaceCooldowns.epic_valk_furnace_shield_until = 0; furnaceCooldowns.epic_valk_emergency_forge_until = Number(session.turn_no) + 1; victim.cooldowns = furnaceCooldowns; }
           await afterAdvancedDamage(victim, damage, barrier, counter.active, true, split); const timeSaved = await rescueWithTimeGuard(connection, session.combat_id, victim, victimModifiers.timeGuard, log);
-          log.push(`　➥${affinityTag(1, elemental)}${strike.crit ? '[暴击!]' : ''}对【${victim.name}】造成 ${dealt} 点${skill?.category === 'magic' ? '魔法' : '物理'}伤害${lifeShieldAbsorptionText(shield)}(${oldHp}→${victim.current_hp})`);
+          log.push(`　➥${affinityTag(1, elemental)}${strike.crit ? '[暴击!]' : ''}对${combatUnitLabel(victim)}造成 ${dealt} 点${skill?.category === 'magic' ? '魔法' : '物理'}伤害${lifeShieldAbsorptionText(shield)}(${oldHp}→${victim.current_hp})`);
           if (counter.active) log.push(`　${shieldCounterLog(counter)}`);
           await triggerAegisEcho(victim, barrier > 0 || guard > 0 || counter.active);
           await triggerSummonerShelter(victim);
@@ -5651,13 +5653,13 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
       const affected = skill?.target_scope === '全体' ? members.filter(member => !member.is_defeated) : [victim];
       await consumePrecisionAim(victim);
       const strike = await resolveMonsterStrike(victim);
-      if (!strike.hit && affected.length === 1) { const cooldowns = jsonObject(victim.cooldowns); if (cooldowns.advanced_phase_guard) { delete cooldowns.advanced_phase_guard; victim.cooldowns = cooldowns; await gainResource(victim, 30, '相位格挡成功闪避'); } log.push(`　➥【${victim.name}】闪避了攻击`); continue; }
+      if (!strike.hit && affected.length === 1) { const cooldowns = jsonObject(victim.cooldowns); if (cooldowns.advanced_phase_guard) { delete cooldowns.advanced_phase_guard; victim.cooldowns = cooldowns; await gainResource(victim, 30, '相位格挡成功闪避'); } log.push(`　➥${combatUnitLabel(victim)}闪避了攻击`); continue; }
       for (const affectedVictim of affected) {
         const affectedModifiers = Number(affectedVictim.id) === Number(victim.id) ? victimModifiers : await modifiersFor(connection, Number(affectedVictim.id));
         await consumePrecisionAim(affectedVictim);
-        if ((skill?.category ?? 'physical') !== 'magic' && effectValue('member', Number(affectedVictim.id), 'device_physical_evade') > 0) { await removeAdvancedStatus('member', Number(affectedVictim.id), ['device_physical_evade']); log.push(`　#物理闪避#【${affectedVictim.name}】避开了这次物理攻击。`); continue; }
+        if ((skill?.category ?? 'physical') !== 'magic' && effectValue('member', Number(affectedVictim.id), 'device_physical_evade') > 0) { await removeAdvancedStatus('member', Number(affectedVictim.id), ['device_physical_evade']); log.push(`　#物理闪避#${combatUnitLabel(affectedVictim)}避开了这次物理攻击。`); continue; }
         const affectedStrike = Number(affectedVictim.id) === Number(victim.id) ? strike : await resolveMonsterStrike(affectedVictim);
-        if (!affectedStrike.hit) { const cooldowns = jsonObject(affectedVictim.cooldowns); if (cooldowns.advanced_phase_guard) { delete cooldowns.advanced_phase_guard; affectedVictim.cooldowns = cooldowns; await gainResource(affectedVictim, 30, '相位格挡成功闪避'); } log.push(`　➥【${affectedVictim.name}】闪避了攻击`); continue; }
+        if (!affectedStrike.hit) { const cooldowns = jsonObject(affectedVictim.cooldowns); if (cooldowns.advanced_phase_guard) { delete cooldowns.advanced_phase_guard; affectedVictim.cooldowns = cooldowns; await gainResource(affectedVictim, 30, '相位格挡成功闪避'); } log.push(`　➥${combatUnitLabel(affectedVictim)}闪避了攻击`); continue; }
         const elemental = elementalMultiplier(monsterTarget.element_mastery_json, affectedVictim.element_resistance_json, String(skill?.element ?? ''));
         const barrier = effectValue('member', Number(affectedVictim.id), 'barrier'); const guard = effectValue('member', Number(affectedVictim.id), 'shield_guard'); const artifactReduction = skill?.category === 'magic' ? affectedModifiers.magicDamageReductionPct : affectedModifiers.physicalDamageReductionPct; const damageReduction = Math.min(90, artifactReduction + affectedModifiers.damageReductionPct + epicIncomingSkillReduction(affectedVictim));
         const exposed = effectValue('member', Number(affectedVictim.id), 'exposed'); const phaseDecoy = effectValue('member', Number(affectedVictim.id), 'phase_decoy'); const oldHp = Number(affectedVictim.current_hp); const counter = await shieldCounterDamage(affectedVictim, affectedStrike.damage); const dealt = effectValue('member', Number(affectedVictim.id), 'time_guard') > 0 ? 0 : directDamageVariance(Math.max(1, Math.floor(affectedStrike.damage * elemental * weatherElementMultiplier(String(skill?.element ?? '')) * (1 + exposed / 100) * (1 - phaseDecoy / 100) * (1 - counter.damageReductionPct / 100) * (1 - Math.min(80, barrier) / 100) * (1 - Math.min(90, guard) / 100) * (1 - damageReduction / 100))));
@@ -5667,7 +5669,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
         const furnaceCooldowns = jsonObject(affectedVictim.cooldowns); if (shield.broken && Number(furnaceCooldowns.epic_valk_furnace_shield_until ?? 0) >= Number(session.turn_no)) { const relief = Math.floor(hpDamage * .20); if (relief) { affectedVictim.current_hp = Math.min(oldHp, Number(affectedVictim.current_hp) + relief); affectedVictim.is_defeated = affectedVictim.current_hp > 0 ? 0 : affectedVictim.is_defeated; log.push(`&余烬急锻&炉壁破裂，剩余伤害降低${relief}点；下次技能直击+8%。`); } furnaceCooldowns.epic_valk_furnace_shield_until = 0; furnaceCooldowns.epic_valk_emergency_forge_until = Number(session.turn_no) + 1; affectedVictim.cooldowns = furnaceCooldowns; }
         await afterAdvancedDamage(affectedVictim, dealt, barrier, counter.active, affected.length === 1, split); await rescueWithTimeGuard(connection, session.combat_id, affectedVictim, affectedModifiers.timeGuard, log);
         await triggerInverseBuffer(affectedVictim);
-        log.push(`　➥${affinityTag(1, elemental)}${affectedStrike.crit || fang ? '[暴击!]' : ''}对【${affectedVictim.name}】造成 ${finalDealt} 点${skill?.category === 'magic' ? '魔法' : '物理'}伤害${lifeShieldAbsorptionText(shield)}(${oldHp}→${affectedVictim.current_hp})`);
+        log.push(`　➥${affinityTag(1, elemental)}${affectedStrike.crit || fang ? '[暴击!]' : ''}对${combatUnitLabel(affectedVictim)}造成 ${finalDealt} 点${skill?.category === 'magic' ? '魔法' : '物理'}伤害${lifeShieldAbsorptionText(shield)}(${oldHp}→${affectedVictim.current_hp})`);
         if (counter.active) log.push(`　${shieldCounterLog(counter)}`);
         await triggerAegisEcho(affectedVictim, barrier > 0 || guard > 0 || counter.active);
         await triggerSummonerShelter(affectedVictim);
@@ -5677,23 +5679,23 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
           const targetCooldowns = jsonObject(affectedVictim.cooldowns); const until = Number(session.turn_no) + 2;
           if (skill.code === 'gruen_fault_sunder') {
             targetCooldowns.regional_gruen_fault_until = until;
-            log.push(`　$断层裂隙$【${affectedVictim.name}】的裂隙持续至第${until}回合，下一次岩震将更为沉重。`);
+            log.push(`　$断层裂隙$${combatUnitLabel(affectedVictim)}的裂隙持续至第${until}回合，下一次岩震将更为沉重。`);
           } else if (skill.code === 'gruen_riftfall' || skill.code === 'gruen_corequake') {
             if (Number(targetCooldowns.regional_gruen_fault_until ?? 0) >= Number(session.turn_no)) {
               delete targetCooldowns.regional_gruen_fault_until;
-              log.push(`　$裂隙引爆$【${affectedVictim.name}】承受了被放大的岩震。`);
+              log.push(`　$裂隙引爆$${combatUnitLabel(affectedVictim)}承受了被放大的岩震。`);
             }
             if (skill.code === 'gruen_riftfall' && Number(targetCooldowns.boss_component_gruen_arm_press_until ?? 0) >= Number(session.turn_no)) {
               delete targetCooldowns.boss_component_gruen_arm_press_until;
-              log.push(`　$裂谷擒压$【${affectedVictim.name}】承受了重臂追加的 15% 冲击。`);
+              log.push(`　$裂谷擒压$${combatUnitLabel(affectedVictim)}承受了重臂追加的 15% 冲击。`);
             }
             if (skill.code === 'gruen_corequake' && Number(cooldowns.boss_component_gruen_horn_charge ?? 0) > 0) {
               await applyAdvancedStatus('member', Number(affectedVictim.id), 'bind', 18, 2);
-              log.push(`　$崩岳角鸣$【${affectedVictim.name}】的束缚延长 1 回合。`);
+              log.push(`　$崩岳角鸣$${combatUnitLabel(affectedVictim)}的束缚延长 1 回合。`);
             }
           } else if (skill.code === 'valk_slag_brand') {
             targetCooldowns.regional_valk_slag_until = until;
-            log.push(`　$炉渣烙印$【${affectedVictim.name}】被烙印至第${until}回合，瓦尔克会优先裁决该目标。`);
+            log.push(`　$炉渣烙印$${combatUnitLabel(affectedVictim)}被烙印至第${until}回合，瓦尔克会优先裁决该目标。`);
           } else if (skill.code === 'valk_anvil_sentence') {
             if (Number(targetCooldowns.regional_valk_slag_until ?? 0) >= Number(session.turn_no)) {
               delete targetCooldowns.regional_valk_slag_until;
@@ -5702,7 +5704,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
             if (Number(cooldowns.boss_component_valk_chain_execute_target ?? 0) === Number(affectedVictim.id)) delete cooldowns.boss_component_valk_chain_execute_target;
           } else if (skill.code === 'threehead_venom_fang') {
             targetCooldowns.regional_mother_venom_until = until;
-            log.push(`　$毒首猎记$【${affectedVictim.name}】成为雾首的追击目标，持续至第${until}回合。`);
+            log.push(`　$毒首猎记$${combatUnitLabel(affectedVictim)}成为雾首的追击目标，持续至第${until}回合。`);
           } else if (skill.code === 'threehead_mist_lash') {
             if (Number(targetCooldowns.regional_mother_venom_until ?? 0) >= Number(session.turn_no)) {
               delete targetCooldowns.regional_mother_venom_until;
@@ -5710,7 +5712,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
             }
           } else if (skill.code === 'threehead_rootcoil') {
             targetCooldowns.regional_mother_swallow_until = Number(session.turn_no) + 1;
-            log.push(`　$根沼猎杀$【${affectedVictim.name}】被绞缠；蛇母的下一次行动将优先吞噬该目标。`);
+            log.push(`　$根沼猎杀$${combatUnitLabel(affectedVictim)}被绞缠；蛇母的下一次行动将优先吞噬该目标。`);
           } else if (skill.code === 'threehead_swallow') {
             if (Number(targetCooldowns.regional_mother_swallow_until ?? 0) >= Number(session.turn_no)) {
               delete targetCooldowns.regional_mother_swallow_until;
@@ -5718,7 +5720,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
             }
           } else if (skill.code === 'uzz_gravebrand') {
             targetCooldowns.regional_uzz_gravebrand_until = until;
-            log.push(`　$葬印蚀魂$【${affectedVictim.name}】被葬印锁定至第${until}回合，墓群和鸣会优先撕裂该印记。`);
+            log.push(`　$葬印蚀魂$${combatUnitLabel(affectedVictim)}被葬印锁定至第${until}回合，墓群和鸣会优先撕裂该印记。`);
           } else if (skill.code === 'uzz_choir_of_graves') {
             if (Number(targetCooldowns.regional_uzz_gravebrand_until ?? 0) >= Number(session.turn_no)) {
               delete targetCooldowns.regional_uzz_gravebrand_until;
@@ -5726,7 +5728,7 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
             }
           } else if (skill.code === 'uzz_marrow_lash') {
             targetCooldowns.regional_uzz_reap_until = Number(session.turn_no) + 1;
-            log.push(`　$髓骨缚鞭$【${affectedVictim.name}】被锁入收割窗口；乌兹下一次行动会优先噬魂。`);
+            log.push(`　$髓骨缚鞭$${combatUnitLabel(affectedVictim)}被锁入收割窗口；乌兹下一次行动会优先噬魂。`);
           } else if (skill.code === 'uzz_soul_reaping') {
             if (Number(targetCooldowns.regional_uzz_reap_until ?? 0) >= Number(session.turn_no)) {
               delete targetCooldowns.regional_uzz_reap_until;
@@ -5737,8 +5739,8 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
         }
         if (mentorBuild && skill) {
           // 同一套二转机制在导师侧使用“敌方目标”落点：前置状态会真实改变下一次出手，而非仅展示技能名。
-          if (skill.code === 'nightblade_shadow_mark') { await applyAdvancedStatus('member', Number(affectedVictim.id), 'advanced_hunt', 20, 3); log.push(`　$追猎$【${affectedVictim.name}】被暗影标定，导师的下一次攻击+20%。`); }
-          if (skill.code === 'ranger_grapple_trap') { await applyAdvancedStatus('member', Number(affectedVictim.id), 'advanced_hunt', 15, 2); log.push(`　$追猎$【${affectedVictim.name}】被钩索标定，导师的下一次攻击+15%。`); }
+          if (skill.code === 'nightblade_shadow_mark') { await applyAdvancedStatus('member', Number(affectedVictim.id), 'advanced_hunt', 20, 3); log.push(`　$追猎$${combatUnitLabel(affectedVictim)}被暗影标定，导师的下一次攻击+20%。`); }
+          if (skill.code === 'ranger_grapple_trap') { await applyAdvancedStatus('member', Number(affectedVictim.id), 'advanced_hunt', 15, 2); log.push(`　$追猎$${combatUnitLabel(affectedVictim)}被钩索标定，导师的下一次攻击+15%。`); }
           if (skill.code === 'elementalist_cinderfrost_cycle') {
             const mentorCooldowns = jsonObject(monsterTarget.cooldowns); const ice = Boolean(mentorCooldowns.advanced_mentor_element_cycle); mentorCooldowns.advanced_mentor_element_cycle = ice ? 0 : 1; monsterTarget.cooldowns = mentorCooldowns;
             await applyAdvancedStatus('member', Number(affectedVictim.id), ice ? 'slow' : 'burn', ice ? 25 : 5, ice ? 1 : 2);
@@ -5786,9 +5788,9 @@ export const combatAction = async (qqUserId: string, action: Exclude<PendingActi
             const commandModifiers = Number(commandVictim.id) === Number(victim.id) ? victimModifiers : await modifiersFor(connection, Number(commandVictim.id)); const pressuredKingStats = monsterCombatStatsForPlayer(king, Number(commandVictim.level));
             const magicDefenseReduction = effectValue('member', Number(commandVictim.id), 'magic_shatter');
             const commandStrike = resolveStrike(kingStats.magicAttack * basePct / 100, Number(commandVictim.magic_defense) * (1 + commandModifiers.magicDefensePct / 100) * (1 - Math.min(90, magicDefenseReduction) / 100), pressuredKingStats.accuracy, Number(commandVictim.evasion), pressuredKingStats.crit, Number(commandVictim.crit_resist_bp), pressuredKingStats.critDamage, Number(commandVictim.crit_damage_reduction_bp));
-            if (!commandStrike.hit) { log.push(`　➥【${commandVictim.name}】闪避了王令雷击`); continue; }
+            if (!commandStrike.hit) { log.push(`　➥${combatUnitLabel(commandVictim)}闪避了王令雷击`); continue; }
             const elemental = elementalMultiplier(king.element_mastery_json, commandVictim.element_resistance_json, '雷'); const damageReduction = Math.min(90, commandModifiers.magicDamageReductionPct + commandModifiers.damageReductionPct); const oldHp = Number(commandVictim.current_hp); const dealt = directDamageVariance(Math.max(1, Math.floor(commandStrike.damage * elemental * weatherElementMultiplier('雷') * (1 - damageReduction / 100)))); const shield = await absorbRuleShield(connection, session.combat_id, 'member', Number(commandVictim.id), Number(commandVictim.hp_max), dealt); const hpDamage = dealt - shield.absorbed; commandVictim.current_hp = Math.max(0, oldHp - hpDamage); if (!commandVictim.current_hp) commandVictim.is_defeated = 1;
-            log.push(`　➥${affinityTag(1, elemental)}对【${commandVictim.name}】造成 ${dealt} 点雷属性魔法伤害${lifeShieldAbsorptionText(shield)}(${oldHp}→${commandVictim.current_hp})`);
+            log.push(`　➥${affinityTag(1, elemental)}对${combatUnitLabel(commandVictim)}造成 ${dealt} 点雷属性魔法伤害${lifeShieldAbsorptionText(shield)}(${oldHp}→${commandVictim.current_hp})`);
           }
         }
       }

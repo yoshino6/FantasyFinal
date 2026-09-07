@@ -1,4 +1,5 @@
-import { logger, useEvent, useMessage } from 'alemonjs';
+import { logger, useEvent } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { beginRegistration } from '../game/character.service';
 import { audienceFormat, audienceText, dangerFormat, dangerText, destinationFormat, destinationText, giftFormat, giftText, messageFormat, questionFormat, questionText, randomStoryText, sendWithTextFallback, storyFormat } from '../game/message';
 

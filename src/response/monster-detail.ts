@@ -1,4 +1,5 @@
-import { logger, useEvent, useMessage, useRoute } from 'alemonjs';
+import { logger, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { monsterDetail } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
 

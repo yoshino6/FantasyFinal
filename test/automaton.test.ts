@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAutomaton, cultivateAutomaton, respecAutomaton } from '../src/game/automaton';
+import { createAutomaton, cultivateAutomaton, respecAutomaton, effectiveAutomatonState } from '../src/game/automaton';
 import { allocateAutomatonGrowth, automatonGrowthPreview } from '../src/game/automaton-growth';
 import { automatonFeeds } from '../src/game/automaton-feeds';
 import { createAutomatonPersonality, compatibleAutomatonTraits } from '../src/game/automaton-personality';
@@ -58,7 +58,18 @@ test('天空粉尘逐份40%，移除旧重复条目，召唤与部位不产生�
   const drops=bossSkyDustDrops([{code:'sky_dust',chance:.4,quantity:1}],{level:99,monster_class:'boss'});assert.equal(drops.length,5);assert(drops.every(d=>d.chance===.4&&d.quantity===1));
   assert.equal(bossSkyDustDrops([],{level:50,monster_class:'boss',traits_json:[{code:'boss_component'}]}).length,0);
 });
-test('称呼和自称独立持久化，去重耗尽不强制重复，自定义默认不公开',()=>{
-  const state=createAutomaton('quote');state.ownerAddress='汝';state.selfAddress='吾';assert.equal(renderAutomatonQuote('{称呼}，{自称}在。',state),'汝，吾在。');state.customQuotes.greeting=['绝不公开'];
+test('称呼自称由性格决定，旧自定义不外发，去重耗尽不强制重复',()=>{
+  const state=createAutomaton('quote');state.ownerAddress='汝';state.selfAddress='吾';assert.equal(renderAutomatonQuote('{称呼}，{自称}在。',state),`${state.personality.ownerAddress}，${state.personality.selfAddress}在。`);state.customQuotes.greeting=['绝不公开'];
   const used=new Set<string>();for(let i=0;i<9;i++){const q=chooseAutomatonQuote(state,'greeting',String(i),used);assert(q);assert.notEqual(q.text,'绝不公开');used.add(q.hash);}assert.equal(chooseAutomatonQuote(state,'greeting','exhausted',used),null);
+});
+
+test('受伤后拆批培养一致；等级回退保留原始成长和技能记录',()=>{
+  const initial=createAutomaton('injured-split');initial.hp=13;initial.mp=7;
+  const batch=cultivateAutomaton(initial,[{code:'blade',count:100}],50);
+  let split=initial;for(let i=0;i<100;i++)split=cultivateAutomaton(split,[{code:'blade',count:1}],50);
+  assert.deepEqual(split,batch);
+  const original=structuredClone(batch),limited=effectiveAutomatonState(batch,5);assert.equal(limited.level,5);assert.deepEqual(batch,original);
+  assert.deepEqual(limited.learned.filter(id=>id.startsWith('S')),[]);assert.equal(limited.levels.length,4);
+  const at5=cultivateAutomaton(initial,[{code:'blade',count:100}],50,5);limited.stats.forEach((value,i)=>assert(Math.abs(value-at5.stats[i]!)<1e-8));
+  assert.deepEqual(effectiveAutomatonState(batch,50),batch);
 });

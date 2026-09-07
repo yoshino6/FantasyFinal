@@ -1,9 +1,15 @@
-import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { nearbyPoints } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
-import { acceptWorldSiteCommissionFromAttendant, claimWorldSiteCommission, useWorldSite, worldSiteKnock, worldSiteView } from '../game/world-dynamics.service';
+import { acceptWorldSiteCommissionFromAttendant, claimWorldSiteCommission, useWorldSite, worldSiteKnock, worldSiteView, submitWorldSiteCommission } from '../game/world-dynamics.service';
 
 const fail = async (message: any, error: unknown) => message.send({ format: messageFormat('特色站点', error instanceof Error ? error.message : '站点暂时无法响应。') });
+export const submitWorldSiteCommissionHandler = async () => {
+  const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
+  try { await message.send({ format: messageFormat('委托交接', await submitWorldSiteCommission(event.current.UserId, Number(route.param('id')))).addButtonGroup(Format.createButtonGroup().addRow().addButton('任务栏', '/任务', { type: 'command', autoEnter: true })) }); }
+  catch (error) { await fail(message, error); }
+};
 
 const actionCode: Record<string, 'commission' | 'forecast' | 'exchange' | 'clues' | 'shelter'> = { 委托: 'commission', 预报: 'forecast', 交换: 'exchange', 线索: 'clues', 庇护: 'shelter', commission: 'commission', forecast: 'forecast', exchange: 'exchange', clues: 'clues', shelter: 'shelter' };
 const actionCommand: Record<'commission' | 'forecast' | 'exchange' | 'clues' | 'shelter', string> = { commission: '委托', forecast: '预报', exchange: '交换', clues: '线索', shelter: '庇护' };

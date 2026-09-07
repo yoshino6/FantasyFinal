@@ -7,6 +7,7 @@ import { adminCoverPath, adminPage, loginPage } from './page';
 import { createWebAdminAccount, loginAdminWeb, logoutAdminWeb, sessionForAdminWeb, setWebAdminEnabled, webAdminAccounts, type WebSession } from '../game/admin-web.service';
 import { adminDashboard, adminGameOperations, adminMails, adminPatrolEntities, adminPlayerDetail, adminPlayers, adminWebJournals, adminWorldEvents, adminWorldOverview, changeGlobalMultiplierFromWeb, runWebPlayerAudit, sendWebMail } from '../game/admin-web-data.service';
 import { monitorSnapshot } from '../game/monitor.service';
+import { adminPortraitPreview, adminPortraitReviews, decidePortraitReview } from '../game/automaton-portrait-admin.service';
 
 type Context = any;
 const cookieName = 'fantasyfinal_admin_session';
@@ -106,6 +107,14 @@ export const registerAdminWebRoutes = (router: koaRouter) => {
     ctx.type = 'application/json'; ctx.body = { ok: true };
   });
   router.get('/api/admin/dashboard', ctx => api(ctx, async () => adminDashboard()));
+  router.get('/api/admin/portraits', ctx => { ctx.set('Cache-Control', 'no-store'); return api(ctx, async () => adminPortraitReviews(ctx.query)); });
+  router.post('/api/admin/portraits/:id/review', ctx => api(ctx, async (session, body) => decidePortraitReview(session, Number(ctx.params.id), body.decision, body.reason), true));
+  router.get('/api/admin/portraits/:id/image', async (ctx: Context) => {
+    if (!await auth(ctx)) return;
+    ctx.set('Cache-Control', 'no-store'); ctx.set('X-Content-Type-Options', 'nosniff');
+    try { ctx.body = await adminPortraitPreview(Number(ctx.params.id)); ctx.type = 'image/webp'; }
+    catch { apiError(ctx, 404, '待审图片不存在或已处理。'); }
+  });
   router.get('/api/admin/players', ctx => api(ctx, async () => adminPlayers(ctx.query)));
   router.get('/api/admin/players/:id', ctx => api(ctx, async () => adminPlayerDetail(Math.max(1, Number(ctx.params.id)))));
   router.post('/api/admin/players/:id/audit', ctx => api(ctx, async (session, body) => runWebPlayerAudit(session, Math.max(1, Number(ctx.params.id)), body.kind, body.reason), true));

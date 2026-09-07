@@ -1,4 +1,5 @@
-import { logger, useEvent, useMessage, useRoute } from 'alemonjs';
+import { logger, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { changeCharacterName } from '../game/character.service';
 import { messageFormat } from '../game/message';
 

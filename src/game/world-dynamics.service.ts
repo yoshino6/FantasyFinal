@@ -3,6 +3,8 @@ import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql
 import { getPool, withTransaction } from '../database/pool';
 import { dynamicNpcDisplayName, dynamicWorldRegions, generatedDynamicEncounterTemplates, type DynamicEncounterChoice, type DynamicEncounterDefinition, type DynamicEncounterNode, type WorldSiteAccess } from './world-dynamics.content';
 import { dynamicNpcProfile, dynamicNpcVoiceAnchor } from './dynamic-npc-dialogue.service';
+import { buildPatrolEncounter, patrolKindFor, patrolObjective, patrolPositionMatches, type PatrolContext } from './patrol-encounters';
+import { pointBelongsToRegion, validWorldSitePoint, type WorldArea } from './world-site-geometry';
 
 type Db = Pool | PoolConnection;
 type WeatherPhase = 'forming' | 'steady' | 'easing';
@@ -19,7 +21,7 @@ export const weatherElementMultiplier = (modifiers: Pick<WeatherModifiers, 'elem
 };
 type EncounterChoice = DynamicEncounterChoice;
 type EncounterDefinition = DynamicEncounterDefinition;
-type Encounter = { id: string; title: string; opening: string; choices: EncounterChoice[]; expiresAt: Date; weatherName: string; regionName: string; nodeCode: string };
+type Encounter = { id: string; title: string; opening: string; choices: EncounterChoice[]; expiresAt: Date; weatherName: string; regionName: string; nodeCode: string; patrol?: PatrolContext; objective?: ReturnType<typeof patrolObjective> };
 
 const profiles: Record<string, { climate: string; forecast: string[]; anomalies: string[] }> = {
   baina_town: { climate: 'urban', forecast: ['clear', 'cloudy', 'rain', 'wind'], anomalies: [] },
@@ -50,6 +52,8 @@ const templates: { code: string; title: string; regions: string[]; weather: stri
 ];
 
 const schema = [
+  `CREATE TABLE IF NOT EXISTS player_patrol_encounters (character_id BIGINT UNSIGNED NOT NULL,npc_code VARCHAR(64) NOT NULL,visit_revision INT UNSIGNED NOT NULL,encounter_id CHAR(36) NOT NULL,team_key VARCHAR(80) NOT NULL,rewarded TINYINT NOT NULL,accepted_date DATE NOT NULL,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(character_id,npc_code,visit_revision),UNIQUE KEY uk_patrol_daily_npc(character_id,npc_code,accepted_date),KEY idx_patrol_visit(npc_code,visit_revision),KEY idx_patrol_daily(character_id,accepted_date)) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS patrol_world_progress (npc_code VARCHAR(64) NOT NULL,visit_revision INT UNSIGNED NOT NULL,encounter_id CHAR(36) NOT NULL,created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(npc_code,visit_revision)) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS region_weather_profiles (region_id BIGINT UNSIGNED NOT NULL, climate_code VARCHAR(32) NOT NULL, forecast_json JSON NOT NULL, anomaly_pool_json JSON NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, PRIMARY KEY (region_id)) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS region_weather_states (region_id BIGINT UNSIGNED NOT NULL, weather_code VARCHAR(32) NOT NULL, intensity TINYINT UNSIGNED NOT NULL DEFAULT 1, phase ENUM('forming','steady','easing') NOT NULL DEFAULT 'steady', anomaly_code VARCHAR(64) NULL, revision INT UNSIGNED NOT NULL DEFAULT 1, cause_code VARCHAR(48) NOT NULL DEFAULT 'initial', started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, transition_due_at DATETIME NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, PRIMARY KEY (region_id), KEY idx_weather_due (transition_due_at)) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS weather_transition_log (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, region_id BIGINT UNSIGNED NOT NULL, from_weather_code VARCHAR(32) NULL, to_weather_code VARCHAR(32) NOT NULL, from_intensity TINYINT UNSIGNED NULL, to_intensity TINYINT UNSIGNED NOT NULL, anomaly_code VARCHAR(64) NULL, cause_code VARCHAR(48) NOT NULL, revision INT UNSIGNED NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (id), KEY idx_weather_transition_region (region_id,id)) ENGINE=InnoDB`,
@@ -110,6 +114,7 @@ const retiredDynamicNpcCodes = ['courier_morningdew'] as const;
 export const initializeDynamicWorldSystem = async (pool?: Pool) => {
   const connection = pool ?? await getPool();
   for (const statement of schema) await connection.query(statement);
+  const [areas] = await connection.execute<(RowDataPacket & WorldArea)[]>('SELECT a.*,r.danger_level FROM map_region_areas a JOIN map_regions r ON r.id=a.region_id');
   for (const code of retiredDynamicNpcCodes) {
     await connection.execute("DELETE FROM map_npcs WHERE code=? AND interaction_kind='npc'", [code]);
     await connection.execute('DELETE FROM world_dynamic_npc_states WHERE code=?', [code]);
@@ -136,7 +141,7 @@ export const initializeDynamicWorldSystem = async (pool?: Pool) => {
       ON DUPLICATE KEY UPDATE state_json=JSON_SET(state_json,'$.name',?,'$.regionCode',?)`, [region.worldline, `${region.name}世界线`, region.code, `${region.name}世界线`, region.code]);
     const [boundsRows] = await connection.execute<(RowDataPacket & RegionBounds)[]>('SELECT id,min_x,max_x,min_y,max_y,min_z,max_z FROM map_regions WHERE code=? LIMIT 1', [region.code]);
     const bounds = boundsRows[0]; if (!bounds) continue;
-    const sites = region.buildings.map((building, index) => ({ building, point: { ...pointInRegion(bounds, index), name: building.name } }));
+    const sites = region.buildings.map((building, index) => ({ building, point: { ...validWorldSitePoint(areas, Number(bounds.id), pointInRegion(bounds, index)), name: building.name } }));
     for (const { building, point } of sites) {
       await connection.execute(`INSERT INTO map_npcs (region_id,code,name,description,interaction_kind,pos_x,pos_y,pos_z) VALUES (?,?,?,?, 'building',?,?,?)
         ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),interaction_kind='building',pos_x=VALUES(pos_x),pos_y=VALUES(pos_y),pos_z=VALUES(pos_z)`, [bounds.id, building.code, building.name, building.description, point.x, point.y, point.z]);
@@ -148,15 +153,25 @@ export const initializeDynamicWorldSystem = async (pool?: Pool) => {
       const displayName = dynamicNpcDisplayName(npc);
       const route: RoutePoint[] = [
         { ...home.point, name: home.building.name, siteCode: home.building.code },
-        { ...pointInRegion(bounds, (npc.homeIndex + 1) % 3, npc.homeIndex % 2 ? -2 : 2), name: '巡游路段' },
-        { ...pointInRegion(bounds, (npc.homeIndex + 2) % 3, npc.homeIndex % 2 ? 2 : -2), name: '观察点' }
+        { ...validWorldSitePoint(areas, Number(bounds.id), pointInRegion(bounds, (npc.homeIndex + 1) % 3, npc.homeIndex % 2 ? -2 : 2)), name: '巡游路段' },
+        { ...validWorldSitePoint(areas, Number(bounds.id), pointInRegion(bounds, (npc.homeIndex + 2) % 3, npc.homeIndex % 2 ? 2 : -2)), name: '观察点' }
       ];
+      const [oldPositions] = await connection.execute<(RowDataPacket & { region_id: number; pos_x: number; pos_y: number; pos_z: number; route_json: unknown })[]>('SELECT n.region_id,n.pos_x,n.pos_y,n.pos_z,d.route_json FROM map_npcs n JOIN world_dynamic_npc_states d ON d.code=n.code AND d.region_id=n.region_id WHERE n.code=?', [npc.code]);
       const current = route[0]!;
       await connection.execute(`INSERT INTO world_dynamic_npc_states (code,name,region_id,status,route_json,state_json,next_action_at)
         VALUES (?,?,?,?,?,?,DATE_ADD(NOW(),INTERVAL 8 MINUTE))
         ON DUPLICATE KEY UPDATE name=VALUES(name),route_json=VALUES(route_json),state_json=JSON_SET(state_json,'$.role',?,'$.homeSite',?,'$.homeRegionId',?,'$.homeStatus',?),next_action_at=IF(status IN ('patrolling','responding'),next_action_at,LEAST(next_action_at,DATE_ADD(NOW(),INTERVAL 8 MINUTE)))`, [npc.code, displayName, bounds.id, npc.status, JSON.stringify(route), JSON.stringify({ role: npc.role, homeSite: home.building.code, homeRegionId: bounds.id, homeStatus: npc.status, currentPoint: current.name }), npc.role, home.building.code, bounds.id, npc.status]);
-      await connection.execute(`INSERT INTO map_npcs (region_id,code,name,description,interaction_kind,pos_x,pos_y,pos_z) VALUES (?,?,?,?, 'npc',?,?,?)
+      // 已外派的域民仍沿用原实体；唯一键是 (region_id,code)，不能向故乡再次插入分身。
+      if (oldPositions.length) await connection.execute("UPDATE map_npcs SET name=?,description=? WHERE code=? AND interaction_kind='npc'", [displayName, `${npc.description}\n\n常驻地：${home.building.name}。`, npc.code]);
+      else await connection.execute(`INSERT INTO map_npcs (region_id,code,name,description,interaction_kind,pos_x,pos_y,pos_z) VALUES (?,?,?,?, 'npc',?,?,?)
         ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),interaction_kind='npc'`, [bounds.id, npc.code, displayName, `${npc.description}\n\n常驻地：${home.building.name}。`, current.x, current.y, current.z]);
+      const old = oldPositions[0];
+      const oldHome = old ? json<RoutePoint[]>(old.route_json, [])[0] : undefined;
+      if (old && (oldHome && Number(old.region_id) === Number(bounds.id) && Number(old.pos_x) === oldHome.x && Number(old.pos_y) === oldHome.y && Number(old.pos_z) === oldHome.z || !pointBelongsToRegion(areas, Number(old.region_id), { x: Number(old.pos_x), y: Number(old.pos_y), z: Number(old.pos_z) }))) {
+        await connection.execute("UPDATE map_npcs SET region_id=?,pos_x=?,pos_y=?,pos_z=? WHERE code=? AND interaction_kind='npc'", [bounds.id, current.x, current.y, current.z, npc.code]);
+        await connection.execute("UPDATE world_dynamic_npc_states SET region_id=?,status=?,state_json=JSON_SET(state_json,'$.routeIndex',0,'$.currentPoint',?,'$.specialSceneId',NULL) WHERE code=?", [bounds.id, npc.status === 'patrolling' ? 'stationed' : npc.status, current.name, npc.code]);
+        if (Number(old.pos_x) !== current.x || Number(old.pos_y) !== current.y || Number(old.region_id) !== Number(bounds.id)) await writeLedger(connection, 'npc.presence', 'returned', npc.code, { reason: '修复建筑与巡查坐标归属', before: old, position: current }, null, Number(bounds.id));
+      }
     }
     if (region.bossCode) await connection.execute(`INSERT INTO world_boss_gates (worldline_code,stage_required,boss_code,state) VALUES (?,24,?,'locked')
       ON DUPLICATE KEY UPDATE stage_required=VALUES(stage_required)`, [region.worldline, region.bossCode]);
@@ -394,11 +409,11 @@ export const playerWorldSiteCommissions = async (qqUserId: string) => withTransa
 export const completeWorldSiteCommissionsAtSite = async (qqUserId: string, siteCode: string) => withTransaction(async connection => {
   const player = await playerContext(connection, qqUserId, true);
   const site = await currentWorldSite(connection, player, siteCode, true);
-  if (!await siteAttendantAtFrontDesk(connection, player, site.code)) return [] as string[];
   const [rows] = await connection.execute<(RowDataPacket & { id: number; title: string; worldline_code: string | null })[]>(`SELECT c.id,c.title,JSON_UNQUOTE(JSON_EXTRACT(s.state_json,'$.relatedWorldline')) AS worldline_code
     FROM player_world_site_commissions c JOIN world_site_states s ON s.code=c.source_site_code
     WHERE c.character_id=? AND c.target_site_code=? AND c.status='accepted' FOR UPDATE`, [player.id, siteCode]);
   if (!rows.length) return [] as string[];
+  if (!await siteAttendantAtFrontDesk(connection, player, site.code)) return ['前台域民暂时外出。请在任务栏选择“提交交接”留下回站通知，待其回来后再次提交或进入建筑即可交接。'];
   await connection.execute('UPDATE player_world_site_commissions SET status=\'completed\',completed_at=NOW() WHERE character_id=? AND target_site_code=? AND status=\'accepted\'', [player.id, siteCode]);
   const notices: string[] = [];
   for (const row of rows) {
@@ -432,6 +447,20 @@ export const claimWorldSiteCommission = async (qqUserId: string, commissionId: n
   await writeLedger(connection, 'site.commission', 'claimed', 'task_panel', { commissionId, reward: Number(commission.reward_copper) }, Number(player.id), Number(player.region_id));
   return { title: commission.title, copper: Number(commission.reward_copper) };
 });
+export const submitWorldSiteCommission = async (qqUserId: string, commissionId: number) => {
+  const ready = await withTransaction(async connection => {
+    const player = await playerContext(connection, qqUserId, true);
+    const [rows] = await connection.execute<(RowDataPacket & { target_site_code: string; status: string })[]>('SELECT target_site_code,status FROM player_world_site_commissions WHERE id=? AND character_id=? FOR UPDATE', [commissionId, player.id]);
+    const row = rows[0]; if (!row) throw new Error('未找到你的这份委托。');
+    if (row.status !== 'accepted') return { code: row.target_site_code, ready: false, text: row.status === 'completed' ? '交接已经完成，请在任务栏领取报酬。' : '这份委托已经结清。' };
+    const site = await currentWorldSite(connection, player, row.target_site_code, true);
+    if (await siteAttendantAtFrontDesk(connection, player, site.code)) return { code: site.code, ready: true, text: '' };
+    await connection.execute("UPDATE world_dynamic_npc_states SET state_json=JSON_SET(state_json,'$.serviceUntil',DATE_FORMAT(DATE_ADD(NOW(),INTERVAL 30 MINUTE),'%Y-%m-%d %H:%i:%s')),next_action_at=LEAST(next_action_at,NOW()) WHERE JSON_UNQUOTE(JSON_EXTRACT(state_json,'$.homeSite'))=?", [site.code]);
+    await writeLedger(connection, 'site.commission', 'waiting', site.code, { commissionId, reason: '收件域民外出，请求回站交接' }, Number(player.id), Number(player.region_id));
+    return { code: site.code, ready: false, text: '你在门前留下交接通知。域民会在下一次巡游调度时优先回站（通常十分钟内；公共现场事务结束后返回）。回来后再次提交即可，委托和报酬会保留。' };
+  });
+  return ready.ready ? (await completeWorldSiteCommissionsAtSite(qqUserId, ready.code)).join('\n') : ready.text;
+};
 
 export const useWorldSite = async (qqUserId: string, siteCode: string, action: WorldSiteAction) => withTransaction(async connection => {
   const player = await playerContext(connection, qqUserId, true); const site = await currentWorldSite(connection, player, siteCode, true); const capability = siteCapabilityFor(site.site_type);
@@ -448,6 +477,7 @@ export const useWorldSite = async (qqUserId: string, siteCode: string, action: W
     const title = `【${plan.type}】${plan.title}`;
     const objective = conciseCommissionObjective(target.name, plan.handoff);
     const [insert] = await connection.execute<ResultSetHeader>('INSERT INTO player_world_site_commissions (character_id,source_site_code,target_site_code,title,objective_text,reward_copper) VALUES (?,?,?,?,?,?)', [player.id, site.code, target.code, title, objective, reward]);
+    await connection.execute("UPDATE world_dynamic_npc_states SET state_json=JSON_SET(state_json,'$.serviceUntil',DATE_FORMAT(DATE_ADD(NOW(),INTERVAL 30 MINUTE),'%Y-%m-%d %H:%i:%s')),next_action_at=LEAST(next_action_at,NOW()) WHERE JSON_UNQUOTE(JSON_EXTRACT(state_json,'$.homeSite'))=?", [target.code]);
     const affinity = await npcAffinityFor(connection, Number(player.id), attendant.code);
     commission = commissionBriefingFor({ npcCode: attendant.code, affinity, variant: seed, issuerName: attendant.name, title, plan, targetName: target.name, backdrop: commissionBackdropFor(player.region_code, player.region_name), dangerLevel: Number(site.region_danger), worldlineStage: Number(site.worldline_stage ?? 0), reward });
     text = `已接受「${title}」。前往${target.name}完成交接后，可在任务栏领取报酬。`;
@@ -503,7 +533,9 @@ export const recordExplorationMovement = async (qqUserId: string) => withTransac
 });
 
 const activeEncounterFor = async (connection: PoolConnection, characterId: number, lock = false) => {
+  const [expired] = await connection.execute<(RowDataPacket & { id: string; region_id: number; template_code: string; node_code: string })[]>("SELECT id,region_id,template_code,node_code FROM player_encounter_instances WHERE character_id=? AND status='active' AND expires_at<=NOW() FOR UPDATE", [characterId]);
   await connection.execute("UPDATE player_encounter_instances SET status='expired' WHERE character_id=? AND status='active' AND expires_at<=NOW()", [characterId]);
+  for (const row of expired) await writeLedger(connection, 'encounter.expired', 'expired', row.template_code, { node: row.node_code }, characterId, Number(row.region_id), row.id);
   const [rows] = await connection.execute<(RowDataPacket & { id: string; region_id: number; template_code: string; node_code: string; context_json: unknown; expires_at: Date; title: string; definition_json: unknown })[]>(`SELECT i.id,i.region_id,i.template_code,i.node_code,i.context_json,i.expires_at,t.title,t.definition_json FROM player_encounter_instances i JOIN dynamic_encounter_templates t ON t.code=i.template_code WHERE i.character_id=? AND i.status='active' ORDER BY i.opened_at DESC LIMIT 1${lock ? ' FOR UPDATE' : ''}`, [characterId]);
   return rows[0] ?? null;
 };
@@ -513,9 +545,9 @@ const definitionForInstance = (row: { definition_json: unknown; context_json: un
   return context.definitionSnapshot ?? json<EncounterDefinition>(row.definition_json, { opening: '一段未能辨明的奇遇正在消散。', choices: [] });
 };
 const renderEncounter = (row: NonNullable<Awaited<ReturnType<typeof activeEncounterFor>>>, regionName: string): Encounter => {
-  const definition = definitionForInstance(row); const context = json<{ weatherName?: string; titleSnapshot?: string }>(row.context_json, {});
+  const definition = definitionForInstance(row); const context = json<{ weatherName?: string; titleSnapshot?: string; regionName?: string; patrol?: PatrolContext }>(row.context_json, {});
   const node: DynamicEncounterNode = definition.nodes?.[row.node_code] ?? { text: definition.opening ?? '一段未能辨明的奇遇正在消散。', choices: definition.choices ?? [] };
-  return { id: row.id, title: context.titleSnapshot ?? row.title, opening: node.text, choices: node.choices, expiresAt: new Date(row.expires_at), weatherName: context.weatherName ?? '未知天气', regionName, nodeCode: row.node_code };
+  return { id: row.id, title: context.titleSnapshot ?? row.title, opening: node.text, choices: node.choices, expiresAt: new Date(row.expires_at), weatherName: context.weatherName ?? '未知天气', regionName: context.regionName ?? regionName, nodeCode: row.node_code, patrol: context.patrol, objective: context.patrol ? patrolObjective(context.patrol, row.node_code) : undefined };
 };
 const recordBudgetProbe = async (connection: PoolConnection, player: Awaited<ReturnType<typeof playerContext>>) => {
   const cellX = Math.floor(Number(player.pos_x) / 8); const cellY = Math.floor(Number(player.pos_y) / 8); const cellZ = Number(player.pos_z);
@@ -528,6 +560,67 @@ const recordBudgetProbe = async (connection: PoolConnection, player: Awaited<Ret
 export const currentDynamicEncounter = async (qqUserId: string) => withTransaction(async connection => {
   const player = await playerContext(connection, qqUserId, true); const active = await activeEncounterFor(connection, Number(player.id), true); return active ? renderEncounter(active, player.region_name) : null;
 });
+const patrolAtPlayer = async (connection: PoolConnection, player: Awaited<ReturnType<typeof playerContext>>) => {
+  const [rows] = await connection.execute<(RowDataPacket & { code: string; action_revision: number; status: string; state_json: unknown; next_action_at: Date; danger_level: number })[]>(`SELECT d.code,d.action_revision,d.status,d.state_json,d.next_action_at,r.danger_level
+    FROM world_dynamic_npc_states d JOIN map_npcs n ON n.code=d.code AND n.region_id=d.region_id AND n.interaction_kind='npc'
+    JOIN map_regions r ON r.id=d.region_id
+    WHERE d.region_id=? AND n.pos_x=? AND n.pos_y=? AND n.pos_z=? AND d.status IN ('patrolling','responding')
+    AND NOT EXISTS (SELECT 1 FROM map_npcs b WHERE b.code=JSON_UNQUOTE(JSON_EXTRACT(d.state_json,'$.homeSite')) AND b.region_id=n.region_id AND b.pos_x=n.pos_x AND b.pos_y=n.pos_y AND b.pos_z=n.pos_z)
+    ORDER BY d.code FOR UPDATE`, [player.region_id, player.pos_x, player.pos_y, player.pos_z]);
+  return rows;
+};
+export const patrolEncounterPreview = async (qqUserId: string, npcCode: string) => withTransaction(async connection => {
+  const player = await playerContext(connection, qqUserId, true);
+  const npc = (await patrolAtPlayer(connection, player)).find(row => row.code === npcCode);
+  const profile = dynamicNpcProfile(npcCode);
+  if (!npc || !profile) return null;
+  if (npc.status === 'responding') return { revision: Number(npc.action_revision), text: `${profile.displayName}正在处理附近的公共奇遇。你可以查看现场，再决定如何协助。`, responding: true };
+  const state = json<{ routeIndex?: number }>(npc.state_json, {});
+  const kind = patrolKindFor(Number(state.routeIndex ?? 1), Number(npc.action_revision), profile.homeIndex);
+  const affinity = await npcAffinityFor(connection, Number(player.id), npcCode);
+  const content = buildPatrolEncounter(npcCode, kind, '附近的公共站点', affinity);
+  return { revision: Number(npc.action_revision), text: content.opening, responding: false };
+});
+
+export const startPatrolEncounter = async (qqUserId: string, npcCode: string, revision: number) => withTransaction(async connection => {
+  const player = await playerContext(connection, qqUserId, true);
+  const active = await activeEncounterFor(connection, Number(player.id), true);
+  if (active) {
+    const patrol = json<{ patrol?: PatrolContext }>(active.context_json, {}).patrol;
+    if (patrol?.npcCode === npcCode && patrol.revision === revision) return renderEncounter(active, player.region_name);
+    throw new Error('请先完成当前奇遇；可在“/奇遇”查看进展。');
+  }
+  const npc = (await patrolAtPlayer(connection, player)).find(row => row.code === npcCode);
+  const profile = dynamicNpcProfile(npcCode);
+  if (!npc || !profile || npc.status !== 'patrolling' || Number(npc.action_revision) !== revision) throw new Error('这段巡查已经改变，请到域民身边重新询问行程。');
+  const [previous] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_patrol_encounters WHERE character_id=? AND npc_code=? AND (visit_revision=? OR accepted_date=CURDATE()) LIMIT 1', [player.id, npcCode, revision]);
+  if (previous.length) throw new Error('你已经参与过这位域民今日的巡查，明日再来听新的见闻吧。');
+  const [daily] = await connection.execute<(RowDataPacket & { total: number; recent: number })[]>('SELECT COUNT(*) AS total,COALESCE(SUM(created_at>DATE_SUB(NOW(),INTERVAL 20 MINUTE)),0) AS recent FROM player_patrol_encounters WHERE character_id=? AND (accepted_date=CURDATE() OR created_at>DATE_SUB(NOW(),INTERVAL 20 MINUTE))', [player.id]);
+  if (Number(daily[0]?.total) >= 3) throw new Error('你今日已经接手三次巡查，先消化这些见闻吧。');
+  if (Number(daily[0]?.recent)) throw new Error('刚接手的巡查还需要整理，距上次参与满二十分钟后再来。');
+  const [targets] = await connection.execute<(RowDataPacket & { name: string; x: number; y: number; z: number })[]>(`SELECT s.name,n.pos_x AS x,n.pos_y AS y,n.pos_z AS z FROM world_site_states s JOIN map_npcs n ON n.code=s.code AND n.region_id=s.region_id AND n.interaction_kind='building'
+    WHERE s.region_id=? AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.state_json,'$.access')),'public')='public' AND NOT(n.pos_x=? AND n.pos_y=? AND n.pos_z=?) ORDER BY ABS(n.pos_x-?)+ABS(n.pos_y-?),s.code LIMIT 1`, [player.region_id, player.pos_x, player.pos_y, player.pos_z, player.pos_x, player.pos_y]);
+  const target = targets[0]; if (!target) throw new Error('附近暂时没有适合交接的公共落脚处。');
+  const [parties] = await connection.execute<(RowDataPacket & { party_id: number })[]>('SELECT party_id FROM party_members WHERE character_id=? LIMIT 1', [player.id]);
+  const teamKey = parties[0] ? `party:${parties[0].party_id}` : `solo:${player.id}`;
+  // 同一个 NPC 的调度行已加锁；结伴与临时换队仍受现场最多三份资源报酬的硬上限约束。
+  const [claims] = await connection.execute<(RowDataPacket & { total: number; team_count: number })[]>('SELECT COALESCE(SUM(rewarded),0) AS total,COALESCE(SUM(rewarded=1 AND team_key=?),0) AS team_count FROM player_patrol_encounters WHERE npc_code=? AND visit_revision=?', [teamKey, npcCode, revision]);
+  const rewarded = Number(claims[0]?.total) < 3 && Number(claims[0]?.team_count) === 0;
+  const state = json<{ routeIndex?: number }>(npc.state_json, {});
+  const kind = patrolKindFor(Number(state.routeIndex ?? 1), revision, profile.homeIndex);
+  const region = dynamicWorldRegions.find(row => row.npcs.some(npc => npc.code === npcCode))!;
+  const [worldlines] = await connection.execute<(RowDataPacket & { stage: number })[]>('SELECT stage FROM worldline_states WHERE code=?', [region.worldline]);
+  const weather = await weatherStateForRegion(connection, Number(player.region_id));
+  const content = buildPatrolEncounter(npcCode, kind, target.name, await npcAffinityFor(connection, Number(player.id), npcCode), Number(worldlines[0]?.stage ?? 0), revision, rewarded ? 12 + Math.min(20, Math.max(0, Number(npc.danger_level)) * 2) : 0);
+  const patrol: PatrolContext = { npcCode, revision, kind, rewarded, origin: { regionId: Number(player.region_id), name: `${profile.name}的巡查现场`, x: Number(player.pos_x), y: Number(player.pos_y), z: Number(player.pos_z) }, target: { regionId: Number(player.region_id), name: target.name, x: Number(target.x), y: Number(target.y), z: Number(target.z) } };
+  const templateCode = `patrol_${npcCode}_${kind}`; const id = randomUUID();
+  // 巡游模板不进入随机探索池；实例快照保存本次情境及奖励资格。
+  await connection.execute(`INSERT IGNORE INTO dynamic_encounter_templates (code,title,region_codes_json,weather_codes_json,min_exposure,weight,definition_json,is_enabled) VALUES (?,?,?, ?,0,0,?,0)`, [templateCode, content.title, JSON.stringify([region.code]), JSON.stringify(region.weather), JSON.stringify(content.definition)]);
+  await connection.execute(`INSERT INTO player_encounter_instances (id,character_id,region_id,template_code,context_json,expires_at) VALUES (?,?,?,?,?,DATE_ADD(NOW(),INTERVAL 30 MINUTE))`, [id, player.id, player.region_id, templateCode, JSON.stringify({ patrol, regionName: player.region_name, titleSnapshot: content.title, weatherName: (weatherText[weather.anomalyCode ?? weather.weatherCode] ?? weatherText.clear).name, weatherRevision: weather.revision, definitionSnapshot: content.definition })]);
+  await connection.execute('INSERT INTO player_patrol_encounters (character_id,npc_code,visit_revision,encounter_id,team_key,rewarded,accepted_date) VALUES (?,?,?,?,?,?,CURDATE())', [player.id, npcCode, revision, id, teamKey, rewarded ? 1 : 0]);
+  await writeLedger(connection, 'patrol.opened', 'accepted', npcCode, { patrol, teamKey, reason: content.reason, weatherRevision: weather.revision }, Number(player.id), Number(player.region_id), id);
+  return renderEncounter({ id, region_id: Number(player.region_id), template_code: templateCode, node_code: 'opening', context_json: { patrol, regionName: player.region_name, titleSnapshot: content.title, definitionSnapshot: content.definition }, expires_at: new Date(Date.now() + 30 * 60_000), title: content.title, definition_json: content.definition } as NonNullable<Awaited<ReturnType<typeof activeEncounterFor>>>, player.region_name);
+});
 export const offerDynamicEncounter = async (qqUserId: string) => withTransaction(async connection => {
   const player = await playerContext(connection, qqUserId, true); const active = await activeEncounterFor(connection, Number(player.id), true); if (active) return renderEncounter(active, player.region_name);
   await recordBudgetProbe(connection, player); const [budgetRows] = await connection.execute<(RowDataPacket & { effective_exposure: number; trigger_count: number; cooldown_until: Date | null })[]>('SELECT effective_exposure,trigger_count,cooldown_until FROM player_exploration_budgets WHERE character_id=? FOR UPDATE', [player.id]); const budget = budgetRows[0]!;
@@ -535,7 +628,7 @@ export const offerDynamicEncounter = async (qqUserId: string) => withTransaction
   const weather = await weatherStateForRegion(connection, Number(player.region_id)); const visibleWeather = weather.anomalyCode ?? weather.weatherCode;
   const [templateRows] = await connection.execute<(RowDataPacket & { code: string; title: string; region_codes_json: unknown; weather_codes_json: unknown; min_exposure: number; weight: number; definition_json: unknown })[]>('SELECT code,title,region_codes_json,weather_codes_json,min_exposure,weight,definition_json FROM dynamic_encounter_templates WHERE is_enabled=1');
   const candidates = templateRows.map(row => ({ code: row.code, title: row.title, regions: json<string[]>(row.region_codes_json, []), weather: json<string[]>(row.weather_codes_json, []), minExposure: Number(row.min_exposure), weight: Math.max(1, Number(row.weight)), definition: json<EncounterDefinition>(row.definition_json, { choices: [] }) }))
-    .filter(template => template.regions.includes(player.region_code) && template.weather.includes(visibleWeather) && Number(budget.effective_exposure) >= template.minExposure);
+    .filter(template => !template.code.startsWith('patrol_') && template.regions.includes(player.region_code) && template.weather.includes(visibleWeather) && Number(budget.effective_exposure) >= template.minExposure);
   if (!candidates.length || hash(`${player.id}:${budget.trigger_count}:${weather.revision}`) % 100 >= 38) return null;
   let pick = hash(`${player.id}:${budget.trigger_count}:template`) % candidates.reduce((sum, template) => sum + template.weight, 0);
   const template = candidates.find(item => (pick -= item.weight) < 0) ?? candidates[candidates.length - 1]!; const id = randomUUID(); const weatherName = (weatherText[visibleWeather] ?? weatherText.clear).name;
@@ -651,7 +744,22 @@ export const contributeDynamicScene = async (qqUserId: string, sceneId: string, 
 
 export const resolveDynamicEncounter = async (qqUserId: string, choiceCode: string, requestedId?: string) => withTransaction(async connection => {
   const player = await playerContext(connection, qqUserId, true); const active = await activeEncounterFor(connection, Number(player.id), true); if (!active) throw new Error('当前没有可选择的奇遇。'); if (requestedId && requestedId !== active.id) throw new Error('这不是你当前有效的奇遇实例。');
-  const definition = definitionForInstance(active); const node = definition.nodes?.[active.node_code] ?? { text: definition.opening ?? '', choices: definition.choices ?? [] }; const choice = node.choices.find(item => item.code === choiceCode); if (!choice) throw new Error('无效的奇遇选项。');
+  const definition = definitionForInstance(active); const node = definition.nodes?.[active.node_code] ?? { text: definition.opening ?? '', choices: definition.choices ?? [] }; const selected = node.choices.find(item => item.code === choiceCode); if (!selected) throw new Error('无效的奇遇选项。');
+  const choice = { ...selected };
+  const patrol = json<{ patrol?: PatrolContext }>(active.context_json, {}).patrol;
+  if (patrol) {
+    const objective = patrolObjective(patrol, active.node_code);
+    if (choice.code !== 'leave' && !patrolPositionMatches(player, objective.location)) throw new Error(`请先抵达${objective.location.name}（${objective.location.x}, ${objective.location.y}, ${objective.location.z}），再完成这一步。`);
+    if (!choice.nextNode && Number(choice.stage) > 0 && choice.worldline) {
+      const [progress] = await connection.execute<ResultSetHeader>('INSERT IGNORE INTO patrol_world_progress (npc_code,visit_revision,encounter_id) VALUES (?,?,?)', [patrol.npcCode, patrol.revision, active.id]);
+      choice.stage = 0;
+      if (progress.affectedRows) {
+        await connection.execute('INSERT IGNORE INTO worldline_daily_commission_progress (worldline_code,progress_date,contribution_count) VALUES (?,CURDATE(),0)', [choice.worldline]);
+        const [quota] = await connection.execute<ResultSetHeader>('UPDATE worldline_daily_commission_progress SET contribution_count=contribution_count+1 WHERE worldline_code=? AND progress_date=CURDATE() AND contribution_count<?', [choice.worldline, worldlineCommissionDailyLimit]);
+        choice.stage = quota.affectedRows ? 1 : 0;
+      }
+    }
+  }
   await connection.execute('INSERT INTO player_encounter_decisions (encounter_id,node_code,choice_code,outcome_code,effects_json) VALUES (?,?,?,?,?)', [active.id, active.node_code, choice.code, choice.nextNode ? 'continued' : 'resolved', JSON.stringify({ copper: choice.copper ?? 0, flag: choice.flag, worldline: choice.worldline, stage: choice.stage ?? 0, nextNode: choice.nextNode })]);
   if (choice.nextNode) {
     const nextNode = definition.nodes?.[choice.nextNode]; if (!nextNode) throw new Error('奇遇分支配置缺失，已记录异常。');
@@ -663,9 +771,10 @@ export const resolveDynamicEncounter = async (qqUserId: string, choiceCode: stri
   await connection.execute("UPDATE player_encounter_instances SET status='resolved',resolved_at=NOW() WHERE id=? AND status='active'", [active.id]); if (copper > 0) await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [copper, player.id]);
   await connection.execute(`INSERT INTO player_destiny_flags (character_id,flag_code,value_int,context_json) VALUES (?,?,1,?) ON DUPLICATE KEY UPDATE value_int=value_int+1,context_json=VALUES(context_json)`, [player.id, flag, JSON.stringify({ encounterId: active.id, choice: choice.code })]);
   let worldlineResult: { stage: number; siteState: string; bossReady: boolean } | null = null;
-  if (worldline) { await connection.execute(`UPDATE worldline_states SET stage=stage+?,state_json=JSON_SET(state_json,'$.lastDecision',?,'$.lastActor',?,'$.updatedByEncounter',true) WHERE code=?`, [stage, choice.code, player.id, worldline]); worldlineResult = await applyWorldlineEffects(connection, worldline, Number(player.id), Number(player.region_id), active.id); }
+  if (worldline && (!patrol || stage !== 0)) { await connection.execute(`UPDATE worldline_states SET stage=stage+?,state_json=JSON_SET(state_json,'$.lastDecision',?,'$.lastActor',?,'$.updatedByEncounter',true) WHERE code=?`, [stage, choice.code, player.id, worldline]); worldlineResult = await applyWorldlineEffects(connection, worldline, Number(player.id), Number(player.region_id), active.id); }
   const reward = await grantHiddenReward(connection, Number(player.id), active.id, choice); const context = json<{ sceneId?: string }>(active.context_json, {}); const sharedWitnesses = context.sceneId ? await settleSceneWitnesses(connection, context.sceneId, copper, Number(player.region_id), active.template_code) : 0;
   await writeLedger(connection, 'encounter.resolved', 'resolved', active.template_code, { choice: choice.code, copper, flag, worldline, stage, reward: reward?.name ?? null, sharedWitnesses }, Number(player.id), Number(player.region_id), active.id);
+  if (patrol) await writeLedger(connection, 'patrol.resolved', 'completed', patrol.npcCode, { patrol, choice: choice.code, copper, stage, position: { x: player.pos_x, y: player.pos_y, z: player.pos_z } }, Number(player.id), Number(player.region_id), active.id);
   return { ...renderEncounter(active, player.region_name), choice: { ...choice, copper, flag, worldline, stage }, worldline, completed: true, reward, sharedWitnesses, worldlineResult };
 });
 
@@ -681,7 +790,7 @@ export const advanceDynamicNpcs = async () => withTransaction(async connection =
   const [rows] = await connection.execute<(RowDataPacket & { code: string; name: string; region_id: number; status: string; route_json: unknown; state_json: unknown; action_revision: number })[]>('SELECT code,name,region_id,status,route_json,state_json,action_revision FROM world_dynamic_npc_states WHERE next_action_at<=NOW() FOR UPDATE');
   for (const npc of rows) {
     const route = json<RoutePoint[]>(npc.route_json, []); const home = route[0]; const previous = json<Record<string, unknown>>(npc.state_json, {}); const deployment = deployments.get(npc.code); const revision = Number(npc.action_revision) + 1;
-    const homeRegionId = Number(previous.homeRegionId ?? npc.region_id); const homeStatus = String(previous.homeStatus ?? npc.status); const homeDestination = isRoutePoint(home) ? { regionId: homeRegionId, x: home.x, y: home.y, z: home.z } : null;
+    const homeRegionId = Number(previous.homeRegionId ?? npc.region_id); const homeStatus = String(previous.homeStatus ?? npc.status) === 'patrolling' ? 'stationed' : String(previous.homeStatus ?? npc.status); const homeDestination = isRoutePoint(home) ? { regionId: homeRegionId, x: home.x, y: home.y, z: home.z } : null;
     if (!deployment && !homeDestination) {
       await connection.execute('UPDATE world_dynamic_npc_states SET next_action_at=DATE_ADD(NOW(),INTERVAL 30 MINUTE) WHERE code=?', [npc.code]);
       continue;
@@ -699,7 +808,7 @@ export const advanceDynamicNpcs = async () => withTransaction(async connection =
     let sceneId: string | null = null;
     if (deployment) {
       destination = deployment; nextStatus = 'responding'; nextRouteIndex = routeIndex; nextMinutes = 5; outcome = 'deployed'; currentPoint = '公共奇遇现场'; sceneId = deployment.sceneId;
-    } else if (previous.specialSceneId) {
+    } else if (previous.specialSceneId || previous.serviceUntil && new Date(String(previous.serviceUntil)).getTime() > Date.now()) {
       destination = homeDestination!; nextStatus = homeStatus; nextRouteIndex = 0; nextMinutes = 8; outcome = 'returned'; currentPoint = home?.name ?? '常驻点';
     // 让常驻域民多数时间能被世界遇见：离站概率 72%，巡游途中续行概率 58%。
     } else if (patrolRoute.length && (npc.status === 'patrolling' ? patrolRoll < 58 : patrolRoll < 72)) {

@@ -3,12 +3,13 @@ import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { SESSION_TTL_MINUTES, STAMINA_RECOVERY_MS, artifactGiftSlots, calculateDerivedStats, equipmentQualityMultiplier, gifts, isGiftCode, staminaMaxForRealm, virtualEquipmentStats, type VirtualEquipmentTier } from './constants';
 import { homeRestRecoveryBonus } from './home.service';
-import { applyWeaponMasteryStats, weaponMasteryBonusesFor } from './weapon-mastery.service';
+import { weaponMasteryBonusesFor } from './weapon-mastery.service';
 import { attributes, type Allocation, type DerivedStats, type Growth } from './types';
 import { recordSkillPointChange, resetSkillPointAllocation } from './skill-point-ledger.service';
-import { applyEvolutionBaseStats, evolutionStatBonuses, repairEvolutionProgress } from './evolution.service';
+import { evolutionStatBonuses, repairEvolutionProgress } from './evolution.service';
 import { advancedProfessionByCode, cachedAdvancedPassiveEffectFor } from './advanced-profession.config';
-import { applyEpicSetPanelStats, epicLoadoutFor } from './epic-equipment.service';
+import { epicLoadoutFor } from './epic-equipment.service';
+import { calculatePanelStats, panelPercentKeys } from './panel-stat-formula';
 
 type RegistrationStage = 'story' | 'audience' | 'question' | 'destination' | 'danger' | 'choice';
 type SessionRow = RowDataPacket & { id: string; player_id: number; stage: RegistrationStage; expires_at: Date };
@@ -57,7 +58,7 @@ export const armorClassDefenseMultiplier = (subtype: string | null | undefined, 
 /** 防具甲类对命中、闪避、速度的最终修正；导师毕业构筑复用玩家同一套规则。 */
 export const armorClassMobilityModifier = (subtype: string | null | undefined, key: 'accuracy' | 'evasion' | 'speed') => armorClassModifier[subtype ?? '']?.[key] ?? 0;
 
-const withEquipmentStats = async (connection: Pool | PoolConnection, characterId: number, base: DerivedStats): Promise<DerivedStats> => {
+const withEquipmentStats = async (connection: Pool | PoolConnection, characterId: number, base: DerivedStats, evolutionBonus: Record<string, number> = {}, independentPercent: readonly Record<string, number>[] = []): Promise<DerivedStats> => {
   const [rows] = await connection.execute<(RowDataPacket & { effect_json: unknown; quality: number; item_category: string; weapon_type: string | null })[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json,COALESCE(ii.quality,100) AS quality,i.item_category,i.weapon_type
     FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
     LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
@@ -65,18 +66,16 @@ const withEquipmentStats = async (connection: Pool | PoolConnection, characterId
   const [foodRows] = await connection.execute<(RowDataPacket & { buff_json: unknown })[]>('SELECT buff_json FROM player_food_buffs WHERE character_id=? AND expires_at>NOW()', [characterId]);
   const effects = [...rows.map(row => ({ effect: jsonRecord(row.effect_json), scale: equipmentQualityMultiplier(Number(row.quality)), armor: armorClassModifier[String(row.weapon_type ?? '')] })), ...foodRows.map(row => ({ effect: jsonRecord(row.buff_json), scale: 1, armor: undefined }))];
   const flat = (key: string) => effects.reduce((total, entry) => total + Number(entry.effect[key] ?? 0) * entry.scale * (key === 'physicalDefense' ? entry.armor?.physicalDefense ?? 1 : key === 'magicDefense' ? entry.armor?.magicDefense ?? 1 : 1), 0);
-  const multiplier = (key: string) => effects.reduce((total, entry) => total * (1 + Number(entry.effect[key] ?? 0) * entry.scale / 100), 1);
-  const stat = (value: number, rawKey: string, percentKey: string) => Math.max(0, Math.floor((value + flat(rawKey)) * multiplier(percentKey)));
+  // 食物保留独立倍率；进化与所有装备的同项百分比加算，不再彼此连乘。
+  const percent = Object.fromEntries(Object.values(panelPercentKeys).map(key => [key, Number(evolutionBonus[key] ?? 0) + rows.reduce((sum, row) => sum + Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)), 0)]));
+  const flatStats = Object.fromEntries(Object.keys(panelPercentKeys).map(key => [key, flat(key)]));
+  const foodPercent = foodRows.map(row => Object.fromEntries(Object.values(panelPercentKeys).map(key => [key, Number(jsonRecord(row.buff_json)[key] ?? 0)])));
+  const stats = calculatePanelStats(base, flatStats, percent, [...foodPercent, ...independentPercent]);
   const finalMultiplier = (key: 'accuracy' | 'evasion' | 'speed') => Math.max(0, 1 + rows.reduce((total, row) => total + Number(armorClassModifier[String(row.weapon_type ?? '')]?.[key] ?? 0), 0) / 100);
   return {
-    hpMax: stat(base.hpMax, 'hpMax', 'hpPct'), mpMax: stat(base.mpMax, 'mpMax', 'mpPct'),
-    physicalAttack: stat(base.physicalAttack, 'physicalAttack', 'physicalAttackPct'), magicAttack: stat(base.magicAttack, 'magicAttack', 'magicAttackPct'),
-    physicalDefense: stat(base.physicalDefense, 'physicalDefense', 'physicalDefensePct'), magicDefense: stat(base.magicDefense, 'magicDefense', 'magicDefensePct'),
-    critRateBp: stat(base.critRateBp, 'critRateBp', 'critRatePct'), critDamageBp: stat(base.critDamageBp, 'critDamageBp', 'critDamagePct'),
-    critResistBp: stat(base.critResistBp, 'critResistBp', 'critResistPct'), critDamageReductionBp: stat(base.critDamageReductionBp, 'critDamageReductionBp', 'critDamageReductionPct'),
-    tenacity: stat(base.tenacity, 'tenacity', 'tenacityPct'), tenacityPierce: stat(base.tenacityPierce, 'tenacityPierce', 'tenacityPiercePct'), speed: Math.floor(stat(base.speed, 'speed', 'speedPct') * finalMultiplier('speed')),
-    accuracy: Math.floor(stat(base.accuracy, 'accuracy', 'accuracyPct') * finalMultiplier('accuracy')),
-    evasion: Math.floor(stat(base.evasion, 'evasion', 'evasionPct') * finalMultiplier('evasion'))
+    ...stats, speed: Math.floor(stats.speed * finalMultiplier('speed')),
+    accuracy: Math.floor(stats.accuracy * finalMultiplier('accuracy')),
+    evasion: Math.floor(stats.evasion * finalMultiplier('evasion'))
   };
 };
 
@@ -102,20 +101,6 @@ const equipmentExtraAttributes = async (connection: Pool | PoolConnection, chara
   const effects = [...rows, ...deviceRows];
   const keys = ['damageBonusPct', 'damageReductionPct', 'chantReduction', 'magicChantBonus', 'manaCostReduction', 'ignoreDefensePct', 'lifestealPct', 'magicDamagePct', 'physicalDamageReductionPct', 'magicDamageReductionPct', 'hpRegenPct', 'mpRegenPct', 'minimumHitRatePct', 'actualHitRatePct', 'physicalActualHitRatePct', 'physicalSkillDamagePct', 'magicSkillDamagePct', 'lightSkillBonusPct', 'criticalDamageBonusPct', 'physicalCriticalFinalDamagePct'];
   return Object.fromEntries(keys.map(key => [key, Math.round(effects.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[key] ?? 0) * (key === 'damageBonusPct' || key === 'damageReductionPct' ? 1 : equipmentQualityMultiplier(Number(row.quality))), 0) * 10) / 10]));
-};
-
-/** 二转固有被动中无条件的派生属性，在重算时写入人物面板，避免战斗层重复乘算。 */
-const applyCachedAdvancedPassiveStats = (stats: DerivedStats, effect: Record<string, number>): DerivedStats => {
-  const increase = (value: number, key: string) => Math.max(0, Math.floor(value * (1 + Number(effect[key] ?? 0) / 100)));
-  return {
-    hpMax: increase(stats.hpMax, 'hpPct'), mpMax: increase(stats.mpMax, 'mpPct'),
-    physicalAttack: increase(stats.physicalAttack, 'physicalAttackPct'), magicAttack: increase(stats.magicAttack, 'magicAttackPct'),
-    physicalDefense: increase(stats.physicalDefense, 'physicalDefensePct'), magicDefense: increase(stats.magicDefense, 'magicDefensePct'),
-    accuracy: increase(stats.accuracy, 'accuracyPct'), evasion: increase(stats.evasion, 'evasionPct'),
-    critRateBp: increase(stats.critRateBp, 'critRatePct'), critDamageBp: increase(stats.critDamageBp, 'critDamagePct'),
-    critResistBp: increase(stats.critResistBp, 'critResistPct'), critDamageReductionBp: increase(stats.critDamageReductionBp, 'critDamageReductionPct'),
-    tenacity: increase(stats.tenacity, 'tenacityPct'), tenacityPierce: increase(stats.tenacityPierce, 'tenacityPiercePct'), speed: increase(stats.speed, 'speedPct')
-  };
 };
 
 /** 角色详情与战斗结算共用六维口径：基础与成长、全属性增益、已穿戴装备的六维加成。 */
@@ -203,13 +188,19 @@ export const recalculateCharacterStats = async (connection: Pool | PoolConnectio
   const equipmentAttributeBonus = (key: string) => equipmentAttributeRows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)), 0);
   const effectiveAttributes = Object.fromEntries(attributes.map(key => [key, baseAttributes[key] * attributeMultiplier + equipmentAttributeBonus(key)])) as Allocation;
   const evolutionBonus = await evolutionStatBonuses(connection, characterId);
-  const equippedStats = await withEquipmentStats(connection, characterId, applyEvolutionBaseStats(calculateDerivedStats(effectiveAttributes), evolutionBonus));
   const masteryBonuses = await weaponMasteryBonusesFor(connection, characterId);
   const [advancedProfessionRows] = await connection.execute<(RowDataPacket & { profession_code: string })[]>('SELECT profession_code FROM player_advanced_professions WHERE character_id=? LIMIT 1', [characterId]);
-  const stats = applyEpicSetPanelStats(applyCachedAdvancedPassiveStats(
-    applyWeaponMasteryStats(withVirtualNpcEquipment(equippedStats, Number(character.level), character.npc_code === null ? null : String(character.npc_code)), masteryBonuses),
-    cachedAdvancedPassiveEffectFor(advancedProfessionRows[0]?.profession_code)
-  ), await epicLoadoutFor(connection, characterId));
+  const epic = await epicLoadoutFor(connection, characterId);
+  const masteryPercent = Object.fromEntries(Object.values(panelPercentKeys).map(key => [key, Number((masteryBonuses as unknown as Record<string, unknown>)[key] ?? 0)]));
+  const equippedStats = await withEquipmentStats(connection, characterId, calculateDerivedStats(effectiveAttributes), evolutionBonus, [
+    masteryPercent,
+    epic.setCode === 'valk_forge_regalia' && epic.setCount >= 3 ? { hpPct: 6 } : {}
+  ]);
+  // 二转无条件被动最后作用于包含装备固定值的面板，不参与前面的百分比池。
+  const stats = calculatePanelStats(
+    withVirtualNpcEquipment(equippedStats, Number(character.level), character.npc_code === null ? null : String(character.npc_code)),
+    {}, cachedAdvancedPassiveEffectFor(advancedProfessionRows[0]?.profession_code)
+  );
   const baseMastery = jsonRecord(character.element_base_mastery_json ?? character.element_mastery_json);
   const baseResistance = jsonRecord(character.element_base_resistance_json ?? character.element_resistance_json);
   const elemental = await withEquipmentElements(connection, characterId, baseMastery, baseResistance);

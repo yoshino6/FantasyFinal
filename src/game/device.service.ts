@@ -1,6 +1,7 @@
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { activeDeviceCodes, constructionRecipeByCode } from './deconstructor-catalog';
+import { assertCombatLoadoutMutable } from './combat-loadout-lock.service';
 
 export type DeviceTargetScope = 'self' | 'ally' | 'enemy' | 'all_allies' | 'all_enemies' | 'any';
 export type ActiveDeviceSkill = { code: string; name: string; description: string; energyCost: number; cooldownTurns: number; targetScope: DeviceTargetScope; power?: number; effect?: string };
@@ -49,15 +50,6 @@ const characterIdFor = async (connection: Pool | PoolConnection, qqUserId: strin
   return Number(rows[0].id);
 };
 
-const ensureDeviceLoadoutMutable = async (connection: Pool | PoolConnection, characterId: number) => {
-  const [pveRows] = await connection.execute<RowDataPacket[]>(`SELECT 1 FROM combat_members cm JOIN combat_sessions cs ON cs.id=cm.session_id
-    WHERE cm.character_id=? AND cs.state='active' LIMIT 1 FOR UPDATE`, [characterId]);
-  if (pveRows[0]) throw new Error('战斗已经开始，异械生效与快捷配置将在下场战斗生效。');
-  const [pvpRows] = await connection.execute<RowDataPacket[]>(`SELECT 1 FROM player_pvp_battle_sessions
-    WHERE state='active' AND (attacker_character_id=? OR defender_character_id=?) LIMIT 1 FOR UPDATE`, [characterId, characterId]);
-  if (pvpRows[0]) throw new Error('战斗已经开始，异械生效与快捷配置将在下场战斗生效。');
-};
-
 export const activeDeviceList = async (qqUserId: string) => {
   const pool = await getPool(); const characterId = await characterIdFor(pool, qqUserId);
   const [rows] = await pool.execute<(RowDataPacket & { id: number; code: string; name: string; active: number; quick_slot: number | null })[]>(`
@@ -86,7 +78,7 @@ export const deviceSkillDetail = async (qqUserId: string, instanceId: number, sk
 
 export const activateDevice = async (qqUserId: string, instanceId: number) => withTransaction(async connection => {
   const characterId = await characterIdFor(connection, qqUserId, true);
-  await ensureDeviceLoadoutMutable(connection, characterId);
+  await assertCombatLoadoutMutable(connection, characterId);
   const [rows] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>(`
     SELECT ii.id,i.name FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
     WHERE ii.id=? AND ii.character_id=? AND i.item_type='device' FOR UPDATE
@@ -99,7 +91,7 @@ export const activateDevice = async (qqUserId: string, instanceId: number) => wi
 
 export const deactivateDevice = async (qqUserId: string, instanceId: number) => withTransaction(async connection => {
   const characterId = await characterIdFor(connection, qqUserId, true);
-  await ensureDeviceLoadoutMutable(connection, characterId);
+  await assertCombatLoadoutMutable(connection, characterId);
   const [rows] = await connection.execute<(RowDataPacket & { name: string })[]>(`
     SELECT i.name FROM player_active_devices ad JOIN player_item_instances ii ON ii.id=ad.instance_id
     JOIN item_definitions i ON i.id=ii.item_id WHERE ad.character_id=? AND ad.instance_id=? AND i.item_type='device' FOR UPDATE
@@ -122,7 +114,7 @@ export const deviceQuickConfig = async (qqUserId: string) => {
 export const setDeviceQuickSlot = async (qqUserId: string, slot: number, instanceId: number) => withTransaction(async connection => {
   if (!Number.isInteger(slot) || slot < 1 || slot > 4) throw new Error('异械栏位仅限 ① 至 ④。');
   const characterId = await characterIdFor(connection, qqUserId, true);
-  await ensureDeviceLoadoutMutable(connection, characterId);
+  await assertCombatLoadoutMutable(connection, characterId);
   const [rows] = await connection.execute<(RowDataPacket & { name: string; code: string })[]>(`SELECT i.name,i.code FROM player_active_devices ad
     JOIN player_item_instances ii ON ii.id=ad.instance_id JOIN item_definitions i ON i.id=ii.item_id
     WHERE ad.character_id=? AND ad.instance_id=? AND i.item_type='device' FOR UPDATE`, [characterId, instanceId]);
@@ -138,7 +130,7 @@ export const setDeviceQuickSlot = async (qqUserId: string, slot: number, instanc
 export const clearDeviceQuickSlot = async (qqUserId: string, slot: number) => withTransaction(async connection => {
   if (!Number.isInteger(slot) || slot < 1 || slot > 4) throw new Error('异械栏位仅限 ① 至 ④。');
   const characterId = await characterIdFor(connection, qqUserId, true);
-  await ensureDeviceLoadoutMutable(connection, characterId);
+  await assertCombatLoadoutMutable(connection, characterId);
   await connection.execute('DELETE FROM player_device_quick_slots WHERE character_id=? AND quick_slot=?', [characterId, slot]);
 });
 

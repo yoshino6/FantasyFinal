@@ -5,6 +5,8 @@ export const initializeInventoryBinding = async (pool: Pool) => {
     ['player_inventory','trade_bound_quantity INT UNSIGNED NOT NULL DEFAULT 0'],
     ['player_inventory','personal_bound_quantity INT UNSIGNED NOT NULL DEFAULT 0'],
     ['player_inventory','binding_revision INT UNSIGNED NOT NULL DEFAULT 0'],
+    ['player_home_storage_items','trade_bound_quantity INT UNSIGNED NOT NULL DEFAULT 0'],
+    ['player_home_storage_items','personal_bound_quantity INT UNSIGNED NOT NULL DEFAULT 0'],
     ['player_item_instances',"bound_kind VARCHAR(16) NOT NULL DEFAULT 'none'"],
     ['player_item_instances','bound_at DATETIME NULL'],
     ['player_item_instances','bound_reason VARCHAR(32) NULL']
@@ -41,13 +43,13 @@ export const initializeInventoryBinding = async (pool: Pool) => {
     END IF;
     IF NEW.personal_bound_quantity+NEW.trade_bound_quantity>NEW.quantity THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='invalid inventory binding quantities'; END IF;
   END`);
-  for(const [name,table,field] of [['equipment_bind_insert_v1','player_equipment','instance_id'],['device_bind_insert_v1','player_active_devices','instance_id']]) {
+  for(const [name,table,field] of [['equipment_bind_insert_v2','player_equipment','instance_id'],['device_bind_insert_v2','player_active_devices','instance_id']]) {
     if(!names.has(name!)) await pool.query(`CREATE TRIGGER ${name} AFTER INSERT ON ${table} FOR EACH ROW
-      UPDATE player_item_instances SET bound_kind=IF(bound_kind='personal','personal','trade'),bound_at=COALESCE(bound_at,NOW()),bound_reason=COALESCE(bound_reason,'used') WHERE id=NEW.${field}`);
+      UPDATE player_item_instances SET bound_kind='personal',bound_at=COALESCE(bound_at,NOW()),bound_reason=COALESCE(bound_reason,'used') WHERE id=NEW.${field}`);
   }
   // 已装配的旧实例有真实使用证据；其他旧库存不编造交易历史。
   await pool.query(`UPDATE player_item_instances i LEFT JOIN player_equipment e ON e.instance_id=i.id LEFT JOIN player_active_devices d ON d.instance_id=i.id
-    SET i.bound_kind='trade',i.bound_at=COALESCE(i.bound_at,NOW()),i.bound_reason='legacy_equipped' WHERE i.bound_kind='none' AND (e.instance_id IS NOT NULL OR d.instance_id IS NOT NULL)`);
+    SET i.bound_kind='personal',i.bound_at=COALESCE(i.bound_at,NOW()),i.bound_reason='legacy_equipped' WHERE i.bound_kind<>'personal' AND (e.instance_id IS NOT NULL OR d.instance_id IS NOT NULL OR i.bound_reason IN ('used','legacy_equipped'))`);
   await pool.query("UPDATE player_inventory p JOIN item_definitions i ON i.id=p.item_id SET p.personal_bound_quantity=p.quantity,p.trade_bound_quantity=0,p.binding_revision=p.binding_revision+1 WHERE i.is_tradeable=0 OR i.item_category IN ('任务','剧情') OR JSON_EXTRACT(i.effect_json,'$.personalOnly')=true");
   await pool.query("UPDATE player_item_instances p JOIN item_definitions i ON i.id=p.item_id SET p.bound_kind='personal',p.bound_at=COALESCE(p.bound_at,NOW()),p.bound_reason='personal_item' WHERE i.is_tradeable=0 OR i.item_category IN ('任务','剧情') OR JSON_EXTRACT(i.effect_json,'$.personalOnly')=true");
 };

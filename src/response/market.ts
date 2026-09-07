@@ -1,4 +1,5 @@
-import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { requireNpcAtCurrentPosition } from '../game/adventure.service';
 import {
   MARKET_TYPES, cancelMarketOrder, createMarketBuyOrder, createMarketSellOrder,

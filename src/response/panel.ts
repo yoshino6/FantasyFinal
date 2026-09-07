@@ -1,4 +1,5 @@
-import { Format, logger, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, logger, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { battleStatus, blockedDungeonDirections, completeTravel, movementProfile, nearbyPoints, resourceMiningStatus, resumeAction, setMapLandmarksVisible, setNearbyPlayersVisible, startRest, travelStatus, type MapLandmark, type NearbyPoint } from '../game/adventure.service';
 import { messageFormat, sendWithTextFallback } from '../game/message';
 import { autoBattleConfig } from '../game/auto-battle.service';

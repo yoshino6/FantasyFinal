@@ -39,17 +39,24 @@ export const recordAlchemyJournal = async (connection: PoolConnection, character
 };
 export const alchemyJournalDetail = async (userId: string, id: number) => {
   const pool = await getPool(); const characterId = await craftCharacterId(pool, userId);
+  await requireJournalAlchemist(pool,characterId);
   const [rows] = await pool.execute<RowDataPacket[]>('SELECT * FROM player_alchemy_journal WHERE character_id=? AND id=?', [characterId, id]);
   if (!rows[0]) throw new Error('未找到你的这条炼金手记。'); return parseJournal(rows[0]);
 };
+const requireJournalAlchemist=async(pool:Pick<PoolConnection,'execute'>,characterId:number)=>{
+  const [rows]=await pool.execute<RowDataPacket[]>("SELECT id FROM characters WHERE id=? AND secondary_profession_code='alchemist'",[characterId]);
+  if(!rows.length)throw new Error('炼金手记仅对当前炼金师开放。');
+};
 const parseJournal = (row: RowDataPacket) => ({ id: Number(row.id), time: new Date(row.created_at), token: String(row.request_token), snapshot: craftJson<AlchemySnapshot>(row.snapshot_json), batches: craftJson<AlchemyBatch[]>(row.batches_json), result: craftJson<Record<string, any>>(row.result_json) });
 export const alchemyJournalPage = async (userId: string, page = 1, scope = '全部记录', field = '全部', keyword = '', anchor = 0) => {
-  if (!['全部记录', '稳定组合', '造物', '育成', '成功', '失败'].includes(scope) || !['全部', '耗材', '成果'].includes(field)) throw new Error('未知手记筛选条件。');
+  if(scope==='造物')scope='点灵';
+  if (!['全部记录', '稳定组合', '点灵', '育成', '成功', '失败'].includes(scope) || !['全部', '耗材', '成果'].includes(field)) throw new Error('未知手记筛选条件。');
   const pool = await getPool(); const characterId = await craftCharacterId(pool, userId);
+  await requireJournalAlchemist(pool,characterId);
   if (!anchor) { const [rows] = await pool.execute<RowDataPacket[]>('SELECT COALESCE(MAX(id),0) AS anchor FROM player_alchemy_journal WHERE character_id=?', [characterId]); anchor = Number(rows[0]?.anchor ?? 0); }
   const values: (string | number)[] = [characterId, anchor];
   let where = 'j.character_id=? AND j.id<=?';
-  if(scope==='造物'||scope==='育成'){where+=' AND j.kind=?';values.push(scope);}
+  if(scope==='点灵'||scope==='育成'){where+=' AND j.kind=?';values.push(scope==='点灵'?'造物':scope);}
   if(scope==='成功'||scope==='失败'){where+=" AND JSON_CONTAINS(j.batches_json,?)";values.push(JSON.stringify({success:scope==='成功'}));}
   if (scope === '稳定组合') where += " AND JSON_EXTRACT(j.result_json,'$.statistics.stable')=true AND NOT EXISTS (SELECT 1 FROM player_alchemy_journal newer WHERE newer.character_id=j.character_id AND newer.group_key=j.group_key AND newer.id>j.id AND newer.id<=?)";
   if (scope === '稳定组合') values.push(anchor);
@@ -68,4 +75,4 @@ export const cancelCraftPreview = async (userId: string, token: string, kind = '
   const id = await craftCharacterId(connection, userId, true); const request = await craftRequestFor(connection, id, kind, token);
   if (request.result) throw new Error('这次操作已完成，可查看原结果。');
   await connection.execute("UPDATE player_craft_requests SET state='cancelled' WHERE token=? AND character_id=?", [token, id]);
-});
+});

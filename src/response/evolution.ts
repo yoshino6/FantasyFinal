@@ -1,4 +1,5 @@
-import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { requireNpcAtCurrentPosition } from '../game/adventure.service';
 import { acceptEvolutionObservation, archiveMutation, claimEvolutionObservation, evolutionInjectionMaterials, evolutionItemName, evolutionObservationDashboard, evolutionPanel, injectEvolution, bodyPartNames, mutationDetail, setMutationPaused, shapingDraft, stabilizeMutation, symbiosisTraitCodes, symbiosisTraits, toggleShapingTrait, type BodyPart, type InjectionCode, type SymbiosisTraitCode } from '../game/evolution.service';
 import { recalculateCharacterStats } from '../game/character.service';

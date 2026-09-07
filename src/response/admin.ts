@@ -1,4 +1,5 @@
-import { Format, useEvent, useMention, useMessage, useRoute } from 'alemonjs';
+import { Format, useEvent, useMention, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { addMailAttachment, addMailRecipientByName, addMailRecipientByQq, discardMailEdit, getMailEdit, openMailEdit, previewMailEdit, removeMailAttachment, removeMailRecipient, sendMailEdit, stashMailEdit, switchMailEditToGlobal, updateMailAttachmentQuantity, updateMailContent, updateMailTitle, type MailEdit } from '../game/admin-mail-edit.service';
 import { grantAdministrator, loginAsOwner, permissionFor, permissionList, requireAdministrator, requireOwner, revokeAdministrator, type PermissionRole } from '../game/permission.service';
 import { messageFormat } from '../game/message';

@@ -12,6 +12,7 @@ import { blindBoxBlueprints, constructionRecipes, constructionValueByCode, devic
 import { regionalBossComponentDefinitions } from '../game/regional-boss-components.config';
 import { initializeResidentSkills } from './resident-skills';
 import { initializeCombatSkillBalance } from './combat-skill-balance';
+import { migrateEquipmentVitalAffixes } from './equipment-vital-affixes';
 
 type BlacksmithStock = { code: string; name: string; category: string; weaponType: string | null; level: number; price: number; effect: Record<string, number | undefined> };
 type AlchemistStock = { code: string; name: string; category: '回复' | '特殊'; price: number; description: string; effect: Record<string, number | boolean> };
@@ -3577,5 +3578,6 @@ export const initializeSchema = async (pool: Pool) => {
   }
   await initializeResidentSkills(pool);
   await initializeCombatSkillBalance(pool);
+  await migrateEquipmentVitalAffixes(pool, recalculateCharacterStats);
   await refreshShopStocks(pool);
 };

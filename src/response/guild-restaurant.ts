@@ -1,4 +1,5 @@
-import { Format, useEvent, useMessage, useRoute } from 'alemonjs';
+import { Format, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { addNpcAffinity, requireNpcAtCurrentPosition } from '../game/adventure.service';
 import { enjoyRestaurantMeal, foodBuffText, restaurantMenu } from '../game/guild-restaurant.service';
 import { messageFormat } from '../game/message';

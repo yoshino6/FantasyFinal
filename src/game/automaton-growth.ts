@@ -13,7 +13,7 @@ export const automatonRandom = (seed: string, domain: string, index = 0) =>
   createHmac('sha256', seed).update(`${domain}:${index}`).digest().readUInt32BE(0) / 2 ** 32;
 export const cultivationRequired = (level: number) => 200 + 40 * level + 4 * level * level;
 export const keys = ['hpMax', 'mpMax', 'physicalAttack', 'magicAttack', 'physicalDefense', 'magicDefense', 'accuracy', 'evasion', 'critRateBp', 'critDamageBp', 'critResistBp', 'critDamageReductionBp', 'tenacity', 'tenacityPierce', 'speed'] as const;
-export const labels = ['生命', '魔力', '物攻', '魔攻', '物防', '魔防', '命中', '闪避', '暴击', '暴伤', '暴抗', '暴减', '韧性', '破韧', '速度'];
+export const labels = ['生命', '魔力', '物攻', '魔攻', '物防', '魔防', '命中', '闪避', '暴击', '暴伤', '暴免', '暴抗', '韧性', '破韧', '速度'];
 export const directions = ['均衡', '战锋', '灵术', '守御', '灵巧'] as const;
 type Direction = typeof directions[number];
 export const weights: Record<Direction, number[]> = {

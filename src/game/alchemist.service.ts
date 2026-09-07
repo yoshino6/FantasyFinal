@@ -1,4 +1,5 @@
 import { consumeInventory, grantInventory, productionBinding, type Binding } from './inventory-binding';
+import { alchemyCreationQuestFor } from './alchemy-creation-quest.service';
 import { alchemyMaterialValue, alchemyQualityRoll, alchemyQualityBudget, alchemyCostQualityBudget, alchemySupportsQuality, alchemySuccessRate } from './alchemy-balance';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
@@ -99,6 +100,7 @@ const addAlchemistProficiency = async (connection: PoolConnection, qqUserId: str
   while (level < secondaryProfessionMaxLevel && proficiency >= proficiencyRequired(level)) { proficiency -= proficiencyRequired(level); level += 1; }
   if (level >= secondaryProfessionMaxLevel) proficiency = 0;
   await connection.execute('UPDATE player_secondary_professions SET level=?,proficiency=? WHERE character_id=?', [level, proficiency, characterId]);
+  if(level>=4)await alchemyCreationQuestFor(connection,characterId);
   return { level, proficiency, required: proficiencyRequired(level), bonus: secondaryProfessionBonus(level), serviceMode: 'personal' as const };
 };
 export const alchemistProgress = async (qqUserId: string) => { const pool = await getPool(); return alchemistProgressFor(pool, await characterIdFor(pool, qqUserId)); };

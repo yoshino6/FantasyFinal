@@ -1,4 +1,5 @@
-import { Format,useEvent,useMessage,useRoute } from 'alemonjs';
+import { Format, useEvent, useRoute } from 'alemonjs';
+import { useGameMessage as useMessage } from '../game/use-game-message';
 import { secondaryFinishedCatalog,buySecondaryFinished } from '../game/secondary-shop.service';
 import { messageFormat } from '../game/message';
 
