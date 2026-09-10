@@ -2424,6 +2424,7 @@ export const initializeSchema = async (pool: Pool) => {
     ,('armor_shatter','碎甲','stat_modifier',5,2,1,1,0,'降低目标物理防御。')
     ,('magic_shatter','破障','stat_modifier',5,2,1,1,0,'降低目标魔法防御。')
     ,('bind','束缚','stat_modifier',5,2,1,1,0,'降低目标速度与闪避。')
+    ,('exposed','易伤','stat_modifier',25,2,1,1,0,'受到的直击伤害提高。')
     ,('rending','撕裂','damage_over_time',3,3,1,1,0,'每回合损失最大生命值3%；对首领每回合最多为其最大生命的1.5%。')
     ,('mist_veil','雾隐','stat_modifier',20,0,1,1,0,'下一次出招伤害提高。')
     ,('shadow_pierce','影刺','stat_modifier',1,0,1,1,0,'下一次出招必定暴击。')
@@ -3024,7 +3025,6 @@ export const initializeSchema = async (pool: Pool) => {
     ('precision','精准','stat_modifier',25,2,1,1,0,'提高自身命中。'),
     ('critical_focus','月影专注','stat_modifier',25,2,1,1,0,'提高自身暴击。'),
     ('evasion_down','破绽','stat_modifier',40,2,1,1,0,'降低目标闪避。'),
-    ('exposed','易伤','stat_modifier',25,2,1,1,0,'受到的直击伤害提高。'),
     ('shield_counter','盾反','shield',80,1,1,1,0,'释放后进入“盾反”状态，持续到自身下次行动前。#盾反#受到的伤害降低80%。受击为近战时，将此次80%的原始攻击反弹给施加者。')
     ,('shield_counter_cooldown','拿捏','stat_modifier',1,0,1,1,0,'格挡成功时，减少1回合该技能冷却；可反复生效。')
     ON DUPLICATE KEY UPDATE name=VALUES(name),effect_type=VALUES(effect_type),default_value=VALUES(default_value),default_duration=VALUES(default_duration),max_level=VALUES(max_level),max_stacks=VALUES(max_stacks),stackable=VALUES(stackable),description=VALUES(description)`);
