@@ -68,7 +68,7 @@ const consumableEffects = (effectJson: unknown) => {
   const statusNames: Record<string, string> = { regeneration: '再生', mana_regeneration: '回流', barrier: '减伤', battle_cry: '战吼', precision: '精准', critical_focus: '凝神', sprint: '迅行', alchemy_guard: '坚守', alchemy_evasion: '轻灵', burn: '灼烧', bind: '束缚', stun: '眩晕', exposed: '易伤', imbalance: '失衡', alchemy_confusion: '混乱' };
   if (String(status.code)) lines.push(`施加${effect.target === 'enemy' ? '目标' : '自身'}「${statusNames[String(status.code)] ?? String(status.code)}」${Number(status.turns) ? `，持续 ${Number(status.turns)} 回合` : ''}${Number(status.chance) ? `（${Number(status.chance)}% 基础概率）` : ''}。`);
   const throwable = jsonObject(effect.throwable);
-  if (Number(throwable.damageScale ?? 0)) lines.push(`对当前目标造成${String(throwable.element ?? '无')}属性直击伤害。`);
+  if (Number(throwable.damageScale ?? 0)) lines.push(`对当前目标造成${String(throwable.element ?? '无')}属性直击伤害${effect.trueHit?'（必中）':''}${effect.noCrit?'（不可暴击）':''}。`);
   if (Number(effect.experienceBonusPct ?? 0)) lines.push(`战斗经验获取提高 ${Number(effect.experienceBonusPct)}%。`);
   if (Number(effect.partyDropBonusPct ?? 0)) lines.push(`所在队伍打怪掉率提高 ${Number(effect.partyDropBonusPct)}%。`);
   if (Number(effect.playerAffinity ?? 0)) lines.push(`赠送给好友后，好感增加 ${Number(effect.playerAffinity)} 点。`);

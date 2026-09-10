@@ -1,0 +1,17 @@
+TAP version 13
+# Subtest: G05 普通软控首次显示来源，刷新不重复，过期重施可显示，硬控与PVP排除
+ok 1 - G05 普通软控首次显示来源，刷新不重复，过期重施可显示，硬控与PVP排除
+  ---
+  duration_ms: 2.0193
+  type: 'test'
+  ...
+# [2026-09-09 12:14:32][INFO] [alemonjs][exit] 进程退出，code=0
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 922.3753

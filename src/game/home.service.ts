@@ -1,3 +1,5 @@
+import { recordAchievement } from './achievement-events';
+import { talentMaterialPayment, consumeTalentMaterial } from './talent-production';
 import { consumeInventory } from './inventory-binding';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
@@ -61,8 +63,9 @@ const addItem = async (connection: Db, characterId: number, itemId: number, quan
 const consumeMaterials = async (connection: Db, characterId: number, materials: Record<string, number>) => {
   for (const [code, quantity] of Object.entries(materials)) {
     const [rows] = await connection.execute<(RowDataPacket & { item_id: number; quantity: number })[]>(`SELECT pi.item_id,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.code=? FOR UPDATE`, [characterId, code]);
-    if (!rows[0] || Number(rows[0].quantity) < quantity) throw new Error(`材料不足：${code} 需要 ${quantity}。`);
-    await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [quantity, characterId, rows[0].item_id]);
+    const paid=rows[0]?await talentMaterialPayment(connection as PoolConnection,characterId,Number(rows[0].item_id),quantity,'home'):quantity;
+    if (!rows[0] || Number(rows[0].quantity) < paid) throw new Error(`材料不足：${code} 实际需要 ${paid}。`);
+    await consumeTalentMaterial(connection as PoolConnection,characterId,Number(rows[0].item_id),quantity,'home');
     await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [characterId, rows[0].item_id]);
   }
 };
@@ -132,6 +135,7 @@ export const purchaseHome = async (qqUserId: string) => withTransaction(async co
   const homeName = `${character.name}的小屋`;
   const [created] = await connection.execute<any>('INSERT INTO player_homes (character_id,home_name,town_region_id,plot_x,plot_y,plot_z) VALUES (?,?,?,?,?,?)', [character.id, homeName, character.current_region_id, plot.x, plot.y, plot.z]);
   await connection.execute('INSERT INTO player_events (player_id,event_type,payload) VALUES (?,\'home.purchased\',JSON_OBJECT(\'homeId\',?,\'x\',?,\'y\',?))', [character.player_id, created.insertId, plot.x, plot.y]);
+  recordAchievement(connection,Number(character.id),['ACH_K10']);
   return { plot, copper: homeCosts.purchase.copper };
 });
 
@@ -166,6 +170,7 @@ export const renameHome = async (qqUserId: string, input: string) => withTransac
   if (!home) throw new Error('你还没有小屋。');
   await connection.execute('UPDATE player_homes SET home_name=? WHERE id=?', [name, home.id]);
   await connection.execute('INSERT INTO player_events (player_id,event_type,payload) VALUES (?,\'home.renamed\',JSON_OBJECT(\'homeId\',?,\'name\',?))', [character.player_id, home.id, name]);
+  recordAchievement(connection,Number(character.id),['ACH_K12']);
   return { name };
 });
 const costForUpgrade = (home: Home) => Number(home.house_level) === 1 ? homeCosts.upgrade2 : Number(home.house_level) === 2 ? homeCosts.upgrade3 : null;
@@ -217,13 +222,17 @@ export const craftFurniture = async (qqUserId: string, code: string, floor: numb
   const [recipe] = await connection.execute<(RowDataPacket & { item_id: number; quantity: number; name: string })[]>(`SELECT r.item_id,r.quantity,i.name FROM home_furniture_recipes r JOIN item_definitions i ON i.id=r.item_id WHERE r.furniture_code=? FOR UPDATE`, [code]);
   for (const material of recipe) {
     const [owned] = await connection.execute<(RowDataPacket & { quantity: number })[]>('SELECT quantity FROM player_inventory WHERE character_id=? AND item_id=? FOR UPDATE', [character.id, material.item_id]);
-    if (!owned[0] || Number(owned[0].quantity) < Number(material.quantity)) throw new Error(`材料不足：${material.name}×${material.quantity}。`);
+    const paid = await talentMaterialPayment(connection, character.id, Number(material.item_id), Number(material.quantity), 'home');
+    if (Number(owned[0]?.quantity ?? 0) < paid) throw new Error(`材料不足：${material.name}×${paid}。`);
   }
-  for (const material of recipe) { await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [material.quantity, character.id, material.item_id]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, material.item_id]); }
+  for (const material of recipe) { await consumeTalentMaterial(connection, character.id, Number(material.item_id), Number(material.quantity), 'home'); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, material.item_id]); }
   const slotKey = `auto-${floor}-${placement.x}-${placement.y}-${Date.now().toString(36)}`;
   const [created] = await connection.execute<any>('INSERT INTO player_home_furniture (home_id,furniture_code,floor_no,slot_key,grid_x,grid_y,rotation,layout_version) VALUES (?,?,?,?,?,?,?,2)', [home.id, code, floor, slotKey, placement.x, placement.y, placement.rotation]);
   await occupyFurnitureCells(connection, Number(home.id), floor, Number(created.insertId), placement);
   await connection.execute('DELETE FROM player_home_floor_renders WHERE home_id=? AND floor_no=?', [home.id, floor]);
+  recordAchievement(connection,Number(character.id),['ACH_K13']);
+  const [furnitureCount]=await connection.execute<RowDataPacket[]>('SELECT COUNT(DISTINCT furniture_code) AS n FROM player_home_furniture WHERE home_id=?',[home.id]);
+  recordAchievement(connection,Number(character.id),[{metric:'ACH_K14',maximum:true,value:Number(furnitureCount[0].n),life:true}]);
   return { id: Number(created.insertId), name: definition.name, floor, placement };
 });
 
@@ -295,8 +304,8 @@ export const depositHomeStorage = async (qqUserId: string, itemId: number, quant
   if (!Number.isInteger(itemId) || itemId < 1 || !Number.isInteger(quantity) || quantity < 1) throw new Error('物品编号和数量必须为正整数。');
   const character = await characterFor(connection, qqUserId, true); const home = await homeFor(connection, Number(character.id), true); if (!home) throw new Error('你还没有小屋。');
   const capacity = await homeStorageCapacityFor(connection, Number(home.id)); if (!capacity) throw new Error('尚未摆放储物箱，暂时没有可用仓储空间。');
-  const [rows] = await connection.execute<(RowDataPacket & { item_id: number; name: string; quantity: number; weight: number })[]>('SELECT pi.item_id,i.name,pi.quantity,i.weight FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.item_id=? AND pi.quantity>0 AND i.stackable=1 FOR UPDATE', [character.id, itemId]);
-  const item = rows[0]; if (!item) throw new Error('背包中没有可放入的该物品。'); if (Number(item.quantity) < quantity) throw new Error(`背包数量不足，当前仅有 ${item.quantity} 个。`);
+  const [rows] = await connection.execute<(RowDataPacket & { item_id: number; name: string; quantity: number; weight: number; personal_only: number })[]>('SELECT pi.item_id,i.name,pi.quantity,i.weight,COALESCE(JSON_EXTRACT(i.effect_json,\'$.personalOnly\'),0) AS personal_only FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.item_id=? AND pi.quantity>0 AND i.stackable=1 FOR UPDATE', [character.id, itemId]);
+  const item = rows[0]; if (!item) throw new Error('背包中没有可放入的该物品。'); if (Number(item.personal_only)) throw new Error('足迹永久道具必须保留在背包中，无法转存。'); if (Number(item.quantity) < quantity) throw new Error(`背包数量不足，当前仅有 ${item.quantity} 个。`);
   const usedWeight = await homeStorageWeightFor(connection, Number(home.id)); const addedWeight = Number(item.weight) * quantity;
   if (usedWeight + addedWeight > capacity + 0.000001) throw new Error(`仓储容量不足，还可放入 ${Math.max(0, capacity - usedWeight).toFixed(2)} kg。`);
   const binding=await consumeInventory(connection,Number(character.id),Number(item.item_id),quantity);

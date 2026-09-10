@@ -1,0 +1,16 @@
+{
+  "capturedAt": "2026-09-08T11:48:44.137Z",
+  "sha256": {
+    "src/game/constants.ts": "82859ba4744495de93d9520c269a9bfd06f58fee95697a49bd0c8e2c92c705a5",
+    "src/game/character.service.ts": "67a48547b529db75d729a7a671b548f677db05fe60d6ecc3b6d7395f450d931c",
+    "src/game/combat-math.ts": "cb71f535f4f15afde8b2e9d0f3d72dfe025f8862bd15b7215f8e6630384925e7",
+    "src/game/armor-set.ts": "693ba81c0f1d57f8d6d34d657bff2f5372d9234e4f63c5a4ebc4d1f08cb31f17",
+    "src/game/adventure.service.ts": "74c18543f13f5cc9c10caf4525b63f55146170d3c6a065fe531a0a9ec995fac5",
+    "src/game/blacksmith.service.ts": "f6306c0d61e06a93ed89d32572a8455e7f83ac140ecc87b0c4e9f1ab4c12ff48",
+    "src/game/automaton-growth.ts": "c7c5b54013ecb8203a3e1a25852e2aae552981b2896ad0108eddcc3d5eca0add",
+    "src/game/automaton.ts": "84342bd08c25212f507579510e2bb7736bd2083fd74db20797b17a735f103a46",
+    "src/game/advanced-mentor-trial.config.ts": "952506016f9514680d6b6e397a4df714565338b5aaa9d4ec6dc03a8c28333994",
+    "src/game/npc-sparring.config.ts": "1240c82aedfd6bce6457587eb0f41a08e2e3d81a923918a14563b70ecb85181a",
+    "src/game/dungeon.service.ts": "ee3832a87affc41a1e27491448641a634666303234aa7c5cfc72eb9f0ab767b0"
+  }
+}

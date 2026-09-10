@@ -1,0 +1,166 @@
+TAP version 13
+# Subtest: ACH_P01 正式PVP结算条件
+ok 1 - ACH_P01 正式PVP结算条件
+  ---
+  duration_ms: 18.7832
+  type: 'test'
+  ...
+# Subtest: ACH_P02 正式PVP结算条件
+ok 2 - ACH_P02 正式PVP结算条件
+  ---
+  duration_ms: 0.4524
+  type: 'test'
+  ...
+# Subtest: ACH_P03 正式PVP结算条件
+ok 3 - ACH_P03 正式PVP结算条件
+  ---
+  duration_ms: 0.3063
+  type: 'test'
+  ...
+# Subtest: ACH_P04 正式PVP结算条件
+ok 4 - ACH_P04 正式PVP结算条件
+  ---
+  duration_ms: 0.4093
+  type: 'test'
+  ...
+# Subtest: ACH_P05 正式PVP结算条件
+ok 5 - ACH_P05 正式PVP结算条件
+  ---
+  duration_ms: 0.4414
+  type: 'test'
+  ...
+# Subtest: ACH_P06 正式PVP结算条件
+ok 6 - ACH_P06 正式PVP结算条件
+  ---
+  duration_ms: 0.3242
+  type: 'test'
+  ...
+# Subtest: ACH_P07 正式PVP结算条件
+ok 7 - ACH_P07 正式PVP结算条件
+  ---
+  duration_ms: 0.4849
+  type: 'test'
+  ...
+# Subtest: ACH_P08 正式PVP结算条件
+ok 8 - ACH_P08 正式PVP结算条件
+  ---
+  duration_ms: 0.3118
+  type: 'test'
+  ...
+# Subtest: ACH_P09 正式PVP结算条件
+ok 9 - ACH_P09 正式PVP结算条件
+  ---
+  duration_ms: 0.5543
+  type: 'test'
+  ...
+# Subtest: ACH_P10 正式PVP结算条件
+ok 10 - ACH_P10 正式PVP结算条件
+  ---
+  duration_ms: 0.5563
+  type: 'test'
+  ...
+# Subtest: ACH_P11 正式PVP结算条件
+ok 11 - ACH_P11 正式PVP结算条件
+  ---
+  duration_ms: 0.2517
+  type: 'test'
+  ...
+# Subtest: ACH_P12 正式PVP结算条件
+ok 12 - ACH_P12 正式PVP结算条件
+  ---
+  duration_ms: 0.2063
+  type: 'test'
+  ...
+# Subtest: ACH_P13 正式PVP结算条件
+ok 13 - ACH_P13 正式PVP结算条件
+  ---
+  duration_ms: 0.2299
+  type: 'test'
+  ...
+# Subtest: ACH_P14 正式PVP结算条件
+ok 14 - ACH_P14 正式PVP结算条件
+  ---
+  duration_ms: 0.2336
+  type: 'test'
+  ...
+# Subtest: ACH_P15 正式PVP结算条件
+ok 15 - ACH_P15 正式PVP结算条件
+  ---
+  duration_ms: 0.2202
+  type: 'test'
+  ...
+# Subtest: ACH_P16 正式PVP结算条件
+ok 16 - ACH_P16 正式PVP结算条件
+  ---
+  duration_ms: 0.2644
+  type: 'test'
+  ...
+# Subtest: ACH_P17 正式PVP结算条件
+ok 17 - ACH_P17 正式PVP结算条件
+  ---
+  duration_ms: 0.2403
+  type: 'test'
+  ...
+# Subtest: ACH_P18 正式PVP结算条件
+ok 18 - ACH_P18 正式PVP结算条件
+  ---
+  duration_ms: 0.1838
+  type: 'test'
+  ...
+# Subtest: ACH_P19 正式PVP结算条件
+ok 19 - ACH_P19 正式PVP结算条件
+  ---
+  duration_ms: 0.1834
+  type: 'test'
+  ...
+# Subtest: ACH_P20 正式PVP结算条件
+ok 20 - ACH_P20 正式PVP结算条件
+  ---
+  duration_ms: 0.1824
+  type: 'test'
+  ...
+# Subtest: ACH_P21 正式PVP结算条件
+ok 21 - ACH_P21 正式PVP结算条件
+  ---
+  duration_ms: 0.1764
+  type: 'test'
+  ...
+# Subtest: ACH_P22 正式PVP结算条件
+ok 22 - ACH_P22 正式PVP结算条件
+  ---
+  duration_ms: 0.2075
+  type: 'test'
+  ...
+# Subtest: ACH_P23 正式PVP结算条件
+ok 23 - ACH_P23 正式PVP结算条件
+  ---
+  duration_ms: 0.2111
+  type: 'test'
+  ...
+# Subtest: ACH_P24 正式PVP结算条件
+ok 24 - ACH_P24 正式PVP结算条件
+  ---
+  duration_ms: 0.1972
+  type: 'test'
+  ...
+# Subtest: ACH_P25 正式PVP结算条件
+ok 25 - ACH_P25 正式PVP结算条件
+  ---
+  duration_ms: 0.2068
+  type: 'test'
+  ...
+# Subtest: PVP排除未结束、逃跑、零伤害、同身份、过低等级，检查精确边界
+ok 26 - PVP排除未结束、逃跑、零伤害、同身份、过低等级，检查精确边界
+  ---
+  duration_ms: 2.28
+  type: 'test'
+  ...
+1..26
+# tests 26
+# suites 0
+# pass 26
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 320.4512

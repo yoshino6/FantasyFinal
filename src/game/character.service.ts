@@ -1,20 +1,30 @@
+import { updateAchievementState } from './achievement-state';
+import { playerGrowthShares, STAT_BALANCE_VERSION } from './growth-rules';
+import { armorPanelPercent } from './armor-class';
+import { armorSetFromRows } from './armor-set';
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
-import { SESSION_TTL_MINUTES, STAMINA_RECOVERY_MS, artifactGiftSlots, calculateDerivedStats, equipmentQualityMultiplier, gifts, isGiftCode, staminaMaxForRealm, virtualEquipmentStats, type VirtualEquipmentTier } from './constants';
+import { SESSION_TTL_MINUTES, STAMINA_RECOVERY_MS, calculateDerivedStats, equipmentQualityMultiplier, staminaMaxForRealm, virtualEquipmentStats, type VirtualEquipmentTier } from './constants';
 import { homeRestRecoveryBonus } from './home.service';
 import { weaponMasteryBonusesFor } from './weapon-mastery.service';
 import { attributes, type Allocation, type DerivedStats, type Growth } from './types';
 import { recordSkillPointChange, resetSkillPointAllocation } from './skill-point-ledger.service';
 import { evolutionStatBonuses, repairEvolutionProgress } from './evolution.service';
-import { advancedProfessionByCode, cachedAdvancedPassiveEffectFor } from './advanced-profession.config';
+import { registeredAdvancedProfessionByCode as advancedProfessionByCode, cachedAdvancedPassiveEffectFor } from './advanced-profession.config';
 import { epicLoadoutFor } from './epic-equipment.service';
 import { calculatePanelStats, panelPercentKeys } from './panel-stat-formula';
+import { talentDefinitions } from './opening-content';
+import { talentCode } from './talent.config';
+import { applyTalentPanel } from './talent-data';
+import { chooseOpeningSpawn, openingWorldFor } from './opening-state';
+import { grantOpeningItem } from './opening.service';
+import { achievementStatBonus, flushAchievements } from './achievement.service';
+import { recordAchievement, takeAchievementEvents } from './achievement-events';
 
-type RegistrationStage = 'story' | 'audience' | 'question' | 'destination' | 'danger' | 'choice';
+type RegistrationStage = 'story' | 'audience' | 'question' | 'destination' | 'heaven' | 'danger' | 'choice';
 type SessionRow = RowDataPacket & { id: string; player_id: number; stage: RegistrationStage; expires_at: Date };
 type PlayerRow = RowDataPacket & { id: number; status: string };
-type RegionRow = RowDataPacket & { id: number; name: string; min_x: number; max_x: number; min_y: number; max_y: number; min_z: number; max_z: number };
 export type CharacterView = Allocation & DerivedStats & { name: string; gender: string; professionName: string | null; regionName: string; x: number; y: number; z: number; level: number; experience: number; realmStage: number; adventurerRegistered: boolean; giftName: string | null; growth: Growth; currentHp: number; currentMp: number; stamina: number; staminaMax: number; staminaFullSeconds: number; activityStatus: 'active' | 'resting' | 'unconscious' | 'detained'; elementMastery: Record<string, number>; elementResistance: Record<string, number>; extraAttributes: Record<string, number>; activeBuffs: string[]; combatNotes: string[] };
 
 const elements = ['水', '火', '土', '木', '风', '冰', '雷', '光', '暗'] as const;
@@ -35,7 +45,7 @@ const distribute = (total: number, precision = 1) => {
   for (let remaining = units - attributes.length; remaining > 0; remaining--) values[randomInRange(0, values.length - 1)]++;
   return Object.fromEntries(attributes.map((key, index) => [key, values[index] * precision])) as Allocation;
 };
-const finalAttributes = (row: Record<string, unknown>) => Object.fromEntries(attributes.map(key => [key, Number(row[key] ?? 0) + Number(row[`${key}_growth`] ?? row[`${key}Growth`] ?? 0) * Math.max(0, Number(row.level ?? 1) - 1)])) as Allocation;
+const finalAttributes = (row: Record<string, unknown>) => Object.fromEntries(attributes.map(key => [key, Number(row[key] ?? 0) + Number(row[`${key}_growth`] ?? row[`${key}Growth`] ?? 0) * playerGrowthShares(Number(row.level ?? 1))])) as Allocation;
 
 const jsonRecord = (value: unknown): Record<string, unknown> => {
   if (!value) return {};
@@ -43,40 +53,24 @@ const jsonRecord = (value: unknown): Record<string, unknown> => {
   try { return JSON.parse(value) as Record<string, unknown>; } catch { return {}; }
 };
 
-const armorClassModifier: Record<string, { physicalDefense: number; magicDefense: number; accuracy: number; evasion: number; speed: number }> = {
-  // 双防按同级主力攻击下的承伤梯度校准：布/皮/轻/重/板约为 1/.85/.75/.65/.5。
-  // 命中、闪避与速度沿用原始甲类定位，不参与本次平衡。
-  '布甲': { physicalDefense: .2, magicDefense: .2, accuracy: 16, evasion: 12, speed: 16 },
-  '皮甲': { physicalDefense: .4, magicDefense: .4, accuracy: 8, evasion: 0, speed: 8 },
-  '轻甲': { physicalDefense: 0.8, magicDefense: 0.8, accuracy: 0, evasion: 0, speed: 0 },
-  '重甲': { physicalDefense: 1.3, magicDefense: 1.1, accuracy: 0, evasion: -8, speed: -8 },
-  '板甲': { physicalDefense: 1.8, magicDefense: 1.6, accuracy: -12, evasion: -16, speed: -16 }
-};
+/** 所有甲类使用同一双防基准；保留详情页的兼容入口。 */
+export const armorClassDefenseMultiplier = (_subtype: string | null | undefined, _key: 'physicalDefense' | 'magicDefense') => 1;
 
-/** 防具甲类对双防主属性的最终倍率；装备详情与实战结算共用。 */
-export const armorClassDefenseMultiplier = (subtype: string | null | undefined, key: 'physicalDefense' | 'magicDefense') => armorClassModifier[subtype ?? '']?.[key] ?? 1;
-/** 防具甲类对命中、闪避、速度的最终修正；导师毕业构筑复用玩家同一套规则。 */
-export const armorClassMobilityModifier = (subtype: string | null | undefined, key: 'accuracy' | 'evasion' | 'speed') => armorClassModifier[subtype ?? '']?.[key] ?? 0;
-
-const withEquipmentStats = async (connection: Pool | PoolConnection, characterId: number, base: DerivedStats, evolutionBonus: Record<string, number> = {}, independentPercent: readonly Record<string, number>[] = []): Promise<DerivedStats> => {
-  const [rows] = await connection.execute<(RowDataPacket & { effect_json: unknown; quality: number; item_category: string; weapon_type: string | null })[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json,COALESCE(ii.quality,100) AS quality,i.item_category,i.weapon_type
+const withEquipmentStats = async (connection: Pool | PoolConnection, characterId: number, base: DerivedStats, evolutionBonus: Record<string, number> = {}, independentPercent: readonly Record<string, number>[] = [], neutralFood=false, offhandMultiplier=.5): Promise<DerivedStats> => {
+  const [rows] = await connection.execute<(RowDataPacket & { effect_json: unknown; quality: number; slot: string; item_category: string; weapon_type: string | null })[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json,COALESCE(ii.quality,100) AS quality,pe.slot,i.item_category,i.weapon_type
     FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
     LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
     WHERE pe.character_id=?`, [characterId]);
   const [foodRows] = await connection.execute<(RowDataPacket & { buff_json: unknown })[]>('SELECT buff_json FROM player_food_buffs WHERE character_id=? AND expires_at>NOW()', [characterId]);
-  const effects = [...rows.map(row => ({ effect: jsonRecord(row.effect_json), scale: equipmentQualityMultiplier(Number(row.quality)), armor: armorClassModifier[String(row.weapon_type ?? '')] })), ...foodRows.map(row => ({ effect: jsonRecord(row.buff_json), scale: 1, armor: undefined }))];
-  const flat = (key: string) => effects.reduce((total, entry) => total + Number(entry.effect[key] ?? 0) * entry.scale * (key === 'physicalDefense' ? entry.armor?.physicalDefense ?? 1 : key === 'magicDefense' ? entry.armor?.magicDefense ?? 1 : 1), 0);
+  if(neutralFood)for(const row of foodRows){const effect=jsonRecord(row.buff_json);if(effect.__talentFoodBase)row.buff_json=Number(effect.__talentFoodExpires??Infinity)>Date.now()?effect.__talentFoodBase:{};}
+  const effects = [...rows.map(row => ({ effect: jsonRecord(row.effect_json), scale: equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? offhandMultiplier : 1) })), ...foodRows.map(row => ({ effect: jsonRecord(row.buff_json), scale: 1 }))];
+  const flat = (key: string) => effects.reduce((total, entry) => total + Number(entry.effect[key] ?? 0) * entry.scale, 0);
   // 食物保留独立倍率；进化与所有装备的同项百分比加算，不再彼此连乘。
-  const percent = Object.fromEntries(Object.values(panelPercentKeys).map(key => [key, Number(evolutionBonus[key] ?? 0) + rows.reduce((sum, row) => sum + Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)), 0)]));
+  const percent = Object.fromEntries(Object.values(panelPercentKeys).map(key => [key, Number(evolutionBonus[key] ?? 0) + rows.reduce((sum, row) => sum + Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? offhandMultiplier : 1), 0)]));
   const flatStats = Object.fromEntries(Object.keys(panelPercentKeys).map(key => [key, flat(key)]));
   const foodPercent = foodRows.map(row => Object.fromEntries(Object.values(panelPercentKeys).map(key => [key, Number(jsonRecord(row.buff_json)[key] ?? 0)])));
-  const stats = calculatePanelStats(base, flatStats, percent, [...foodPercent, ...independentPercent]);
-  const finalMultiplier = (key: 'accuracy' | 'evasion' | 'speed') => Math.max(0, 1 + rows.reduce((total, row) => total + Number(armorClassModifier[String(row.weapon_type ?? '')]?.[key] ?? 0), 0) / 100);
-  return {
-    ...stats, speed: Math.floor(stats.speed * finalMultiplier('speed')),
-    accuracy: Math.floor(stats.accuracy * finalMultiplier('accuracy')),
-    evasion: Math.floor(stats.evasion * finalMultiplier('evasion'))
-  };
+  const stats = calculatePanelStats(base, flatStats, percent, [...foodPercent, ...independentPercent, armorSetFromRows(rows)?.panelPercent ?? {}, armorPanelPercent(rows)]);
+  return stats;
 };
 
 const virtualNpcTier = (npcCode: string | null): VirtualEquipmentTier | null => {
@@ -84,13 +78,13 @@ const virtualNpcTier = (npcCode: string | null): VirtualEquipmentTier | null => 
   if (['npc_forest_warrior', 'npc_forest_mage', 'npc_forest_priest'].includes(npcCode)) return 'elite';
   return 'large';
 };
-const withVirtualNpcEquipment = (stats: DerivedStats, level: number, npcCode: string | null): DerivedStats => {
+export const withVirtualNpcEquipment = (stats: DerivedStats, level: number, npcCode: string | null): DerivedStats => {
   const tier = virtualNpcTier(npcCode); if (!tier) return stats;
-  const virtual = virtualEquipmentStats(level, tier, stats.physicalAttack, stats.magicAttack);
-  return { ...stats, physicalAttack: Math.floor(stats.physicalAttack + virtual.physicalAttack), magicAttack: Math.floor(stats.magicAttack + virtual.magicAttack), physicalDefense: Math.floor(stats.physicalDefense + virtual.physicalDefense), magicDefense: Math.floor(stats.magicDefense + virtual.magicDefense) };
+  const virtual = virtualEquipmentStats(level, tier, stats.physicalAttack, stats.magicAttack, undefined, 'resident');
+  return Object.fromEntries((Object.keys(stats) as Array<keyof DerivedStats>).map(key => [key, Math.floor(stats[key] + virtual[key])])) as DerivedStats;
 };
 
-const equipmentExtraAttributes = async (connection: Pool | PoolConnection, characterId: number) => {
+export const equipmentExtraAttributes = async (connection: Pool | PoolConnection, characterId: number) => {
   const [rows] = await connection.execute<(RowDataPacket & { effect_json: unknown; quality: number })[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json,COALESCE(ii.quality,100) AS quality
     FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
     LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
@@ -104,17 +98,21 @@ const equipmentExtraAttributes = async (connection: Pool | PoolConnection, chara
 };
 
 /** 角色详情与战斗结算共用六维口径：基础与成长、全属性增益、已穿戴装备的六维加成。 */
-const effectiveCharacterAttributes = async (connection: Pool | PoolConnection, character: Record<string, unknown>, characterId: number): Promise<Allocation> => {
+export const effectiveCharacterAttributes = async (connection: Pool | PoolConnection, character: Record<string, unknown>, characterId: number): Promise<Allocation> => {
+  const mastery = await weaponMasteryBonusesFor(connection, characterId);
   const [[timedRows], [equipmentRows]] = await Promise.all([
     connection.execute<(RowDataPacket & { all_core_attributes_multiplier: number })[]>(`SELECT all_core_attributes_multiplier FROM player_timed_buffs WHERE character_id=? AND buff_code='church_blessing' AND expires_at>NOW() LIMIT 1`, [characterId]),
-    connection.execute<(RowDataPacket & { effect_json: unknown; quality: number })[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json,COALESCE(ii.quality,100) AS quality
+    connection.execute<(RowDataPacket & { effect_json: unknown; quality: number; slot: string })[]>(`SELECT pe.slot,COALESCE(ii.effect_json,i.effect_json) AS effect_json,COALESCE(ii.quality,100) AS quality
       FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
       LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
       WHERE pe.character_id=?`, [characterId])
   ]);
   const multiplier = Number(timedRows[0]?.all_core_attributes_multiplier ?? 1); const base = finalAttributes(character);
-  const bonus = (key: string) => equipmentRows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)), 0);
-  return Object.fromEntries(attributes.map(key => [key, base[key] * multiplier + bonus(key)])) as Allocation;
+  const achievementBonus = await achievementStatBonus(connection, characterId);
+  for (const key of attributes) base[key] += achievementBonus[key] ?? 0;
+  const bonus = (key: string) => equipmentRows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? mastery.offhandAttributeMultiplier : 1), 0);
+  const percent = (key: string) => equipmentRows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[`${key}Pct`] ?? 0) * equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? mastery.offhandAttributeMultiplier : 1), 0);
+  return Object.fromEntries(attributes.map(key => [key, base[key] * multiplier * (1 + percent(key) / 100) + bonus(key)])) as Allocation;
 };
 
 const foodBuffText = (effect: Record<string, unknown>) => {
@@ -151,6 +149,8 @@ const activeCharacterEffects = async (connection: Pool | PoolConnection, charact
   for (const row of battleRows[0]) {
     if (row.buff_code === 'minor_experience_elixir') activeBuffs.push(`经验秘药（小）：经验获取+25%｜剩余${row.remaining_battles}场战斗`);
     if (row.buff_code === 'minor_luck_elixir') activeBuffs.push(`幸运秘药（小）：队伍掉率+25%｜剩余${row.remaining_battles}场战斗`);
+    const elixir = /^alchemy_(exp|drop)_(\d+(?:\.\d+)?)$/.exec(row.buff_code);
+    if (elixir) activeBuffs.push(`${elixir[1] === 'exp' ? '经验秘药：经验获取' : '幸运秘药：队伍材料掉率'}+${elixir[2]}%｜剩余${row.remaining_battles}场战斗`);
   }
   for (const row of timedRows[0]) {
     if (row.buff_code === 'church_blessing') activeBuffs.push(`教堂祈福：经验获取+${Math.round((Number(row.experience_multiplier) - 1) * 100)}%｜全六项核心属性+${Math.round((Number(row.all_core_attributes_multiplier) - 1) * 100)}%｜剩余${Math.max(0, Number(row.remaining_seconds))}秒`);
@@ -159,12 +159,12 @@ const activeCharacterEffects = async (connection: Pool | PoolConnection, charact
   return { activeBuffs, combatNotes };
 };
 
-const withEquipmentElements = async (connection: Pool | PoolConnection, characterId: number, baseMastery: Record<string, unknown>, baseResistance: Record<string, unknown>) => {
-  const [rows] = await connection.execute<(RowDataPacket & { effect_json: unknown; quality: number })[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json,COALESCE(ii.quality,100) AS quality
+const withEquipmentElements = async (connection: Pool | PoolConnection, characterId: number, baseMastery: Record<string, unknown>, baseResistance: Record<string, unknown>, offhandMultiplier=.5) => {
+  const [rows] = await connection.execute<(RowDataPacket & { effect_json: unknown; quality: number; slot: string })[]>(`SELECT pe.slot,COALESCE(ii.effect_json,i.effect_json) AS effect_json,COALESCE(ii.quality,100) AS quality
     FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
     LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
     WHERE pe.character_id=?`, [characterId]);
-  const bonus = (prefix: 'elementMastery' | 'elementResistance', element: string) => rows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[`${prefix}_${element}`] ?? 0) * equipmentQualityMultiplier(Number(row.quality)), 0);
+  const bonus = (prefix: 'elementMastery' | 'elementResistance', element: string) => rows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[`${prefix}_${element}`] ?? 0) * equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? offhandMultiplier : 1), 0);
   const value = (base: Record<string, unknown>, prefix: 'elementMastery' | 'elementResistance') => Object.fromEntries(elements.map(element => [element, Math.round((Number(base[element] ?? 0) + bonus(prefix, element)) * 10) / 10]));
   return { mastery: value(baseMastery, 'elementMastery'), resistance: value(baseResistance, 'elementResistance') };
 };
@@ -181,21 +181,24 @@ export const recalculateCharacterStats = async (connection: Pool | PoolConnectio
   const [timedRows] = await connection.execute<(RowDataPacket & { all_core_attributes_multiplier: number })[]>(`SELECT all_core_attributes_multiplier FROM player_timed_buffs WHERE character_id=? AND buff_code='church_blessing' AND expires_at>NOW() LIMIT 1`, [characterId]);
   const attributeMultiplier = Number(timedRows[0]?.all_core_attributes_multiplier ?? 1);
   const baseAttributes = finalAttributes(character);
-  const [equipmentAttributeRows] = await connection.execute<(RowDataPacket & { effect_json: unknown; quality: number })[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json,COALESCE(ii.quality,100) AS quality
+  const achievementBonus = await achievementStatBonus(connection, characterId);
+  for (const key of attributes) baseAttributes[key] += achievementBonus[key] ?? 0;
+  const masteryBonuses = await weaponMasteryBonusesFor(connection, characterId);
+  const [equipmentAttributeRows] = await connection.execute<(RowDataPacket & { effect_json: unknown; quality: number; slot: string })[]>(`SELECT pe.slot,COALESCE(ii.effect_json,i.effect_json) AS effect_json,COALESCE(ii.quality,100) AS quality
     FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
     LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
     WHERE pe.character_id=?`, [characterId]);
-  const equipmentAttributeBonus = (key: string) => equipmentAttributeRows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)), 0);
-  const effectiveAttributes = Object.fromEntries(attributes.map(key => [key, baseAttributes[key] * attributeMultiplier + equipmentAttributeBonus(key)])) as Allocation;
+  const equipmentAttributeBonus = (key: string) => equipmentAttributeRows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? masteryBonuses.offhandAttributeMultiplier : 1), 0);
+  const equipmentAttributePercent = (key: string) => equipmentAttributeRows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[`${key}Pct`] ?? 0) * equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? masteryBonuses.offhandAttributeMultiplier : 1), 0);
+  const effectiveAttributes = Object.fromEntries(attributes.map(key => [key, baseAttributes[key] * attributeMultiplier * (1 + equipmentAttributePercent(key) / 100) + equipmentAttributeBonus(key)])) as Allocation;
   const evolutionBonus = await evolutionStatBonuses(connection, characterId);
-  const masteryBonuses = await weaponMasteryBonusesFor(connection, characterId);
   const [advancedProfessionRows] = await connection.execute<(RowDataPacket & { profession_code: string })[]>('SELECT profession_code FROM player_advanced_professions WHERE character_id=? LIMIT 1', [characterId]);
   const epic = await epicLoadoutFor(connection, characterId);
   const masteryPercent = Object.fromEntries(Object.values(panelPercentKeys).map(key => [key, Number((masteryBonuses as unknown as Record<string, unknown>)[key] ?? 0)]));
   const equippedStats = await withEquipmentStats(connection, characterId, calculateDerivedStats(effectiveAttributes), evolutionBonus, [
     masteryPercent,
     epic.setCode === 'valk_forge_regalia' && epic.setCount >= 3 ? { hpPct: 6 } : {}
-  ]);
+  ], false, masteryBonuses.offhandAttributeMultiplier);
   // 二转无条件被动最后作用于包含装备固定值的面板，不参与前面的百分比池。
   const stats = calculatePanelStats(
     withVirtualNpcEquipment(equippedStats, Number(character.level), character.npc_code === null ? null : String(character.npc_code)),
@@ -203,8 +206,17 @@ export const recalculateCharacterStats = async (connection: Pool | PoolConnectio
   );
   const baseMastery = jsonRecord(character.element_base_mastery_json ?? character.element_mastery_json);
   const baseResistance = jsonRecord(character.element_base_resistance_json ?? character.element_resistance_json);
-  const elemental = await withEquipmentElements(connection, characterId, baseMastery, baseResistance);
-  await connection.execute('UPDATE characters SET hp_max=?,mp_max=?,current_hp=LEAST(current_hp,?),current_mp=LEAST(current_mp,?),physical_attack=?,magic_attack=?,physical_defense=?,magic_defense=?,accuracy=?,evasion=?,crit_rate_bp=?,crit_damage_bp=?,crit_resist_bp=?,crit_damage_reduction_bp=?,tenacity=?,tenacity_pierce=?,speed=?,element_mastery_json=?,element_resistance_json=? WHERE id=?', [stats.hpMax, stats.mpMax, stats.hpMax, stats.mpMax, stats.physicalAttack, stats.magicAttack, stats.physicalDefense, stats.magicDefense, stats.accuracy, stats.evasion, stats.critRateBp, stats.critDamageBp, stats.critResistBp, stats.critDamageReductionBp, stats.tenacity, stats.tenacityPierce, stats.speed, JSON.stringify(elemental.mastery), JSON.stringify(elemental.resistance), characterId]);
+  const elemental = await withEquipmentElements(connection, characterId, baseMastery, baseResistance, masteryBonuses.offhandAttributeMultiplier);
+  const [talentFood]=await connection.execute<RowDataPacket[]>("SELECT 1 FROM player_food_buffs WHERE character_id=? AND expires_at>NOW() AND JSON_EXTRACT(buff_json,'$.__talentFoodBase') IS NOT NULL LIMIT 1",[characterId]);
+  const neutralStats=talentFood.length?calculatePanelStats(withVirtualNpcEquipment(await withEquipmentStats(connection,characterId,calculateDerivedStats(effectiveAttributes),evolutionBonus,[masteryPercent,epic.setCode==='valk_forge_regalia'&&epic.setCount>=3?{hpPct:6}:{}],true,masteryBonuses.offhandAttributeMultiplier),Number(character.level),character.npc_code===null?null:String(character.npc_code)),{},cachedAdvancedPassiveEffectFor(advancedProfessionRows[0]?.profession_code)):stats;
+  await applyTalentPanel(connection,characterId,stats,elemental,neutralStats);
+  const targetVersion = character.npc_code ? 4 : STAT_BALANCE_VERSION;
+  const migrating = Number(character.stat_formula_version ?? 2) < targetVersion;
+  const vital = (current: unknown, previousMax: unknown, maximum: number) => migrating
+    ? Number(current) <= 0 ? 0 : Math.min(maximum, Math.max(1, Math.floor(Number(current) / Math.max(1, Number(previousMax)) * maximum)))
+    : Math.min(Number(current), maximum);
+  const hp = vital(character.current_hp, character.hp_max, stats.hpMax), mp = vital(character.current_mp, character.mp_max, stats.mpMax);
+  await connection.execute('UPDATE characters SET stat_formula_version=?,hp_max=?,mp_max=?,current_hp=?,current_mp=?,physical_attack=?,magic_attack=?,physical_defense=?,magic_defense=?,accuracy=?,evasion=?,crit_rate_bp=?,crit_damage_bp=?,crit_resist_bp=?,crit_damage_reduction_bp=?,tenacity=?,tenacity_pierce=?,speed=?,element_mastery_json=?,element_resistance_json=? WHERE id=?', [targetVersion, stats.hpMax, stats.mpMax, hp, mp, stats.physicalAttack, stats.magicAttack, stats.physicalDefense, stats.magicDefense, stats.accuracy, stats.evasion, stats.critRateBp, stats.critDamageBp, stats.critResistBp, stats.critDamageReductionBp, stats.tenacity, stats.tenacityPierce, stats.speed, JSON.stringify(elemental.mastery), JSON.stringify(elemental.resistance), characterId]);
 };
 
 /** 体力按实际经过的完整五分钟结算；在家时会获得家具提供的恢复速度加成。 */
@@ -244,6 +256,11 @@ const getSession = async (connection: PoolConnection, playerId: number, lock = f
   return rows[0];
 };
 
+const completedRegistration = async (connection: PoolConnection, playerId: number) => {
+  const [rows] = await connection.execute<RowDataPacket[]>('SELECT id FROM characters WHERE player_id=? LIMIT 1', [playerId]);
+  return rows.length > 0;
+};
+
 export const hasCharacter = async (qqUserId: string) => {
   return withTransaction(async connection => {
     const player = await getPlayer(connection, qqUserId);
@@ -259,6 +276,7 @@ export const beginRegistration = async (qqUserId: string, nickname?: string) => 
   let session = await getSession(connection, player.id, true);
   if (!session || session.expires_at <= new Date()) {
     const id = randomUUID();
+    if (session) await connection.execute('DELETE FROM registration_scene_records WHERE session_id=?', [session.id]);
     await connection.execute(
       'INSERT INTO registration_sessions (id, player_id, stage, expires_at) VALUES (?, ?, \'story\', DATE_ADD(NOW(), INTERVAL ? MINUTE)) ON DUPLICATE KEY UPDATE id = VALUES(id), stage = VALUES(stage), expires_at = VALUES(expires_at)',
       [id, player.id, SESSION_TTL_MINUTES]
@@ -268,12 +286,16 @@ export const beginRegistration = async (qqUserId: string, nickname?: string) => 
   return { alreadyRegistered: false as const, stage: session.stage };
 });
 
-export const continueRegistration = async (qqUserId: string) => withTransaction(async connection => {
+export const continueRegistration = async (qqUserId: string, expectedStage?: string) => withTransaction(async connection => {
   const player = await getPlayer(connection, qqUserId);
   const session = await getSession(connection, player.id, true);
-  if (!session || session.expires_at <= new Date()) throw new Error('注册会话已过期，请重新发送“注册”。');
+  if (!session || session.expires_at <= new Date()) {
+    if (await completedRegistration(connection, player.id)) return 'completed' as const;
+    throw new Error('注册会话已过期，请重新发送“注册”。');
+  }
+  if (expectedStage && expectedStage !== session.stage) return session.stage;
   const next = session.stage === 'story' ? 'audience' : session.stage === 'question' ? 'destination' : session.stage === 'danger' ? 'choice' : session.stage;
-  if (next === session.stage) throw new Error(session.stage === 'audience' ? '请先向女神询问这里是哪里。' : session.stage === 'destination' ? '请选择前往天堂或转生异世界。' : '恩赐已经在等待你的选择。');
+  if (next === session.stage) return session.stage;
   await connection.execute('UPDATE registration_sessions SET stage = ? WHERE id = ?', [next, session.id]);
   return next;
 });
@@ -281,71 +303,100 @@ export const continueRegistration = async (qqUserId: string) => withTransaction(
 export const askWhereAmI = async (qqUserId: string) => withTransaction(async connection => {
   const player = await getPlayer(connection, qqUserId);
   const session = await getSession(connection, player.id, true);
-  if (!session || session.expires_at <= new Date() || session.stage !== 'audience') throw new Error('现在还不能提出这个问题。');
+  if (!session || session.expires_at <= new Date()) {
+    if (await completedRegistration(connection, player.id)) return 'completed' as const;
+    throw new Error('注册会话已过期，请重新发送“注册”。');
+  }
+  if (session.stage !== 'audience') return session.stage;
   await connection.execute('UPDATE registration_sessions SET stage=\'question\' WHERE id=?', [session.id]);
+  return 'question' as const;
 });
 
 export const chooseDestination = async (qqUserId: string, destination: '天堂' | '异世界') => withTransaction(async connection => {
   const player = await getPlayer(connection, qqUserId);
   const session = await getSession(connection, player.id, true);
-  if (!session || session.expires_at <= new Date() || session.stage !== 'destination') throw new Error('请先完成前面的转生剧情。');
-  if (destination === '天堂') return 'heaven' as const;
-  await connection.execute('UPDATE registration_sessions SET stage=\'danger\' WHERE id=?', [session.id]);
-  return 'danger' as const;
+  if (!session || session.expires_at <= new Date()) {
+    if (await completedRegistration(connection, player.id)) return 'completed' as const;
+    throw new Error('注册会话已过期，请重新发送“注册”。');
+  }
+  if (session.stage !== 'destination' && session.stage !== 'heaven') return session.stage;
+  const next = destination === '天堂' ? 'heaven' : 'danger';
+  if (next !== session.stage) await connection.execute('UPDATE registration_sessions SET stage=? WHERE id=?', [next, session.id]);
+  return next;
 });
 
 const requireChoiceSession = async (connection: PoolConnection, qqUserId: string) => {
   const player = await getPlayer(connection, qqUserId);
+  if (await completedRegistration(connection, player.id)) return { player, session: null };
   const session = await getSession(connection, player.id, true);
   if (!session || session.stage !== 'choice' || session.expires_at <= new Date()) throw new Error('请先完成转生剧情，再选择恩赐。');
   return { player, session };
 };
 
-export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: string): Promise<CharacterView> => withTransaction(async connection => {
-  if (!isGiftCode(giftCode)) throw new Error('未知恩赐，请使用列表中的英文代号。');
+export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: string): Promise<CharacterView | null> => withTransaction(async connection => {
+  giftCode = talentCode(giftCode) ?? giftCode;
+  const gift = talentDefinitions.find(skill => skill.code === giftCode);
+  if (!gift) throw new Error('神器已经散布世界各地。请从当前天赋目录选择一项恩赐。');
+  if (gift.group==='？？？') throw new Error('请从当前天赋目录选择一项恩赐。');
+  if (!gift.implemented) throw new Error('这条特殊成长道路尚未开放，请先选择其余九类天赋。');
   const { player, session } = await requireChoiceSession(connection, qqUserId);
+  // The player row is locked by requireChoiceSession. A duplicate request never creates or rerolls a character.
+  if (!session) return null;
   const allocation = distribute(randomInRange(80, 120));
   const growth = distribute(randomInRange(80, 120) / 10, 0.1) as Growth;
-  const [regions] = await connection.execute<RegionRow[]>('SELECT id, name, min_x, max_x, min_y, max_y, min_z, max_z FROM map_regions WHERE is_spawn_enabled = 1 ORDER BY id LIMIT 1');
-  const region = regions[0];
-  if (!region) throw new Error('当前没有可用出生区域，请联系管理员。');
-  const x = randomInRange(region.min_x, region.max_x);
-  const y = randomInRange(region.min_y, region.max_y);
-  const z = randomInRange(region.min_z, region.max_z);
+  const { region, route: openingRoute, x, y, z } = await chooseOpeningSpawn(connection);
   const stats = calculateDerivedStats(allocation);
   const elementMastery = randomBalancedElements();
   const elementResistance = randomBalancedElements();
   const name = `冒险者${(nickname || qqUserId).slice(-6)}`;
   await connection.execute(
-    'INSERT INTO characters (player_id, name, constitution, spirit, strength, intelligence, agility, perception, constitution_growth, spirit_growth, strength_growth, intelligence_growth, agility_growth, perception_growth, hp_max, mp_max, current_hp, current_mp, physical_attack, magic_attack, physical_defense, magic_defense, accuracy, evasion, crit_rate_bp, crit_damage_bp, crit_resist_bp, crit_damage_reduction_bp, tenacity, speed, element_mastery_json, element_resistance_json, element_base_mastery_json, element_base_resistance_json, current_region_id, pos_x, pos_y, pos_z) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO characters (stat_formula_version, player_id, name, constitution, spirit, strength, intelligence, agility, perception, constitution_growth, spirit_growth, strength_growth, intelligence_growth, agility_growth, perception_growth, hp_max, mp_max, current_hp, current_mp, physical_attack, magic_attack, physical_defense, magic_defense, accuracy, evasion, crit_rate_bp, crit_damage_bp, crit_resist_bp, crit_damage_reduction_bp, tenacity, speed, element_mastery_json, element_resistance_json, element_base_mastery_json, element_base_resistance_json, current_region_id, pos_x, pos_y, pos_z) VALUES (3, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [player.id, name, ...attributes.map(key => allocation[key]), ...attributes.map(key => growth[key]), stats.hpMax, stats.mpMax, stats.hpMax, stats.mpMax, stats.physicalAttack, stats.magicAttack, stats.physicalDefense, stats.magicDefense, stats.accuracy, stats.evasion, stats.critRateBp, stats.critDamageBp, stats.critResistBp, stats.critDamageReductionBp, stats.tenacity, stats.speed, JSON.stringify(elementMastery), JSON.stringify(elementResistance), JSON.stringify(elementMastery), JSON.stringify(elementResistance), region.id, x, y, z]
   );
   const [newCharacters] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM characters WHERE player_id=?', [player.id]);
   const characterId = newCharacters[0].id;
+  await (await import('./hidden-attributes.service')).hiddenAttributesFor(connection, Number(characterId));
   await recordSkillPointChange(connection, Number(characterId), 1, 'initial_grant', null, '角色创建时获得的初始技能点');
   await connection.execute('UPDATE characters SET game_id=? WHERE id=?', [10000000 + Number(characterId), characterId]);
   await connection.execute(`INSERT INTO player_inventory (character_id,item_id,quantity)
     SELECT ?, id, 3 FROM item_definitions WHERE code='healing_herb'`, [characterId]);
   await connection.execute(`INSERT INTO player_quick_items (character_id,quick_slot,item_id)
     SELECT ?, 1, id FROM item_definitions WHERE code='healing_herb'`, [characterId]);
-  await connection.execute(`INSERT INTO player_skill_discoveries (character_id,skill_id)
-    SELECT ?,id FROM skill_definitions WHERE code='appraisal'`, [characterId]);
-  if (gifts[giftCode].category === 'artifact') {
-    const itemCode = giftCode;
-    await connection.execute('INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max) SELECT ?,id,100,100,100 FROM item_definitions WHERE code=?', [characterId, itemCode]);
-    await connection.execute(`INSERT INTO player_equipment (character_id,slot,item_id,instance_id)
-      SELECT ?, ?, ii.item_id, ii.id FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
-      WHERE ii.character_id=? AND i.code=? ORDER BY ii.id DESC LIMIT 1`, [characterId, artifactGiftSlots[giftCode as keyof typeof artifactGiftSlots], characterId, itemCode]);
-    await recalculateCharacterStats(connection, characterId);
-  } else {
-    await connection.execute('INSERT INTO player_blessings (character_id,code) VALUES (?,?)', [characterId, giftCode]);
-    await connection.execute(`INSERT INTO player_skills (character_id,skill_id)
-      SELECT ?,id FROM skill_definitions WHERE code=? AND category='bound'`, [characterId, giftCode]);
+  // 女神随降临授予基础鉴识；不记学习支出，后续专精仍由玩家消耗技能点升级。
+  await connection.execute(`INSERT INTO player_skills (character_id,skill_id,level,passive_linked)
+    SELECT ?,id,1,0 FROM skill_definitions WHERE code='appraisal'`, [characterId]);
+  await connection.execute('INSERT INTO player_appraisal_progress (character_id,range_level,information_level) VALUES (?,1,1)', [characterId]);
+  await connection.execute('INSERT INTO player_blessings (character_id,code) VALUES (?,?)', [characterId, giftCode]);
+  await connection.execute(`INSERT INTO player_skills (character_id,skill_id) SELECT ?,id FROM skill_definitions WHERE code=? AND category='bound'`, [characterId, giftCode]);
+  await grantOpeningItem(connection, Number(characterId), 'opening_last_ration');
+  for (const [itemCode, slot] of [['opening_staff','weapon'],['opening_clothes','upper']]) {
+    const [definitions] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM item_definitions WHERE code=?', [itemCode]);
+    if (!definitions[0]) throw new Error('初行装备尚未备齐，请稍后重新选择恩赐。');
+    const itemId = Number(definitions[0].id);
+    const [created] = await connection.execute<any>("INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max,bound_kind,bound_at) VALUES (?,?,100,100,100,'personal',NOW())", [characterId,itemId]);
+    // 装备绑定触发器会更新实例表；穿戴语句不能同时从实例表 SELECT，否则 MySQL 报 1442。
+    await connection.execute('INSERT INTO player_equipment (character_id,slot,item_id,instance_id) VALUES (?,?,?,?)',[characterId,slot,itemId,created.insertId]);
+    await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [characterId,itemId]);
   }
+  const world = await openingWorldFor(connection);
+  await connection.execute("INSERT INTO player_opening_stories (character_id,route_code,story_version,destination_code,started_epoch,flags_json) VALUES (?,?,?,?,?,'{}')",[characterId,openingRoute.code,openingRoute.version,openingRoute.destination,world.reception_epoch]);
+  await updateAchievementState(connection,Number(characterId),'pve_life_history','birth',true,state=>{state.fromBirth=true;});
+  recordAchievement(connection, Number(characterId), ['ACH_A01'], `registration:${characterId}`);
+  await flushAchievements(connection,takeAchievementEvents(connection));
+  await recalculateCharacterStats(connection, Number(characterId));
+  await connection.execute('UPDATE characters SET current_hp=hp_max,current_mp=mp_max WHERE id=?',[characterId]);
+  const [createdPanels]=await connection.execute<RowDataPacket[]>('SELECT hp_max AS hpMax,mp_max AS mpMax,physical_attack AS physicalAttack,magic_attack AS magicAttack,physical_defense AS physicalDefense,magic_defense AS magicDefense,accuracy,evasion,speed,element_mastery_json,element_resistance_json FROM characters WHERE id=?',[characterId]);
+  const createdPanel=createdPanels[0]!;
+  const inheritedAchievementAttributes=await achievementStatBonus(connection,Number(characterId));
+  for(const key of attributes)allocation[key]+=inheritedAchievementAttributes[key]??0;
+  Object.assign(stats,Object.fromEntries(Object.keys(stats).filter(key=>createdPanel[key]!==undefined).map(key=>[key,Number(createdPanel[key])])));
+  Object.assign(elementMastery,jsonRecord(createdPanel.element_mastery_json));Object.assign(elementResistance,jsonRecord(createdPanel.element_resistance_json));
+
+  await connection.execute('INSERT IGNORE INTO achievement_profiles(identity_key) VALUES (?)',[qqUserId]);
   await connection.execute('UPDATE players SET status = \'active\' WHERE id = ?', [player.id]);
   await connection.execute('DELETE FROM registration_sessions WHERE id = ?', [session.id]);
-  await connection.execute('INSERT INTO player_events (player_id, event_type, payload) VALUES (?, \'character.created\', ?)', [player.id, JSON.stringify({ region: region.name, x, y, z, giftCode })]);
-  return { ...allocation, ...stats, growth, name, gender: '未设定', professionName: null, regionName: region.name, x, y, z, level: 1, experience: 0, realmStage: 1, adventurerRegistered: false, giftName: gifts[giftCode].name, currentHp: stats.hpMax, currentMp: stats.mpMax, stamina: 120, staminaMax: 120, staminaFullSeconds: 0, activityStatus: 'active', elementMastery, elementResistance, extraAttributes: {}, activeBuffs: [], combatNotes: [] };
+  await connection.execute('INSERT INTO player_events (player_id, event_type, payload) VALUES (?, \'character.created\', ?)', [player.id, JSON.stringify({ characterId, region: region.name, x, y, z, giftCode, giftName: gift.name })]);
+  return { ...allocation, ...stats, growth, name, gender: '未设定', professionName: null, regionName: String(region.name), x, y, z, level: 1, experience: 0, realmStage: 1, adventurerRegistered: false, giftName: gift.name, currentHp: stats.hpMax, currentMp: stats.mpMax, stamina: 120, staminaMax: 120, staminaFullSeconds: 0, activityStatus: 'active', elementMastery, elementResistance, extraAttributes: {}, activeBuffs: [], combatNotes: [] };
 });
 
 export const getCharacter = async (qqUserId: string): Promise<CharacterView | null> => {
@@ -372,6 +423,7 @@ export const getCharacter = async (qqUserId: string): Promise<CharacterView | nu
   const staminaFullSeconds = stamina >= staminaMax ? 0 : Math.ceil((staminaIntervalMs - elapsed % staminaIntervalMs + Math.max(0, staminaMax - stamina - 1) * staminaIntervalMs) / 1000);
   return {
     ...row,
+    giftName: talentDefinitions.find(skill => skill.code === row.giftName)?.name ?? row.giftName,
     professionName: advancedProfessionByCode(row.advanced_profession_code ?? '')?.name ?? row.base_profession_name,
     ...effectiveAttributes,
     stamina,
@@ -427,7 +479,9 @@ export const registerAdventurer = async (qqUserId: string) => withTransaction(as
   const [rows] = await connection.execute<(RowDataPacket & { id: number; level: number; adventurer_registered: number })[]>('SELECT id,level,adventurer_registered FROM characters WHERE player_id=? FOR UPDATE', [player.id]);
   if (!rows[0]) throw new Error('请先完成转生。');
   if (rows[0].adventurer_registered) return false;
+  await (await import('./guild-context')).requireGuildService(connection,Number(rows[0].id));
   await connection.execute('UPDATE characters SET adventurer_registered=1 WHERE id=?', [rows[0].id]);
+  recordAchievement(connection, Number(rows[0].id), ['ACH_A02']);
   const [card] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM item_definitions WHERE code=\'adventurer_card\' LIMIT 1', []);
   if (card[0]) await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,1) ON DUPLICATE KEY UPDATE quantity=quantity+1,acquired_at=NOW()', [rows[0].id, card[0].id]);
   return true;
@@ -444,12 +498,15 @@ export const chooseProfession = async (qqUserId: string, code: string) => withTr
   const player = await getPlayer(connection, qqUserId);
   const [characters] = await connection.execute<(RowDataPacket & { id: number; adventurer_registered: number; profession_code: string | null })[]>('SELECT id,adventurer_registered,profession_code FROM characters WHERE player_id=? FOR UPDATE', [player.id]); const character = characters[0];
   if (!character?.adventurer_registered) throw new Error('完成冒险者注册后才能选择职业。');
+  await (await import('./guild-context')).requireGuildService(connection,Number(character.id));
   if (character.profession_code) throw new Error('已选择职业，暂不可更改。');
   const [professions] = await connection.execute<(RowDataPacket & { code: string; growth_json: unknown; skill_codes_json: unknown })[]>('SELECT code,growth_json,skill_codes_json FROM profession_definitions WHERE code=? LIMIT 1 FOR UPDATE', [code]); const profession = professions[0];
   if (!profession) throw new Error('该职业暂未开放。'); const growth = typeof profession.growth_json === 'string' ? JSON.parse(profession.growth_json) : profession.growth_json as Record<string, number>; const skills = typeof profession.skill_codes_json === 'string' ? JSON.parse(profession.skill_codes_json) : profession.skill_codes_json as string[];
   const reset = await resetSkillPointAllocation(connection, Number(character.id));
   await connection.execute('UPDATE characters SET profession_code=?,constitution_growth=constitution_growth+?,spirit_growth=spirit_growth+?,strength_growth=strength_growth+?,intelligence_growth=intelligence_growth+?,agility_growth=agility_growth+?,perception_growth=perception_growth+? WHERE id=?', [code, Number(growth.constitution ?? 0), Number(growth.spirit ?? 0), Number(growth.strength ?? 0), Number(growth.intelligence ?? 0), Number(growth.agility ?? 0), Number(growth.perception ?? 0), character.id]);
   for (const skillCode of skills) await connection.execute('INSERT IGNORE INTO player_skills (character_id,skill_id) SELECT ?,id FROM skill_definitions WHERE code=?', [character.id, skillCode]);
+  const weapon = await (await import('./opening-pack.service')).grantOpeningProfessionWeapon(connection, Number(character.id), code);
+  recordAchievement(connection, Number(character.id), ['ACH_A16']);
   await recalculateCharacterStats(connection, character.id);
-  return { code, reset };
+  return { code, reset, weapon };
 });

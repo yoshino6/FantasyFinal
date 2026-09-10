@@ -1,3 +1,5 @@
+import { achievementBookSource } from './achievement-state';
+import { recordAchievement } from './achievement-events';
 import { grantInventory } from './inventory-binding';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
@@ -44,6 +46,7 @@ export const buyBookshopItem = async (qqUserId: string, itemId: number, quantity
   await connection.execute('UPDATE bookshop_items SET stock_quantity=stock_quantity-? WHERE item_id=?', [amount, itemId]);
   await grantInventory(connection,Number(character.id),Number(itemId),{trade:amount,personal:0,unbound:0});
   await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [character.id, itemId]);
+  recordAchievement(connection,Number(character.id),[{metric:'ACH_J16'},{metric:'ACH_K01'},{metric:'ACH_K08',value:price,life:true},{metric:'ACH_E23',distinct:String(itemId)}]);
   return { name: item.name, quantity: amount, price };
 });
 
@@ -52,6 +55,7 @@ export const sellBookshopItem = async (qqUserId: string, itemId: number, quantit
   const [rows] = await connection.execute<(SellRow & { is_tradeable: number; trade_price: number })[]>(`SELECT i.name,i.item_category,i.is_tradeable,i.trade_price,pi.quantity,CEIL(i.trade_price*1.20) AS price FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.item_id=? FOR UPDATE`, [character.id, itemId]);
   const item = rows[0]; if (!item || !item.is_tradeable || !Number(item.trade_price) || !['书籍', '卷宗', '技能书'].includes(item.item_category)) throw new Error('店主只收购可交易的书籍、卷宗与技能书。'); if (Number(item.quantity) < amount) throw new Error(`背包数量不足，当前仅有 ${item.quantity} 本。`);
   const price = Number(item.price) * amount; await recordPvpLootSale(connection, Number(character.id), itemId, amount, price); await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [amount, character.id, itemId]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, itemId]); await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [price, character.id]);
+  recordAchievement(connection,Number(character.id),[{metric:'ACH_K09',value:price,life:true}]);
   return { name: item.name, quantity: amount, price };
 });
 
@@ -62,5 +66,6 @@ export const readSkillBook = async (qqUserId: string, itemId: number) => withTra
   const [skills] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>('SELECT id,name FROM skill_definitions WHERE code=? LIMIT 1', [skillCode]); const skill = skills[0]; if (!skill) throw new Error('书中的术式残缺，暂时无法研读。');
   const [discovered] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_skill_discoveries WHERE character_id=? AND skill_id=? FOR UPDATE', [character.id, skill.id]); const [learned] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_skills WHERE character_id=? AND skill_id=? FOR UPDATE', [character.id, skill.id]); if (discovered[0] || learned[0]) throw new Error(`你已经领悟技能「${skill.name}」。`);
   await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=?', [character.id, itemId]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, itemId]); await connection.execute('INSERT INTO player_skill_discoveries (character_id,skill_id) VALUES (?,?)', [character.id, skill.id]);
+  await achievementBookSource(connection,Number(character.id),Number(skill.id),itemId);
   return { book: item.name, skill: skill.name };
 });

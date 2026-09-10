@@ -1,12 +1,14 @@
 import { Format, useEvent, useRoute } from 'alemonjs';
+import { talentByCode } from '../game/talent.config';
+import { useTalentDetailMessage } from '../game/talent-detail-message';
 import { useGameMessage as useMessage } from '../game/use-game-message';
 import { learnSkill, skillDetail, skillList, togglePassiveLink, toggleSkillShortcut, upgradeAppraisal, upgradeSkill, upgradeSkillSpecialization } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
-import { specializationPerLevelLines, specializationTotalLines, specializationNumberText, passiveSpecializationPerLevelLine, passiveSpecializationTotalLine } from '../game/skill-specialization-presentation';
+import { specializationPerLevelLines, specializationNumberText, passiveSpecializationPerLevelLine, passiveSpecializationTotalLine } from '../game/skill-specialization-presentation';
 import { balancedSkillDescription } from '../game/combat-skill-balance.config';
 import { craftsmanshipEffect } from '../game/blacksmith.service';
 import { advancedResourceForProfession, advancedSkillDescriptions, advancedResourceRequirementForSkill } from '../game/advanced-resource.config';
-import { advancedProfessionPassiveCodes, hasBattleOnlyAdvancedPassiveEffect, isAdvancedProfessionSkillCode, worldTreeAdvancedProfessions } from '../game/advanced-profession.config';
+import { advancedBoundSkillDefinitions, advancedProfessionPassiveCodes, hasBattleOnlyAdvancedPassiveEffect, isAdvancedProfessionSkillCode, worldTreeAdvancedProfessions } from '../game/advanced-profession.config';
 
 const categoryNames: Record<string, string> = { physical: '物理', magic: '魔法', utility: '辅助', passive: '被动', bound: '绑定', special: '特殊' };
 type SkillEffectDetail = { code: string; name: string; effect_type: string; value: number; duration: number; target_scope: 'enemy' | 'ally' | 'self'; trigger_timing: 'on_hit' | 'on_cast' };
@@ -86,7 +88,8 @@ const skillListFormat = async (qqUserId: string, view: '已学习' | '未学习'
     if (boundSkills.length) {
       markdown.addText('> ').addBold('绑定').addNewline();
       for (const skill of boundSkills) {
-        markdown.addBlockquote(`【${skill.name}】${isAdvancedProfessionSkillCode(skill.code) ? '' : `Lv.${skill.level} `}`).addButton('[详情]', { data: `/技能详情 ${skill.id}`, autoEnter: false }).addText(' [绑定]').addNewline();
+        const bound = advancedBoundSkillDefinitions.find(entry => entry.code === skill.code);
+        markdown.addBlockquote(`【${skill.name}】${isAdvancedProfessionSkillCode(skill.code) || talentByCode.has(skill.code) ? '' : `Lv.${skill.level} `}`).addButton('[详情]', { data: `/技能详情 ${skill.id}`, autoEnter: false }).addText(talentByCode.has(skill.code) ? ' [天赋·绑定]' : bound ? ` [绑定·${bound.kind}]` : ' [绑定]').addNewline();
       }
     }
     if (passiveSkills.length) {
@@ -158,12 +161,21 @@ export const skillInfusionHandler = async () => {
 
 export const skillDetailHandler = async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
+  const detailMessage = useTalentDetailMessage();
   try {
     const skill = await skillDetail(event.current.UserId, Number(route.param('id')));
+    const talent = talentByCode.get(skill.code);
+    if (talent) {
+      const markdown = Format.createMarkdown().addTitle(`天赋·${talent.name}`).addNewline().addNewline()
+        .addBlockquote(`${talent.group}｜人物绑定`).addNewline().addText(talent.description);
+      if (skill.learned) markdown.addNewline().addButton('[天赋操作]', { data: '/天赋', autoEnter: false });
+      await detailMessage.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('技能列表', '/技能列表 已学习', { type: 'command', autoEnter: true })) });
+      return;
+    }
     if (skill.code === 'appraisal' && skill.learned && skill.appraisal) {
       const eyeCost = skill.appraisal.rangeLevel; const pearlCost = skill.appraisal.informationLevel + 1;
       const markdown = Format.createMarkdown().addTitle('技能详情').addNewline().addNewline()
-        .addText(`【鉴识】Lv.${skill.level}\n`).addBlockquote('类别：绑定').addNewline().addBlockquote('效果：鉴识未知的敌对生物，查看其各种信息。').addNewline().addNewline()
+        .addText(`【鉴识】Lv.${skill.level}\n`).addBlockquote('类别：绑定').addNewline().addBlockquote('女神在降临时授予的通用能力，基础 Lv.1 无需学习；后续慧眼与识珠仍需自行消耗技能点升级。').addNewline().addBlockquote('效果：鉴识未知的敌对生物，查看其各种信息。').addNewline().addNewline()
         .addText('专精：\n①慧眼 Lv.' + skill.appraisal.rangeLevel + '/10 ');
       if (skill.appraisal.rangeLevel < 10) markdown.addButton(`[升级(SP${eyeCost})]`, { data: '/升级鉴识 慧眼', autoEnter: false });
       markdown.addNewline().addBlockquote('每一级允许查看比自身等级高3级以内的信息。').addNewline().addBlockquote(`当前可查看 Lv.${skill.characterLevel + skill.appraisal.rangeLevel * 3} 及以下敌对生物的信息。`).addNewline().addNewline()
@@ -182,7 +194,7 @@ export const skillDetailHandler = async () => {
         orb_mastery: { weapon: '法球', stat: '魔力上限', base: 40, step: 10 }, dagger_mastery: { weapon: '匕首', stat: '命中', base: 40, step: 10 },
         fistblade_mastery: { weapon: '拳刃', stat: '暴击、暴伤', base: 20, step: 5 }
       } as const)[skill.code] ?? { weapon: '对应', stat: '属性', base: 0, step: 0 };
-      const offhandText = focus >= 6 ? '效果无衰减。' : `仅有${50 + (focus - 1) * 10}%效果。`;
+      const offhandText = focus >= 6 ? '主、副词条发挥100%。' : `主、副词条发挥${50 + (focus - 1) * 10}%。`;
       const effectValue = masteryText.base + masteryText.step * (proficiency - 1);
       const effectText = `装备${masteryText.weapon}类武器时，${masteryText.stat}+${effectValue}%。副手装备时，${offhandText}`;
       const markdown = Format.createMarkdown().addTitle('技能详情').addNewline().addNewline().addText(`【${skill.name}】Lv.${skill.level}\n`)
@@ -190,7 +202,7 @@ export const skillDetailHandler = async () => {
       if (skill.masteryProficiencyCost !== null) markdown.addButton(`[升级(SP${skill.masteryProficiencyCost})]`, { data: `/升级专精 ${skill.id} 娴熟`, autoEnter: false });
       markdown.addNewline().addBlockquote(`${masteryText.stat}+${effectValue}%。每提升一级 +${masteryText.step}%，Lv.5 为 +${masteryText.base + masteryText.step * 4}%。`).addNewline().addNewline().addText(`②随心 Lv.${focus}/6 `);
       if (skill.masteryFocusCost !== null) markdown.addButton(`[升级(SP${skill.masteryFocusCost})]`, { data: `/升级专精 ${skill.id} 随心`, autoEnter: false });
-      markdown.addNewline().addBlockquote('每提升一级，副手装备效果+10%。').addNewline().addNewline().addText(`当前技能点：${skill.skillPoints}`);
+      markdown.addNewline().addBlockquote('每提升一级，对应武器类型的副手主、副词条发挥提高10个百分点，最高100%；装备特殊效果不衰减。').addNewline().addNewline().addText(`当前技能点：${skill.skillPoints}`);
       const buttons = Format.createButtonGroup().addRow().addButton('返回技能列表', '/技能列表 已学习', { type: 'command', autoEnter: true, style: 'blue' });
       await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) });
       return;
@@ -206,7 +218,7 @@ export const skillDetailHandler = async () => {
     }
     if (skill.learned && skill.category !== 'passive' && skill.category !== 'bound') {
       const names = { overcharge: '过充', potent: '强效', instant: '瞬息', efficient: '节能' } as const;
-      const perLevel = specializationPerLevelLines(skill.tier, skill.specializations);
+      const perLevel = specializationPerLevelLines(skill.tier, skill.specializations, skill.code);
       const category = categoryNames[skill.category] ?? '特殊';
       const resourceRequirement = advancedResourceRequirementForSkill(skill.code); const resource = advancedResourceForProfession(resourceRequirement?.professionCode);
       const markdown = Format.createMarkdown().addTitle('技能详情').addNewline().addNewline().addText(`【${skill.name}】${`Lv.${skill.level}`}\n`)
@@ -214,17 +226,16 @@ export const skillDetailHandler = async () => {
       if (resourceRequirement && resource) markdown.addBlockquote(`专属资源：消耗${resourceRequirement.amount}${resource.name}。${resource.summary}`).addNewline();
       appendSkillEffectDetails(markdown, skill);
       {
-        markdown.addNewline().addText('专精 · 下一级变化\n').addBlockquote('Lv.1尚未加点；以下百分比作用于当前值，逐级乘算。收益每点衰减10%、最低保留25%；惩罚倍率固定。').addNewline().addNewline();
+        markdown.addNewline().addText('专精 · 下一级变化\n');
         (Object.keys(names) as Array<keyof typeof names>).forEach((key, index) => {
-          if (!skill.specializationChoices.includes(key)) { markdown.addText(`${'①②③④'.charAt(index)}${names[key]}：不适用\n`).addNewline(); return; }
+          if (!skill.specializationChoices.includes(key)) return;
           const level = Number(skill.specializations[key] ?? 1); markdown.addText(`${'①②③④'.charAt(index)}${names[key]} Lv.${level}/${skill.specializationMaxLevel} `);
-          if (level < skill.specializationMaxLevel && skill.specializationUpgradeCost !== null) markdown.addButton(`[升级(SP${skill.specializationUpgradeCost})]`, { data: `/升级专精 ${skill.id} ${names[key]}`, autoEnter: false });
+          const cost = skill.specializationUpgradeCosts[key];
+          if (cost != null) markdown.addButton(`[升级(SP${cost})]`, { data: `/升级专精 ${skill.id} ${names[key]}`, autoEnter: false });
           markdown.addNewline();
           for (const line of perLevel[key]) markdown.addBlockquote(line).addNewline();
           markdown.addNewline();
         });
-        markdown.addText('总体变化（仅专精）\n');
-        for (const line of specializationTotalLines(skill, skill.specializationResult)) markdown.addBlockquote(line).addNewline();
       }
       markdown.addNewline().addText(`当前技能点：${skill.skillPoints}`);
       const buttons = Format.createButtonGroup().addRow().addButton('返回技能列表', '/技能列表 已学习', { type: 'command', autoEnter: true, style: 'blue' });
@@ -245,6 +256,7 @@ export const skillDetailHandler = async () => {
       : '';
     const resourceRequirement = advancedResourceRequirementForSkill(skill.code); const resource = advancedResourceForProfession(resourceRequirement?.professionCode);
     const markdown = Format.createMarkdown().addTitle('技能详情').addNewline().addNewline().addText(`【${skill.name}】${levelText}\n`);
+    if(skill.code.startsWith('talent_'))markdown.addNewline().addButton('[天赋操作]',{data:'/天赋',autoEnter:false});
     if (skill.category === 'passive' || skill.category === 'bound') {
       markdown.addBlockquote(`等阶：${skill.tier}`).addNewline().addBlockquote(`类别：${categoryNames[skill.category]}`).addNewline().addBlockquote(`效果：${skill.description}`);
       if (skill.passiveSpecializable) {
@@ -253,9 +265,12 @@ export const skillDetailHandler = async () => {
         if (skill.learned && level < skill.specializationMaxLevel && skill.specializationUpgradeCost !== null) markdown.addButton(`[升级强效(SP${skill.specializationUpgradeCost})]`, { data: `/升级专精 ${skill.id} 强效`, autoEnter: false }).addNewline();
         markdown.addNewline().addText('总体变化（仅专精）\n').addBlockquote(passiveSpecializationTotalLine(skill.passiveFactor));
       } else markdown.addNewline().addBlockquote('专精：固定机制被动不放大权限、次数或资源返还；装备精通和鉴识保留专用成长。');
-      if (advancedProfessionPassiveCodes.has(skill.code)) {
+      const bound = advancedBoundSkillDefinitions.find(entry => entry.code === skill.code);
+      if (bound) markdown.addNewline().addBlockquote(`本职${bound.kind}：常驻生效，不占普通被动槽；切换二转时随职业更换。`);
+      if (bound?.kind === '传承') markdown.addNewline().addBlockquote('传承按本职规则触发，不会因列入技能列表而重复结算。');
+      else if (advancedProfessionPassiveCodes.has(skill.code)) {
         const profession = worldTreeAdvancedProfessions.find(entry => entry.passive.code === skill.code);
-        if (hasBattleOnlyAdvancedPassiveEffect(profession?.code)) markdown.addNewline().addBlockquote('战斗规则：此效果仅在战斗结算时生效，不会增加角色详情中的基础属性。');
+        if (!profession || hasBattleOnlyAdvancedPassiveEffect(profession.code)) markdown.addNewline().addBlockquote('战斗规则：此效果仅在战斗结算时生效，不会增加角色详情中的基础属性。');
         else markdown.addNewline().addBlockquote('属性规则：此效果已在角色属性重算时写入角色详情，不会在战斗中重复叠加。');
       }
     }

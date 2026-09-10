@@ -2,7 +2,10 @@ import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import type { DerivedStats } from './types';
 
 type MasteryKey = 'physicalAttackPct' | 'magicAttackPct' | 'physicalDefensePct' | 'magicDefensePct' | 'accuracyPct' | 'critRatePct' | 'critDamagePct' | 'critResistPct' | 'critDamageReductionPct' | 'mpPct' | 'chantSpeedPct';
-type MasteryBonuses = Record<MasteryKey, number> & { details: string[] };
+type MasteryBonuses = Record<MasteryKey, number> & { details: string[]; offhandAttributeMultiplier: number };
+
+/** 未学习或随心Lv.1均为50%；Lv.2—6为60%—100%。仅用于属性词条，不缩放装备特殊效果。 */
+export const offhandAttributeMultiplier = (focus: unknown = 1) => (5 + Math.min(6, Math.max(1, Math.floor(Number(focus) || 1))) - 1) / 10;
 
 const masteryCodes = ['longsword_mastery', 'shield_mastery', 'staff_mastery', 'spellbook_mastery', 'orb_mastery', 'dagger_mastery', 'fistblade_mastery'];
 const masteryLabels: Record<MasteryKey, string> = { physicalAttackPct: '物攻', magicAttackPct: '魔攻', physicalDefensePct: '物防', magicDefensePct: '魔防', accuracyPct: '命中', critRatePct: '暴击', critDamagePct: '暴伤', critResistPct: '暴免', critDamageReductionPct: '暴抗', mpPct: '魔力上限', chantSpeedPct: '吟唱速度' };
@@ -23,14 +26,16 @@ export const weaponMasteryBonusesFor = async (connection: Pool | PoolConnection,
     FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id
     WHERE ps.character_id=? AND s.code IN (${masteryCodes.map(() => '?').join(',')})
     `, [characterId, ...masteryCodes]);
-  const bonuses: MasteryBonuses = { physicalAttackPct: 0, magicAttackPct: 0, physicalDefensePct: 0, magicDefensePct: 0, accuracyPct: 0, critRatePct: 0, critDamagePct: 0, critResistPct: 0, critDamageReductionPct: 0, mpPct: 0, chantSpeedPct: 0, details: [] };
+  const offhand = equipmentRows.find(item => item.slot === 'offhand');
+  const offhandMastery = offhand?.weapon_type ? skillRows.find(skill => jsonRecord(skill.passive_effect_json).weaponType === offhand.weapon_type) : undefined;
+  const bonuses: MasteryBonuses = { physicalAttackPct: 0, magicAttackPct: 0, physicalDefensePct: 0, magicDefensePct: 0, accuracyPct: 0, critRatePct: 0, critDamagePct: 0, critResistPct: 0, critDamageReductionPct: 0, mpPct: 0, chantSpeedPct: 0, details: [], offhandAttributeMultiplier: offhandAttributeMultiplier(offhandMastery?.focus) };
   for (const skill of skillRows) {
     const effect = jsonRecord(skill.passive_effect_json); const weaponType = String(effect.weaponType ?? '');
     const matched = equipmentRows.find(item => item.slot === 'weapon' && item.weapon_type === weaponType) ?? equipmentRows.find(item => item.weapon_type === weaponType);
     if (!matched) continue;
     const proficiency = Math.min(5, Math.max(1, Number(skill.proficiency)));
     const focus = Math.min(6, Math.max(1, Number(skill.focus)));
-    const scale = matched.slot === 'offhand' ? .5 + (focus - 1) * .1 : 1;
+    const scale = matched.slot === 'offhand' ? offhandAttributeMultiplier(focus) : 1;
     const step = Number(effect.masteryStepPct ?? 0);
     // 成长只作用于该精通本身声明的属性；例如长剑精通只提升暴击，不能把同一档成长误加到物攻、防御等全部面板。
     const active = masteryKeys.filter(key => Number(effect[key] ?? 0) !== 0).map(key => [key, (Number(effect[key] ?? 0) + step * (proficiency - 1)) * scale] as const);

@@ -1,0 +1,226 @@
+TAP version 13
+# Subtest: 只统计五个防具槽：2件未激活，3/4件低档，5件覆盖低档，混穿及重复槽不凑件
+ok 1 - 只统计五个防具槽：2件未激活，3/4件低档，5件覆盖低档，混穿及重复槽不凑件
+  ---
+  duration_ms: 2.2118
+  type: 'test'
+  ...
+# Subtest: 轻甲只加生命魔力；重甲和板甲生命档位独立于品质
+ok 2 - 轻甲只加生命魔力；重甲和板甲生命档位独立于品质
+  ---
+  duration_ms: 1.7025
+  type: 'test'
+  ...
+# Subtest: 概率按用户例子计算：补足未命中部分、削减最终命中、只削减额外暴伤
+ok 3 - 概率按用户例子计算：补足未命中部分、削减最终命中、只削减额外暴伤
+  ---
+  duration_ms: 0.5617
+  type: 'test'
+  ...
+# Subtest: 基础直击真实掷骰：命中补偿、暴免、强制暴击的额外暴伤抗性
+ok 4 - 基础直击真实掷骰：命中补偿、暴免、强制暴击的额外暴伤抗性
+  ---
+  duration_ms: 0.4673
+  type: 'test'
+  ...
+# Subtest: 共享战斗引擎确实读取攻守双方套装，未命中不扣血，暴抗仅削减暴击奖励
+ok 5 - 共享战斗引擎确实读取攻守双方套装，未命中不扣血，暴抗仅削减暴击奖励
+  ---
+  duration_ms: 4.8029
+  type: 'test'
+  ...
+# Subtest: 批量装备读取区分角色，空列表不发SQL
+ok 6 - 批量装备读取区分角色，空列表不发SQL
+  ---
+  duration_ms: 0.4817
+  type: 'test'
+  ...
+# Subtest: 装备摘要同时显示甲类与史诗；5件甲类只显示高档，史诗保留两档；未激活不展示
+ok 7 - 装备摘要同时显示甲类与史诗；5件甲类只显示高档，史诗保留两档；未激活不展示
+  ---
+  duration_ms: 0.93
+  type: 'test'
+  ...
+# Subtest: 史诗3件岩压可积累到3层，只有5件才触发断层壁障
+ok 8 - 史诗3件岩压可积累到3层，只有5件才触发断层壁障
+  ---
+  duration_ms: 353.3074
+  type: 'test'
+  ...
+# [2026-09-08 21:54:00][INFO] [alemonjs][exit] 进程退出，code=0
+# Subtest: 机巧普攻与同面板角色共用完整公式，没有额外伤害折扣
+ok 9 - 机巧普攻与同面板角色共用完整公式，没有额外伤害折扣
+  ---
+  duration_ms: 17.6472
+  type: 'test'
+  ...
+# Subtest: 全部 88 个主动与大招可独立结算，全部被动可装配
+ok 10 - 全部 88 个主动与大招可独立结算，全部被动可装配
+  ---
+  duration_ms: 312.7423
+  type: 'test'
+  ...
+# Subtest: 持续伤害每轮一次、每具机巧最多两种，不因额外行动重复结算
+ok 11 - 持续伤害每轮一次、每具机巧最多两种，不因额外行动重复结算
+  ---
+  duration_ms: 3.871
+  type: 'test'
+  ...
+# Subtest: 护主仅直击且每场一次；全额吸收不会把挡刀资格泄漏给 DOT
+ok 12 - 护主仅直击且每场一次；全额吸收不会把挡刀资格泄漏给 DOT
+  ---
+  duration_ms: 2.7922
+  type: 'test'
+  ...
+# Subtest: 主人倒下立即退出、蓄力被沉默打断且不返还同步
+ok 13 - 主人倒下立即退出、蓄力被沉默打断且不返还同步
+  ---
+  duration_ms: 2.2724
+  type: 'test'
+  ...
+# Subtest: 裂盾额外伤害只消耗护盾，破盾不额外放大生命伤害
+ok 14 - 裂盾额外伤害只消耗护盾，破盾不额外放大生命伤害
+  ---
+  duration_ms: 6.0052
+  type: 'test'
+  ...
+# Subtest: 净化修护先移除禁疗再回复；退出单位不能被治疗或加盾
+ok 15 - 净化修护先移除禁疗再回复；退出单位不能被治疗或加盾
+  ---
+  duration_ms: 2.38
+  type: 'test'
+  ...
+# Subtest: 旧策略、手动指令、挡刀开关不干预性格与危机决策
+ok 16 - 旧策略、手动指令、挡刀开关不干预性格与危机决策
+  ---
+  duration_ms: 2.3188
+  type: 'test'
+  ...
+# Subtest: 普通元素统一价后，十二种原液主材60、辅材40、催化剂40保持等成本
+ok 17 - 普通元素统一价后，十二种原液主材60、辅材40、催化剂40保持等成本
+  ---
+  duration_ms: 1.4182
+  type: 'test'
+  ...
+# Subtest: 出生稳定、兼容人格、完整技能权重与三倍语料
+ok 18 - 出生稳定、兼容人格、完整技能权重与三倍语料
+  ---
+  duration_ms: 796.4628
+  type: 'test'
+  ...
+# Subtest: 全部属性可抽中，十级归一预算为四倍，稳定种子不随材料刷新
+ok 19 - 全部属性可抽中，十级归一预算为四倍，稳定种子不随材料刷新
+  ---
+  duration_ms: 756.182
+  type: 'test'
+  ...
+# Subtest: 批量与拆分培养一致，244/56材料贡献守恒，停机不被升级治愈
+ok 20 - 批量与拆分培养一致，244/56材料贡献守恒，停机不被升级治愈
+  ---
+  duration_ms: 7.7495
+  type: 'test'
+  ...
+# Subtest: 跨越十级只领悟一次特殊，重调不重抽技能，原材料与手续费分离
+ok 21 - 跨越十级只领悟一次特殊，重调不重抽技能，原材料与手续费分离
+  ---
+  duration_ms: 20.0859
+  type: 'test'
+  ...
+# Subtest: 绑定先消耗、不可逆制造可交易、互转继承绑定
+ok 22 - 绑定先消耗、不可逆制造可交易、互转继承绑定
+  ---
+  duration_ms: 0.3269
+  type: 'test'
+  ...
+# Subtest: 天空粉尘逐份40%，移除旧重复条目，召唤与部位不产生粉尘
+ok 23 - 天空粉尘逐份40%，移除旧重复条目，召唤与部位不产生粉尘
+  ---
+  duration_ms: 0.3522
+  type: 'test'
+  ...
+# Subtest: 称呼自称由性格决定，旧自定义不外发，去重耗尽不强制重复
+ok 24 - 称呼自称由性格决定，旧自定义不外发，去重耗尽不强制重复
+  ---
+  duration_ms: 17.7513
+  type: 'test'
+  ...
+# Subtest: 受伤后拆批培养一致；等级回退保留原始成长和技能记录
+ok 25 - 受伤后拆批培养一致；等级回退保留原始成长和技能记录
+  ---
+  duration_ms: 24.4016
+  type: 'test'
+  ...
+# node:internal/modules/run_main:123
+#     triggerUncaughtException(
+#     ^
+# AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+# 2 !== 3
+#     at <anonymous> (E:\\猫拉瑞亚\\FantasyFinal\\test\\panel-stat-formula.test.ts:14:8)
+#     at ModuleJob.run (node:internal/modules/esm/module_job:343:25)
+#     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+#     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) {
+#   generatedMessage: true,
+#   code: 'ERR_ASSERTION',
+#   actual: 2,
+#   expected: 3,
+#   operator: 'strictEqual',
+#   diff: 'simple'
+# }
+# Node.js v22.22.0
+# Subtest: test\\panel-stat-formula.test.ts
+not ok 4 - test\\panel-stat-formula.test.ts
+  ---
+  duration_ms: 1380.2527
+  type: 'test'
+  location: 'E:\\猫拉瑞亚\\FantasyFinal\\test\\panel-stat-formula.test.ts:1:1'
+  failureType: 'testCodeFailure'
+  exitCode: 1
+  signal: ~
+  error: 'test failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: 成长十级边界及后续等级衔接，没有虚构0升1
+ok 27 - 成长十级边界及后续等级衔接，没有虚构0升1
+  ---
+  duration_ms: 1.5535
+  type: 'test'
+  ...
+# Subtest: 普通满品质标准躯体：武器2比1、整套双防1比1；怪物虚拟套装不翻倍
+ok 28 - 普通满品质标准躯体：武器2比1、整套双防1比1；怪物虚拟套装不翻倍
+  ---
+  duration_ms: 1.363
+  type: 'test'
+  ...
+# Subtest: 五件按2大3小连乘，混装和低品质也不会加算扣成负数
+ok 29 - 五件按2大3小连乘，混装和低品质也不会加算扣成负数
+  ---
+  duration_ms: 0.6962
+  type: 'test'
+  ...
+# Subtest: 各甲类5件覆盖3件，固定套装数值与品质无关
+ok 30 - 各甲类5件覆盖3件，固定套装数值与品质无关
+  ---
+  duration_ms: 1.2516
+  type: 'test'
+  ...
+# Subtest: 装备迁移保留熔铸差额、负词条、标识；未知历史拒绝猜测；重跑不再缩放
+ok 31 - 装备迁移保留熔铸差额、负词条、标识；未知历史拒绝猜测；重跑不再缩放
+  ---
+  duration_ms: 0.5209
+  type: 'test'
+  ...
+# Subtest: 机巧旧历史迁移保留出生、种子、技能及零生命，不重复迁移
+ok 32 - 机巧旧历史迁移保留出生、种子、技能及零生命，不重复迁移
+  ---
+  duration_ms: 8.9032
+  type: 'test'
+  ...
+1..32
+# tests 32
+# suites 0
+# pass 31
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2466.2304

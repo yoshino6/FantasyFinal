@@ -1,3 +1,9 @@
+import { achievementAutomatonFeeds } from './achievement-state';
+import { achievementActivity, achievementSecondaryLevel } from './achievement-hooks';
+import { recordAchievement } from './achievement-events';
+import { currentSecondaryShop } from './secondary-shop-context';
+import { talentProficiency, talentProductionRecord } from './talent-rewards';
+import { consumeTalentMaterial, talentMaterialPayment } from './talent-production';
 import { randomBytes } from 'node:crypto';
 import type { AutomatonBattleState } from './automaton-combat';
 import { automatonMemoryKinds, automatonBondStages } from './automaton-events';
@@ -6,7 +12,7 @@ import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/prom
 import { withTransaction } from '../database/pool';
 import { craftCharacterId, craftJson, createCraftRequest, craftRequestFor, completeCraftRequest, recordAlchemyJournal } from './alchemy-journal.service';
 import { consumeInventory, grantInventory, productionBinding, type Binding } from './inventory-binding';
-import { createAutomaton, cultivateAutomaton, respecAutomaton, feedDefinition, type AutomatonState } from './automaton';
+import { createAutomaton, migrateAutomatonGrowth, cultivateAutomaton, respecAutomaton, feedDefinition, type AutomatonState } from './automaton';
 import { automatonFeeds } from './automaton-feeds';
 import { realmLevelCap } from './constants';
 import { secondaryProfessionBonus, secondaryProfessionMaxLevel, secondaryProfessionProficiencyRequired } from './secondary-profession';
@@ -33,7 +39,10 @@ export const automatonFor = async (connection: PoolConnection, characterId: numb
   if(!Number.isSafeInteger(id) || id < 1) throw new Error('机巧编号无效。');
   const [rows] = await connection.execute<AutomatonRow[]>('SELECT * FROM player_automatons WHERE id=? AND holder_id=? FOR UPDATE',[id,characterId]);
   const row=rows[0]; if(!row || (claimed && Number(row.owner_id)!==characterId))throw new Error('未找到属于你的机巧。');
-  const state=craftJson<AutomatonState>(row.state_json);
+  const stored=craftJson<AutomatonState>(row.state_json);
+  const state=row.combat_id ? stored : migrateAutomatonGrowth(stored);
+  if (state !== stored) await saveAutomaton(connection,row,state);
+
   if(!row.combat_id && row.recover_at && new Date(row.recover_at).getTime()<=Date.now()) {
     if(!state.hp)await recordAutomatonEvent(connection,id,characterId,`recovery:${new Date(row.recover_at).toISOString()}`,'recovery',{name:state.name,source:'休整后自动恢复'},new Date(row.recover_at));
     state.hp=Math.floor(state.stats[0]!);state.mp=Math.floor(state.stats[1]!);
@@ -46,9 +55,26 @@ export const saveAutomaton = async (connection: PoolConnection, row: AutomatonRo
 };
 export const recordAutomatonEvent = async (connection: PoolConnection, id: number, characterId: number, key: string, kind: string, data: unknown, occurredAt:Date|null=null) => {
   await connection.execute('INSERT INTO automaton_events (automaton_id,character_id,event_key,kind,data_json,created_at) VALUES (?,?,?,?,?,COALESCE(?,NOW()))',[id,characterId,key,kind,JSON.stringify(data),occurredAt]);
+  if(automatonMemoryKinds[kind])recordAchievement(connection,characterId,['ACH_J15'],'automaton-memory:'+id+':'+key);
 };
 export const recordAutomatonFirstEvent = async (connection:PoolConnection,id:number,characterId:number,kind:string,data:unknown,identity=kind)=>{
   await connection.execute('INSERT IGNORE INTO automaton_events(automaton_id,character_id,event_key,kind,data_json) VALUES(?,?,?,?,?)',[id,characterId,`first:${characterId}:${identity}`,kind,JSON.stringify(data)]);
+  if(automatonMemoryKinds[kind])recordAchievement(connection,characterId,['ACH_J15'],'automaton-memory:'+id+':'+identity);
+};
+/** Opening-only adoption. The automaton chooses its owner and enters the normal permanent-bound lifecycle. */
+export const grantOpeningAutomaton=async(connection:PoolConnection,characterId:number)=>{
+  const[existing]=await connection.execute<AutomatonRow[]>("SELECT * FROM player_automatons WHERE owner_id=? AND JSON_UNQUOTE(JSON_EXTRACT(state_json,'$.origin.code'))='I02' LIMIT 1 FOR UPDATE",[characterId]);
+  if(existing[0])return{id:Number(existing[0].id),state:craftJson<AutomatonState>(existing[0].state_json)};
+  const[count]=await connection.execute<RowDataPacket[]>('SELECT COUNT(*) total FROM player_automatons WHERE owner_id=? FOR UPDATE',[characterId]);
+  if(Number(count[0]?.total??0)>=3)throw new Error('机巧认主名额已满，请先处理现有机巧后再继续剧情。');
+  const state=createAutomaton(randomBytes(32).toString('hex'));state.name='无主机偶';state.intimacy=10;state.origin={kind:'opening',code:'I02'};
+  await connection.execute('UPDATE player_automatons SET following=0 WHERE owner_id=?',[characterId]);
+  const[insert]=await connection.execute<ResultSetHeader>("INSERT INTO player_automatons(holder_id,creator_id,owner_id,bound_kind,following,state_json) VALUES(?,?,?,'personal',1,?)",[characterId,characterId,characterId,JSON.stringify(state)]);
+  const id=Number(insert.insertId);
+  await recordAutomatonEvent(connection,id,characterId,`opening:i02:${id}`,'认主',{name:state.name,source:'无主机偶自主选择',personality:state.personality});
+  await recordAutomatonFirstEvent(connection,id,characterId,'first_met',{name:state.name,source:'赤铁山道相遇'});
+  await recordAutomatonFirstEvent(connection,id,characterId,'first_follow',{name:state.name,source:'主动随行'});
+  return{id,state};
 };
 export const automatonEventPage=(user:string,id:number,page=1)=>withTransaction(async connection=>{
   const character=await automatonCharacter(connection,user),{state}=await automatonFor(connection,character.id,id,false);
@@ -130,15 +156,16 @@ export const confirmAutomatonCraft=(user:string,token:string)=>withTransaction(a
   if(snapshot.version!=='automaton-v4'||snapshot.level!==recipeLevel||snapshot.chance!==chance)throw new Error('职业等级或配方条件已变化，请重新放入配方确认。');
   const batches:(AlchemyBatch & {consumed:AlchemyIngredient[]})[]=[],lines:string[]=[];
   for(let index=0;index<snapshot.batches;index++){
-    for(const part of recipe.ingredients){const item=await itemFor(connection,character.id,part.code);if(Number(item.quantity)<part.quantity+(part.code==='sky_dust'&&Number(character.realm_stage)<2?1:0))throw new Error(`【${item.name}】不足，本次批量未扣料。`);}
+    for(const part of recipe.ingredients){const item=await itemFor(connection,character.id,part.code);if(Number(item.quantity)<await talentMaterialPayment(connection,character.id,Number(item.id),part.quantity,'craft')+(part.code==='sky_dust'&&Number(character.realm_stage)<2?1:0))throw new Error(`【${item.name}】不足，本次批量未扣料。`);}
     const success=Math.random()<chance,used:Binding={unbound:0,trade:0,personal:0},consumed:AlchemyIngredient[]=[];
     for(const ingredient of snapshot.ingredients){const quantity=snapshot.code==='automaton'&&!success?(ingredient.code==='sky_dust'?2:0):ingredient.quantity;if(!quantity)continue;
-      const binding=await consumeInventory(connection,character.id,ingredient.id,quantity);for(const key of ['unbound','trade','personal'] as const)used[key]+=binding[key];consumed.push({...ingredient,quantity});}
+      const payment=await consumeTalentMaterial(connection,character.id,ingredient.id,quantity,'craft'),binding=payment.binding;for(const key of ['unbound','trade','personal'] as const)used[key]+=binding[key];consumed.push({...ingredient,quantity:payment.paid});}
     const outputs:AlchemyIngredient[]=[];
     if(success){
       if(snapshot.code==='automaton'){
         const state=createAutomaton(randomBytes(32).toString('hex'));
         const [insert]=await connection.execute<ResultSetHeader>('INSERT INTO player_automatons (holder_id,creator_id,bound_kind,state_json) VALUES (?,?,?,?)',[character.id,character.id,used.personal?'personal':'none',JSON.stringify(state)]);
+        if(!currentSecondaryShop())recordAchievement(connection,Number(character.id),['ACH_J04'], 'automaton-birth:'+insert.insertId);
         await recordAutomatonEvent(connection,insert.insertId,character.id,`birth:${token}:${index}`,'birth',{name:state.name,creatorId:character.id,personality:state.personality,skills:state.learned});
         await recordAutomatonFirstEvent(connection,insert.insertId,character.id,'first_met',{name:state.name,source:'亲手点灵'});
         lines.push(`点灵成功：机巧 #${insert.insertId}，尚未认主。`);
@@ -158,11 +185,15 @@ export const confirmAutomatonCraft=(user:string,token:string)=>withTransaction(a
   const [remainders]=await connection.execute<RowDataPacket[]>('SELECT budget_units FROM automaton_proficiency_remainders WHERE character_id=? AND profession_code=? FOR UPDATE',[character.id,recipe.profession]);
   // 使用 1/89 铜预算单位，精确保留魔力粉尘 58/0.89 的锚价和拆批余量。
   const units=Number(remainders[0]?.budget_units??0)+(['automaton','automaton_body'].includes(snapshot.code)?0:batches.flatMap(b=>b.consumed).reduce((sum,i)=>sum+i.quantity*(i.code==='mana_dust'?5800:2*(baseMaterialTradeValues[i.code]??0)*89),0));
-  const proficiencyGain=['automaton','automaton_body'].includes(snapshot.code)?successes*5:Math.floor(units/8900);
+  const baseProficiency=['automaton','automaton_body'].includes(snapshot.code)?successes*5:Math.floor(units/8900);
+  await talentProductionRecord(connection,character.id,snapshot.code,['automaton','automaton_body'].includes(snapshot.code)?baseProficiency:baseProficiency*(successes/Math.max(1,batches.length)),true);
+  const proficiencyGain=await talentProficiency(connection,character.id,baseProficiency,{profession:recipe.profession});
   await connection.execute('UPDATE automaton_proficiency_remainders SET budget_units=? WHERE character_id=? AND profession_code=?',[units%8900,character.id,recipe.profession]);
   let level=Number(progress[0]?.level??4),xp=Number(progress[0]?.proficiency??0)+proficiencyGain;
   while(level<secondaryProfessionMaxLevel&&xp>=secondaryProfessionProficiencyRequired(level)){xp-=secondaryProfessionProficiencyRequired(level);level++;}
   await connection.execute('UPDATE player_secondary_professions SET level=?,proficiency=? WHERE character_id=? AND profession_code=?',[level,level>=secondaryProfessionMaxLevel?0:xp,character.id,recipe.profession]);
+  achievementSecondaryLevel(connection,Number(character.id),level);
+  if(successes>0&&!currentSecondaryShop())achievementActivity(connection,Number(character.id));
   await completeCraftRequest(connection,character.id,token,result);return result;
 });
 
@@ -195,7 +226,7 @@ export const previewAutomatonMutation=(user:string,id:number,action:string,args:
   if(action==='装配')validateAutomatonLoadout(state.level,state.learned,args);
   if(action==='命名')cleanText(args.join(' '),12);
   if(action==='认主'){const [counts]=await connection.execute<RowDataPacket[]>('SELECT COUNT(*) total FROM player_automatons WHERE owner_id=?',[character.id]);if(row.owner_id||Number(counts[0]!.total)>=3)throw new Error('已经认主或已达到三具上限。');description+='\n认主后永久绑定，不能再次交易。';}
-  if(action==='维修'){const kit=await itemFor(connection,character.id,'forge_repair_kit');if(!kit.quantity)throw new Error('缺少维修包。');if(state.hp>=Math.floor(state.stats[0]!)&&state.mp>=Math.floor(state.stats[1]!))throw new Error('状态已满，无需维修。');description+='\n消耗维修包×1，完全恢复生命、魔力并结束停机。';}
+  if(action==='维修'){if(state.hp>=Math.floor(state.stats[0]!)&&state.mp>=Math.floor(state.stats[1]!))throw new Error('状态已满，无需维修。');const kit=await itemFor(connection,character.id,'forge_repair_kit'),paid=await talentMaterialPayment(connection,character.id,Number(kit.id),1,'automatonRepair');if(Number(kit.quantity)<paid)throw new Error('缺少维修包。');description+=`\n消耗维修包×${paid}，完全恢复生命、魔力并结束停机。`;}
   if(action==='休眠归档')description+='\n隐藏日常列表并收起，仍占认主名额，可恢复展示。';
   const token=await createCraftRequest(connection,character.id,'automaton_mutate',{id,revision:Number(row.revision),action,args} satisfies Mutation);
   return {token,description};
@@ -225,7 +256,7 @@ export const confirmAutomatonMutation=(user:string,token:string)=>withTransactio
     if(action==='随行')await recordAutomatonFirstEvent(connection,id,character.id,'first_follow',{name:state.name});
   }else if(action==='培养'){
     const {bottles,stop}=cultivationInput(args);state=cultivateAutomaton(state,bottles,Math.min(Number(character.level),realmLevelCap(Number(character.realm_stage)),50),stop);
-    for(const b of bottles){const item=await itemFor(connection,character.id,`automaton_feed_${b.code}`);await consumeInventory(connection,character.id,Number(item.id),b.count);}await automatonIntimacy(connection,character.id,state,'cultivation',id);
+    for(const b of bottles){const item=await itemFor(connection,character.id,`automaton_feed_${b.code}`);await consumeInventory(connection,character.id,Number(item.id),b.count);}await automatonIntimacy(connection,character.id,state,'cultivation',id);await achievementAutomatonFeeds(connection,Number(character.id),id,token,bottles.filter(b=>b.count>0).map(b=>b.code));
   }else if(action==='重调'){
     const from=Number(args[0]),to=Number(args[1]),feed=feedDefinition(args[2]!);if(!Number.isInteger(from)||!Number.isInteger(to)||from<2||to>state.level||to<from)throw new Error('重调等级范围无效。');
     const levels=Array.from({length:to-from+1},(_,i)=>from+i),xp=levels.reduce((s,l)=>s+cultivationRequired(l-1),0);
@@ -233,7 +264,7 @@ export const confirmAutomatonMutation=(user:string,token:string)=>withTransactio
     await consumeInventory(connection,character.id,Number(item.id),count);state=result.state;const remainder=count*100-xp-result.fee;if(remainder)state.reserve.push({code:feed.code,xp:remainder});
   }else if(action==='维修'){
     if(state.hp>=Math.floor(state.stats[0]!)&&state.mp>=Math.floor(state.stats[1]!))throw new Error('状态已满，不消耗维修包。');
-    const item=await itemFor(connection,character.id,'forge_repair_kit');await consumeInventory(connection,character.id,Number(item.id),1);if(!state.hp)await recordAutomatonEvent(connection,id,character.id,`recovery:${token}`,'recovery',{name:state.name,source:'主人使用维修包修复'});state.hp=Math.floor(state.stats[0]!);state.mp=Math.floor(state.stats[1]!);await connection.execute('UPDATE player_automatons SET recover_at=NULL WHERE id=?',[id]);
+    const item=await itemFor(connection,character.id,'forge_repair_kit');await consumeTalentMaterial(connection,character.id,Number(item.id),1,'automatonRepair');if(!state.hp)await recordAutomatonEvent(connection,id,character.id,`recovery:${token}`,'recovery',{name:state.name,source:'主人使用维修包修复'});state.hp=Math.floor(state.stats[0]!);state.mp=Math.floor(state.stats[1]!);await connection.execute('UPDATE player_automatons SET recover_at=NULL WHERE id=?',[id]);
   }else if(action==='装配'){validateAutomatonLoadout(state.level,state.learned,args);state.equipped=args;
   }else if(action==='命名'){
     const day=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
@@ -245,6 +276,8 @@ export const confirmAutomatonMutation=(user:string,token:string)=>withTransactio
   await recordAutomatonEvent(connection,id,character.id,token,action,{name:state.name,previousName:before.name,previousLevel:before.level,level:state.level,args,previousStats:before.stats,stats:state.stats,previousLevels:action==='重调'?before.levels:undefined,levels:action==='重调'?state.levels:undefined});
   if(action==='培养')for(const level of state.levels.filter(l=>l.level>before.level&&l.level%10===0))await recordAutomatonFirstEvent(connection,id,character.id,'breakthrough',{name:state.name,level:level.level,skills:level.skills,gain:level.gain},`breakthrough:${level.level}`);
   if(action==='培养')for(const level of state.levels.filter(l=>l.level>before.level&&l.level%10!==0&&l.skills.length))await recordAutomatonFirstEvent(connection,id,character.id,'skill_learned',{name:state.name,level:level.level,skills:level.skills},`skill_learned:${level.level}`);
+  if(action==='维修')recordAchievement(connection,Number(character.id),['ACH_J12'], 'automaton:'+token);
+  if(action==='培养'&&state.level>before.level){recordAchievement(connection,Number(character.id),['ACH_J09']);if(state.learned.some(s=>!before.learned.includes(s)))recordAchievement(connection,Number(character.id),['ACH_J14']);}
   const learned=state.learned.filter(s=>!before.learned.includes(s)).map(id=>automatonSkills.find(s=>s.id===id)?.name??id);
   const growth=action==='培养'||action==='重调'?'\n'+labels.map((label,i)=>`${label} ${Math.floor(before.stats[i]!)} → ${Math.floor(state.stats[i]!)}`).join('｜'):'';
   const result={text:`${action}完成：${state.name} #${id}，Lv.${state.level}。${state.level>before.level?` 新领悟：${learned.join('、')||'本次未领悟技能'}。`:''}${growth}`};await completeCraftRequest(connection,character.id,token,result);return result;

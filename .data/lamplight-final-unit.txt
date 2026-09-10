@@ -1,0 +1,282 @@
+TAP version 13
+# Subtest: 切磋开战、操作、回合日志与结束日志统一标题，普通战斗保持原样
+ok 1 - 切磋开战、操作、回合日志与结束日志统一标题，普通战斗保持原样
+  ---
+  duration_ms: 3.9811
+  type: 'test'
+  ...
+# Subtest: 双方血蓝与状态使用单层引用，并保留双方名称的切换目标按钮
+ok 2 - 双方血蓝与状态使用单层引用，并保留双方名称的切换目标按钮
+  ---
+  duration_ms: 0.9701
+  type: 'test'
+  ...
+# Subtest: 切磋操作按钮不出现道具，认输与友方瞄准在重开面板后保留
+ok 3 - 切磋操作按钮不出现道具，认输与友方瞄准在重开面板后保留
+  ---
+  duration_ms: 0.8529
+  type: 'test'
+  ...
+# Subtest: 空名称切磋内部标记不会被丢弃，实体化保留域民真名和快照属性
+ok 4 - 空名称切磋内部标记不会被丢弃，实体化保留域民真名和快照属性
+  ---
+  duration_ms: 201.0065
+  type: 'test'
+  ...
+# Subtest: 天气不随回合或切换目标重复显示
+ok 5 - 天气不随回合或切换目标重复显示
+  ---
+  duration_ms: 0.4894
+  type: 'test'
+  ...
+# Subtest: QQ Markdown 中回合标题与首行被动、行动、吟唱均明确换行
+ok 6 - QQ Markdown 中回合标题与首行被动、行动、吟唱均明确换行
+  ---
+  duration_ms: 0.7287
+  type: 'test'
+  ...
+# Subtest: 已学与未学主动效果都置于效果栏，冷却下一行显示吟唱数值
+ok 7 - 已学与未学主动效果都置于效果栏，冷却下一行显示吟唱数值
+  ---
+  duration_ms: 92.2476
+  type: 'test'
+  ...
+# Subtest: 专精只显示适用方向，删除重复说明并保留收益和独立价格
+ok 8 - 专精只显示适用方向，删除重复说明并保留收益和独立价格
+  ---
+  duration_ms: 25.6059
+  type: 'test'
+  ...
+# Subtest: 各阶详情展示当前数值、固定收益和四个独立升级价格
+ok 9 - 各阶详情展示当前数值、固定收益和四个独立升级价格
+  ---
+  duration_ms: 61.9144
+  type: 'test'
+  ...
+# Subtest: 被动强效每级变化与总体变化分区，不套主动成本
+ok 10 - 被动强效每级变化与总体变化分区，不套主动成本
+  ---
+  duration_ms: 18.2856
+  type: 'test'
+  ...
+# Subtest: 被动、二转与附加状态技能详情保留效果且不贴在名称之后
+ok 11 - 被动、二转与附加状态技能详情保留效果且不贴在名称之后
+  ---
+  duration_ms: 92.1377
+  type: 'test'
+  ...
+# Subtest: 切磋准备面板只显示身份、次数、携带技能与鉴识提示，不读取隐藏属性
+ok 12 - 切磋准备面板只显示身份、次数、携带技能与鉴识提示，不读取隐藏属性
+  ---
+  duration_ms: 3.5728
+  type: 'test'
+  ...
+# Subtest: 黄昏露有实际战外回复入口，PVE与PVP道具判定均拒绝
+ok 13 - 黄昏露有实际战外回复入口，PVE与PVP道具判定均拒绝
+  ---
+  duration_ms: 1.2569
+  type: 'test'
+  ...
+# Subtest: 全部炼金定义有明确使用位置；洗练不进战斗、秘药不进PVP
+ok 14 - 全部炼金定义有明确使用位置；洗练不进战斗、秘药不进PVP
+  ---
+  duration_ms: 1.5452
+  type: 'test'
+  ...
+# Subtest: 使用按钮走正确流程：回复药直接用，洗练先预览，改名待输入，战斗物不假装可战外用
+ok 15 - 使用按钮走正确流程：回复药直接用，洗练先预览，改名待输入，战斗物不假装可战外用
+  ---
+  duration_ms: 0.6804
+  type: 'test'
+  ...
+# Subtest: 背包最近获得与分类列表都显示使用入口，并保留秘药/符咒/投掷物筛选
+not ok 16 - 背包最近获得与分类列表都显示使用入口，并保留秘药/符咒/投掷物筛选
+  ---
+  duration_ms: 56.3935
+  type: 'test'
+  location: 'E:\\猫拉瑞亚\\FantasyFinal\\test\\item-use.test.ts:36:1'
+  failureType: 'testCodeFailure'
+  error: 'inventory is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
+  stack: |-
+    Object.inventoryFormat (eval at <anonymous> (file:///E:/%E7%8C%AB%E6%8B%89%E7%91%9E%E4%BA%9A/FantasyFinal/test/item-use.test.ts:1:1045), <anonymous>:45:94)
+    TestContext.<anonymous> (E:\猫拉瑞亚\FantasyFinal\test\item-use.test.ts:40:34)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 成品货架详情和购买使用 QQ 输入链接，避免 cmd-enter 不支持 show 的发送错误
+ok 17 - 成品货架详情和购买使用 QQ 输入链接，避免 cmd-enter 不支持 show 的发送错误
+  ---
+  duration_ms: 11.9006
+  type: 'test'
+  ...
+# Subtest: 炼金手记详情和再次投料使用 QQ 输入链接
+not ok 18 - 炼金手记详情和再次投料使用 QQ 输入链接
+  ---
+  duration_ms: 36.0465
+  type: 'test'
+  location: 'E:\\猫拉瑞亚\\FantasyFinal\\test\\item-use.test.ts:57:1'
+  failureType: 'testCodeFailure'
+  error: 'alchemyCreationQuest is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
+  stack: |-
+    eval (eval at <anonymous> (file:///E:/%E7%8C%AB%E6%8B%89%E7%91%9E%E4%BA%9A/FantasyFinal/test/item-use.test.ts:1:1045), <anonymous>:33:27)
+  ...
+# Subtest: 三家副职业商店进店保留买卖、闲聊、转职和离开，移除加工按钮
+not ok 19 - 三家副职业商店进店保留买卖、闲聊、转职和离开，移除加工按钮
+  ---
+  duration_ms: 55.9014
+  type: 'test'
+  location: 'E:\\猫拉瑞亚\\FantasyFinal\\test\\item-use.test.ts:64:1'
+  failureType: 'testCodeFailure'
+  error: 'appendHiddenQuestButton is not defined'
+  code: 'ERR_TEST_FAILURE'
+  name: 'ReferenceError'
+  stack: |-
+    Object.blacksmithFormat (eval at <anonymous> (file:///E:/%E7%8C%AB%E6%8B%89%E7%91%9E%E4%BA%9A/FantasyFinal/test/item-use.test.ts:1:1045), <anonymous>:22:5)
+    async TestContext.<anonymous> (E:\猫拉瑞亚\FantasyFinal\test\item-use.test.ts:70:6)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 七图采用21条V4及53分支，旧21条内容仍能按版本读取
+ok 20 - 七图采用21条V4及53分支，旧21条内容仍能按版本读取
+  ---
+  duration_ms: 1.8608
+  type: 'test'
+  ...
+# Subtest: 全部路线最终经过对应安全区、联合调查和同一世界终章，无孤立节点或循环
+ok 21 - 全部路线最终经过对应安全区、联合调查和同一世界终章，无孤立节点或循环
+  ---
+  duration_ms: 84.6153
+  type: 'test'
+  ...
+# Subtest: 后六章符合现有30级成长上限；不修改原进化数值
+ok 22 - 后六章符合现有30级成长上限；不修改原进化数值
+  ---
+  duration_ms: 0.9454
+  type: 'test'
+  ...
+# Subtest: 神秘箱独立开奖：20%史诗与80%稀有池，支持100箱，无永久凭证混入
+ok 23 - 神秘箱独立开奖：20%史诗与80%稀有池，支持100箱，无永久凭证混入
+  ---
+  duration_ms: 1.9329
+  type: 'test'
+  ...
+# Subtest: 本人回忆不会同时混入敌对和救援、A/B/C经历
+ok 24 - 本人回忆不会同时混入敌对和救援、A/B/C经历
+  ---
+  duration_ms: 0.2852
+  type: 'test'
+  ...
+# Subtest: 灯火剧情标题、人物详情与引用排版，长选项蓝色输入链接和十键完整转换
+ok 25 - 灯火剧情标题、人物详情与引用排版，长选项蓝色输入链接和十键完整转换
+  ---
+  duration_ms: 10.5498
+  type: 'test'
+  ...
+# Subtest: 神技全部目录、分类、搜索与详情经本机QQ适配器转换，不产生不支持的cmd-enter show
+ok 26 - 神技全部目录、分类、搜索与详情经本机QQ适配器转换，不产生不支持的cmd-enter show
+  ---
+  duration_ms: 12.1582
+  type: 'test'
+  ...
+# Subtest: 相同注册阶段重发保存的完整正文，女神更替只在新页面明确交接
+ok 27 - 相同注册阶段重发保存的完整正文，女神更替只在新页面明确交接
+  ---
+  duration_ms: 34.2034
+  type: 'test'
+  ...
+# Subtest: 世界树人物页和满员随从名册经过QQ转换，不丢人物、邀请或返回按钮
+ok 28 - 世界树人物页和满员随从名册经过QQ转换，不丢人物、邀请或返回按钮
+  ---
+  duration_ms: 49.1061
+  type: 'test'
+  ...
+# Subtest: 世界树前台沿用百纳镇业务分组，登记和闲聊均留在维萝柜台，QQ按钮完整
+ok 29 - 世界树前台沿用百纳镇业务分组，登记和闲聊均留在维萝柜台，QQ按钮完整
+  ---
+  duration_ms: 97.5228
+  type: 'test'
+  ...
+# Subtest: 世界树大厅与百纳镇同为四行七键，有额度也不插入额外服务和翻页
+ok 30 - 世界树大厅与百纳镇同为四行七键，有额度也不插入额外服务和翻页
+  ---
+  duration_ms: 58.07
+  type: 'test'
+  ...
+# Subtest: 公会交谈只发人物引用消息，详情链接正确且保留鉴识和当地公会限制
+ok 31 - 公会交谈只发人物引用消息，详情链接正确且保留鉴识和当地公会限制
+  ---
+  duration_ms: 52.9418
+  type: 'test'
+  ...
+# Subtest: 首次移动或寻怪进入私有故事，未选择前不会执行原有世界动作
+ok 32 - 首次移动或寻怪进入私有故事，未选择前不会执行原有世界动作
+  ---
+  duration_ms: 45.2729
+  type: 'test'
+  ...
+# Subtest: 先点击其他功能只重发待开始页，开始按钮有效；相似命令前缀不能绕过保护
+ok 33 - 先点击其他功能只重发待开始页，开始按钮有效；相似命令前缀不能绕过保护
+  ---
+  duration_ms: 37.3396
+  type: 'test'
+  ...
+# Subtest: 已进入抉择时只重显选项；无新开局或已完成的角色保留正常行为
+ok 34 - 已进入抉择时只重显选项；无新开局或已完成的角色保留正常行为
+  ---
+  duration_ms: 7.3192
+  type: 'test'
+  ...
+# Subtest: 14张出生地图均有三条完整路线，版本唯一，所有分支都有相遇、后果和安全落脚
+ok 35 - 14张出生地图均有三条完整路线，版本唯一，所有分支都有相遇、后果和安全落脚
+  ---
+  duration_ms: 1.5223
+  type: 'test'
+  ...
+# Subtest: 采用逃婚新版与保留奇遇，旧版编号不能偷偷换稿
+ok 36 - 采用逃婚新版与保留奇遇，旧版编号不能偷偷换稿
+  ---
+  duration_ms: 0.6035
+  type: 'test'
+  ...
+# Subtest: 刚出生的armed状态可读取，不会访问尚未选择的分支
+ok 37 - 刚出生的armed状态可读取，不会访问尚未选择的分支
+  ---
+  duration_ms: 68.8104
+  type: 'test'
+  ...
+# Subtest: 降临事务直接赠送Lv.1鉴识及基础专精，不占神技名额或初始SP
+ok 38 - 降临事务直接赠送Lv.1鉴识及基础专精，不占神技名额或初始SP
+  ---
+  duration_ms: 35.1644
+  type: 'test'
+  ...
+# Subtest: 随从概率以心情占掉落价值上限的比例计算，Boss不吃神技加成
+ok 39 - 随从概率以心情占掉落价值上限的比例计算，Boss不吃神技加成
+  ---
+  duration_ms: 0.1914
+  type: 'test'
+  ...
+# Subtest: 宝箱批量独立开奖，没有空箱，数量与概率边界可审计
+ok 40 - 宝箱批量独立开奖，没有空箱，数量与概率边界可审计
+  ---
+  duration_ms: 18.1583
+  type: 'test'
+  ...
+# [2026-09-09 02:44:09][INFO] [alemonjs][exit] 进程退出，code=0
+1..40
+# tests 40
+# suites 0
+# pass 37
+# fail 3
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1982.3375

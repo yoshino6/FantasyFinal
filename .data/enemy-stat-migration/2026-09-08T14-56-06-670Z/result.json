@@ -1,0 +1,17 @@
+{
+  "mode": "apply",
+  "directory": ".data/enemy-stat-migration/2026-09-08T14-56-06-670Z",
+  "alreadyApplied": true,
+  "templates": 204,
+  "liveSpawns": 4776,
+  "oldSpawns": 4776,
+  "newSpawns": 0,
+  "spawnChanges": 0,
+  "profileChanges": 27,
+  "characterChanges": 0,
+  "mapNpcs": 116,
+  "sparNpcs": 64,
+  "scenarioCount": 384,
+  "blocked": [],
+  "committed": true
+}

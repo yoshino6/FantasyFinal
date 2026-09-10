@@ -1,0 +1,224 @@
+TAP version 13
+# Subtest: 成长观察器 Lv.9
+ok 1 - 成长观察器 Lv.9
+  ---
+  duration_ms: 1.6784
+  type: 'test'
+  ...
+# Subtest: 成长观察器 Lv.10
+ok 2 - 成长观察器 Lv.10
+  ---
+  duration_ms: 0.2835
+  type: 'test'
+  ...
+# Subtest: 成长观察器 Lv.19
+ok 3 - 成长观察器 Lv.19
+  ---
+  duration_ms: 0.106
+  type: 'test'
+  ...
+# Subtest: 成长观察器 Lv.20
+ok 4 - 成长观察器 Lv.20
+  ---
+  duration_ms: 0.0866
+  type: 'test'
+  ...
+# Subtest: 成长观察器 Lv.30
+ok 5 - 成长观察器 Lv.30
+  ---
+  duration_ms: 0.1586
+  type: 'test'
+  ...
+# Subtest: 副职业观察器 Lv.2
+ok 6 - 副职业观察器 Lv.2
+  ---
+  duration_ms: 0.1564
+  type: 'test'
+  ...
+# Subtest: 副职业观察器 Lv.3
+ok 7 - 副职业观察器 Lv.3
+  ---
+  duration_ms: 0.1817
+  type: 'test'
+  ...
+# Subtest: 副职业观察器 Lv.4
+ok 8 - 副职业观察器 Lv.4
+  ---
+  duration_ms: 0.1419
+  type: 'test'
+  ...
+# Subtest: 副职业观察器 Lv.5
+ok 9 - 副职业观察器 Lv.5
+  ---
+  duration_ms: 0.3149
+  type: 'test'
+  ...
+# Subtest: 副职业观察器 Lv.10
+ok 10 - 副职业观察器 Lv.10
+  ---
+  duration_ms: 0.3412
+  type: 'test'
+  ...
+# Subtest: 副职业观察器 Lv.11
+ok 11 - 副职业观察器 Lv.11
+  ---
+  duration_ms: 0.1436
+  type: 'test'
+  ...
+# Subtest: 正常获取分类：锻材
+ok 12 - 正常获取分类：锻材
+  ---
+  duration_ms: 0.4414
+  type: 'test'
+  ...
+# Subtest: 正常获取分类：炼材
+ok 13 - 正常获取分类：炼材
+  ---
+  duration_ms: 0.0931
+  type: 'test'
+  ...
+# Subtest: 正常获取分类：元素粉尘
+ok 14 - 正常获取分类：元素粉尘
+  ---
+  duration_ms: 0.0972
+  type: 'test'
+  ...
+# Subtest: 正常获取分类：三粒子
+ok 15 - 正常获取分类：三粒子
+  ---
+  duration_ms: 0.083
+  type: 'test'
+  ...
+# Subtest: 正常获取分类：百分比药
+ok 16 - 正常获取分类：百分比药
+  ---
+  duration_ms: 0.0858
+  type: 'test'
+  ...
+# Subtest: 正常获取分类：固定药
+ok 17 - 正常获取分类：固定药
+  ---
+  duration_ms: 0.0875
+  type: 'test'
+  ...
+# Subtest: 正常获取分类：零回复
+ok 18 - 正常获取分类：零回复
+  ---
+  duration_ms: 0.0785
+  type: 'test'
+  ...
+# Subtest: 正常获取分类：材料回复不算药
+ok 19 - 正常获取分类：材料回复不算药
+  ---
+  duration_ms: 0.0806
+  type: 'test'
+  ...
+# Subtest: 正常获取分类：技能书
+ok 20 - 正常获取分类：技能书
+  ---
+  duration_ms: 0.1994
+  type: 'test'
+  ...
+# Subtest: 正常获取分类：稀有武器
+ok 21 - 正常获取分类：稀有武器
+  ---
+  duration_ms: 0.1148
+  type: 'test'
+  ...
+# Subtest: 正常获取分类：史诗装备有实例
+ok 22 - 正常获取分类：史诗装备有实例
+  ---
+  duration_ms: 0.1067
+  type: 'test'
+  ...
+# Subtest: 正常获取分类：史诗仅定义无实例
+ok 23 - 正常获取分类：史诗仅定义无实例
+  ---
+  duration_ms: 0.0856
+  type: 'test'
+  ...
+# Subtest: 正常获取分类：史诗材料
+ok 24 - 正常获取分类：史诗材料
+  ---
+  duration_ms: 0.07
+  type: 'test'
+  ...
+# Subtest: 正常获取分类：神器正常取得
+ok 25 - 正常获取分类：神器正常取得
+  ---
+  duration_ms: 0.0698
+  type: 'test'
+  ...
+# Subtest: 正常获取分类：布甲
+ok 26 - 正常获取分类：布甲
+  ---
+  duration_ms: 0.0773
+  type: 'test'
+  ...
+# Subtest: 正常获取分类：皮甲
+ok 27 - 正常获取分类：皮甲
+  ---
+  duration_ms: 0.0758
+  type: 'test'
+  ...
+# Subtest: 正常获取分类：轻甲
+ok 28 - 正常获取分类：轻甲
+  ---
+  duration_ms: 0.0629
+  type: 'test'
+  ...
+# Subtest: 正常获取分类：重甲
+ok 29 - 正常获取分类：重甲
+  ---
+  duration_ms: 0.0661
+  type: 'test'
+  ...
+# Subtest: 正常获取分类：板甲
+ok 30 - 正常获取分类：板甲
+  ---
+  duration_ms: 0.0617
+  type: 'test'
+  ...
+# Subtest: NPC第二级好感 199
+ok 31 - NPC第二级好感 199
+  ---
+  duration_ms: 0.3068
+  type: 'test'
+  ...
+# Subtest: NPC第二级好感 200
+ok 32 - NPC第二级好感 200
+  ---
+  duration_ms: 0.1227
+  type: 'test'
+  ...
+# Subtest: 装备：重复槽不凑五件，同甲类五槽才计套装；装备定义按本世记录
+not ok 33 - 装备：重复槽不凑五件，同甲类五槽才计套装；装备定义按本世记录
+  ---
+  duration_ms: 5.4544
+  type: 'test'
+  location: 'E:\\猫拉瑞亚\\FantasyFinal\\test\\achievement-observers.test.ts:27:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The expression evaluated to a falsy value:
+    
+      assert.ok(f.some(f=>f.metric==='ACH_I08'))
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (E:\猫拉瑞亚\FantasyFinal\test\achievement-observers.test.ts:27:402)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..33
+# tests 33
+# suites 0
+# pass 32
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 305.7093

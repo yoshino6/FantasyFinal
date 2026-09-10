@@ -1,0 +1,24 @@
+TAP version 13
+# Subtest: 数据库事务：临时角色穿卸甲、15项属性重算、双战斗适配器与装备消息（全部回滚）
+ok 1 - 数据库事务：临时角色穿卸甲、15项属性重算、双战斗适配器与装备消息（全部回滚）
+  ---
+  duration_ms: 2403.7964
+  type: 'test'
+  ...
+# [2026-09-08 22:56:11][INFO] [alemonjs][exit] 进程退出，code=0
+# Subtest: 实库事务：存活怪物血量、全部域民快照、NPC重算及敌方套装适配（回滚）
+ok 2 - 实库事务：存活怪物血量、全部域民快照、NPC重算及敌方套装适配（回滚）
+  ---
+  duration_ms: 245.3783
+  type: 'test'
+  ...
+# [2026-09-08 22:56:13][INFO] [alemonjs][exit] 进程退出，code=0
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5262.6926

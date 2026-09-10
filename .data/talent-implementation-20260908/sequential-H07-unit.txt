@@ -1,0 +1,17 @@
+TAP version 13
+# Subtest: H07 队友炼金药剂援助取消贫者资格，满血未用药不取消
+ok 1 - H07 队友炼金药剂援助取消贫者资格，满血未用药不取消
+  ---
+  duration_ms: 2.9439
+  type: 'test'
+  ...
+# [2026-09-09 12:32:59][INFO] [alemonjs][exit] 进程退出，code=0
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 924.0143

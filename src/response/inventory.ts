@@ -1,12 +1,16 @@
+import { randomUUID } from 'node:crypto';
 import { Format, logger, useEvent, useRoute } from 'alemonjs';
 import { useGameMessage as useMessage } from '../game/use-game-message';
-import { inventoryView } from '../game/adventure.service';
+import { inventory, inventoryView } from '../game/adventure.service';
 import { clearQuickItem, quickItemConfig, setQuickItem, toggleQuickItem } from '../game/quick-item.service';
 import { currentMainQuest } from '../game/main-quest.service';
 import { messageFormat } from '../game/message';
 import { activateDevice, activeDeviceList, clearDeviceQuickSlot, deactivateDevice, deviceDetail, deviceQuickConfig, deviceSkillDetail, setDeviceQuickSlot } from '../game/device.service';
 import { discardMaterial } from '../game/inventory.service';
 import {appendItemUse} from './item-use';
+import { achievementRewards } from '../game/achievement.service';
+import { achievementBoxes, type AchievementBoxKey } from '../game/achievement-rewards.config';
+import { achievementBoxCommand } from '../game/achievement-message';
 
 type InventoryCategory = '装备' | '道具' | '材料';
 const categories: InventoryCategory[] = ['装备', '道具', '材料'];
@@ -14,6 +18,11 @@ const subcategories: Record<InventoryCategory, string[]> = {
   装备: ['全部', '武器', '头肩', '上装', '腰部', '下装', '脚部', '项链', '手镯', '戒指'],
   道具: ['全部', '药剂', '秘药', '投掷物', '符咒', '食物', '特殊', '地图', '图纸', '技能书'],
   材料: ['全部', '怪材', '建材', '锻材', '粒子', '基材', '构件', '炼材', '食材', '草药', '货币']
+};
+
+const isPermanentFootprintItem=(value:unknown)=>{
+  try{const effect=typeof value==='string'?JSON.parse(value):value;return Boolean(effect&&typeof effect==='object'&&(effect as Record<string,unknown>).personalOnly);}
+  catch{return false;}
 };
 
 const parseCategory = (value: unknown): InventoryCategory | undefined => {
@@ -59,12 +68,15 @@ const pageButtons = (category: InventoryCategory, subcategory: string, page: num
 };
 
 const inventoryFormat = async (qqUserId: string, category?: InventoryCategory, page = 1, keyword = '', subcategory = '全部') => {
-  const [result, mainQuest] = await Promise.all([inventoryView(qqUserId, category), currentMainQuest(qqUserId)]);
+  const rewards=await achievementRewards(qqUserId);
+  const [result, mainQuest, carry] = await Promise.all([inventoryView(qqUserId, category), currentMainQuest(qqUserId), inventory(qqUserId)]);
+  const weightText = `${carry.weight.toFixed(2)}/${carry.capacity.toFixed(2)} kg`;
   const canContemplate = mainQuest.title === '【主线·窥探世间】';
   const canContemplateEvolution = mainQuest.title === '【主线·感悟进化之种】';
   const markdown = Format.createMarkdown();
   if (!category) {
-    markdown.addTitle('背包').addText('\n\n最近获得：\n');
+    markdown.addTitle('背包').addNewline().addNewline().addText(weightText).addText('\n\n最近获得：\n');
+    for(const key of Object.keys(achievementBoxes) as AchievementBoxKey[])if(rewards.boxes[key]>0)markdown.addText(`${achievementBoxes[key].name} ×${rewards.boxes[key]} `).addButton('[打开]',{data:`/${achievementBoxCommand[key]} ${randomUUID()}`,autoEnter:false}).addText(' ').addButton('[批量打开]',{data:`/${achievementBoxCommand[key]} ${randomUUID()} `,autoEnter:false}).addNewline().addNewline();
     if (!result.recent.length) markdown.addBlockquote('暂无获得记录。');
     for (const item of result.recent) {
       markdown.addText('> ');
@@ -82,6 +94,7 @@ const inventoryFormat = async (qqUserId: string, category?: InventoryCategory, p
 
   const normalizedKeyword = keyword.trim();
   const items = [
+    ...(category==='道具'?(Object.keys(achievementBoxes) as AchievementBoxKey[]).filter(key=>rewards.boxes[key]>0).map(key=>({type:'achievement' as const,name:achievementBoxes[key].name,item_category:'特殊',quantity:rewards.boxes[key],code:key})):[]),
     ...result.instances.map(item => ({ type: 'instance' as const, ...item })),
     ...result.stacked.map(item => ({ type: 'stacked' as const, ...item }))
   ].filter(item => matchesSubcategory(category, subcategory, item.item_category))
@@ -91,13 +104,17 @@ const inventoryFormat = async (qqUserId: string, category?: InventoryCategory, p
   const displayed = items.slice((currentPage - 1) * 10, currentPage * 10);
   markdown.addTitle(`背包·${category}`);
   if (category === '道具') markdown.addText(' ').addButton('[道具配置]', { data: '/道具配置', autoEnter: false });
-  markdown.addNewline().addNewline().addText('子分类：').addNewline();
+  markdown.addNewline().addNewline().addText(weightText).addNewline().addNewline().addText('子分类：').addNewline();
   appendSubcategoryLinks(markdown, category);
   markdown.addText(`当前子分类：${subcategory}`).addNewline().addNewline();
   if (!displayed.length) markdown.addBlockquote(normalizedKeyword ? '没有找到符合条件的物品。' : '该分类暂无物品。');
   for (const item of displayed) {
     markdown.addText('> ');
-    if (item.type === 'instance') {
+    if(item.type==='achievement'){
+      markdown.addText(`【特殊】${item.name} ×${item.quantity}｜个人绑定 `);
+      const key=item.code as AchievementBoxKey,command=achievementBoxCommand[key];
+      markdown.addButton('[打开]',{data:`/${command} ${randomUUID()}`,autoEnter:false}).addText(' ').addButton('[批量打开]',{data:`/${command} ${randomUUID()} `,autoEnter:false});
+    } else if (item.type === 'instance') {
       markdown.addButton(`[${item.item_category}]${item.name}`, { data: `/装备详情 ${item.id}`, autoEnter: false })
         .addText(`｜品质 ${Number(item.quality).toFixed(2)}%｜耐久 ${item.durability}/${item.durability_max}｜${item.bound_kind==='none'?'未绑定':'已绑定'}${item.market_listing_id?'｜寄售中':''}`);
     } else {
@@ -106,7 +123,7 @@ const inventoryFormat = async (qqUserId: string, category?: InventoryCategory, p
       appendItemUse(markdown,item);
       if (canContemplate && item.code === 'sky_dust') markdown.addText(' ').addButton('[窥探]', { data: '/窥探天空粉尘', autoEnter: false });
       if (canContemplateEvolution && item.code === 'evolution_seed') markdown.addText(' ').addButton('[感悟]', { data: '/感悟进化之种', autoEnter: false });
-      if (category === '材料') markdown.addText(' ').addButton('[丢弃]', { data: `/丢弃材料 ${item.id} `, autoEnter: false });
+      if (category === '材料'&&!isPermanentFootprintItem(item.effect_json)) markdown.addText(' ').addButton('[丢弃]', { data: `/丢弃材料 ${item.id} `, autoEnter: false });
     }
     markdown.addNewline();
   }

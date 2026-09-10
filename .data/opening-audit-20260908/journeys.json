@@ -1,0 +1,910 @@
+{
+  "checkedAt": "2026-09-10T12:10:40.695Z",
+  "scope": "actual registration/story/reward SQL; derived-stat and evolution-profile substitutes",
+  "journeys": [
+    {
+      "route": "S01",
+      "branch": "A",
+      "birth": "gravelwind_shore",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "S01",
+      "branch": "B",
+      "birth": "gravelwind_shore",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "S02",
+      "branch": "A",
+      "birth": "gravelwind_shore",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "S02",
+      "branch": "B",
+      "birth": "gravelwind_shore",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "S03",
+      "branch": "A",
+      "birth": "gravelwind_shore",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "S03",
+      "branch": "B",
+      "birth": "gravelwind_shore",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "S03",
+      "branch": "C",
+      "birth": "gravelwind_shore",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "D01",
+      "branch": "A",
+      "birth": "dark_forest_deep",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "D01",
+      "branch": "B",
+      "birth": "dark_forest_deep",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "D01",
+      "branch": "C",
+      "birth": "dark_forest_deep",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "D02",
+      "branch": "A",
+      "birth": "dark_forest_deep",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "D02",
+      "branch": "B",
+      "birth": "dark_forest_deep",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "D03",
+      "branch": "A",
+      "birth": "dark_forest_deep",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "D03",
+      "branch": "B",
+      "birth": "dark_forest_deep",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "D03",
+      "branch": "C",
+      "birth": "dark_forest_deep",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "H01",
+      "branch": "A",
+      "birth": "ridge_foothills",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "H01",
+      "branch": "B",
+      "birth": "ridge_foothills",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "H02",
+      "branch": "A",
+      "birth": "ridge_foothills",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "H02",
+      "branch": "B",
+      "birth": "ridge_foothills",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "H02",
+      "branch": "C",
+      "birth": "ridge_foothills",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "H03",
+      "branch": "A",
+      "birth": "ridge_foothills",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "H03",
+      "branch": "B",
+      "birth": "ridge_foothills",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "H03",
+      "branch": "C",
+      "birth": "ridge_foothills",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "I01",
+      "branch": "A",
+      "birth": "rediron_pass",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "I01",
+      "branch": "B",
+      "birth": "rediron_pass",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "I02",
+      "branch": "A",
+      "birth": "rediron_pass",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "I02",
+      "branch": "B",
+      "birth": "rediron_pass",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "I02",
+      "branch": "C",
+      "birth": "rediron_pass",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "I03",
+      "branch": "A",
+      "birth": "rediron_pass",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "I03",
+      "branch": "B",
+      "birth": "rediron_pass",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "W01",
+      "branch": "A",
+      "birth": "mistalgae_marsh",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "W01",
+      "branch": "B",
+      "birth": "mistalgae_marsh",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "W02",
+      "branch": "A",
+      "birth": "mistalgae_marsh",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "W02",
+      "branch": "B",
+      "birth": "mistalgae_marsh",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "W03",
+      "branch": "A",
+      "birth": "mistalgae_marsh",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "W03",
+      "branch": "B",
+      "birth": "mistalgae_marsh",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "W03",
+      "branch": "C",
+      "birth": "mistalgae_marsh",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "B01",
+      "branch": "A",
+      "birth": "baina_town",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "B01",
+      "branch": "B",
+      "birth": "baina_town",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "B01",
+      "branch": "C",
+      "birth": "baina_town",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "B02",
+      "branch": "A",
+      "birth": "baina_town",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "B02",
+      "branch": "B",
+      "birth": "baina_town",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "B03",
+      "branch": "A",
+      "birth": "baina_town",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "B03",
+      "branch": "B",
+      "birth": "baina_town",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "B03",
+      "branch": "C",
+      "birth": "baina_town",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "Y01",
+      "branch": "A",
+      "birth": "world_tree",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "Y01",
+      "branch": "B",
+      "birth": "world_tree",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "Y01",
+      "branch": "C",
+      "birth": "world_tree",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "Y02",
+      "branch": "A",
+      "birth": "world_tree",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "Y02",
+      "branch": "B",
+      "birth": "world_tree",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "Y03",
+      "branch": "A",
+      "birth": "world_tree",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "Y03",
+      "branch": "B",
+      "birth": "world_tree",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "Y03",
+      "branch": "C",
+      "birth": "world_tree",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "M01",
+      "branch": "A",
+      "birth": "worldtree_meadow",
+      "destination": "floating_leaf_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "M01",
+      "branch": "B",
+      "birth": "worldtree_meadow",
+      "destination": "floating_leaf_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "M01",
+      "branch": "C",
+      "birth": "worldtree_meadow",
+      "destination": "floating_leaf_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "M02",
+      "branch": "A",
+      "birth": "worldtree_meadow",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "M02",
+      "branch": "B",
+      "birth": "worldtree_meadow",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "M02",
+      "branch": "C",
+      "birth": "worldtree_meadow",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "M03",
+      "branch": "A",
+      "birth": "worldtree_meadow",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "M03",
+      "branch": "B",
+      "birth": "worldtree_meadow",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "M03",
+      "branch": "C",
+      "birth": "worldtree_meadow",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "R01",
+      "branch": "A",
+      "birth": "morningdew_riverbank",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "R01",
+      "branch": "B",
+      "birth": "morningdew_riverbank",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "R01",
+      "branch": "C",
+      "birth": "morningdew_riverbank",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "R02",
+      "branch": "A",
+      "birth": "morningdew_riverbank",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "R02",
+      "branch": "B",
+      "birth": "morningdew_riverbank",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "R02",
+      "branch": "C",
+      "birth": "morningdew_riverbank",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "R03",
+      "branch": "A",
+      "birth": "morningdew_riverbank",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "R03",
+      "branch": "B",
+      "birth": "morningdew_riverbank",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "R03",
+      "branch": "C",
+      "birth": "morningdew_riverbank",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "A01",
+      "branch": "A",
+      "birth": "fallenstar_swamp",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "A01",
+      "branch": "B",
+      "birth": "fallenstar_swamp",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/女神"
+    },
+    {
+      "route": "A01",
+      "branch": "C",
+      "birth": "fallenstar_swamp",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "A02",
+      "branch": "A",
+      "birth": "fallenstar_swamp",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "A02",
+      "branch": "B",
+      "birth": "fallenstar_swamp",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "A02",
+      "branch": "C",
+      "birth": "fallenstar_swamp",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "A03",
+      "branch": "A",
+      "birth": "fallenstar_swamp",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "A03",
+      "branch": "B",
+      "birth": "fallenstar_swamp",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "A03",
+      "branch": "C",
+      "birth": "fallenstar_swamp",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "C01",
+      "branch": "A",
+      "birth": "frostcrown_plateau",
+      "destination": "snowlamp_hollow",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "C01",
+      "branch": "B",
+      "birth": "frostcrown_plateau",
+      "destination": "snowlamp_hollow",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "C01",
+      "branch": "C",
+      "birth": "frostcrown_plateau",
+      "destination": "snowlamp_hollow",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "C02",
+      "branch": "A",
+      "birth": "frostcrown_plateau",
+      "destination": "frost_dragon_inn",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "C02",
+      "branch": "B",
+      "birth": "frostcrown_plateau",
+      "destination": "frost_dragon_inn",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "C02",
+      "branch": "C",
+      "birth": "frostcrown_plateau",
+      "destination": "frost_dragon_inn",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "C03",
+      "branch": "A",
+      "birth": "frostcrown_plateau",
+      "destination": "snowlamp_hollow",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "C03",
+      "branch": "B",
+      "birth": "frostcrown_plateau",
+      "destination": "snowlamp_hollow",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "C03",
+      "branch": "C",
+      "birth": "frostcrown_plateau",
+      "destination": "snowlamp_hollow",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "T01",
+      "branch": "A",
+      "birth": "thundercliff",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "T01",
+      "branch": "B",
+      "birth": "thundercliff",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "T01",
+      "branch": "C",
+      "birth": "thundercliff",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "T02",
+      "branch": "A",
+      "birth": "thundercliff",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "T02",
+      "branch": "B",
+      "birth": "thundercliff",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "T02",
+      "branch": "C",
+      "birth": "thundercliff",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "T03",
+      "branch": "A",
+      "birth": "thundercliff",
+      "destination": "sleepwhale_market",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "T03",
+      "branch": "B",
+      "birth": "thundercliff",
+      "destination": "sleepwhale_market",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "T03",
+      "branch": "C",
+      "birth": "thundercliff",
+      "destination": "sleepwhale_market",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "E01",
+      "branch": "A",
+      "birth": "eclipse_ruins",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "E01",
+      "branch": "B",
+      "birth": "eclipse_ruins",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "E01",
+      "branch": "C",
+      "birth": "eclipse_ruins",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "E02",
+      "branch": "A",
+      "birth": "eclipse_ruins",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "E02",
+      "branch": "B",
+      "birth": "eclipse_ruins",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "E02",
+      "branch": "C",
+      "birth": "eclipse_ruins",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "E03",
+      "branch": "A",
+      "birth": "eclipse_ruins",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "E03",
+      "branch": "B",
+      "birth": "eclipse_ruins",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "E03",
+      "branch": "C",
+      "birth": "eclipse_ruins",
+      "destination": "world_tree",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "F01",
+      "branch": "A",
+      "birth": "dark_forest",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "F01",
+      "branch": "B",
+      "birth": "dark_forest",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "F02",
+      "branch": "A",
+      "birth": "dark_forest",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "F02",
+      "branch": "B",
+      "birth": "dark_forest",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "F03",
+      "branch": "A",
+      "birth": "dark_forest",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    },
+    {
+      "route": "F03",
+      "branch": "B",
+      "birth": "dark_forest",
+      "destination": "baina_town",
+      "level": 3,
+      "next": "/初行公会"
+    }
+  ]
+}

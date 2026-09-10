@@ -1,4 +1,6 @@
+import { currentSecondaryShop } from '../game/secondary-shop-context';
 import { secondaryShopFormat } from './secondary-shop';
+import { appendHiddenQuestButton } from './hidden-profession';
 import { alchemyCreationQuest, alchemyCreationQuestTitle, learnAlchemyCreation } from '../game/alchemy-creation-quest.service';
 import { Format, useEvent, useRoute } from 'alemonjs';
 import { useGameMessage as useMessage } from '../game/use-game-message';
@@ -46,8 +48,11 @@ export const alchemistShopFormat = async (qqUserId: string, dialogue?: string, c
   const buttons = Format.createButtonGroup()
     .addRow().addButton('我要买', '/炼金商店购买', { type: 'command', autoEnter: true, style: 'blue' }).addButton('我要卖', '/炼金商店出售', { type: 'command', autoEnter: true, style: 'blue' })
     .addRow().addButton('切磋', '/切磋 alchemy_sweetshop', { type: 'command', autoEnter: true, style: 'blue' }).addButton('闲聊', '/晴儿闲聊', { type: 'command', autoEnter: true, style: 'blue' }).addButton('关于 炼金师', '/关于炼金师', { type: 'command', autoEnter: true, style: 'blue' });
+  buttons
+    .addRow().addButton('提纯','/店铺提纯',{type:'command',autoEnter:true,style:'blue'}).addButton('炼金','/店铺炼金',{type:'command',autoEnter:true,style:'blue'});
   if (creationQuest.pending) buttons.addRow().addButton(`关于 ${alchemyCreationQuestTitle}`, '/晴儿 关于点灵与育成', { type: 'command', autoEnter: true, style: 'blue' });
   if (questReady) buttons.addRow().addButton('关于 无形的禁锢', '/晴儿 关于无形的禁锢', { type: 'command', autoEnter: true, style: 'blue' });
+  await appendHiddenQuestButton(buttons, qqUserId, shopCode);
   buttons.addRow().addButton('离开 糖水屋', `/建筑离开 ${shopCode}`, { type: 'command', autoEnter: true });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
@@ -166,7 +171,7 @@ const purificationFormat = async (qqUserId: string, page = 1, keyword = '') => {
   const operator = state.progress.serviceMode === 'sweetshop' ? '本次由【晴儿】代为提纯（炼金师 Lv.3）；不会获得个人炼金熟练度。' : '每份材料都会独立进行提纯判定；失败会消耗该份材料。怪材每跨 10 级，精材料产出按 1.2 倍累乘。';
   const markdown = Format.createMarkdown().addTitle('炼金·提纯').addNewline().addNewline()
     .addBlockquote(operator).addNewline().addNewline();
-  if (state.itemId) markdown.addText('放入材料：').addText(' ').addButton('[清空]', { data: '/提纯清空', autoEnter: false }).addNewline().addBlockquote(`【${state.name}】×${state.quantity}｜单份成功率：${state.success.toFixed(1)}%`).addText(' ').addButton('[修改数量]', { data: `/提纯放入 ${state.itemId} `, autoEnter: false }).addButton('[删除]', { data: '/提纯删除', autoEnter: false }).addNewline().addText('预计产物：').addNewline().addBlockquote(`【${state.outputName}】｜约${Math.floor(state.expectedOutput)}份`).addNewline().addNewline();
+  if (state.itemId) markdown.addText('放入材料：').addText(' ').addButton('[清空]', { data: '/提纯清空', autoEnter: false }).addNewline().addBlockquote(`【${state.name}】×${state.quantity}（实付${state.paid}份）｜单份成功率：${state.success.toFixed(1)}%`).addText(' ').addButton('[修改数量]', { data: `/提纯放入 ${state.itemId} `, autoEnter: false }).addButton('[删除]', { data: '/提纯删除', autoEnter: false }).addNewline().addText('预计产物：').addNewline().addBlockquote(`【${state.outputName}】｜约${Math.floor(state.expectedOutput)}份`).addNewline().addNewline();
   else markdown.addBlockquote('当前未放入材料。').addNewline().addNewline();
   markdown.addText('可提纯材料\n');
   if (!entries.length) markdown.addBlockquote('背包中没有符合条件的可提纯材料。').addNewline();
@@ -186,7 +191,7 @@ const bulkPurificationConfirmFormat = async (qqUserId: string) => {
   if (!preview.materials.length) markdown.addBlockquote('背包中没有可一键提纯的普通或大型怪材。');
   else {
     markdown.addText('即将消耗并提纯：').addNewline();
-    for (const material of preview.materials) markdown.addBlockquote(`【${material.name}】×${material.quantity} → 【${material.outputName}】预计${material.expectedOutput.toFixed(1)}份`).addNewline();
+    for (const material of preview.materials) markdown.addBlockquote(`【${material.name}】×${material.quantity}（实付${material.paid}份） → 【${material.outputName}】预计${material.expectedOutput.toFixed(1)}份`).addNewline();
   }
   const buttons = Format.createButtonGroup().addRow()
     .addButton('确认提纯', `/确认一键提纯 ${preview.token}`, { type: 'command', autoEnter: true, style: preview.materials.length ? 'blue' : undefined })
@@ -195,7 +200,7 @@ const bulkPurificationConfirmFormat = async (qqUserId: string) => {
 };
 
 const alchemyFormat = async (qqUserId: string, page = 1, keyword = '') => {
-  const [state, materials, creationQuest] = await Promise.all([alchemyState(qqUserId), alchemyMaterials(qqUserId), alchemyCreationQuest(qqUserId)]);
+  const [state, materials, creationQuest] = await Promise.all([alchemyState(qqUserId), alchemyMaterials(qqUserId), currentSecondaryShop()?Promise.resolve({unlocked:false,pending:false}):alchemyCreationQuest(qqUserId)]);
   const filtered = materials.filter(material => !keyword || material.name.includes(keyword) || material.category.includes(keyword));
   const totalPages = Math.max(1, Math.ceil(filtered.length / 10)); const currentPage = Math.min(Math.max(1, page), totalPages);
   const entries = filtered.slice((currentPage - 1) * 10, currentPage * 10);
@@ -239,9 +244,9 @@ export const purificationPageHandler = async () => { const [event] = useEvent();
 export const purificationSearchHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await message.send({ format: await purificationFormat(event.current.UserId, 1, String(route.param('keyword'))) }); } catch (error) { await message.send({ format: messageFormat('无法搜索材料', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const purificationPutHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await selectPurificationMaterial(event.current.UserId, Number(route.param('id')), Number(route.param('quantity') ?? 1)); await message.send({ format: await purificationFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法放入材料', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const purificationClearHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await clearPurificationMaterial(event.current.UserId); await message.send({ format: await purificationFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法清空材料', error instanceof Error ? error.message : '请稍后重试。') }); } };
-export const purificationExecuteHandler = async () => { const [route]=useRoute(); const [event] = useEvent(); const [message] = useMessage(); try { if(!route.param('token')){await message.send({format:await purificationFormat(event.current.UserId)});return;} const result = await executePurification(event.current.UserId,String(route.param('token'))); await message.send({ format: messageFormat(result.succeeded ? '提纯成功' : '提纯失败', result.succeeded ? `消耗【${result.inputName}】×${result.inputQuantity}\n获得【${result.outputName}】×${result.outputQuantity}\n熟练度：+${result.proficiencyGain}\n成功率：${result.success.toFixed(1)}%` : `【${result.inputName}】在反应中化作了无用残渣。\n消耗×${result.inputQuantity}\n熟练度：+${result.proficiencyGain}\n成功率：${result.success.toFixed(1)}%`) }); await message.send({ format: await purificationFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法提纯', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const purificationExecuteHandler = async () => { const [route]=useRoute(); const [event] = useEvent(); const [message] = useMessage(); try { if(!route.param('token')){await message.send({format:await purificationFormat(event.current.UserId)});return;} const result = await executePurification(event.current.UserId,String(route.param('token'))); await message.send({ format: messageFormat(result.succeeded ? '提纯成功' : '提纯失败', result.succeeded ? `消耗【${result.inputName}】×${result.inputQuantity}\n获得【${result.outputName}】×${result.outputQuantity}\n失败返还：${result.refundedQuantity??0}份\n熟练度：+${result.proficiencyGain}\n成功率：${result.success.toFixed(1)}%` : `【${result.inputName}】在反应中化作了无用残渣。\n消耗×${result.inputQuantity}\n失败返还：${result.refundedQuantity??0}份\n熟练度：+${result.proficiencyGain}\n成功率：${result.success.toFixed(1)}%`) }); await message.send({ format: await purificationFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法提纯', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const bulkPurificationPreviewHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await message.send({ format: await bulkPurificationConfirmFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法一键提纯', error instanceof Error ? error.message : '请稍后重试。') }); } };
-export const bulkPurificationExecuteHandler = async () => { const [route]=useRoute(); const [event] = useEvent(); const [message] = useMessage(); try { const result = await executeBulkPurification(event.current.UserId,String(route.param('token')??'')); const outputText = result.outputs.length ? result.outputs.map(output => `【${output.name}】×${output.quantity}`).join('\n') : '本次未获得精材料。'; await message.send({ format: messageFormat('一键提纯完成', `消耗普通与大型怪材×${result.inputQuantity}\n获得：\n${outputText}\n熟练度：+${result.proficiencyGain}\n单份成功率：${result.success.toFixed(1)}%`) }); await message.send({ format: await purificationFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法一键提纯', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const bulkPurificationExecuteHandler = async () => { const [route]=useRoute(); const [event] = useEvent(); const [message] = useMessage(); try { const result = await executeBulkPurification(event.current.UserId,String(route.param('token')??'')); const outputText = result.outputs.length ? result.outputs.map(output => `【${output.name}】×${output.quantity}`).join('\n') : '本次未获得精材料。'; await message.send({ format: messageFormat('一键提纯完成', `消耗普通与大型怪材×${result.inputQuantity}\n失败返还：${result.refundedQuantity??0}份\n获得：\n${outputText}\n熟练度：+${result.proficiencyGain}\n单份成功率：${result.success.toFixed(1)}%`) }); await message.send({ format: await purificationFormat(event.current.UserId) }); } catch (error) { await message.send({ format: messageFormat('无法一键提纯', error instanceof Error ? error.message : '请稍后重试。') }); } };
 const alchemyFormulaFormat = async (qqUserId: string, page = 1, keyword = '') => {
   const list = await alchemyFormulaList(qqUserId, page, keyword);
   const markdown = Format.createMarkdown().addTitle('炼金快捷配方').addNewline().addNewline().addText(`已保存：${list.total}/${list.capacity}`).addNewline().addNewline();

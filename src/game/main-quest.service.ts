@@ -1,10 +1,13 @@
+import { recordAchievement } from './achievement-events';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
-import { calculateDerivedStats, experienceRequiredForLevel } from './constants';
-import { attributes, type Allocation } from './types';
+import { experienceRequiredForLevel } from './constants';
+import { monsterCombatStats } from './adventure.service';
+import type { Allocation } from './types';
 import { girlGratitudeMainQuest } from './girl-gratitude.service';
 import { activateEvolutionProfile } from './evolution.service';
 import { guildCareerMainQuest } from './career-quest.service';
+import { openingMainQuest } from './opening.service';
 
 export type MainQuest = {
   title: string;
@@ -56,11 +59,7 @@ const stringList = (value: unknown): string[] => {
   } catch { return []; }
 };
 
-const monsterHp = (template: QuestMonsterTemplate, level: number, bossCore: boolean) => {
-  const values = Object.fromEntries(attributes.map(attribute => [attribute, Math.floor(Number(template[attribute]) + Math.max(0, level - 1) * Number(template[`${attribute}_growth`]))])) as Allocation;
-  const base = calculateDerivedStats(values);
-  return Math.floor(base.hpMax * (template.monster_class === 'boss' && bossCore ? 3 : 1));
-};
+const monsterHp = (template: QuestMonsterTemplate, level: number, bossCore: boolean) => monsterCombatStats({...template,level,traits_json:bossCore?[evolutionBossTrait(0)]:[]}).hpMax;
 
 const createGoblinKingEncounter = async (connection: QuestConnection, ownerCharacterId: number, quest: GoblinKingQuestRow) => {
   if (quest.region_id === null || quest.pos_x === null || quest.pos_y === null || quest.pos_z === null || !quest.encounter_id) throw new Error('讨伐坐标尚未准备好。');
@@ -72,7 +71,7 @@ const createGoblinKingEncounter = async (connection: QuestConnection, ownerChara
   const create = async (code: string, role: string, level: number, isBossCore: boolean) => {
     const template = byCode.get(code)!;
     const traits = [...(isBossCore ? [ordinaryTrait] : []), questBossTrait(ownerCharacterId, quest.encounter_id!), { code: 'kingbeast_encounter', name: '', groupId: quest.encounter_id, role }];
-    const hp = monsterHp(template, level, isBossCore);
+    const hp = monsterCombatStats({...template,level,traits_json:traits}).hpMax;
     const [created] = await connection.execute<any>('INSERT INTO monster_spawns (template_id,region_id,pos_x,pos_y,pos_z,level,constitution,spirit,strength,intelligence,agility,perception,current_hp,skill_sequence,traits_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [template.id, quest.region_id, quest.pos_x, quest.pos_y, quest.pos_z, level, template.constitution, template.spirit, template.strength, template.intelligence, template.agility, template.perception, hp, JSON.stringify(stringList(template.skill_sequence)), JSON.stringify(traits)]);
     return Number(created.insertId);
   };
@@ -85,14 +84,19 @@ const createGoblinKingEncounter = async (connection: QuestConnection, ownerChara
 };
 
 /** 主线只保留当前阶段，由角色等级、剧情进度与地图持有状态自动推导。 */
-export const currentMainQuest = async (qqUserId: string): Promise<MainQuest> => {
+export const currentMainQuest = async (qqUserId: string, skipLamplight = false): Promise<MainQuest> => {
+  const opening = await openingMainQuest(qqUserId);
+  if (opening) return opening;
+  if (!skipLamplight) {
+    const lamplight = await (await import('./lamplight.service')).lamplightMainQuest(qqUserId);
+    if (lamplight) return lamplight;
+  }
   const pool = await getPool();
-  const [rows] = await pool.execute<(RowDataPacket & { id: number; level: number; experience: number; realm_stage: number; pos_x: number; pos_y: number; adventurer_registered: number; profession_code: string | null; forest_status: string | null; owns_forest_map: number; owns_sky_dust: number; has_appraisal: number; barrier_stage: number; evolution_stage: number; evolution_cap: number | null })[]>(`
+  const [rows] = await pool.execute<(RowDataPacket & { id: number; level: number; experience: number; realm_stage: number; pos_x: number; pos_y: number; adventurer_registered: number; profession_code: string | null; forest_status: string | null; owns_forest_map: number; owns_sky_dust: number; barrier_stage: number; evolution_stage: number; evolution_cap: number | null })[]>(`
     SELECT c.id,c.level,c.experience,c.realm_stage,c.pos_x,c.pos_y,c.adventurer_registered,c.profession_code,
       (SELECT sp.status FROM player_story_progress sp WHERE sp.character_id=c.id AND sp.story_code='forest_guide' LIMIT 1) AS forest_status,
       EXISTS(SELECT 1 FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=c.id AND i.code='map_dark_forest' AND pi.quantity>0) AS owns_forest_map,
       EXISTS(SELECT 1 FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=c.id AND i.code='sky_dust' AND pi.quantity>0) AS owns_sky_dust,
-      EXISTS(SELECT 1 FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=c.id AND s.code='appraisal') AS has_appraisal,
       COALESCE((SELECT qp.stage FROM player_main_quest_progress qp WHERE qp.character_id=c.id AND qp.quest_code='realm_barrier' LIMIT 1),0) AS barrier_stage,
       COALESCE((SELECT qp.stage FROM player_main_quest_progress qp WHERE qp.character_id=c.id AND qp.quest_code='evolution_barrier' LIMIT 1),0) AS evolution_stage,
       (SELECT ep.unlocked_level FROM player_evolution_profiles ep WHERE ep.character_id=c.id LIMIT 1) AS evolution_cap
@@ -103,11 +107,6 @@ export const currentMainQuest = async (qqUserId: string): Promise<MainQuest> => 
   const level = Number(character.level);
   const experience = Number(character.experience);
 
-  if (!Number(character.has_appraisal)) return {
-    title: '【主线·初识鉴识】',
-    description: '未知往往比锋刃更致命。现在的你无法辨认敌人的名称、生命、技能与危险程度，贸然交战很容易陷入不利局面。\n\n打开“技能列表”，切换到“未学习”页，找到【鉴识】并消耗 1 点技能点学习。学会后，你可以在战斗中点击“鉴识”查看敌我状态；这也是在异世界活下去的第一课。\n\n目标：学习绑定技能【鉴识】。',
-    action: { label: '[打开 技能·未学习]', command: '/技能列表 未学习' }
-  };
   if (level < 5) return {
     title: '【主线·初入异界】',
     description: `提升至Lv.5\n当前等级：Lv.${level}/5`
@@ -290,8 +289,11 @@ const evolutionCharacterFor = async (connection: PoolConnection, qqUserId: strin
     FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1${lock ? ' FOR UPDATE' : ''}`, [qqUserId]);
   const character = rows[0];
   if (!character) throw new Error('请先注册角色。');
-  if (Number(character.goblin_quest_stage) < 11) throw new Error('先完成「失踪的少女」，再处理这道新的瓶颈。');
-  if (Number(character.gratitude_stage) < 6) throw new Error('先完成与梨子喵在世界树上的同行，再处理这道新的瓶颈。');
+  const [lamplight] = await connection.execute<RowDataPacket[]>("SELECT 1 FROM player_lamplight_progress WHERE character_id=? AND (phase IN ('world','completed') OR phase='join' AND node_index>=3)", [character.id]);
+  if (!lamplight.length) {
+    if (Number(character.goblin_quest_stage) < 11) throw new Error('先完成「失踪的少女」，再处理这道新的瓶颈。');
+    if (Number(character.gratitude_stage) < 6) throw new Error('先完成与梨子喵在世界树上的同行，再处理这道新的瓶颈。');
+  }
   if (Number(character.realm_stage) !== 2 || Number(character.level) < 20 || Number(character.experience) < experienceRequiredForLevel(20)) throw new Error('你的积累尚未触及这道新的灵阶枷锁。');
   return character;
 };
@@ -359,6 +361,7 @@ export const contemplateEvolutionSeed = async (qqUserId: string) => withTransact
   if (Number(items[0].quantity) <= 1) await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=?', [character.id, items[0].item_id]);
   else await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=?', [character.id, items[0].item_id]);
   await connection.execute('UPDATE characters SET realm_stage=3 WHERE id=?', [character.id]);
+  recordAchievement(connection,Number(character.id),['ACH_A15']);
   await activateEvolutionProfile(connection, Number(character.id));
   await connection.execute(`INSERT INTO player_events (player_id,event_type,payload)
     SELECT player_id,'evolution.seed_awakened',JSON_OBJECT('level',level) FROM characters WHERE id=?`, [character.id]);
@@ -380,6 +383,7 @@ export const contemplateSkyDust = async (qqUserId: string) => withTransaction(as
   if (!Number(character.owns_sky_dust)) throw new Error('背包中没有可供感悟的天空粉尘。');
   if (barrierStage(character.barrier_stage) !== 4) throw new Error('先带着天空粉尘回去向晴儿请教，再开始窥探吧。');
   await connection.execute('UPDATE characters SET realm_stage=2 WHERE id=?', [character.id]);
+  recordAchievement(connection,Number(character.id),['ACH_A15']);
   return { name: character.name };
 });
 

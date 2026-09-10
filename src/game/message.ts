@@ -12,6 +12,13 @@ export const sendWithTextFallback = async (message: MessageSender, format: Forma
   }
 };
 
+/** 公会人物共用的标题、姓名／详情与引用对白布局。 */
+export const npcInteractionMarkdown = (title: string, name: string, text: string, detailCode?: string, detailsUnlocked = false) => {
+  const markdown = Format.createMarkdown().addTitle(title).addNewline().addNewline().addText(`【${name}】`);
+  if (detailCode && detailsUnlocked) markdown.addText('   ').addButton('[详情]', { data: `/域民详情 ${detailCode}`, autoEnter: false });
+  return markdown.addNewline().addNewline().addBlockquote(text.replace(/\r?\n/g, '\n> '));
+};
+
 export const messageFormat = (title: string, content: string) => Format.create()
   .addMarkdown(Format.createMarkdown().addTitle(title).addNewline().addNewline().addText(content.trimStart()));
 
@@ -59,7 +66,7 @@ export const heavenFormat = () => Format.create()
   .addMarkdown(Format.createMarkdown().addTitle('天堂的门扉').addText(heavenText))
   .addButtonGroup(Format.createButtonGroup().addRow().addButton('还是转生异世界', '/选择去向 异世界', { type: 'command', autoEnter: true, style: 'blue' }));
 
-export const dangerText = '\n\n女神的神情认真起来：“异世界的魔物会猎杀弱者，迷宫与荒野埋葬过无数冒险者。即使拥有天赋，也不能保证你活过第一天。”\n“因此，在出发前，我允许你从神器或神技中带走一份恩赐。它会成为你在陌生世界的第一张底牌。”';
+export const dangerText = '光门后的草叶轻轻晃动，远处忽然传来一声低吼。阿库娅合上册子，难得收起了笑。\n\n“那边可不会因为你刚来，就专挑弱小的魔物迎接你。荒野里有捕猎的魔物，遗迹中有看不见的陷阱。分不清危险的时候，先退回来，别急着拔剑。”\n\n她抬起手，一点微光落在你的眉心，化成细小的印记。\n\n“我赐予你一项神力——【鉴识】！有了它，对手藏着的底细可就没那么容易瞒过你了。怎么样，很可靠吧？毕竟是本女神亲自给的！不过，想看穿更厉害的家伙，之后可得自己努力。”\n\n你望向旁边空荡荡的台座。她顺着你的目光看过去，立刻把册子竖了起来。\n\n“别找了，所有神器早已散布世界各地。鉴识之外，你还可以挑一项天赋。想活得轻松一点，可不只有挥剑这一种办法。”';
 export const dangerFormat = () => Format.create()
   .addMarkdown(Format.createMarkdown().addTitle('序章·异界的危险（5/6）').addText(dangerText))
   .addButtonGroup(Format.createButtonGroup().addRow().addButton('接受恩赐', '/注册 继续', { type: 'command', autoEnter: true, style: 'blue' }));
@@ -79,22 +86,22 @@ export const giftText = (category: GiftCategory = 'artifact', page = 1, keyword 
   const entries = giftEntries(category, keyword); const totalPages = Math.max(1, Math.ceil(entries.length / 10));
   const currentPage = Math.min(Math.max(1, page), totalPages);
   const displayed = entries.slice((currentPage - 1) * 10, currentPage * 10);
-  return displayed.map(([code, gift], index) => `${circledNumber(index)}【${gift.name}】${giftTypeLabels[code] ?? '神技'}\n${gift.summary}\n/选择恩赐 ${code}`).join('\n\n')
+  return displayed.map(([code, gift], index) => `${circledNumber(index)}【${gift.name}】${giftTypeLabels[code] ?? '天赋'}\n${gift.summary}\n/选择恩赐 ${code}`).join('\n\n')
     + `\n\n当前第（${currentPage}/${totalPages}）页`;
 };
 
 export const giftFormat = (category: GiftCategory = 'artifact', page = 1, keyword = '') => {
-  const categoryName = category === 'artifact' ? '神器' : '神技';
+  const categoryName = category === 'artifact' ? '神器' : '天赋';
   const entries = giftEntries(category, keyword); const totalPages = Math.max(1, Math.ceil(entries.length / 10));
   const currentPage = Math.min(Math.max(1, page), totalPages);
   const displayed = entries.slice((currentPage - 1) * 10, currentPage * 10);
   const markdown = Format.createMarkdown()
     .addTitle('序章·选择恩赐（6/6）')
-    .addText(`\n\n女神说：“你可以带走一件神器，或一种神技。\n来看看吧。”\n当前分类：${categoryName}。点击蓝色名称来选择。\n\n`);
+    .addText(`\n\n女神说：“你可以带走一件神器，或一种天赋。\n来看看吧。”\n当前分类：${categoryName}。点击蓝色名称来选择。\n\n`);
   if (!displayed.length) markdown.addBlockquote(keyword ? '没有找到匹配的恩赐。' : '此分类暂未配置恩赐。').addNewline();
   for (const [index, [code, gift]] of displayed.entries()) {
     markdown.addText(`${circledNumber(index)}`).addButton(`【${gift.name}】`, { data: `/选择恩赐 ${code}`, autoEnter: false })
-      .addText(`${giftTypeLabels[code] ?? '神技'}\n`).addBlockquote(gift.summary).addNewline().addNewline();
+      .addText(`${giftTypeLabels[code] ?? '天赋'}\n`).addBlockquote(gift.summary).addNewline().addNewline();
   }
   markdown.addText(`当前第（${currentPage}/${totalPages}）页`);
   const command = (target: number) => `/恩赐分页 ${categoryName} ${target}${keyword ? ` ${keyword}` : ''}`;
@@ -104,5 +111,5 @@ export const giftFormat = (category: GiftCategory = 'artifact', page = 1, keywor
     .addButton('下一页', command(Math.min(totalPages, currentPage + 1)), { type: 'command', autoEnter: true, style: currentPage < totalPages ? 'blue' : undefined })
     .addRow()
     .addButton('神器', '/恩赐列表 神器', { type: 'command', autoEnter: true, style: category === 'artifact' ? 'blue' : undefined })
-    .addButton('神技', '/恩赐列表 神技', { type: 'command', autoEnter: true, style: category === 'ability' ? 'blue' : undefined }));
+    .addButton('天赋', '/恩赐列表 天赋', { type: 'command', autoEnter: true, style: category === 'ability' ? 'blue' : undefined }));
 };

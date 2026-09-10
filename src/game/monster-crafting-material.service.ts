@@ -1,15 +1,20 @@
 export type MonsterCraftMaterialKind = 'hair' | 'gel_skin' | 'bone' | 'shell' | 'scale';
 
-/** 材料来源每跨 10 级按 1.2 倍累乘：1.00、1.20、1.44、1.728…… */
+/** 其他材料价值计算仍按来源每跨 10 级累乘；提纯怪材本身改为每 20 级产出一档新材料。 */
 export const materialValueMultiplierForLevel = (level: number) => Math.pow(1.2, Math.floor((Math.max(1, Math.floor(level)) - 1) / 10));
+/** 提纯成功产量只在 Lv.11 时提升一次，之后固定为 1.2 倍。 */
+export const purificationOutputMultiplierForLevel = (level: number) => Math.max(1, Math.floor(level)) <= 10 ? 1 : 1.2;
 
-const kindMeta: Record<MonsterCraftMaterialKind, { basicSuffix: string; refinedCode: string; refinedName: string; armorType: string }> = {
-  hair: { basicSuffix: '毛', refinedCode: 'spellcloth_bolt', refinedName: '灵纺布匹', armorType: '布甲' },
-  gel_skin: { basicSuffix: '皮', refinedCode: 'tanned_spirit_leather', refinedName: '韧鞣灵革', armorType: '皮甲' },
-  bone: { basicSuffix: '骨', refinedCode: 'bone_steel_plate', refinedName: '轻质骨钢片', armorType: '轻甲' },
-  shell: { basicSuffix: '甲壳', refinedCode: 'cast_shell_plate', refinedName: '铸纹甲壳板', armorType: '重甲' },
-  scale: { basicSuffix: '鳞', refinedCode: 'laminated_scale_plate', refinedName: '叠锻鳞甲片', armorType: '板甲' }
+const kindMeta: Record<MonsterCraftMaterialKind, { basicSuffix: string; refinedCode: string; refinedNames: readonly string[]; materialClass: string; armorType: string }> = {
+  hair: { basicSuffix: '毛', refinedCode: 'spellcloth_bolt', refinedNames: ['灵麻布卷', '灵纺布匹', '灵纹法绢', '星辉秘帛', '月华天绫'], materialClass: '布料', armorType: '布甲' },
+  gel_skin: { basicSuffix: '皮', refinedCode: 'tanned_spirit_leather', refinedNames: ['兽鞣皮革', '韧鞣灵革', '玄鞣魔革', '星纹战革', '月蚀龙革'], materialClass: '皮革', armorType: '皮甲' },
+  bone: { basicSuffix: '骨', refinedCode: 'bone_steel_plate', refinedNames: ['碎骨钢片', '轻质骨钢片', '精锻骨钢板', '星锻骨钢甲', '月银骨钢甲'], materialClass: '骨钢', armorType: '轻甲' },
+  shell: { basicSuffix: '甲壳', refinedCode: 'cast_shell_plate', refinedNames: ['硬甲壳片', '铸纹甲壳板', '玄铸甲壳板', '星铸玄壳板', '月铸灵壳板'], materialClass: '甲壳', armorType: '重甲' },
+  scale: { basicSuffix: '鳞', refinedCode: 'laminated_scale_plate', refinedNames: ['粗鳞甲片', '叠锻鳞甲片', '重叠鳞甲板', '星纹鳞甲', '月华玄鳞甲'], materialClass: '鳞甲', armorType: '板甲' }
 };
+/** Lv.21–40 的第二套材料沿用既定价值；前一套减半，后续每套翻倍。 */
+const purifiedTierTwoValues: Record<MonsterCraftMaterialKind, number> = { hair: 32, gel_skin: 32, bone: 34, shell: 36, scale: 38 };
+export const purifiedCraftMaterialTierForLevel = (level: number) => Math.min(5, Math.max(1, Math.ceil(Math.max(1, Math.floor(level)) / 20)));
 
 /** 怪物专属怪材名：按掉落顺序对应其两种材质，均不与其他怪物复用。 */
 const uniqueMonsterMaterialNames: Record<string, readonly string[]> = {
@@ -72,22 +77,38 @@ export const monsterCraftMaterialName = (monsterCode: string, monsterName: strin
               : kindMeta[kind].basicSuffix;
   return `${monsterName}${suffix}`;
 };
-export const purifiedCraftMaterialCode = (kind: MonsterCraftMaterialKind) => kindMeta[kind].refinedCode;
-export const purifiedCraftMaterialName = (kind: MonsterCraftMaterialKind) => kindMeta[kind].refinedName;
-export const purifiedCraftMaterialDisplayName = (code: string) => {
-  const kind = (Object.entries(kindMeta).find(([, meta]) => meta.refinedCode === code)?.[0] ?? undefined) as MonsterCraftMaterialKind | undefined;
-  return kind ? purifiedCraftMaterialName(kind) : undefined;
+export const purifiedCraftMaterialCode = (kind: MonsterCraftMaterialKind, level = 1) => {
+  const tier = purifiedCraftMaterialTierForLevel(level);
+  return `${kindMeta[kind].refinedCode}${tier === 1 ? '' : `_t${tier}`}`;
 };
-export const purifiedMaterialForArmor = (armorType: string) => {
+export const purifiedCraftMaterialTierForCode = (code: string) => {
+  const match = code.match(/_t([1-5])$/);
+  return Math.max(1, Number(match?.[1] ?? 1));
+};
+const purifiedCraftMaterialKindForCode = (code: string) => (Object.entries(kindMeta).find(([, meta]) => code === meta.refinedCode || code.startsWith(`${meta.refinedCode}_t`))?.[0] ?? undefined) as MonsterCraftMaterialKind | undefined;
+export const purifiedCraftMaterialBaseCode = (code: string) => {
+  const kind = purifiedCraftMaterialKindForCode(code);
+  return kind ? kindMeta[kind].refinedCode : undefined;
+};
+export const purifiedCraftMaterialName = (kind: MonsterCraftMaterialKind, level = 1) => {
+  const tier = purifiedCraftMaterialTierForLevel(level);
+  return kindMeta[kind].refinedNames[tier - 1]!;
+};
+export const purifiedCraftMaterialDisplayName = (code: string) => {
+  const kind = purifiedCraftMaterialKindForCode(code);
+  return kind ? purifiedCraftMaterialName(kind, purifiedCraftMaterialTierForCode(code) * 20) : undefined;
+};
+export const purifiedMaterialForArmor = (armorType: string, equipmentLevel = 1) => {
   const kind = (Object.entries(kindMeta).find(([, meta]) => meta.armorType === armorType)?.[0] ?? 'gel_skin') as MonsterCraftMaterialKind;
-  return purifiedCraftMaterialCode(kind);
+  return purifiedCraftMaterialCode(kind, equipmentLevel);
 };
 export const purifiedCraftMaterialValue = (code: string) => {
-  return purifiedCraftMaterialDisplayName(code) ? 20 : 0;
+  const kind = purifiedCraftMaterialKindForCode(code);
+  return kind ? purifiedTierTwoValues[kind] * Math.pow(2, purifiedCraftMaterialTierForCode(code) - 2) : 0;
 };
-export const purifiedCraftOutputFor = (code: string) => {
+export const purifiedCraftOutputFor = (code: string, sourceLevel = 1) => {
   const match = code.match(/^(?:monster_.+|map_.+)_(hair|gel_skin|bone|shell|scale)(?:_l\d+)?$/);
-  return match ? purifiedCraftMaterialCode(match[1] as MonsterCraftMaterialKind) : undefined;
+  return match ? purifiedCraftMaterialCode(match[1] as MonsterCraftMaterialKind, sourceLevel) : undefined;
 };
 /** 怪材不随怪物生成等级分档；同种怪物始终掉落同一部位材料。 */
 export const resolvedMonsterMaterialDropCode = (drop: Record<string, unknown>, _monsterLevel: number) => {
@@ -97,8 +118,12 @@ export const resolvedMonsterMaterialDropCode = (drop: Record<string, unknown>, _
   if (drop.dynamic_material === 'meat_chunk') return meatChunkCode();
   return String(drop.code ?? '');
 };
-export const allPurifiedCraftMaterials = () => (['hair', 'gel_skin', 'bone', 'shell', 'scale'] as MonsterCraftMaterialKind[]).map(kind => ({
-  code: purifiedCraftMaterialCode(kind), name: purifiedCraftMaterialName(kind), description: `由${kindMeta[kind].basicSuffix}类怪材提纯而成，是${kindMeta[kind].armorType}的通用锻造材料。`
+export const allPurifiedCraftMaterials = () => (['hair', 'gel_skin', 'bone', 'shell', 'scale'] as MonsterCraftMaterialKind[]).flatMap(kind => kindMeta[kind].refinedNames.map((_name, index) => {
+  const tier = index + 1;
+  return {
+    code: purifiedCraftMaterialCode(kind, tier * 20), name: purifiedCraftMaterialName(kind, tier * 20), tradePrice: purifiedCraftMaterialValue(purifiedCraftMaterialCode(kind, tier * 20)),
+    description: `${kindMeta[kind].materialClass}类通用锻材，由 Lv.${(tier - 1) * 20 + 1}–${tier * 20} 怪物的${kindMeta[kind].basicSuffix}类材料提纯而成，适用于${kindMeta[kind].armorType}。`
+  };
 }));
 export const allBeastCoreMaterials = () => [{ code: beastCoreCode(), name: beastCoreName(), description: '蕴含野性魔力的兽核，可用作基础怪物素材。' }];
 export const allMeatChunkMaterials = () => [{ code: meatChunkCode(), name: meatChunkName(), description: '来自可食用怪物的新鲜肉块，可作为食材使用。' }];

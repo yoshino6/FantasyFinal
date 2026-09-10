@@ -1,8 +1,13 @@
+import { recordAchievement } from './achievement-events';
+import { armorSetsFor } from './armor-set';
+import { recalculateCharacterStats } from './character.service';
+import { correctedHitChance, strikeCorrections } from './combat-math';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { assertPvpDefeatUnprotected, createPvpBattleLog, finishPvpBattleLog, recordPvpAttack, resolvePvpVictory } from './pvp.service';
 import { isFriendRelation, recordFriendInteraction } from './social.service';
-import { calculateDerivedStats, virtualEquipmentStats } from './constants';
+import { monsterCombatStats } from './adventure.service';
+type DungeonMonsterTemplate = RowDataPacket & Parameters<typeof monsterCombatStats>[0] & {id:number;code:string;skill_sequence:unknown};
 import { dungeonBlueprintDrops } from './deconstructor-catalog';
 
 const DUNGEON_REGION_CODE = 'dark_forest_dungeon';
@@ -80,20 +85,6 @@ const randomDungeonBossTrait = () => {
   const weights = [25, 24, 15, 10, 5, 5, 5, 5, 3, 2, 1]; let roll = Math.random() * 100;
   return dungeonBossTraits[weights.findIndex(weight => (roll -= weight) < 0) || 0];
 };
-// 地下三层的乌兹与地表 Lv.32 Boss 共用“六维成长 + 虚拟 Boss 装备 + 首领词条”的生命计算，
-// 不再沿用旧的体质×60+等级×120 的额外四倍血量。
-const level32BossHpMultiplier: Record<string, number> = { ordinary: 4, powerful: 5, heroic: 6, infernal: 8, abyssal: 10, crimson: 10, corrupted: 10, holy: 15, golden: 12, brilliant: 14, dreamlike: 16 };
-const level32DungeonBossHp = (boss: { level: number; constitution: number; spirit: number; strength: number; intelligence: number; agility: number; perception: number; constitution_growth: number; spirit_growth: number; strength_growth: number; intelligence_growth: number; agility_growth: number; perception_growth: number }, trait: { code: string }) => {
-  const growthLevels = Math.max(0, Number(boss.level) - 1);
-  const values = {
-    constitution: Number(boss.constitution) + growthLevels * Number(boss.constitution_growth), spirit: Number(boss.spirit) + growthLevels * Number(boss.spirit_growth),
-    strength: Number(boss.strength) + growthLevels * Number(boss.strength_growth), intelligence: Number(boss.intelligence) + growthLevels * Number(boss.intelligence_growth),
-    agility: Number(boss.agility) + growthLevels * Number(boss.agility_growth), perception: Number(boss.perception) + growthLevels * Number(boss.perception_growth)
-  };
-  const base = calculateDerivedStats(values); const equipment = virtualEquipmentStats(Number(boss.level), 'boss', base.physicalAttack, base.magicAttack);
-  return Math.max(900, Math.floor((base.hpMax + equipment.hpMax) * (level32BossHpMultiplier[trait.code] ?? 4)));
-};
-
 const dungeonSmallMonsterPlan: Record<number, { target: number; codes: string[]; levelFor: (code: string) => number }> = {
   [-10]: { target: 13, codes: firstFloorSlimes, levelFor: () => randomLevel(1, 9) },
   [-20]: { target: 20, codes: secondFloorMonsters, levelFor: code => code === 'skeleton' || code === 'undead' ? randomLevel(16, 18) : code === 'skeleton_warrior' || code === 'death_wight' ? randomLevel(18, 20) : randomLevel(8, 16) },
@@ -106,7 +97,7 @@ const refreshDungeonSmallMonsters = async (connection: Pool | PoolConnection) =>
   const [dungeons] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM dungeon_instances WHERE state=\'active\' FOR UPDATE');
   if (!dungeons.length) return 0;
   const allCodes = [...new Set(Object.values(dungeonSmallMonsterPlan).flatMap(plan => plan.codes))];
-  const [templates] = await connection.execute<(RowDataPacket & { id: number; code: string; constitution: number; spirit: number; strength: number; intelligence: number; agility: number; perception: number; skill_sequence: unknown })[]>(`SELECT id,code,constitution,spirit,strength,intelligence,agility,perception,skill_sequence FROM monster_templates WHERE code IN (${allCodes.map(() => '?').join(',')})`, allCodes);
+  const [templates] = await connection.execute<DungeonMonsterTemplate[]>(`SELECT * FROM monster_templates WHERE code IN (${allCodes.map(() => '?').join(',')})`, allCodes);
   const byCode = new Map(templates.map(template => [template.code, template]));
   let spawned = 0;
   for (const dungeon of dungeons) for (const z of FLOORS) {
@@ -123,7 +114,7 @@ const refreshDungeonSmallMonsters = async (connection: Pool | PoolConnection) =>
     const slots = [...cells].sort(() => Math.random() - .5).slice(0, missing);
     for (const slot of slots) {
       const code = random(plan.codes); const template = byCode.get(code); if (!template) continue;
-      const level = plan.levelFor(code); const hp = Math.max(100, Math.floor((Number(template.constitution) * 42 + level * 70) * 1.2));
+      const level = plan.levelFor(code); const hp = monsterCombatStats({...template,level}).hpMax;
       const [spawn] = await connection.execute<any>('INSERT INTO monster_spawns (template_id,region_id,pos_x,pos_y,pos_z,level,constitution,spirit,strength,intelligence,agility,perception,current_hp,skill_sequence,traits_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,JSON_ARRAY())', [template.id, dungeonRegionId, slot.pos_x, slot.pos_y, z, level, template.constitution, template.spirit, template.strength, template.intelligence, template.agility, template.perception, hp, skillJson(template.skill_sequence)]);
       await connection.execute('INSERT INTO dungeon_monsters (dungeon_id,spawn_id,is_boss,is_floor_leader) VALUES (?,?,0,0)', [dungeon.id, Number(spawn.insertId)]);
       spawned += 1;
@@ -233,17 +224,17 @@ const createDungeon = async (connection: Pool | PoolConnection) => {
     floorBossSlots.push({ x: originX + width - 3, y: originY + height - 1, z, floor: floorIndex });
   }
   for (const [x, y, z, type, trap, landmark, quality] of cells) await connection.execute('INSERT INTO dungeon_cells (dungeon_id,pos_x,pos_y,pos_z,cell_type,trap_type,landmark_text,chest_quality) VALUES (?,?,?,?,?,?,?,?)', [dungeonId, x, y, z, type, trap, landmark, quality]);
-  const [templates] = await connection.execute<(RowDataPacket & { id: number; code: string; level: number; constitution: number; spirit: number; strength: number; intelligence: number; agility: number; perception: number; constitution_growth: number; spirit_growth: number; strength_growth: number; intelligence_growth: number; agility_growth: number; perception_growth: number; skill_sequence: unknown })[]>(`SELECT id,code,level,constitution,spirit,strength,intelligence,agility,perception,constitution_growth,spirit_growth,strength_growth,intelligence_growth,agility_growth,perception_growth,skill_sequence FROM monster_templates WHERE code IN (${dungeonTemplateCodes.map(() => '?').join(',')},'dungeon_warden')`, dungeonTemplateCodes);
+  const [templates] = await connection.execute<DungeonMonsterTemplate[]>(`SELECT * FROM monster_templates WHERE code IN (${dungeonTemplateCodes.map(() => '?').join(',')},'dungeon_warden')`, dungeonTemplateCodes);
   const byCode = new Map(templates.map(template => [template.code, template]));
   for (const slot of monsterSlots) {
     const code = slot.floor === 0 ? random(firstFloorSlimes) : slot.floor === 1 ? random(secondFloorMonsters) : random(['skeleton_warrior', 'death_wight', 'undead']); const template = byCode.get(code); if (!template) continue;
-    const level = slot.floor === 0 ? randomLevel(1, 9) : code === 'skeleton' || code === 'undead' ? randomLevel(16, 18) : code === 'skeleton_warrior' || code === 'death_wight' ? randomLevel(18, 20) : randomLevel(8, 16); const hp = Math.max(100, Math.floor((Number(template.constitution) * 42 + level * 70) * 1.2));
+    const level = slot.floor === 0 ? randomLevel(1, 9) : code === 'skeleton' || code === 'undead' ? randomLevel(16, 18) : code === 'skeleton_warrior' || code === 'death_wight' ? randomLevel(18, 20) : randomLevel(8, 16); const hp = monsterCombatStats({...template,level}).hpMax;
     const [spawn] = await connection.execute<any>('INSERT INTO monster_spawns (template_id,region_id,pos_x,pos_y,pos_z,level,constitution,spirit,strength,intelligence,agility,perception,current_hp,skill_sequence,traits_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,JSON_ARRAY())', [template.id, dungeonRegionId, slot.x, slot.y, slot.z, level, template.constitution, template.spirit, template.strength, template.intelligence, template.agility, template.perception, hp, skillJson(template.skill_sequence)]);
     await connection.execute('INSERT INTO dungeon_monsters (dungeon_id,spawn_id,is_boss,is_floor_leader) VALUES (?,?,0,0)', [dungeonId, Number(spawn.insertId)]);
   }
   for (const slot of floorBossSlots) {
     const code = slot.floor === 0 ? 'black_slime' : slot.floor === 1 ? random(['skeleton_general', 'death_knight']) : 'necromancer_uz'; const boss = byCode.get(code); if (!boss) continue;
-    const trait = randomDungeonBossTrait(); const hp = code === 'necromancer_uz' ? level32DungeonBossHp(boss, trait) : Math.max(900, Math.floor((Number(boss.constitution) * 60 + Number(boss.level) * 120) * 4));
+    const trait = randomDungeonBossTrait(); const hp = monsterCombatStats({...boss,traits_json:[trait]}).hpMax;
     const [spawn] = await connection.execute<any>('INSERT INTO monster_spawns (template_id,region_id,pos_x,pos_y,pos_z,level,constitution,spirit,strength,intelligence,agility,perception,current_hp,skill_sequence,traits_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [boss.id, dungeonRegionId, slot.x, slot.y, slot.z, boss.level, boss.constitution, boss.spirit, boss.strength, boss.intelligence, boss.agility, boss.perception, hp, skillJson(boss.skill_sequence), JSON.stringify([trait])]);
     await connection.execute('INSERT INTO dungeon_monsters (dungeon_id,spawn_id,is_boss,is_floor_leader) VALUES (?,?,?,?)', [dungeonId, Number(spawn.insertId), slot.floor === 2 ? 1 : 0, slot.floor < 2 ? 1 : 0]);
   }
@@ -481,6 +472,7 @@ export const changeDungeonFloor = async (qqUserId: string, direction: 'down' | '
       throw new Error(`【${leader.name}】仍守在通往下一层的道路上。击败它后，石阶才会开启。`);
     }
   }
+  if(direction==='down')recordAchievement(connection,Number(character.id),['ACH_L13']);
   const targetZ = Number(character.pos_z) + (direction === 'down' ? -10 : 10); const targetType = direction === 'down' ? 'stairs_up' : Number(targetZ) === -10 ? 'entrance' : 'stairs_down';
   const [target] = await connection.execute<DungeonCell[]>('SELECT * FROM dungeon_cells WHERE dungeon_id=? AND pos_z=? AND cell_type=? LIMIT 1', [dungeon.id, targetZ, targetType]); if (!target[0]) throw new Error('楼层之间的石阶已经坍塌。');
   await connection.execute('UPDATE characters SET pos_x=?,pos_y=?,pos_z=? WHERE id=?', [target[0].pos_x, target[0].pos_y, target[0].pos_z, character.id]);
@@ -497,12 +489,12 @@ export const dungeonPlayersInRange = async (connection: Pool | PoolConnection, c
   return rows.map(row => ({ gameId: Number(row.game_id), name: row.name, x: Number(row.pos_x), y: Number(row.pos_y), wanted: Boolean(row.wanted), inHome: Boolean(row.in_home), isFriend: Boolean(row.is_friend) }));
 };
 
-type PvpAction = { type: 'attack' } | { type: 'skill'; name: string; category: 'physical' | 'magic' | 'utility'; manaCost: number; power: number } | { type: 'item'; id: number; name: string; effect: Record<string, number> };
+type PvpAction = { type: 'attack' } | { type: 'skill'; name: string; category: 'physical' | 'magic' | 'utility'; manaCost: number; power: number } | { type: 'item'; id: number; code: string; name: string; effect: Record<string, number> };
 const pvpActionFor = async (connection: PoolConnection, character: CharacterRow, manual = false): Promise<PvpAction> => {
   const [settings] = await connection.execute<(RowDataPacket & { enabled: number; auto_potion_enabled: number; hp_threshold: number; hp_item_id: number | null; mp_threshold: number; mp_item_id: number | null; action_cursor: number })[]>('SELECT * FROM player_pvp_auto_battle_settings WHERE character_id=? FOR UPDATE', [character.id]); const setting = settings[0];
   if (setting?.enabled) {
     const lowHp = Number(character.current_hp) * 100 <= Number(character.hp_max) * Number(setting.hp_threshold); const lowMp = Number(character.current_mp) * 100 <= Number(character.mp_max) * Number(setting.mp_threshold); const potionId = Number(setting.auto_potion_enabled) ? (lowHp ? setting.hp_item_id : lowMp ? setting.mp_item_id : null) : null;
-    if (potionId) { const [items] = await connection.execute<(RowDataPacket & { id: number; name: string; effect_json: unknown })[]>('SELECT i.id,i.name,i.effect_json FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.item_id=? AND pi.quantity>0 AND i.item_type=\'consumable\' LIMIT 1 FOR UPDATE', [character.id, potionId]); if (items[0]) return { type: 'item', id: Number(items[0].id), name: items[0].name, effect: typeof items[0].effect_json === 'string' ? JSON.parse(items[0].effect_json) : (items[0].effect_json as Record<string, number> ?? {}) }; }
+    if (potionId) { const [items] = await connection.execute<(RowDataPacket & { id: number; code: string; name: string; effect_json: unknown })[]>('SELECT i.id,i.code,i.name,i.effect_json FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.item_id=? AND pi.quantity>0 AND i.item_type=\'consumable\' LIMIT 1 FOR UPDATE', [character.id, potionId]); if (items[0]) return { type: 'item', id: Number(items[0].id), code: String(items[0].code), name: items[0].name, effect: typeof items[0].effect_json === 'string' ? JSON.parse(items[0].effect_json) : (items[0].effect_json as Record<string, number> ?? {}) }; }
     const [actions] = await connection.execute<(RowDataPacket & { skill_id: number | null; active_skill_id: number | null; name: string | null; category: 'physical' | 'magic' | 'utility' | null; mana_cost: number | null; power: number | null })[]>(`SELECT a.skill_id,
       CASE WHEN ps.skill_id IS NOT NULL AND s.id IS NOT NULL THEN s.id ELSE NULL END AS active_skill_id,
       s.name,s.category,s.mana_cost,s.power
@@ -518,12 +510,13 @@ const pvpActionFor = async (connection: PoolConnection, character: CharacterRow,
   if (!quick.length) return { type: 'attack' }; const picked = random(quick); return { type: 'skill', name: picked.name, category: picked.category, manaCost: Number(picked.mana_cost), power: Number(picked.power) };
 };
 const resolvePvpAction = async (connection: PoolConnection, actor: CharacterRow, target: CharacterRow, action: PvpAction) => {
-  if (action.type === 'item') { const oldHp = Number(actor.current_hp); const oldMp = Number(actor.current_mp); const hp = Math.min(Number(actor.hp_max), oldHp + Number(action.effect.heal ?? 0) + Math.floor(Number(actor.hp_max) * Math.max(0, Number(action.effect.healPct ?? 0)) / 100)); const mp = Math.min(Number(actor.mp_max), oldMp + Number(action.effect.restoreMp ?? 0) + Math.floor(Number(actor.mp_max) * Math.max(0, Number(action.effect.restoreMpPct ?? 0)) / 100)); await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=? AND quantity>0', [actor.id, action.id]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [actor.id, action.id]); await connection.execute('UPDATE characters SET current_hp=?,current_mp=? WHERE id=?', [hp, mp, actor.id]); actor.current_hp = hp; actor.current_mp = mp; return `【${actor.name}】使用【${action.name}】，HP ${oldHp}→${hp}｜MP ${oldMp}→${mp}。`; }
+  if (action.type === 'item') { const oldHp = Number(actor.current_hp); const oldMp = Number(actor.current_mp); const hp = Math.min(Number(actor.hp_max), oldHp + Number(action.effect.heal ?? 0) + Math.floor(Number(actor.hp_max) * Math.max(0, Number(action.effect.healPct ?? 0)) / 100)); const mp = Math.min(Number(actor.mp_max), oldMp + Number(action.effect.restoreMp ?? 0) + Math.floor(Number(actor.mp_max) * Math.max(0, Number(action.effect.restoreMpPct ?? 0)) / 100)); await (await import('./achievement.service')).consumeAchievementRewardItem(connection,Number(actor.id),action.code,1); await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=? AND quantity>0', [actor.id, action.id]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [actor.id, action.id]); await connection.execute('UPDATE characters SET current_hp=?,current_mp=? WHERE id=?', [hp, mp, actor.id]); actor.current_hp = hp; actor.current_mp = mp; return `【${actor.name}】使用【${action.name}】，HP ${oldHp}→${hp}｜MP ${oldMp}→${mp}。`; }
   const skill = action.type === 'skill' && Number(actor.current_mp) >= action.manaCost ? action : null; if (action.type === 'skill' && !skill) return resolvePvpAction(connection, actor, target, { type: 'attack' });
   if (skill) { actor.current_mp = Number(actor.current_mp) - skill.manaCost; await connection.execute('UPDATE characters SET current_mp=? WHERE id=?', [actor.current_mp, actor.id]); }
   if (skill?.category === 'utility') { await recordPvpAttack(connection, actor, target, `技能「${skill.name}」`, 0, 'utility'); return `【${actor.name}】释放技能「${skill.name}」，但该辅助技能尚未在 PvP 对抗中形成直接伤害。`; }
   const magic = skill?.category === 'magic'; const attack = magic ? Number(actor.magic_attack) : Number(actor.physical_attack); const defense = magic ? Number(target.magic_defense) : Number(target.physical_defense); const label = skill ? `释放技能「${skill.name}」` : '普通攻击';
-  if (Math.random() >= Number(actor.accuracy) / Math.max(1, Number(actor.accuracy) + Number(target.evasion))) { await recordPvpAttack(connection, actor, target, label, 0, 'miss'); return `【${actor.name}】${label}，但【${target.name}】闪避了攻击。`; }
+  const armorSets = await armorSetsFor(connection,[Number(actor.id),Number(target.id)]);
+  if (Math.random() >= correctedHitChance(Number(actor.accuracy) / Math.max(1, Number(actor.accuracy) + Number(target.evasion)),strikeCorrections({armorSet:armorSets.get(Number(actor.id))},{armorSet:armorSets.get(Number(target.id))}))) { await recordPvpAttack(connection, actor, target, label, 0, 'miss'); return `【${actor.name}】${label}，但【${target.name}】闪避了攻击。`; }
   const damage = Math.max(1, Math.floor(attack * attack / Math.max(1, attack + defense) * (skill ? skill.power / 100 : 1))); const hp = Math.max(0, Number(target.current_hp) - damage); const defeated = hp <= 0;
   if (defeated) {
     const settlement = await resolvePvpVictory(connection, Number(actor.id), Number(target.id)); target.current_hp = 1;
@@ -541,6 +534,11 @@ export const dungeonPvP = async (qqUserId: string, targetGameId: number) => with
   if (!target || Number(target.id) === Number(attacker.id) || Number(target.current_region_id) !== dungeonRegion || Number(target.pos_z) !== Number(attacker.pos_z) || Math.abs(Number(target.pos_x) - Number(attacker.pos_x)) + Math.abs(Number(target.pos_y) - Number(attacker.pos_y)) > 1) throw new Error('目标不在你相邻的地下迷宫格子中。');
   await assertPvpDefeatUnprotected(connection, Number(target.id));
   if (await isFriendRelation(connection, Number(attacker.id), Number(target.id))) throw new Error('游戏内好友之间无法互相攻击。');
+  for (const fighter of [attacker,target].sort((a,b)=>Number(a.id)-Number(b.id))) {
+    await recalculateCharacterStats(connection,Number(fighter.id));
+    const [rows] = await connection.execute<CharacterRow[]>('SELECT * FROM characters WHERE id=?',[fighter.id]);
+    if (rows[0]) Object.assign(fighter,rows[0]);
+  }
   const battleLogId = await createPvpBattleLog(connection, attacker, target, '地宫');
   const opening = await resolvePvpAction(connection, attacker, target, await pvpActionFor(connection, attacker, true));
   const response = Number(target.current_hp) > 1 ? await resolvePvpAction(connection, target, attacker, await pvpActionFor(connection, target)) : null;
@@ -567,13 +565,15 @@ export const interactDungeonPlayer = async (qqUserId: string, targetGameId: numb
 });
 
 /** 最终 Boss 被击败时关闭该迷宫，并在两小时后允许刷新新结构。 */
-export const closeDungeonForBossSpawns = async (connection: PoolConnection, spawnIds: number[]) => {
+export const closeDungeonForBossSpawns = async (connection: PoolConnection, spawnIds: number[], members: Record<string,any>[] = []) => {
   if (!spawnIds.length) return false;
   const [rows] = await connection.execute<(RowDataPacket & { dungeon_id: number })[]>(`SELECT dungeon_id FROM dungeon_monsters WHERE is_boss=1 AND spawn_id IN (${spawnIds.map(() => '?').join(',')}) LIMIT 1 FOR UPDATE`, spawnIds);
   const dungeonId = Number(rows[0]?.dungeon_id ?? 0); if (!dungeonId) return false;
   const [dungeons] = await connection.execute<DungeonRow[]>('SELECT * FROM dungeon_instances WHERE id=? AND state=\'active\' FOR UPDATE', [dungeonId]); const dungeon = dungeons[0]; if (!dungeon) return false;
   await connection.execute('UPDATE dungeon_instances SET state=\'cleared\',cleared_at=NOW(),refresh_at=DATE_ADD(NOW(),INTERVAL 2 HOUR) WHERE id=?', [dungeonId]);
 
+  const contributors=members.filter(m=>{const data=typeof m.cooldowns==='string'?JSON.parse(m.cooldowns):m.cooldowns;const e=data?.__rules?.memory?.achievement;return !m.npc_code&&m.stamina_eligible&&(Number(e?.damage)>0||Number(e?.healed)>0||Number(e?.playerSupport)>0);});
+  for(const m of contributors)recordAchievement(connection,Number(m.id),[{metric:'ACH_L13',cooperationKey:'dungeon:'+dungeonId},{metric:'ACH_L14',cooperationKey:'dungeon:'+dungeonId}],'dungeon:'+dungeonId);
   const dungeonRegion = await regionId(connection, DUNGEON_REGION_CODE);
   await connection.execute(`UPDATE characters c JOIN dungeon_cells dc ON dc.pos_x=c.pos_x AND dc.pos_y=c.pos_y AND dc.pos_z=c.pos_z AND dc.dungeon_id=?
     SET c.current_region_id=?,c.pos_x=?,c.pos_y=?,c.pos_z=0 WHERE c.current_region_id=?`, [dungeonId, dungeon.entrance_region_id, dungeon.entrance_x, dungeon.entrance_y, dungeonRegion]);

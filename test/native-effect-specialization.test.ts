@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
 import { skillSpecialization, specializeEffectValue, specializeEffectDuration, specializeControlChance } from '../src/game/skill-specialization';
-import { nativeCleanseLimit } from '../src/game/combat-dispel-policy';
+import { talentSupport, hasTalent, talentRecordEnemyDamage, talentState } from '../src/game/talent-combat';
+import { nativeCleanseLimit, canDispelCombatEffect } from '../src/game/combat-dispel-policy';
 import { balancedSkillDescription } from '../src/game/combat-skill-balance.config';
 import { CombatRules, emptyRuleState, type RuleUnit } from '../src/game/combat-rule-registry';
 import { initializeResidentSkills } from '../src/database/resident-skills';
@@ -14,7 +15,8 @@ const loadFunction = (name: string, dependencies: Record<string, unknown>) => {
   let declaration: ts.VariableDeclaration | undefined;
   const visit = (node: ts.Node) => { if (ts.isVariableDeclaration(node) && node.name.getText(file) === name) declaration = node; ts.forEachChild(node, visit); };
   visit(file); assert.ok(declaration);
-  const source = ts.transpileModule(`const ${declaration.getText(file)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
+  const functionSource = declaration.getText(file).replace(/import\((['"])(\.[^'"]+)\1\)/g, (_match, _quote, path: string) => `import(${JSON.stringify(new URL(`${path}.ts`, new URL('../src/game/adventure.service.ts', import.meta.url)).href)})`);
+  const source = ts.transpileModule(`const ${functionSource};`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
   return new Function(...Object.keys(dependencies), `${source}\nreturn ${name};`)(...Object.values(dependencies));
 };
 const makeUnit = (id: number): RuleUnit => ({ key: `member:${id}`, name: `友方${id}`, side: 'member', level: 30, boss: false, hp: 5000, hpMax: 10000, mp: 2000, mpMax: 3000, attack: 700, magic: 800, defense: 400, magicDefense: 450, accuracy: 100, evasion: 30, speed: 100, crit: 100, critResist: 100, critDamage: 100, critReduction: 100, pierce: 100, tenacity: 100, state: emptyRuleState(), cooldowns: {}, passives: [], resistance: {}, mastery: {} });
@@ -25,7 +27,7 @@ const fixture = () => {
   let effect: any = { id: 1, skill_code: 'frost_barrier', code: 'life_shield', name: '护盾', effect_type: 'shield', target_scope: 'self', value: 20, duration: 3, effect_level: 1, max_stacks: 1, stackable: 0 };
   const connection = { execute: async (sql: string, args?: any[]) => { calls.push({ sql, args }); return [sql.includes('FROM skill_effects se') ? [effect] : sql.includes('SELECT sd.tier') ? [{ tier: '中位', specialization: 'potent', level: 40 }, { tier: '中位', specialization: 'overcharge', level: 40 }] : []]; } };
   const shields: any[][] = [];
-  const apply = loadFunction('applySkillEffects', { skillSpecialization, specializeEffectValue, specializeEffectDuration, specializeControlChance, nativeCleanseLimit, effectMessage: () => '', effectMarkerForTarget: () => '#', grantLifeShield: async (...args: any[]) => { shields.push(args); return { added: args[5] }; } });
+  const apply = loadFunction('applySkillEffects', { talentSupport, hasTalent, talentRecordEnemyDamage, talentState, skillSpecialization, specializeEffectValue, specializeEffectDuration, specializeControlChance, nativeCleanseLimit, effectMessage: () => '', effectMarkerForTarget: () => '#', grantLifeShield: async (...args: any[]) => { shields.push(args); return { added: args[5] }; } });
   const invoke = () => apply(connection, 'test', 1, { id: 1, hp_max: 20000 }, 'member', { id: 2, hp_max: 10000 }, 'member', 'on_cast', [], 0, 1, rules);
   return { source, ally, rules, calls, shields, invoke, setEffect: (value: any) => { effect = { ...effect, ...value }; } };
 };
@@ -69,4 +71,19 @@ test('梦魇被动兼容仅清理自己的旧主动快捷栏，不重置学习�
   const writes = calls.filter(sql => /UPDATE player_|DELETE.*player_|INSERT.*player_/i.test(sql));
   assert.equal(writes.length, 1); assert.ok(writes[0].includes("s.code='resident_l01'"));
   assert.ok(writes[0].includes('SET ps.quick_slot=NULL')); assert.ok(!writes[0].includes('passive_linked'));
+});
+
+
+test('原生DOT使用保存的施加者，真实承伤、未知来源和琉璃减伤走实际回合入口',async()=>{
+  const a=makeUnit(1),enemy={...makeUnit(2),key:'target:2',side:'target'},r=new CombatRules([a,enemy],1,[],{absorb:async()=>0,legacyEffects:()=>[],removeLegacy:async()=>{},extraAction:()=>{},swapThreat:async()=>{}});
+  a.hp=1000;a.hpMax=1000;a.opening={pve:true,divines:['talent_growth_06'],weapons:[],crimson:0};
+  const row:any={id:1,current_hp:1000,hp_max:1000,cooldowns:{}};
+  Object.defineProperty(a,'hp',{get:()=>row.current_hp,set:v=>row.current_hp=v});
+  let effect:any={id:10,target_kind:'member',target_id:1,code:'burn',name:'灼烧',effect_type:'damage_over_time',value:20,stacks:1,remaining_turns:2,source_key:enemy.key};
+  const run=loadFunction('processTurnEffects',{activeCombatEffects:async()=>[effect],absorbLifeShield:async()=>({absorbed:0}),jsonObject:(x:any)=>x??{},hasTalent,canDispelCombatEffect,talentRecordEnemyDamage,lifeShieldAbsorptionText:()=>''});
+  const c={execute:async()=>[{}]};await run(c,'test','member',1,[row],[],[],async()=>({absorbed:50}),r);
+  assert.equal(row.current_hp,850);assert.equal(talentState(a).enemyHpLoss,150);
+  effect={...effect,source_key:null};await run(c,'test','member',1,[row],[],[],undefined,r);assert.equal(talentState(a).enemyHpLoss,150);
+  a.opening.divines=['talent_physique_07'];row.current_hp=1000;
+  await run(c,'test','member',1,[row],[],[],undefined,r);assert.equal(row.current_hp,930);
 });

@@ -42,7 +42,6 @@ const blacksmithShopStock: BlacksmithStock[] = [5, 10, 15, 20].flatMap(level => 
   const prefix = ({ 5: '新手', 10: '硬木', 15: '黑铁', 20: '精钢' } as Record<number, string>)[level];
   const armorPrefix = ({ 5: '新手', 10: '旅用', 15: '匠制', 20: '精制' } as Record<number, string>)[level];
   const weaponBase = forgedEquipmentBase(level, '武器');
-  const armorBase = forgedEquipmentBase(level, '防具');
   const armorItems: BlacksmithStock[] = armorShopTypes.flatMap(armor => armorShopSlots.map(slot => ({
     // 既有轻甲编码保持不变，避免已购装备与商店库存失联；其余甲类使用独立编码。
     code: armor.code === 'light' ? `shop_${slot.code}_${level}` : `shop_${slot.code}_${armor.code}_${level}`,
@@ -51,7 +50,7 @@ const blacksmithShopStock: BlacksmithStock[] = [5, 10, 15, 20].flatMap(level => 
     weaponType: armor.name,
     level,
     price,
-    effect: { physicalDefense: armorBase, magicDefense: armorBase }
+    effect: { physicalDefense: forgedEquipmentBase(level, '防具', slot.code), magicDefense: forgedEquipmentBase(level, '防具', slot.code) }
   })));
   return [
     { code: `shop_longsword_${level}`, name: `${prefix}长剑`, category: '武器', weaponType: '长剑', level, price, effect: { physicalAttack: weaponBase } },
@@ -177,7 +176,7 @@ const schemaStatements = [
     PRIMARY KEY (id), KEY idx_deletion_record_deleted (deleted_at,id), KEY idx_deletion_record_player (qq_user_id,id), KEY idx_deletion_record_name (character_name,id), KEY idx_deletion_record_restored (restored_at,id)
   ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS registration_sessions (
-    id CHAR(36) NOT NULL, player_id BIGINT UNSIGNED NOT NULL, stage ENUM('story','audience','question','destination','danger','choice') NOT NULL DEFAULT 'story',
+    id CHAR(36) NOT NULL, player_id BIGINT UNSIGNED NOT NULL, stage ENUM('story','audience','question','destination','heaven','danger','choice') NOT NULL DEFAULT 'story',
     constitution SMALLINT UNSIGNED NOT NULL DEFAULT 0, spirit SMALLINT UNSIGNED NOT NULL DEFAULT 0, strength SMALLINT UNSIGNED NOT NULL DEFAULT 0,
     intelligence SMALLINT UNSIGNED NOT NULL DEFAULT 0, agility SMALLINT UNSIGNED NOT NULL DEFAULT 0, perception SMALLINT UNSIGNED NOT NULL DEFAULT 0,
     expires_at DATETIME NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -484,6 +483,11 @@ const schemaStatements = [
     PRIMARY KEY (id), KEY idx_equipment_fusions_instance (instance_id), CONSTRAINT fk_equipment_fusion_instance FOREIGN KEY (instance_id) REFERENCES player_item_instances(id) ON DELETE CASCADE,
     CONSTRAINT fk_equipment_fusion_material FOREIGN KEY (material_item_id) REFERENCES item_definitions(id)
   ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS equipment_fusion_effects (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, fusion_id BIGINT UNSIGNED NOT NULL, effect_key VARCHAR(64) NOT NULL, effect_value DECIMAL(12,4) NOT NULL,
+    PRIMARY KEY (id), UNIQUE KEY uk_equipment_fusion_effect (fusion_id,effect_key), KEY idx_equipment_fusion_effect_fusion (fusion_id),
+    CONSTRAINT fk_equipment_fusion_effect_fusion FOREIGN KEY (fusion_id) REFERENCES equipment_fusions(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_forge_sessions (
     character_id BIGINT UNSIGNED NOT NULL, equipment_category VARCHAR(32) NULL, subtype VARCHAR(32) NULL, target_level SMALLINT UNSIGNED NULL,
     entry_source ENUM('blacksmith','profession') NOT NULL DEFAULT 'blacksmith',
@@ -631,7 +635,7 @@ const schemaStatements = [
     CONSTRAINT fk_goblin_king_quest_region FOREIGN KEY (region_id) REFERENCES map_regions(id) ON DELETE SET NULL
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_npc_affinity (
-    character_id BIGINT UNSIGNED NOT NULL, npc_code VARCHAR(64) NOT NULL, affinity INT UNSIGNED NOT NULL DEFAULT 0, daily_date DATE NOT NULL, daily_interactions TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    character_id BIGINT UNSIGNED NOT NULL, npc_code VARCHAR(64) NOT NULL, affinity BIGINT NOT NULL DEFAULT 0, daily_date DATE NOT NULL, daily_interactions TINYINT UNSIGNED NOT NULL DEFAULT 0,
     daily_chat_count TINYINT UNSIGNED NOT NULL DEFAULT 0, daily_buy_count TINYINT UNSIGNED NOT NULL DEFAULT 0, daily_sell_count TINYINT UNSIGNED NOT NULL DEFAULT 0, daily_craft_count TINYINT UNSIGNED NOT NULL DEFAULT 0,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (character_id,npc_code), KEY idx_npc_affinity_npc (npc_code,affinity), CONSTRAINT fk_npc_affinity_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
@@ -1229,9 +1233,9 @@ const seedWorldSurfaceContent = async (pool: Pool) => {
 
 /** 每只地图怪物掉落两种最贴合自身构造的基础怪材；炼金提纯后才成为通用甲材。 */
 const seedMonsterCraftMaterials = async (pool: Pool) => {
-  for (const material of allPurifiedCraftMaterials()) await pool.execute(`INSERT INTO item_definitions (code,name,description,obtain_source,item_type,item_category,weight,stackable,effect_json)
-    VALUES (?,?,?,'炼金师提纯','material','锻材',0.1,1,NULL)
-    ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),obtain_source=VALUES(obtain_source),item_type=VALUES(item_type),item_category=VALUES(item_category),stackable=1`, [material.code, material.name, material.description]);
+  for (const material of allPurifiedCraftMaterials()) await pool.execute(`INSERT INTO item_definitions (code,name,description,obtain_source,item_type,item_category,weight,trade_price,stackable,effect_json)
+    VALUES (?,?,?,'炼金师提纯','material','锻材',0.1,?,1,NULL)
+    ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),obtain_source=VALUES(obtain_source),item_type=VALUES(item_type),item_category=VALUES(item_category),trade_price=VALUES(trade_price),stackable=1`, [material.code, material.name, material.description, material.tradePrice]);
   for (const core of allBeastCoreMaterials()) await pool.execute(`INSERT INTO item_definitions (code,name,description,obtain_source,item_type,item_category,weight,stackable,effect_json)
     VALUES (?,?,?,'地图怪物掉落','material','怪材',0.1,1,?)
     ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),obtain_source=VALUES(obtain_source),item_type=VALUES(item_type),item_category=VALUES(item_category),stackable=1,effect_json=VALUES(effect_json)`, [core.code, core.name, core.description, JSON.stringify({ beast_core: true })]);
@@ -1323,6 +1327,9 @@ const seedEpicForgeContent = async (pool: Pool) => {
 
 export const initializeSchema = async (pool: Pool) => {
   for (const statement of schemaStatements) await pool.query(statement);
+  await (await import('./achievements')).initializeAchievements(pool);
+  await(await import('../game/talent-data')).initializeTalentPersistence(pool);
+  await(await import('./talent-codes')).migrateTalentCodes(pool);
   await (await import('./alchemy-v2')).initializeAlchemyV2(pool);
   await (await import('./inventory-binding')).initializeInventoryBinding(pool);
   await (await import('./automaton')).initializeAutomaton(pool);
@@ -1440,7 +1447,7 @@ export const initializeSchema = async (pool: Pool) => {
   for (const column of ['hp_max INT UNSIGNED NOT NULL DEFAULT 0', 'attack INT UNSIGNED NOT NULL DEFAULT 0', 'defense INT UNSIGNED NOT NULL DEFAULT 0', 'speed INT UNSIGNED NOT NULL DEFAULT 0', 'charisma INT UNSIGNED NOT NULL DEFAULT 0']) {
     await pool.query(`ALTER TABLE monster_templates MODIFY COLUMN ${column}`);
   }
-  await pool.query("ALTER TABLE registration_sessions MODIFY stage ENUM('story','audience','question','destination','danger','choice') NOT NULL DEFAULT 'story'");
+  await pool.query("ALTER TABLE registration_sessions MODIFY stage ENUM('story','audience','question','destination','heaven','danger','choice') NOT NULL DEFAULT 'story'");
   await pool.query("ALTER TABLE player_story_progress MODIFY COLUMN status ENUM('met','joined','declined','awaiting_arrival','arrival_story','guild_story','completed') NOT NULL DEFAULT 'met'");
   for (const column of ["adventurer_rank ENUM('F','E','D','C','B','A','S','SS','SSS') NOT NULL DEFAULT 'F'", 'profession_code VARCHAR(32) NULL', 'secondary_profession_code VARCHAR(32) NULL', 'copper_coins BIGINT UNSIGNED NOT NULL DEFAULT 0', 'delete_confirmation_code CHAR(6) NULL', 'delete_confirmation_expires_at DATETIME NULL']) {
     try { await pool.query(`ALTER TABLE characters ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
@@ -1474,6 +1481,7 @@ export const initializeSchema = async (pool: Pool) => {
   try { await pool.query('ALTER TABLE player_equipment ADD COLUMN instance_id BIGINT UNSIGNED NULL'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   await pool.query(`UPDATE player_equipment pe JOIN (SELECT character_id,item_id,MIN(id) AS instance_id FROM player_item_instances GROUP BY character_id,item_id) ii ON ii.character_id=pe.character_id AND ii.item_id=pe.item_id SET pe.instance_id=ii.instance_id WHERE pe.instance_id IS NULL`);
   try { await pool.query('ALTER TABLE player_equipment ADD UNIQUE KEY uk_equipment_instance (character_id,instance_id)'); } catch (error: any) { if (error?.code !== 'ER_DUP_KEYNAME') throw error; }
+  try { await pool.query('ALTER TABLE combat_status_effects ADD COLUMN source_key VARCHAR(80) NULL'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   try { await pool.query('ALTER TABLE combat_status_effects DROP INDEX uk_combat_effect_target'); } catch (error: any) { if (error?.code !== 'ER_CANT_DROP_FIELD_OR_KEY') throw error; }
   try { await pool.query('ALTER TABLE combat_status_effects ADD KEY idx_combat_effect_target (session_id,target_kind,target_id,effect_id)'); } catch (error: any) { if (error?.code !== 'ER_DUP_KEYNAME') throw error; }
   for (const column of ['constitution_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'spirit_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'strength_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'intelligence_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'agility_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'perception_growth DECIMAL(4,1) NOT NULL DEFAULT 0', 'adventurer_registered TINYINT(1) NOT NULL DEFAULT 0', "gender VARCHAR(8) NOT NULL DEFAULT '未设定'", 'free_name_change_used TINYINT(1) NOT NULL DEFAULT 0', 'free_gender_change_used TINYINT(1) NOT NULL DEFAULT 0']) {
@@ -2068,12 +2076,12 @@ export const initializeSchema = async (pool: Pool) => {
     WHEN 'slime_gel' THEN 1 WHEN 'red_slime_gel' THEN 3 WHEN 'orange_slime_gel' THEN 3 WHEN 'yellow_slime_gel' THEN 3 WHEN 'green_slime_gel' THEN 3 WHEN 'cyan_slime_gel' THEN 3 WHEN 'blue_slime_gel' THEN 3 WHEN 'purple_slime_gel' THEN 3 WHEN 'black_slime_gel' THEN 3
     WHEN 'wood_element_dust' THEN 3 WHEN 'metal_element_dust' THEN 3 WHEN 'water_element_dust' THEN 3 WHEN 'ice_element_dust' THEN 3 WHEN 'dark_element_dust' THEN 4 WHEN 'fire_element_dust' THEN 3 WHEN 'thunder_element_dust' THEN 3 WHEN 'light_element_dust' THEN 5
     WHEN 'herbal_extract' THEN 5 WHEN 'mana_dust' THEN 8 WHEN 'residue_life_potion' THEN 8 WHEN 'ember_mana_potion' THEN 8
-    WHEN 'magic_branch' THEN 12 WHEN 'goblin_ear' THEN 5 WHEN 'riot_aura' THEN 50
+    WHEN 'magic_branch' THEN 12 WHEN 'goblin_ear' THEN 5 WHEN 'riot_aura' THEN 150
     WHEN 'goblin_scrap_iron' THEN 18 WHEN 'goblin_whetstone' THEN 24 WHEN 'goblin_bowstring' THEN 22
     WHEN 'goblin_blast_core' THEN 32 WHEN 'goblin_drumhide' THEN 26 WHEN 'goblin_shadowcloth' THEN 35
     WHEN 'goblin_totem_shard' THEN 38 WHEN 'goblin_earth_crystal' THEN 42 WHEN 'goblin_command_seal' THEN 75
     WHEN 'goblin_colonel_insignia' THEN 160
-    WHEN 'living_wood' THEN 6 WHEN 'meteor_iron' THEN 20 WHEN 'star_copper' THEN 40 WHEN 'moon_silver' THEN 90 WHEN 'sun_gold' THEN 200
+    WHEN 'living_wood' THEN 6 WHEN 'meteor_iron' THEN 100 WHEN 'star_copper' THEN 200 WHEN 'moon_silver' THEN 400 WHEN 'sun_gold' THEN 800 WHEN 'sky_dust' THEN 150
     WHEN 'skill_book_guardian_taunt' THEN 35 WHEN 'skill_book_shield_counter' THEN 60 WHEN 'skill_book_guard_break' THEN 50
     WHEN 'skill_book_arcane_shackle' THEN 50 WHEN 'skill_book_ember_burst' THEN 65 WHEN 'skill_book_healing_prayer' THEN 75
     WHEN 'skill_book_blessing_aegis' THEN 110 WHEN 'skill_book_mana_benediction' THEN 130 WHEN 'skill_book_sanctified_bolt' THEN 40
@@ -2083,7 +2091,7 @@ export const initializeSchema = async (pool: Pool) => {
   for (const item of blacksmithShopStock) {
     await pool.execute(`INSERT INTO item_definitions (code,name,description,obtain_source,item_type,item_category,weapon_type,rarity,required_level,weight,stackable,effect_json)
       VALUES (?,?,?,?,? ,?,?,?,?,?,0,?)
-      ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),item_category=VALUES(item_category),weapon_type=VALUES(weapon_type),rarity=VALUES(rarity),required_level=VALUES(required_level),stackable=0,effect_json=VALUES(effect_json)`, [item.code, item.name, `小北铁匠铺出售的同级普通${['头肩', '上装', '腰部', '下装', '脚部'].includes(item.category) ? `${item.weaponType}制式` : '打造'}白板装备，初始品质固定为 0%，可通过精炼提升。`, '百纳镇·铁匠铺', 'equipment', item.category, item.weaponType, '普通', item.level, 2, JSON.stringify(item.effect)]);
+      ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),item_category=VALUES(item_category),weapon_type=VALUES(weapon_type),rarity=VALUES(rarity),required_level=VALUES(required_level),stackable=0,effect_json=VALUES(effect_json)`, [item.code, item.name, `小北铁匠铺出售的同级普通${['头肩', '上装', '腰部', '下装', '脚部'].includes(item.category) ? `${item.weaponType}制式` : '打造'}白板装备，初始品质固定为 0%，可通过精炼提升。`, '百纳镇·铁匠铺', 'equipment', item.category, item.weaponType, '普通', item.level, 2, JSON.stringify({...item.effect, balanceVersion:3})]);
     await pool.execute(`INSERT INTO blacksmith_shop_items (item_id,buy_price,sell_price,is_active)
       SELECT id,?,?,1 FROM item_definitions WHERE code=?
       ON DUPLICATE KEY UPDATE buy_price=VALUES(buy_price),sell_price=VALUES(sell_price),is_active=1`, [item.price, Math.floor(item.price / 2), item.code]);
@@ -2163,7 +2171,7 @@ export const initializeSchema = async (pool: Pool) => {
       WHEN 'refined_magic_scale' THEN JSON_OBJECT('magicDefensePct',6)
       WHEN 'refined_magic_claw' THEN JSON_OBJECT('critRatePct',6)
       WHEN 'refined_magic_heartcore' THEN JSON_OBJECT('accuracyPct',6)
-      WHEN 'riot_aura' THEN JSON_OBJECT('damageBonusPct',3)
+      WHEN 'riot_aura' THEN JSON_OBJECT('damageBonusPct',1)
       WHEN 'goblin_scrap_iron' THEN JSON_OBJECT('physicalDefense',3)
       WHEN 'goblin_whetstone' THEN JSON_OBJECT('physicalAttack',16)
       WHEN 'goblin_bowstring' THEN JSON_OBJECT('accuracy',14)
@@ -2187,7 +2195,7 @@ export const initializeSchema = async (pool: Pool) => {
       WHEN 'fire_element_dust' THEN JSON_OBJECT('elementMastery_火',2)
       WHEN 'thunder_element_dust' THEN JSON_OBJECT('elementMastery_雷',2)
       WHEN 'light_element_dust' THEN JSON_OBJECT('elementMastery_光',2) END,
-      CASE code WHEN 'beast_bone' THEN '物攻+2%' WHEN 'beast_hide' THEN '物防+2%' WHEN 'beast_tendon' THEN '速度+2%' WHEN 'beast_core' THEN '魔攻+2%' WHEN 'magic_wool' THEN '闪避+3%' WHEN 'magic_tusk' THEN '物攻+3%' WHEN 'magic_scale' THEN '魔防+3%' WHEN 'magic_claw' THEN '暴击+3%' WHEN 'magic_heartcore' THEN '命中+3%' WHEN 'refined_beast_bone' THEN '物攻+4%' WHEN 'refined_beast_hide' THEN '双防+4%' WHEN 'refined_beast_tendon' THEN '速度+4%' WHEN 'refined_beast_core' THEN '魔攻+4%' WHEN 'refined_magic_wool' THEN '闪避+6%' WHEN 'refined_magic_tusk' THEN '物攻+6%' WHEN 'refined_magic_scale' THEN '魔防+6%' WHEN 'refined_magic_claw' THEN '暴击+6%' WHEN 'refined_magic_heartcore' THEN '命中+6%' WHEN 'riot_aura' THEN '伤害增加3%' WHEN 'goblin_scrap_iron' THEN '物防+3' WHEN 'goblin_whetstone' THEN '物攻+16' WHEN 'goblin_bowstring' THEN '命中+14' WHEN 'goblin_blast_core' THEN '暴伤+10' WHEN 'goblin_drumhide' THEN '速度+12' WHEN 'goblin_shadowcloth' THEN '闪避+12' WHEN 'goblin_totem_shard' THEN '魔攻+18' WHEN 'goblin_earth_crystal' THEN '物防+16' WHEN 'goblin_command_seal' THEN '双防各+8' WHEN 'goblin_colonel_insignia' THEN '全属性各+6' WHEN 'living_wood' THEN '生命上限+2%' WHEN 'meteor_iron' THEN '物防+3%' WHEN 'star_copper' THEN '命中+3%' WHEN 'moon_silver' THEN '魔力上限+3%' WHEN 'sun_gold' THEN '双攻+2%' WHEN 'wood_element_dust' THEN '武器：木元素精通+2；防具：木元素抗性+2' WHEN 'metal_element_dust' THEN '武器：土元素精通+2；防具：土元素抗性+2' WHEN 'water_element_dust' THEN '武器：水元素精通+2；防具：水元素抗性+2' WHEN 'ice_element_dust' THEN '武器：冰元素精通+2；防具：冰元素抗性+2' WHEN 'dark_element_dust' THEN '武器：暗元素精通+2；防具：暗元素抗性+2' WHEN 'fire_element_dust' THEN '武器：火元素精通+2；防具：火元素抗性+2' WHEN 'thunder_element_dust' THEN '武器：雷元素精通+2；防具：雷元素抗性+2' WHEN 'light_element_dust' THEN '武器：光元素精通+2；防具：光元素抗性+2' END
+      CASE code WHEN 'beast_bone' THEN '物攻+2%' WHEN 'beast_hide' THEN '物防+2%' WHEN 'beast_tendon' THEN '速度+2%' WHEN 'beast_core' THEN '魔攻+2%' WHEN 'magic_wool' THEN '闪避+3%' WHEN 'magic_tusk' THEN '物攻+3%' WHEN 'magic_scale' THEN '魔防+3%' WHEN 'magic_claw' THEN '暴击+3%' WHEN 'magic_heartcore' THEN '命中+3%' WHEN 'refined_beast_bone' THEN '物攻+4%' WHEN 'refined_beast_hide' THEN '双防+4%' WHEN 'refined_beast_tendon' THEN '速度+4%' WHEN 'refined_beast_core' THEN '魔攻+4%' WHEN 'refined_magic_wool' THEN '闪避+6%' WHEN 'refined_magic_tusk' THEN '物攻+6%' WHEN 'refined_magic_scale' THEN '魔防+6%' WHEN 'refined_magic_claw' THEN '暴击+6%' WHEN 'refined_magic_heartcore' THEN '命中+6%' WHEN 'riot_aura' THEN '造成伤害+0.1%～1.0%' WHEN 'goblin_scrap_iron' THEN '物防+3' WHEN 'goblin_whetstone' THEN '物攻+16' WHEN 'goblin_bowstring' THEN '命中+14' WHEN 'goblin_blast_core' THEN '暴伤+10' WHEN 'goblin_drumhide' THEN '速度+12' WHEN 'goblin_shadowcloth' THEN '闪避+12' WHEN 'goblin_totem_shard' THEN '魔攻+18' WHEN 'goblin_earth_crystal' THEN '物防+16' WHEN 'goblin_command_seal' THEN '双防各+8' WHEN 'goblin_colonel_insignia' THEN '全属性各+6' WHEN 'living_wood' THEN '生命上限+2%' WHEN 'meteor_iron' THEN '物防+3%' WHEN 'star_copper' THEN '命中+3%' WHEN 'moon_silver' THEN '魔力上限+3%' WHEN 'sun_gold' THEN '双攻+2%' WHEN 'wood_element_dust' THEN '武器：木元素精通+2；防具：木元素抗性+2' WHEN 'metal_element_dust' THEN '武器：土元素精通+2；防具：土元素抗性+2' WHEN 'water_element_dust' THEN '武器：水元素精通+2；防具：水元素抗性+2' WHEN 'ice_element_dust' THEN '武器：冰元素精通+2；防具：冰元素抗性+2' WHEN 'dark_element_dust' THEN '武器：暗元素精通+2；防具：暗元素抗性+2' WHEN 'fire_element_dust' THEN '武器：火元素精通+2；防具：火元素抗性+2' WHEN 'thunder_element_dust' THEN '武器：雷元素精通+2；防具：雷元素抗性+2' WHEN 'light_element_dust' THEN '武器：光元素精通+2；防具：光元素抗性+2' END
     FROM item_definitions WHERE code IN ('beast_bone','beast_hide','beast_tendon','beast_core','magic_wool','magic_tusk','magic_scale','magic_claw','magic_heartcore','refined_beast_bone','refined_beast_hide','refined_beast_tendon','refined_beast_core','refined_magic_wool','refined_magic_tusk','refined_magic_scale','refined_magic_claw','refined_magic_heartcore','riot_aura','goblin_scrap_iron','goblin_whetstone','goblin_bowstring','goblin_blast_core','goblin_drumhide','goblin_shadowcloth','goblin_totem_shard','goblin_earth_crystal','goblin_command_seal','goblin_colonel_insignia','living_wood','meteor_iron','star_copper','moon_silver','sun_gold','wood_element_dust','metal_element_dust','water_element_dust','ice_element_dust','dark_element_dust','fire_element_dust','thunder_element_dust','light_element_dust')
     ON DUPLICATE KEY UPDATE effect_json=VALUES(effect_json),description=VALUES(description)`);
   await pool.query(`INSERT INTO guild_shop_items (item_id,buy_price,sell_price)
@@ -2200,7 +2208,7 @@ export const initializeSchema = async (pool: Pool) => {
       WHEN 'healing_herb' THEN 1
       WHEN 'beast_meat' THEN 2 WHEN 'beast_bone' THEN 3 WHEN 'beast_hide' THEN 5 WHEN 'beast_tendon' THEN 9 WHEN 'beast_core' THEN 30
       WHEN 'wolf_fang' THEN 8 WHEN 'magic_wool' THEN 12 WHEN 'magic_tusk' THEN 14 WHEN 'magic_scale' THEN 14 WHEN 'magic_claw' THEN 16 WHEN 'magic_heartcore' THEN 18
-      WHEN 'goblin_ear' THEN 25 WHEN 'magic_branch' THEN 80 WHEN 'living_wood' THEN 65 WHEN 'riot_aura' THEN 250
+      WHEN 'goblin_ear' THEN 25 WHEN 'magic_branch' THEN 80 WHEN 'living_wood' THEN 65 WHEN 'riot_aura' THEN 75
       WHEN 'refined_beast_bone' THEN 15 WHEN 'refined_beast_hide' THEN 25 WHEN 'refined_beast_tendon' THEN 45 WHEN 'refined_beast_core' THEN 160
       WHEN 'refined_magic_wool' THEN 60 WHEN 'refined_magic_tusk' THEN 70 WHEN 'refined_magic_scale' THEN 70 WHEN 'refined_magic_claw' THEN 80 WHEN 'refined_magic_heartcore' THEN 90
       WHEN 'blood_residue' THEN 1 WHEN 'energy_ember' THEN 1 WHEN 'magic_unit' THEN 8 WHEN 'residue_life_potion' THEN 2 WHEN 'ember_mana_potion' THEN 2 WHEN 'herbal_extract' THEN 3 WHEN 'mana_dust' THEN 15
@@ -2380,14 +2388,15 @@ export const initializeSchema = async (pool: Pool) => {
     WHEN 'hunter_blessing' THEN JSON_OBJECT('dropBonusPct',35)
     ELSE passive_effect_json END
     WHERE code IN ('growth_blessing','mana_affinity','lucky_favor','war_god_favor','arcane_revelation','crimson_recovery','seer_instinct','hunter_blessing')`);
-  await pool.query(`UPDATE skill_definitions SET category='bound',skill_kind='绑定',range_type='自身',learn_cost=1,upgrade_cost=1,max_level=13,power_per_level=0,passive_effect_json=JSON_OBJECT('revealMonsterTraits',true,'unlockMonsterDetail',true),description='鉴识未知的敌对生物。慧眼每升一级可额外鉴识高于自身 3 级的目标；识珠可逐步解锁更多情报。' WHERE code='appraisal'`);
+  await pool.query(`UPDATE skill_definitions SET category='bound',skill_kind='绑定',range_type='自身',learn_cost=0,upgrade_cost=1,max_level=13,power_per_level=0,passive_effect_json=JSON_OBJECT('revealMonsterTraits',true,'unlockMonsterDetail',true),description='降临异世界时由女神授予的通用绑定能力，初始 Lv.1，无需学习。后续须自行消耗技能点升级慧眼与识珠：慧眼每升一级可额外鉴识高于自身 3 级的目标；识珠可逐步解锁更多情报。' WHERE code='appraisal'`);
   await pool.query(`UPDATE skill_definitions SET category='bound',skill_kind='绑定',range_type='自身' WHERE code IN ('longsword_mastery','shield_mastery','staff_mastery','spellbook_mastery','orb_mastery','dagger_mastery','fistblade_mastery','craftsmanship')`);
   await pool.query(`UPDATE player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id SET ps.passive_linked=0,ps.quick_slot=NULL WHERE s.category='bound'`);
   await pool.query(`UPDATE skill_definitions SET codex_id=CONCAT(CASE category WHEN 'physical' THEN '41' WHEN 'magic' THEN '42' ELSE '49' END, CASE WHEN id>=100000 THEN CAST(id AS CHAR) ELSE LPAD(id,5,'0') END) WHERE codex_id IS NULL`);
   await pool.query(`INSERT IGNORE INTO player_skills (character_id,skill_id)
     SELECT b.character_id,s.id FROM player_blessings b JOIN skill_definitions s ON s.code=b.code AND s.category='bound'`);
-  await pool.query(`INSERT IGNORE INTO player_skill_discoveries (character_id,skill_id)
-    SELECT c.id,s.id FROM characters c JOIN skill_definitions s ON s.code='appraisal'
+  // 仅补齐缺少基础鉴识的角色；重复初始化不得覆盖已付费提升的技能与专精等级。
+  await pool.query(`INSERT IGNORE INTO player_skills (character_id,skill_id,level,passive_linked)
+    SELECT c.id,s.id,1,0 FROM characters c JOIN skill_definitions s ON s.code='appraisal'
     LEFT JOIN player_skills ps ON ps.character_id=c.id AND ps.skill_id=s.id WHERE ps.skill_id IS NULL`);
   await pool.query(`INSERT IGNORE INTO player_appraisal_progress (character_id)
     SELECT ps.character_id FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE s.code='appraisal'`);
@@ -2645,7 +2654,7 @@ export const initializeSchema = async (pool: Pool) => {
     FROM (SELECT 900000001 AS npc_id,'npc_forest_warrior' AS code,'莱昂' AS name,50 AS constitution,20 AS spirit,52 AS strength,12 AS intelligence,28 AS agility,24 AS perception,1150 AS hp,520 AS mp,170 AS patk,55 AS matk,145 AS pdef,85 AS mdef,22 AS accuracy,14 AS evasion,86 AS speed
       UNION ALL SELECT 900000002,'npc_forest_mage','伊芙',24,52,12,55,30,34,820,1150,55,185,78,120,23,16,94
       UNION ALL SELECT 900000003,'npc_forest_priest','希娅',38,55,18,38,25,32,1040,1100,72,145,115,145,21,16,82) v
-    ON DUPLICATE KEY UPDATE name=VALUES(name),npc_id=VALUES(npc_id),level=VALUES(level),hp_max=VALUES(hp_max),mp_max=VALUES(mp_max),current_hp=VALUES(current_hp),current_mp=VALUES(current_mp),physical_attack=VALUES(physical_attack),magic_attack=VALUES(magic_attack),physical_defense=VALUES(physical_defense),magic_defense=VALUES(magic_defense),accuracy=VALUES(accuracy),evasion=VALUES(evasion),crit_rate_bp=VALUES(crit_rate_bp),crit_damage_bp=VALUES(crit_damage_bp),crit_resist_bp=VALUES(crit_resist_bp),crit_damage_reduction_bp=VALUES(crit_damage_reduction_bp),speed=VALUES(speed),stat_formula_version=2`);
+    ON DUPLICATE KEY UPDATE name=VALUES(name),npc_id=VALUES(npc_id),level=VALUES(level)`);
   const [combatNpcs] = await pool.execute<Array<RowDataPacket & { id: number }>>(`SELECT id FROM characters WHERE npc_code IN ('npc_forest_warrior','npc_forest_mage','npc_forest_priest')`);
   for (const npc of combatNpcs) await recalculateCharacterStats(pool, Number(npc.id));
   await pool.query('ALTER TABLE characters ALTER stat_formula_version SET DEFAULT 2');
@@ -3578,6 +3587,15 @@ export const initializeSchema = async (pool: Pool) => {
   }
   await initializeResidentSkills(pool);
   await initializeCombatSkillBalance(pool);
+  await (await import('./hidden-professions')).initializeHiddenProfessions(pool);
+  await (await import('./advanced-bound-skills')).initializeAdvancedBoundSkills(pool);
+  await (await import('./negotiation')).initializeNegotiation(pool);
+  await (await import('./opening')).initializeOpening(pool);
+  await (await import('./companions')).initializeCompanions(pool);
+  await (await import('./opening-chests')).initializeOpeningChests(pool);
+  await (await import('./new-world')).initializeNewWorld(pool);
+  await (await import('./lamplight')).initializeLamplight(pool);
+  await (await import('./achievements')).seedAchievementProfiles(pool);
   await migrateEquipmentVitalAffixes(pool, recalculateCharacterStats);
   await refreshShopStocks(pool);
 };

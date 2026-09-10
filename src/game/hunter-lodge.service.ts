@@ -1,6 +1,7 @@
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { recordPvpLootSale } from './pvp.service';
+import { recordAchievement } from './achievement-events';
 
 const PAGE_SIZE = 5;
 type CharacterRow = RowDataPacket & { id: number; copper_coins: number };
@@ -73,6 +74,7 @@ export const buyHunterItem = async (qqUserId: string, itemId: number, quantity =
   await connection.execute('UPDATE hunter_lodge_items SET stock_quantity=stock_quantity-? WHERE item_id=?', [amount, item.id]);
   await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),acquired_at=NOW()', [character.id, item.id, amount]);
   await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [character.id, item.id]);
+  recordAchievement(connection,Number(character.id),[{metric:'ACH_K08',value:price,life:true}]);
   return { name: item.name, quantity: amount, price };
 });
 
@@ -88,5 +90,6 @@ export const sellHunterItem = async (qqUserId: string, itemId: number, quantity 
   await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [amount, character.id, item.id]);
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, item.id]);
   await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [price, character.id]);
+  recordAchievement(connection,Number(character.id),[{metric:'ACH_K09',value:price,life:true}]);
   return { name: item.name, quantity: amount, price };
 });

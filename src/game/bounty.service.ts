@@ -1,3 +1,5 @@
+import { recordAchievement } from './achievement-events';
+import { achievementActivity } from './achievement-hooks';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 
@@ -157,6 +159,7 @@ export const abandonSecondaryQuest = async (qqUserId: string, questCode: 'blacks
 
 export const acceptBounty = async (qqUserId: string, bountyId: number) => withTransaction(async connection => {
   const character = await characterFor(connection, qqUserId, true); if (!character.adventurer_registered) throw new Error('完成冒险者注册后才能接受悬赏。');
+  await(await import('./guild-context')).requireGuildService(connection,Number(character.id));
   await refreshBounties(connection);
   await syncBountyBoard(connection);
   const [counts] = await connection.execute<(RowDataPacket & { total: number })[]>(`SELECT COUNT(*) AS total FROM player_bounties pb
@@ -175,12 +178,14 @@ export const acceptBounty = async (qqUserId: string, bountyId: number) => withTr
 
 export const claimBounty = async (qqUserId: string, bountyId: number) => withTransaction(async connection => {
   const character = await characterFor(connection, qqUserId, true);
+  await(await import('./guild-context')).requireGuildService(connection,Number(character.id));
   const [rows] = await connection.execute<(RowDataPacket & { title: string; copper_reward: number; status: string })[]>(`SELECT b.title,b.copper_reward,pb.status FROM player_bounties pb JOIN bounty_notices b ON b.id=pb.bounty_id
     WHERE pb.character_id=? AND pb.bounty_id=? FOR UPDATE`, [character.id, bountyId]);
   const bounty = rows[0]; if (!bounty) throw new Error('没有找到这份已接受的悬赏。');
   if (bounty.status !== 'completed') throw new Error('讨伐目标尚未全部完成。');
   await connection.execute('UPDATE player_bounties SET status=\'claimed\',claimed_at=NOW() WHERE character_id=? AND bounty_id=?', [character.id, bountyId]);
   await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [bounty.copper_reward, character.id]);
+  recordAchievement(connection,Number(character.id),[{metric:'ACH_L15'},{metric:'ACH_L16',distinct:String(bountyId)},{metric:'ACH_K09',value:Number(bounty.copper_reward),life:true}], 'bounty:'+bountyId+':'+character.id);achievementActivity(connection,Number(character.id));
   return { title: bounty.title, copper: Number(bounty.copper_reward) };
 });
 

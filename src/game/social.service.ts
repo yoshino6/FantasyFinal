@@ -1,3 +1,6 @@
+import { achievementSocialPair } from './achievement-state';
+import { randomUUID } from 'node:crypto';
+import { recordAchievement } from './achievement-events';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { withTransaction } from '../database/pool';
 import {
@@ -5,7 +8,7 @@ import {
   FRIEND_INTERACTION_DAILY_LIMIT, FRUIT_DAILY_LIMIT, OATH_MEMORY_DAILY_LIMIT,
   OATH_MIN_AFFINITY, OATH_REQUEST_TTL_MINUTES, pairOf, relationshipDisplayStage, relationshipStage
 } from './social.constants';
-import { advancedProfessionByCode } from './advanced-profession.config';
+import { registeredAdvancedProfessionByCode as advancedProfessionByCode } from './advanced-profession.config';
 
 type CharacterRow = RowDataPacket & {
   id: number; player_id: number; game_id: number; name: string; current_region_id: number;
@@ -17,8 +20,8 @@ type RelationshipRow = RowDataPacket & {
   daily_bouquet_count: number; daily_fruit_count: number; daily_ceremony_count: number;
 };
 
-const businessDate = () => {
-  const parts = new Intl.DateTimeFormat('en', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+const businessDate = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat('en', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date);
   const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
   return `${values.year}-${values.month}-${values.day}`;
 };
@@ -63,9 +66,10 @@ const relationshipFor = async (connection: PoolConnection, leftId: number, right
   const [rows] = await connection.execute<RelationshipRow[]>(`SELECT * FROM player_relationships WHERE character_low_id=? AND character_high_id=? LIMIT 1${lock ? ' FOR UPDATE' : ''}`, [pair.low, pair.high]);
   const relationship = rows[0];
   if (!relationship) return null;
-  if (String(relationship.daily_date).slice(0, 10) !== businessDate()) {
-    await connection.execute(`UPDATE player_relationships SET daily_date=?,daily_interactions=0,daily_gifts=0,daily_bouquet_count=0,daily_fruit_count=0,daily_ceremony_count=0 WHERE character_low_id=? AND character_high_id=?`, [businessDate(), pair.low, pair.high]);
-    relationship.daily_date = businessDate(); relationship.daily_interactions = 0; relationship.daily_gifts = 0; relationship.daily_bouquet_count = 0; relationship.daily_fruit_count = 0; relationship.daily_ceremony_count = 0;
+  const today = businessDate();
+  if (businessDate(new Date(relationship.daily_date)) !== today) {
+    await connection.execute(`UPDATE player_relationships SET daily_date=?,daily_interactions=0,daily_gifts=0,daily_bouquet_count=0,daily_fruit_count=0,daily_ceremony_count=0 WHERE character_low_id=? AND character_high_id=?`, [today, pair.low, pair.high]);
+    relationship.daily_date = today; relationship.daily_interactions = 0; relationship.daily_gifts = 0; relationship.daily_bouquet_count = 0; relationship.daily_fruit_count = 0; relationship.daily_ceremony_count = 0;
   }
   return relationship;
 };
@@ -77,6 +81,10 @@ export const isFriendRelation = async (connection: PoolConnection, leftId: numbe
 };
 const eventFor = async (connection: PoolConnection, actor: CharacterRow, eventType: string, payload: Record<string, unknown>, target?: CharacterRow) => {
   await connection.execute('INSERT INTO player_events (player_id,event_type,payload) VALUES (?, ?, ?)', [actor.player_id, eventType, JSON.stringify({ ...payload, targetCharacterId: target?.id ?? null })]);
+  const metric: Record<string,string>={'social.friend.accepted':'ACH_G13','social.oath.started':'ACH_G17','social.oath.memory':'ACH_G18'};
+  if(metric[eventType]) { recordAchievement(connection,Number(actor.id),[metric[eventType]]);if(target)recordAchievement(connection,Number(target.id),[metric[eventType]]); }
+  if(eventType==='social.oath.memory'&&target)await achievementSocialPair(connection,Number(actor.id),Number(target.id),'oath',randomUUID());
+  if(eventType==='social.affinity_gift')recordAchievement(connection,Number(actor.id),['ACH_G16']);
   if (target) await connection.execute('INSERT INTO player_events (player_id,event_type,payload) VALUES (?, ?, ?)', [target.player_id, eventType, JSON.stringify({ ...payload, actorCharacterId: actor.id })]);
 };
 
@@ -158,6 +166,7 @@ export const recordFriendInteraction = async (connection: PoolConnection, actorI
   if (!relationship || (relationship.status !== 'friend' && relationship.status !== 'oath')) return null;
   if (Number(relationship!.daily_interactions) >= FRIEND_INTERACTION_DAILY_LIMIT) return { changed: false, affinity: Number(relationship!.affinity), dailyInteractions: FRIEND_INTERACTION_DAILY_LIMIT, stage: relationshipStage(Number(relationship!.affinity)) };
   const pair = pairOf(actorId, targetId); await connection.execute(`UPDATE player_relationships SET affinity=affinity+5,daily_interactions=daily_interactions+1 WHERE character_low_id=? AND character_high_id=?`, [pair.low, pair.high]);
+  await achievementSocialPair(connection,actorId,targetId,'friend',randomUUID());
   return { changed: true, affinity: Number(relationship!.affinity) + 5, dailyInteractions: Number(relationship!.daily_interactions) + 1, stage: relationshipStage(Number(relationship!.affinity) + 5) };
 };
 
@@ -168,20 +177,23 @@ export const interactFriend = (qqUserId: string, targetGameId: number) => withTr
   return { ...result, targetName: target.name };
 });
 
-const giftCodeFor = async (connection: PoolConnection, item: string | number) => {
-  const [rows] = await connection.execute<(RowDataPacket & { id: number; code: string; name: string; quantity: number; playerAffinity: number })[]>(`SELECT i.id,i.code,i.name,pi.quantity,CAST(JSON_UNQUOTE(JSON_EXTRACT(i.effect_json,'$.playerAffinity')) AS UNSIGNED) AS playerAffinity FROM item_definitions i JOIN player_inventory pi ON pi.item_id=i.id WHERE ${typeof item === 'number' ? 'i.id=?' : 'i.code=?'} AND i.code IN ('heart_bouquet','resonance_fruit') LIMIT 1 FOR UPDATE`, [item]);
+const giftCodeFor = async (connection: PoolConnection, characterId: number, item: string | number) => {
+  const [rows] = await connection.execute<(RowDataPacket & { id: number; code: string; name: string; quantity: number; playerAffinity: number })[]>(`SELECT i.id,i.code,i.name,pi.quantity,CAST(JSON_UNQUOTE(JSON_EXTRACT(i.effect_json,'$.playerAffinity')) AS UNSIGNED) AS playerAffinity FROM item_definitions i JOIN player_inventory pi ON pi.item_id=i.id WHERE pi.character_id=? AND ${typeof item === 'number' ? 'i.id=?' : 'i.code=?'} AND i.code IN ('heart_bouquet','resonance_fruit') LIMIT 1 FOR UPDATE`, [characterId, item]);
   return rows[0];
 };
 
 export const giveAffinityGift = (qqUserId: string, targetGameId: number, item: string | number) => withTransaction(async connection => {
   const { actor, target } = await socialPair(connection, qqUserId, targetGameId); const relationship = await relationshipFor(connection, actor.id, target.id, true); ensureFriend(relationship);
-  const gift = await giftCodeFor(connection, item); if (!gift || Number(gift.quantity) < 1) throw new Error('背包中没有这件可赠礼道具。');
+  const gift = await giftCodeFor(connection, Number(actor.id), item); if (!gift || Number(gift.quantity) < 1) throw new Error('背包中没有这件可赠礼道具。');
   const isBouquet = gift.code === 'heart_bouquet'; const count = Number(isBouquet ? relationship!.daily_bouquet_count : relationship!.daily_fruit_count);
   if (Number(relationship!.daily_gifts) >= FRIEND_GIFT_DAILY_LIMIT) throw new Error('今天的赠礼次数已用完。');
   if (isBouquet && count >= BOUQUET_DAILY_LIMIT) throw new Error('今天的心意花束赠礼次数已用完。');
   if (!isBouquet && count >= FRUIT_DAILY_LIMIT) throw new Error('今天的共鸣果实赠礼次数已用完。');
-  await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=? AND quantity>0', [actor.id, gift.id]);
-  const pair = pairOf(actor.id, target.id); await connection.execute(`UPDATE player_relationships SET affinity=affinity+?,daily_gifts=daily_gifts+1,${isBouquet ? 'daily_bouquet_count' : 'daily_fruit_count'}=${isBouquet ? 'daily_bouquet_count' : 'daily_fruit_count'}+1 WHERE character_low_id=? AND character_high_id=?`, [Number(gift.playerAffinity), pair.low, pair.high]);
+  const pair = pairOf(actor.id, target.id); const counterColumn = isBouquet ? 'daily_bouquet_count' : 'daily_fruit_count'; const counterLimit = isBouquet ? BOUQUET_DAILY_LIMIT : FRUIT_DAILY_LIMIT;
+  const [updated] = await connection.execute<any>(`UPDATE player_relationships SET affinity=affinity+?,daily_gifts=daily_gifts+1,${counterColumn}=${counterColumn}+1 WHERE character_low_id=? AND character_high_id=? AND daily_date=? AND daily_gifts<? AND ${counterColumn}<?`, [Number(gift.playerAffinity), pair.low, pair.high, businessDate(), FRIEND_GIFT_DAILY_LIMIT, counterLimit]);
+  if (!Number(updated.affectedRows)) throw new Error('今天的赠礼次数已用完。');
+  const [inventory] = await connection.execute<any>('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=? AND quantity>0', [actor.id, gift.id]);
+  if (!Number(inventory.affectedRows)) throw new Error('背包中没有这件可赠礼道具。');
   const affinity = Number(relationship!.affinity) + Number(gift.playerAffinity); await eventFor(connection, actor, 'social.affinity_gift', { itemCode: gift.code, affinity: Number(gift.playerAffinity) }, target);
   return { targetName: target.name, itemName: gift.name, affinity, gain: Number(gift.playerAffinity), stage: relationshipStage(affinity), dailyGifts: Number(relationship!.daily_gifts) + 1 };
 });

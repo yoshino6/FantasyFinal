@@ -1,0 +1,2 @@
+const fs=require('node:fs'),yaml=require('yaml'),mysql=require('mysql2/promise');
+(async()=>{const cfg=yaml.parse(fs.readFileSync('alemon.config.yaml','utf8'));const c=await mysql.createConnection(cfg.FantasyFinal?.database??cfg.mysql);try{const [rows]=await c.query("SELECT code,name,item_category,rarity FROM item_definitions WHERE code='meteor_iron' OR (item_type='material' AND rarity='稀有') ORDER BY id");console.log(rows);}finally{await c.end();}})();

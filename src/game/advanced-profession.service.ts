@@ -1,11 +1,13 @@
+import { recordAchievement } from './achievement-events';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
-import { activeSkillCodesForAdvancedProfession, advancedProfessionByCode, advancedProfessionByMentor, inheritancePassiveFor, type AdvancedProfession, worldTreeAdvancedProfessions } from './advanced-profession.config';
+import { activeSkillCodesForAdvancedProfession, advancedProfessionByCode, advancedProfessionByMentor, advancedProfessionInheritanceCodes, advancedInheritanceSkillCode, inheritancePassiveFor, type AdvancedProfession, worldTreeAdvancedProfessions } from './advanced-profession.config';
 import { spiritSummonerActiveSkillCodes } from './spirit-summoner.config';
 import { advancedMentorTrialBuild, advancedMentorTrialTraits } from './advanced-mentor-trial.config';
 import { resetSkillPointAllocation } from './skill-point-ledger.service';
 import { recalculateCharacterStats } from './character.service';
 import { durationText } from './time-format';
+import { hiddenProfessions, hiddenSkills, hiddenPassiveCode } from './hidden-profession.config';
 
 type Character = RowDataPacket & { id: number; level: number; profession: string; current_region_id: number; region_code: string; pos_x: number; pos_y: number };
 type Quest = RowDataPacket & { profession_code: string; stage: number; story_kills: number; proof_kills: number; completed_at: Date | null };
@@ -15,11 +17,13 @@ const advancedProfessionRetrainCooldownMs = 24 * 60 * 60_000;
 
 const allAdvancedProfessionSkillCodes = [...new Set([
   ...worldTreeAdvancedProfessions.flatMap(profession => [profession.passive.code, ...activeSkillCodesForAdvancedProfession(profession.code)]),
-  ...spiritSummonerActiveSkillCodes
+  ...spiritSummonerActiveSkillCodes,
+  ...advancedProfessionInheritanceCodes,
+  ...hiddenSkills.map(skill => skill.code), ...hiddenProfessions.map(profession => hiddenPassiveCode(profession.code))
 ])];
 
 /** 二转职业始终以 player_advanced_professions 当前记录为准；旧职业技能与快捷配置不得残留。 */
-const revokeAdvancedProfessionSkills = async (connection: PoolConnection, characterId: number) => {
+export const revokeAdvancedProfessionSkills = async (connection: PoolConnection, characterId: number) => {
   if (!allAdvancedProfessionSkillCodes.length) return;
   const placeholders = allAdvancedProfessionSkillCodes.map(() => '?').join(',');
   const values = [characterId, ...allAdvancedProfessionSkillCodes];
@@ -80,8 +84,7 @@ export const beginAdvancedProfession = async (qqUserId: string, code: string, re
   const profession = advancedProfessionByCode(code); if (!profession) throw new Error('未知的二转职业。');
   const character = await characterFor(qqUserId, connection); assertAtMentor(character, profession);
   if (Number(character.level) < 25) throw new Error('二转试炼将在 Lv.25 开放。');
-  const baseCodes: Record<AdvancedProfession['baseProfession'], string> = { 战士: 'warrior', 法师: 'mage', 盗贼: 'rogue', 牧师: 'priest' };
-  if (character.profession !== baseCodes[profession.baseProfession]) throw new Error(`【${profession.name}】仅限${profession.baseProfession}开启。`);
+  if (!character.profession) throw new Error('请先选择初始职业。');
   const [done] = await connection.execute<CompletedProfession[]>('SELECT profession_code,completed_at FROM player_advanced_professions WHERE character_id=? LIMIT 1 FOR UPDATE', [character.id]);
   const currentProfession = done[0];
   if (currentProfession?.profession_code === profession.code) throw new Error(`你当前已经是【${profession.name}】，无需重复接受这条试炼。`);
@@ -143,7 +146,9 @@ export const beginAdvancedProfessionTrial = async (qqUserId: string, code: strin
       AND JSON_CONTAINS(COALESCE(s.traits_json,JSON_ARRAY()),JSON_OBJECT('code','advanced_profession_trial','owner_character_id',?))
     LIMIT 1 FOR UPDATE`, [profession.trial.code, character.current_region_id, character.pos_x, character.pos_y, character.id]);
   if (existing[0]) {
-    if (!String(existing[0].traits_json ?? '').includes('"version":2')) await connection.execute(`UPDATE monster_spawns SET level=30,constitution=?,spirit=?,strength=?,intelligence=?,agility=?,perception=?,current_hp=?,skill_sequence=?,traits_json=? WHERE id=?`, [
+    const [active] = await connection.execute<RowDataPacket[]>("SELECT 1 FROM combat_targets ct JOIN combat_sessions cs ON cs.id=ct.session_id WHERE ct.spawn_id=? AND cs.state='active' LIMIT 1", [existing[0].id]);
+    if (active.length) throw new Error('导师正在战斗，请先结束当前试炼。');
+    if (Number((typeof existing[0].traits_json === 'string' ? JSON.parse(existing[0].traits_json) : existing[0].traits_json as any[]).find((trait: any) => trait.code === 'advanced_mentor_build')?.build?.version ?? 0) < build.version) await connection.execute(`UPDATE monster_spawns SET level=30,constitution=?,spirit=?,strength=?,intelligence=?,agility=?,perception=?,current_hp=?,skill_sequence=?,traits_json=? WHERE id=?`, [
       build.trainedAttributes.constitution, build.trainedAttributes.spirit, build.trainedAttributes.strength, build.trainedAttributes.intelligence, build.trainedAttributes.agility, build.trainedAttributes.perception,
       build.stats.hpMax, JSON.stringify(skillSequence), JSON.stringify(traits), existing[0].id
     ]);
@@ -178,8 +183,8 @@ export const completeAdvancedProfessionTrial = async (connection: PoolConnection
   await revokeAdvancedProfessionSkills(connection, characterId);
   await connection.execute(`INSERT INTO player_advanced_professions (character_id,profession_code,mentor_code,completed_at) VALUES (?,?,?,NOW())
     ON DUPLICATE KEY UPDATE profession_code=VALUES(profession_code),mentor_code=VALUES(mentor_code),completed_at=VALUES(completed_at)`, [characterId, profession.code, profession.mentor.code]);
-  await connection.execute(`INSERT IGNORE INTO player_skills (character_id,skill_id,level,passive_linked)
-    SELECT ?,id,1,1 FROM skill_definitions WHERE code=?`, [characterId, profession.passive.code]);
+  for (const code of [profession.passive.code, advancedInheritanceSkillCode(profession.code)]) await connection.execute(`INSERT IGNORE INTO player_skills (character_id,skill_id,level,passive_linked)
+    SELECT ?,id,1,0 FROM skill_definitions WHERE code=?`, [characterId, code]);
   const activeSkills = [...activeSkillCodesForAdvancedProfession(profession.code), ...(profession.code === 'spirit_summoner' ? spiritSummonerActiveSkillCodes : [])];
   for (const skillCode of activeSkills) await connection.execute(`INSERT IGNORE INTO player_skills (character_id,skill_id,level,passive_linked)
     SELECT ?,id,1,0 FROM skill_definitions WHERE code=?`, [characterId, skillCode]);
@@ -187,5 +192,6 @@ export const completeAdvancedProfessionTrial = async (connection: PoolConnection
     SELECT ?,id,1 FROM item_definitions WHERE code='resonance_crystal'
     ON DUPLICATE KEY UPDATE quantity=quantity+1`, [characterId]);
   await recalculateCharacterStats(connection, characterId);
+  recordAchievement(connection,characterId,['ACH_A17'],'advanced:'+profession.code+':'+characterId);
   return { ...profession, reset };
 };

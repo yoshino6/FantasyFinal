@@ -1,0 +1,119 @@
+TAP version 13
+# Subtest: 神技全部目录、分类、搜索与详情经本机QQ适配器转换，不产生不支持的cmd-enter show
+ok 1 - 神技全部目录、分类、搜索与详情经本机QQ适配器转换，不产生不支持的cmd-enter show
+  ---
+  duration_ms: 8.815
+  type: 'test'
+  ...
+# Subtest: 相同注册阶段重发保存的完整正文，女神更替只在新页面明确交接
+not ok 2 - 相同注册阶段重发保存的完整正文，女神更替只在新页面明确交接
+  ---
+  duration_ms: 23.4208
+  type: 'test'
+  location: 'E:\\猫拉瑞亚\\FantasyFinal\\test\\opening-message.test.ts:54:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /选择神技/. Input:
+    
+    '[{"type":"Markdown","value":[{"type":"MD.title","value":"序章·选择天赋（6/6）"},{"type":"MD.text","value":"\\n\\n神器已散布世界各地。此刻可以带走的，是一项陪你走下去的天赋。\\n\\n"},{"type":"MD.button","value":"【战意不灭】","options":{"data":"/天赋详情 G15","autoEnter":false}},{"type":"MD.newline","value":false},{"type":"MD.blockquote","value":"本人主动PVE直击最终伤害×1.50"},{"type":"MD.newline","value":false},{"type":"MD.newline","value":false},{"type":"MD.button","value":"【守望之手】","options":{"data":"/天赋详情 G14","autoEnter":false}},{"type":"MD.newline","value":false},{"type":"MD.blockquote","value":"本人治疗术的治疗基数×1.50，再结算受疗与生命上限"},{"type":"MD.newline","value":false},{"type":"MD.newline","value":false},{"type":"MD.button","value":"【魔力潮汐】","options":{"data":"/天赋详情 G16","autoEnter":false}},{"type":"MD.newline","value":false},{"type":"MD.blockquote","value":"本人技能实际MP支付×2/3"},{"type":"MD.newline","value":false},{"type":"MD.newline","value":false},{"type":"MD.button","value":"【破阵之眼】","options":{"data":"/天赋详情 Z01","autoEnter":false}},{"type":"MD.newline","value":false},{"type":"MD.blockquote","value":"攻击自身未命中过的敌人时直击×3.00；对已命中过目标×1.25"},{"type":"MD.newline","value":false},{"type":"MD.newline","value":false},{"type":"MD.button","value":"【兵无常形】","options":{"data":"/天赋详情 Z02","autoEnter":false}},{"type":"MD.newline","value":false},{"type":"MD.blockquote","value":"连续两次主动攻击使用不同伤害类型时，第二次起直击×1.60；否则×1.10"},{"type":"MD.newline","value":false},{"type":"MD.newline","value":false},{"type":"MD.button","value":"【誓约前锋】","options":{"data":"/天赋详情 Z03","autoEnter":false}},{"type":"MD.newline","value":false},{"type":"MD.blockquote","value":"本人直击×1.25、承受直击×5/6；对敌人造成的仇恨×1.50"},{"type":"MD.newline","value":false},{"type":"MD.newline","value":false},{"type":"MD.text","value":"第 1/15 页｜全部"}]},{"type":"BT.group","value":[{"type":"BT.row","value":[{"type":"Button","value":"上一页","options":{"data":"/天赋目录 1 全部","type":"command","autoEnter":true}},{"type":"Button","value":"下一页","options":{"data":"/天赋目录 2 全部","type":"command","autoEnter":true}}]},{"type":"BT.row","value":[{"type":"Button","value":"全部","options":{"data":"/天赋目录 1 全部","type":"command","autoEnter":true}},{"type":"Button","value":"战斗","options":{"data":"/天赋目录 1 战斗","type":"command","autoEnter":true}},{"type":"Button","value":"探索","options":{"data":"/天赋目录 1 探索","type":"command","autoEnter":true}},{"type":"Button","value":"成长","options":{"data":"/天赋目录 1 成长","type":"command","autoEnter":true}},{"type":"Button","value":"社交","options":{"data":"/天赋目录 1 社交","type":"command","autoEnter":true}}]},{"type":"BT.row","value":[{"type":"Button","value":"生产","options":{"data":"/天赋目录 1 生产","type":"command","autoEnter":true}},{"type":"Button","value":"血脉","options":{"data":"/天赋目录 1 血脉","type":"command","autoEnter":true}},{"type":"Button","value":"体魄","options":{"data":"/天赋目录 1 体魄","type":"command","autoEnter":true}},{"type":"Button","value":"孤注","options":{"data":"/天赋目录 1 孤注","type":"command","autoEnter":true}},{"type":"Button","value":"奇异","options":{"data":"/天赋目录 1 奇异","type":"command","autoEnter":true}}]}]}]'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual: '[{"type":"Markdown","value":[{"type":"MD.title","value":"序章·选择天赋（6/6）"},{"type":"MD.text","value":"\\n\\n神器已散布世界各地。此刻可以带走的，是一项陪你走下去的天赋。\\n\\n"},{"type":"MD.button","value":"【战意不灭】","options":{"data":"/天赋详情 G15","autoEnter":false}},{"type":"MD.newline","value":false},{"type":"MD.blockquote","value":"本人主动PVE直击最终伤害×1.50"},{"type":"MD.newline","value":false},{"type":"MD.newline","value":false},{"type":"MD.button","value":"【守望之手】","options":{"data":"/天赋详情 G14","autoEnter":false}},{"type":"MD.newline","value":false},{"type":"MD.blockquote","value":"本人治疗术的治疗基数×1.50，再结算受疗与生命上限"},{"type":"MD.newline","value":false},{"type":"MD.newline","value":false},{"type":"MD.button","value":"【魔力潮汐】","options":{"data":"/天赋详情 G16","autoEnter":false}},{"type":"MD.newline","value":false},{"type":"MD.blockquote","value":"本人技能实际MP支付×2/3"},{"type":"MD.newline","value":false},{"type":"MD.newline","value":false},{"type":"MD.button","value":"【破阵之眼】","options":{"data":"/天赋详情 Z01","autoEnter":false}},{"type":"MD.newline","value":false},{"type":"MD.blockquote","value":"攻击自身未命中过的敌人时直击×3.00；对已命中过目标×1.25"},{"type":"MD.newline","value":false},{"type":"MD.newline","value":false},{"type":"MD.button","value":"【兵无常形】","options":{"data":"/天赋详情 Z02","autoEnter":false}},{"type":"MD.newline","value":false},{"type":"MD.blockquote","value":"连续两次主动攻击使用不同伤害类型时，第二次起直击×1.60；否则×1.10"},{"type":"MD.newline","value":false},{"type":"MD.newline","value":false},{"type":"MD.button","value":"【誓约前锋】","options":{"data":"/天赋详情 Z03","autoEnter":false}},{"type":"MD.newline","value":false},{"type":"MD.blockquote","value":"本人直击×1.25、承受直击×5/6；对敌人造成的仇恨×1.50"},{"type":"MD.newline","value":false},{"type":"MD.newline","value":false},{"type":"MD.text","value":"第 1/15 页｜全部"}]},{"type":"BT.group","value":[{"type":"BT.row","value":[{"type":"Button","value":"上一页","options":{"data":"/天赋目录 1 全部","type":"command","autoEnter":true}},{"type":"Button","value":"下一页","options":{"data":"/天赋目录 2 全部","type":"command","autoEnter":true}}]},{"type":"BT.row","value":[{"type":"Button","value":"全部","options":{"data":"/天赋目录 1 全部","type":"command","autoEnter":true}},{"type":"Button","value":"战斗","options":{"data":"/天赋目录 1 战斗","type":"command","autoEnter":true}},{"type":"Button","value":"探索","options":{"data":"/天赋目录 1 探索","type":"command","autoEnter":true}},{"type":"Button","value":"成长","options":{"data":"/天赋目录 1 成长","type":"command","autoEnter":true}},{"type":"Button","value":"社交","options":{"data":"/天赋目录 1 社交","type":"command","autoEnter":true}}]},{"type":"BT.row","value":[{"type":"Button","value":"生产","options":{"data":"/天赋目录 1 生产","type":"command","autoEnter":true}},{"type":"Button","value":"血脉","options":{"data":"/天赋目录 1 血脉","type":"command","autoEnter":true}},{"type":"Button","value":"体魄","options":{"data":"/天赋目录 1 体魄","type":"command","autoEnter":true}},{"type":"Button","value":"孤注","options":{"data":"/天赋目录 1 孤注","type":"command","autoEnter":true}},{"type":"Button","value":"奇异","options":{"data":"/天赋目录 1 奇异","type":"command","autoEnter":true}}]}]}]'
+  operator: 'match'
+  stack: |-
+    TestContext.<anonymous> (E:\猫拉瑞亚\FantasyFinal\test\opening-message.test.ts:67:64)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: 世界树人物页和满员随从名册经过QQ转换，不丢人物、邀请或返回按钮
+ok 3 - 世界树人物页和满员随从名册经过QQ转换，不丢人物、邀请或返回按钮
+  ---
+  duration_ms: 54.6962
+  type: 'test'
+  ...
+# Subtest: 世界树前台沿用百纳镇业务分组，登记和闲聊均留在维萝柜台，QQ按钮完整
+ok 4 - 世界树前台沿用百纳镇业务分组，登记和闲聊均留在维萝柜台，QQ按钮完整
+  ---
+  duration_ms: 83.5726
+  type: 'test'
+  ...
+# Subtest: 世界树大厅与百纳镇同为四行七键，有额度也不插入额外服务和翻页
+ok 5 - 世界树大厅与百纳镇同为四行七键，有额度也不插入额外服务和翻页
+  ---
+  duration_ms: 47.9513
+  type: 'test'
+  ...
+# Subtest: 公会交谈只发人物引用消息，详情链接正确且保留鉴识和当地公会限制
+ok 6 - 公会交谈只发人物引用消息，详情链接正确且保留鉴识和当地公会限制
+  ---
+  duration_ms: 49.646
+  type: 'test'
+  ...
+# Subtest: 14张出生地图均有三条完整路线，版本唯一，所有分支都有相遇、后果和安全落脚
+ok 7 - 14张出生地图均有三条完整路线，版本唯一，所有分支都有相遇、后果和安全落脚
+  ---
+  duration_ms: 1.5702
+  type: 'test'
+  ...
+# Subtest: 采用逃婚新版与保留奇遇，旧版编号不能偷偷换稿
+not ok 8 - 采用逃婚新版与保留奇遇，旧版编号不能偷偷换稿
+  ---
+  duration_ms: 4.4873
+  type: 'test'
+  location: 'E:\\猫拉瑞亚\\FantasyFinal\\test\\opening.test.ts:26:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The expression evaluated to a falsy value:
+    
+      assert.ok(divineSkillDefinitions.every(s=>s.code.startsWith('divine_g')))
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (E:\猫拉瑞亚\FantasyFinal\test\opening.test.ts:30:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: 刚出生的armed状态可读取，不会访问尚未选择的分支
+ok 9 - 刚出生的armed状态可读取，不会访问尚未选择的分支
+  ---
+  duration_ms: 69.5622
+  type: 'test'
+  ...
+# Subtest: 降临事务直接赠送Lv.1鉴识及基础专精，不占神技名额或初始SP
+ok 10 - 降临事务直接赠送Lv.1鉴识及基础专精，不占神技名额或初始SP
+  ---
+  duration_ms: 35.6677
+  type: 'test'
+  ...
+# Subtest: 随从概率以心情占掉落价值上限的比例计算，Boss不吃神技加成
+ok 11 - 随从概率以心情占掉落价值上限的比例计算，Boss不吃神技加成
+  ---
+  duration_ms: 0.2604
+  type: 'test'
+  ...
+# Subtest: 宝箱批量独立开奖，没有空箱，数量与概率边界可审计
+ok 12 - 宝箱批量独立开奖，没有空箱，数量与概率边界可审计
+  ---
+  duration_ms: 17.2655
+  type: 'test'
+  ...
+# [2026-09-09 00:59:02][INFO] [alemonjs][exit] 进程退出，code=1
+1..12
+# tests 12
+# suites 0
+# pass 10
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1694.0531

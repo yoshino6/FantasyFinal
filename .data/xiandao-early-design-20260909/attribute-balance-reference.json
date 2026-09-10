@@ -1,0 +1,131 @@
+{
+  "scope": "Deterministic unrounded direct-hit expectation with existing formulas; symmetric standard reference, not live combat or win probability",
+  "assumptions": [
+    "Birth six-stat total 100, growth total 10, equal allocation",
+    "Same weapon 0.5 times baseline body attack, five armor items total baseline body defense",
+    "No equipment stat-percent, armor correction, resistances, professions, mana, control, turn-speed, healing or summons",
+    "Opposed hit/crit/crit bonus, no forced hits, floor or random variance"
+  ],
+  "rows": [
+    {
+      "realm": 1,
+      "level": 10,
+      "eachCumulative": 4,
+      "eachNew": 4,
+      "total": 24,
+      "offense": 1.2167850934920017,
+      "survival": 1.2464481546787287,
+      "index": 1.51665953442369,
+      "sensitivityMin": 1.4384382240145064,
+      "sensitivityMax": 1.5512370448427106
+    },
+    {
+      "realm": 2,
+      "level": 20,
+      "eachCumulative": 8,
+      "eachNew": 4,
+      "total": 48,
+      "offense": 1.2180386129560192,
+      "survival": 1.2508821585375838,
+      "index": 1.5236227693565498,
+      "sensitivityMin": 1.4448109359248282,
+      "sensitivityMax": 1.5584528044584307
+    },
+    {
+      "realm": 3,
+      "level": 30,
+      "eachCumulative": 13,
+      "eachNew": 5,
+      "total": 78,
+      "offense": 1.202346002470651,
+      "survival": 1.2336436626126277,
+      "index": 1.4832665262155453,
+      "sensitivityMin": 1.4115361738852812,
+      "sensitivityMax": 1.5149440138333063
+    },
+    {
+      "realm": 4,
+      "level": 40,
+      "eachCumulative": 21,
+      "eachNew": 8,
+      "total": 126,
+      "offense": 1.208490806593573,
+      "survival": 1.2415231871884915,
+      "index": 1.5003693578900439,
+      "sensitivityMin": 1.4258868574652075,
+      "sensitivityMax": 1.5332679609018913
+    },
+    {
+      "realm": 5,
+      "level": 50,
+      "eachCumulative": 30,
+      "eachNew": 9,
+      "total": 180,
+      "offense": 1.2047527838041079,
+      "survival": 1.2374291344260326,
+      "index": 1.4907961944600705,
+      "sensitivityMin": 1.4179896805280858,
+      "sensitivityMax": 1.5229488726211964
+    },
+    {
+      "realm": 6,
+      "level": 60,
+      "eachCumulative": 42,
+      "eachNew": 12,
+      "total": 252,
+      "offense": 1.208711799685003,
+      "survival": 1.2423334635470062,
+      "index": 1.501623116532805,
+      "sensitivityMin": 1.4270382130841206,
+      "sensitivityMax": 1.5345654585898063
+    },
+    {
+      "realm": 7,
+      "level": 70,
+      "eachCumulative": 55,
+      "eachNew": 13,
+      "total": 330,
+      "offense": 1.2073379770000727,
+      "survival": 1.240833413183628,
+      "index": 1.4981053028672169,
+      "sensitivityMin": 1.4241382397200648,
+      "sensitivityMax": 1.5307726330849352
+    },
+    {
+      "realm": 8,
+      "level": 80,
+      "eachCumulative": 70,
+      "eachNew": 15,
+      "total": 420,
+      "offense": 1.2068437469809952,
+      "survival": 1.240335757120566,
+      "index": 1.4968914526378934,
+      "sensitivityMin": 1.4231460436924452,
+      "sensitivityMax": 1.5294599921175682
+    },
+    {
+      "realm": 9,
+      "level": 90,
+      "eachCumulative": 87,
+      "eachNew": 17,
+      "total": 522,
+      "offense": 1.2068024122193948,
+      "survival": 1.2403503333735002,
+      "index": 1.4968577743122706,
+      "sensitivityMin": 1.4231306184711305,
+      "sensitivityMax": 1.5294179980646667
+    },
+    {
+      "realm": 10,
+      "level": 100,
+      "eachCumulative": 106,
+      "eachNew": 19,
+      "total": 636,
+      "offense": 1.2069978924738956,
+      "survival": 1.2406296799953977,
+      "index": 1.4974374090950084,
+      "sensitivityMin": 1.42362220213931,
+      "sensitivityMax": 1.5300366111352375
+    }
+  ]
+}

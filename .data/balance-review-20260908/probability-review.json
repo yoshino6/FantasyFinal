@@ -1,0 +1,185 @@
+{
+  "at": "2026-09-08T11:54:46.561Z",
+  "rows": [
+    {
+      "attributeBonusPct": 10,
+      "hitPct": 52.381,
+      "hitGainPoints": 2.381,
+      "hitRelativeGainPct": 4.7619,
+      "incomingHitPct": 47.619,
+      "incomingHitReductionPct": 4.7619
+    },
+    {
+      "attributeBonusPct": 20,
+      "hitPct": 54.5455,
+      "hitGainPoints": 4.5455,
+      "hitRelativeGainPct": 9.0909,
+      "incomingHitPct": 45.4545,
+      "incomingHitReductionPct": 9.0909
+    },
+    {
+      "attributeBonusPct": 40,
+      "hitPct": 58.3333,
+      "hitGainPoints": 8.3333,
+      "hitRelativeGainPct": 16.6667,
+      "incomingHitPct": 41.6667,
+      "incomingHitReductionPct": 16.6667
+    },
+    {
+      "attributeBonusPct": 50,
+      "hitPct": 60,
+      "hitGainPoints": 10,
+      "hitRelativeGainPct": 20,
+      "incomingHitPct": 40,
+      "incomingHitReductionPct": 20
+    },
+    {
+      "attributeBonusPct": 80,
+      "hitPct": 64.2857,
+      "hitGainPoints": 14.2857,
+      "hitRelativeGainPct": 28.5714,
+      "incomingHitPct": 35.7143,
+      "incomingHitReductionPct": 28.5714
+    },
+    {
+      "attributeBonusPct": 100,
+      "hitPct": 66.6667,
+      "hitGainPoints": 16.6667,
+      "hitRelativeGainPct": 33.3333,
+      "incomingHitPct": 33.3333,
+      "incomingHitReductionPct": 33.3333
+    }
+  ],
+  "targets": [
+    {
+      "targetProbabilityPct": 55,
+      "attributeBonusPct": 22.2222,
+      "referencePiecePct": 4.4444
+    },
+    {
+      "targetProbabilityPct": 60,
+      "attributeBonusPct": 50,
+      "referencePiecePct": 10
+    },
+    {
+      "targetProbabilityPct": 65,
+      "attributeBonusPct": 85.7143,
+      "referencePiecePct": 17.1429
+    },
+    {
+      "targetProbabilityPct": 70,
+      "attributeBonusPct": 133.3333,
+      "referencePiecePct": 26.6667
+    }
+  ],
+  "compare": [
+    {
+      "type": "布甲",
+      "currentHitPct": 76.0714,
+      "currentIncomingHitPct": 25.7692,
+      "v1HitPct": 54.5455,
+      "v1IncomingHitPct": 48.7805
+    },
+    {
+      "type": "皮甲",
+      "currentHitPct": 72.0833,
+      "currentIncomingHitPct": 50,
+      "v1HitPct": 51.2195,
+      "v1IncomingHitPct": 45.4545
+    },
+    {
+      "type": "轻甲",
+      "currentHitPct": 51.2195,
+      "currentIncomingHitPct": 48.7805,
+      "v1HitPct": 52.381,
+      "v1IncomingHitPct": 47.619
+    }
+  ],
+  "armorCrit": [
+    {
+      "bothAntiCritAttributePct": 10,
+      "enemyCritChancePct": 47.619,
+      "critExtraDamagePct": 47.619,
+      "expectedCritMultiplier": 1.2267573696145124,
+      "directDamageReductionPct": 1.8594
+    },
+    {
+      "bothAntiCritAttributePct": 40,
+      "enemyCritChancePct": 41.6667,
+      "critExtraDamagePct": 41.6667,
+      "expectedCritMultiplier": 1.1736111111111112,
+      "directDamageReductionPct": 6.1111
+    },
+    {
+      "bothAntiCritAttributePct": 80,
+      "enemyCritChancePct": 35.7143,
+      "critExtraDamagePct": 35.7143,
+      "expectedCritMultiplier": 1.1275510204081634,
+      "directDamageReductionPct": 9.7959
+    },
+    {
+      "bothAntiCritAttributePct": 100,
+      "enemyCritChancePct": 33.3333,
+      "critExtraDamagePct": 33.3333,
+      "expectedCritMultiplier": 1.1111111111111112,
+      "directDamageReductionPct": 11.1111
+    }
+  ],
+  "sensitivity": [
+    {
+      "baseProbabilityPct": 20,
+      "attributeBonusPct": 20,
+      "newProbabilityPct": 23.0769,
+      "relativeIncreasePct": 15.3846
+    },
+    {
+      "baseProbabilityPct": 20,
+      "attributeBonusPct": 50,
+      "newProbabilityPct": 27.2727,
+      "relativeIncreasePct": 36.3636
+    },
+    {
+      "baseProbabilityPct": 20,
+      "attributeBonusPct": 100,
+      "newProbabilityPct": 33.3333,
+      "relativeIncreasePct": 66.6667
+    },
+    {
+      "baseProbabilityPct": 50,
+      "attributeBonusPct": 20,
+      "newProbabilityPct": 54.5455,
+      "relativeIncreasePct": 9.0909
+    },
+    {
+      "baseProbabilityPct": 50,
+      "attributeBonusPct": 50,
+      "newProbabilityPct": 60,
+      "relativeIncreasePct": 20
+    },
+    {
+      "baseProbabilityPct": 50,
+      "attributeBonusPct": 100,
+      "newProbabilityPct": 66.6667,
+      "relativeIncreasePct": 33.3333
+    },
+    {
+      "baseProbabilityPct": 80,
+      "attributeBonusPct": 20,
+      "newProbabilityPct": 82.7586,
+      "relativeIncreasePct": 3.4483
+    },
+    {
+      "baseProbabilityPct": 80,
+      "attributeBonusPct": 50,
+      "newProbabilityPct": 85.7143,
+      "relativeIncreasePct": 7.1429
+    },
+    {
+      "baseProbabilityPct": 80,
+      "attributeBonusPct": 100,
+      "newProbabilityPct": 88.8889,
+      "relativeIncreasePct": 11.1111
+    }
+  ],
+  "method": "live combat-math and armor-set functions; controlled equal input values; no gameplay simulation or database writes"
+}

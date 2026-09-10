@@ -83,7 +83,7 @@ export const installAutomatonRules=(rules:CombatRules,pets:AutomatonCombatant[])
   const missed=rules.missed.bind(rules);
   rules.missed=async(source,target)=>{await missed(source,target);const pet=pets.find(p=>p.unit===target);if(pet&&equipped(pet,'N060'))rules.add(target,'next_damage',20,2,target);};
   const incoming=rules.incoming.bind(rules);
-  rules.incoming=async(source,target,raw,element,magic,skill,single=true,legacyResolved=false)=>{
+  rules.incoming=async(source,target,raw,element,magic,skill,single=true,legacyResolved=false,playerDirect=true)=>{
     const pet=pets.find(p=>p.unit===target);
     if(pet){
       raw*=1-rules.value(target,'automaton_defending')/100;
@@ -92,7 +92,7 @@ export const installAutomatonRules=(rules:CombatRules,pets:AutomatonCombatant[])
       if(rules.status(target,'automaton_mirror')&&rules.shieldValue(target)>0&&magic)raw*=.9;
     }
     const buffer=rules.status(target,'automaton_buffer');if(buffer){raw-=Math.min(raw*.25,buffer.value);await rules.consume(target,'automaton_buffer');}
-    const amount=await incoming(source,target,raw,element,magic,skill,single,legacyResolved);
+    const amount=await incoming(source,target,raw*(source.state.memory.talentCommand&&!skill&&playerDirect?2:1),element,magic,skill,single,legacyResolved,playerDirect);
     target.state.memory.automaton_direct_single=single&&source.side!==target.side?rules.turn:-1;
     return amount;
   };
@@ -169,7 +169,8 @@ export const actAutomaton=async(rules:CombatRules,p:AutomatonCombatant)=>{
     const affected=[target,...rules.enemies(self).filter(u=>u.key!==target.key).sort((a,b)=>a.key.localeCompare(b.key))].slice(0,area);
     const oldAccuracy=self.accuracy;if(equipped(p,'N094')&&self.hp/self.hpMax<.4)self.accuracy*=1.15;
     const oldCrit=self.crit;if(skill&&equipped(p,'S006'))self.crit*=1.15;
-    for(const enemy of affected)for(let segment=0;segment<segments&&enemy.hp>0;segment++){
+    for(let segment=0;segment<segments;segment++) await rules.areaDamage(affected, async enemy => {
+      if(enemy.hp<=0)return;
       const hpBefore=enemy.hp,shieldBefore=rules.shieldValue(enemy);let bonus=1;
       if(!magic&&equipped(p,'N012')&&rules.status(enemy,'armor_shatter'))bonus*=1.18;
       if(equipped(p,'N072')&&rules.effects(enemy).some(e=>e.debuff))bonus*=1.15;
@@ -198,7 +199,7 @@ export const actAutomaton=async(rules:CombatRules,p:AutomatonCombatant)=>{
         if(['N068','S018'].includes(id))await rules.dispel(self,enemy,false,1);
         if(id==='N073')dot(rules,p,enemy,id,.12*self.magic,'火',2);if(id==='N074')dot(rules,p,enemy,id,.12*self.attack,'无',2);if(id==='N078')dot(rules,p,enemy,id,.18*self.magic,'暗',3);
       }
-    }
+    });
     self.accuracy=oldAccuracy;self.crit=oldCrit;
     if(hit&&equipped(p,'N011')&&rules.random()<.2&&once(rules,p,'pursuit'))await rules.strike(self,target,25,'无',false,true);
     if(skill&&hit&&equipped(p,'S007')){const used=Number(self.state.memory.siphonTurn===rules.turn?self.state.memory.siphonValue??0:0),amount=Math.max(0,Math.min(totalHpDamage*.1,self.hpMax*.08-used));self.state.memory.siphonTurn=rules.turn;self.state.memory.siphonValue=used+amount;await heal(rules,p,self,amount,false);}

@@ -1,3 +1,6 @@
+import { achievementSecondaryLevel } from './achievement-hooks';
+import { talentProficiency } from './talent-rewards';
+import { currentSecondaryShop, shopProgressFor } from './secondary-shop-context';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { materialValueMultiplierForLevel } from './monster-crafting-material.service';
@@ -60,6 +63,7 @@ export const claimOmniscientQuest = async (qqUserId: string) => withTransaction(
 
 export const omniscientProgress = async (qqUserId: string) => {
   const pool = await getPool(); const character = await characterFor(pool, qqUserId);
+  const shop=await shopProgressFor(pool,Number(character.id),'omniscient');if(shop)return {...shop,rangeBonus:3,informationBonus:3,dropBonusPct:shop.bonus};
   if (character.secondary_profession_code !== 'omniscient') throw new Error('尚未转职全知者。');
   await pool.execute("INSERT IGNORE INTO player_secondary_professions (character_id,profession_code,level,proficiency) VALUES (?,'omniscient',1,0)", [character.id]);
   const [rows] = await pool.execute<(RowDataPacket & { level: number; proficiency: number })[]>('SELECT level,proficiency FROM player_secondary_professions WHERE character_id=? AND profession_code=\'omniscient\'', [character.id]);
@@ -80,7 +84,7 @@ export const awardOmniscientProficiency = async (connection: PoolConnection, cha
   let level = Math.min(secondaryProfessionMaxLevel, Math.max(1, Number(rows[0]?.level ?? 1)));
   let proficiency = level >= secondaryProfessionMaxLevel ? 0 : Number(rows[0]?.proficiency ?? 0);
   const averageLevel = targetLevels.reduce((total, targetLevel) => total + Math.max(1, Number(targetLevel)), 0) / Math.max(1, targetLevels.length);
-  const materialValue = materialValueMultiplierForLevel(averageLevel); const gain = Math.floor(materialValue) + (Math.random() < materialValue % 1 ? 1 : 0);
+  const materialValue = materialValueMultiplierForLevel(averageLevel); const gain = await talentProficiency(connection,characterId,Math.floor(materialValue) + (Math.random() < materialValue % 1 ? 1 : 0),{profession:'omniscient',successfulBase:0});
   proficiency += gain;
   while (level < secondaryProfessionMaxLevel && proficiency >= secondaryProfessionProficiencyRequired(level)) {
     proficiency -= secondaryProfessionProficiencyRequired(level);
@@ -88,6 +92,7 @@ export const awardOmniscientProficiency = async (connection: PoolConnection, cha
   }
   if (level >= secondaryProfessionMaxLevel) proficiency = 0;
   await connection.execute("UPDATE player_secondary_professions SET level=?,proficiency=? WHERE character_id=? AND profession_code='omniscient'", [level, proficiency, characterId]);
+  achievementSecondaryLevel(connection,Number(characterId),level);
   return { level, proficiency, required: secondaryProfessionProficiencyRequired(level), gain };
 };
 
@@ -157,9 +162,10 @@ const trailNodes = (boss: { id: number; pos_x: number; pos_y: number; min_x: num
 
 export const omniscientTraces = async (qqUserId: string) => {
   const pool = await getPool(); const preview = await characterFor(pool, qqUserId);
-  if (preview.secondary_profession_code !== 'omniscient') return null;
+  if (preview.secondary_profession_code !== 'omniscient'&&!currentSecondaryShop()) return null;
   return withTransaction(async connection => {
   const character = await characterFor(connection, qqUserId, true);
+  await shopProgressFor(connection,Number(character.id),'omniscient');
   const [materials] = await connection.execute<(RowDataPacket & { name: string })[]>(`SELECT i.name FROM map_resource_pools rp JOIN item_definitions i ON i.id=rp.item_id
     LEFT JOIN blacksmith_refinement_materials rm ON rm.item_id=i.id WHERE rp.region_id=? AND rm.item_id IS NOT NULL ORDER BY rm.max_gain DESC,rp.spawn_density ASC,i.id DESC LIMIT 1`, [character.current_region_id]);
   const materialText = materials[0] ? `【锻材感知】本区域最高阶锻材为「${materials[0].name}」，其地脉共鸣正与强敌的气息彼此呼应。` : null;

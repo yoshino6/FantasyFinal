@@ -1,0 +1,1295 @@
+[
+  {
+    "code": "bulwark_guard",
+    "name": "石垒",
+    "build": {
+      "version": 3,
+      "armorSet": {
+        "name": "板甲",
+        "count": 5,
+        "tier": 5,
+        "hitCorrectionPct": 0,
+        "evasionCorrectionPct": 0,
+        "critAvoidanceCorrectionPct": 12,
+        "critDamageCorrectionPct": 12,
+        "damageReductionPct": 4,
+        "panelPercent": {
+          "hpPct": 25
+        }
+      },
+      "professionCode": "bulwark_guard",
+      "equipment": {
+        "level": 30,
+        "rarity": "传说",
+        "quality": 100,
+        "weapon": "誓壁长剑（长剑）",
+        "offhand": "根脉塔盾（盾牌）",
+        "armor": "板甲毕业套装",
+        "secondaryAffixes": [
+          "命中",
+          "暴击",
+          "暴伤",
+          "生命",
+          "闪避",
+          "暴抗",
+          "韧性",
+          "速度"
+        ],
+        "mastery": [
+          "长剑精通：暴击属性+80%",
+          "盾牌精通：暴免、暴抗属性各+40%"
+        ]
+      },
+      "evolution": [
+        {
+          "name": "根脉骨铠",
+          "effect": {
+            "hpPct": 6,
+            "physicalDefensePct": 4,
+            "tenacityPct": 4
+          }
+        },
+        {
+          "name": "守誓心室",
+          "effect": {
+            "hpPct": 4,
+            "critDamageReductionPct": 3
+          }
+        }
+      ],
+      "trainedAttributes": {
+        "constitution": 110.8,
+        "spirit": 49.5,
+        "strength": 114.8,
+        "intelligence": 35.7,
+        "agility": 35.7,
+        "perception": 61.4
+      },
+      "stats": {
+        "hpMax": 5975,
+        "mpMax": 1870,
+        "physicalAttack": 797,
+        "magicAttack": 219,
+        "physicalDefense": 1750,
+        "magicDefense": 1299,
+        "accuracy": 469,
+        "evasion": 347,
+        "critRateBp": 1854,
+        "critDamageBp": 1132,
+        "critResistBp": 2669,
+        "critDamageReductionBp": 1475,
+        "tenacity": 1878,
+        "tenacityPierce": 288,
+        "speed": 317
+      },
+      "passive": {
+        "name": "守势直觉",
+        "effect": {
+          "damageReductionPct": 4
+        }
+      },
+      "inheritance": {
+        "name": "护阵余韵",
+        "values": [
+          6
+        ]
+      },
+      "resource": {
+        "code": "guard_stance",
+        "name": "守势"
+      },
+      "rotation": [
+        "bulwark_shieldwall_advance",
+        "sweeping_slash",
+        "bulwark_vicarious_guard",
+        "bulwark_immovable_mountain",
+        "bulwark_bastion_judgment"
+      ],
+      "lowHealthSkill": "bulwark_immovable_mountain"
+    }
+  },
+  {
+    "code": "war_lord",
+    "name": "旌岚",
+    "build": {
+      "version": 3,
+      "armorSet": {
+        "name": "重甲",
+        "count": 5,
+        "tier": 5,
+        "hitCorrectionPct": 0,
+        "evasionCorrectionPct": 0,
+        "critAvoidanceCorrectionPct": 16,
+        "critDamageCorrectionPct": 16,
+        "damageReductionPct": 0,
+        "panelPercent": {
+          "hpPct": 25
+        }
+      },
+      "professionCode": "war_lord",
+      "equipment": {
+        "level": 30,
+        "rarity": "传说",
+        "quality": 100,
+        "weapon": "军旗长剑（长剑）",
+        "offhand": "凯旋副剑（长剑）",
+        "armor": "重甲毕业套装",
+        "secondaryAffixes": [
+          "命中",
+          "暴击",
+          "暴伤",
+          "生命",
+          "闪避",
+          "暴抗",
+          "韧性",
+          "速度"
+        ],
+        "mastery": [
+          "长剑精通：暴击属性+80%"
+        ]
+      },
+      "evolution": [
+        {
+          "name": "战纹脊骨",
+          "effect": {
+            "physicalAttackPct": 5,
+            "hpPct": 3
+          }
+        },
+        {
+          "name": "旌旗视野",
+          "effect": {
+            "accuracyPct": 4,
+            "speedPct": 3
+          }
+        }
+      ],
+      "trainedAttributes": {
+        "constitution": 85.1,
+        "spirit": 51.5,
+        "strength": 124.7,
+        "intelligence": 43.6,
+        "agility": 59.4,
+        "perception": 77.2
+      },
+      "stats": {
+        "hpMax": 5125,
+        "mpMax": 2009,
+        "physicalAttack": 1326,
+        "magicAttack": 251,
+        "physicalDefense": 1233,
+        "magicDefense": 1112,
+        "accuracy": 958,
+        "evasion": 592,
+        "critRateBp": 2056,
+        "critDamageBp": 1227,
+        "critResistBp": 1537,
+        "critDamageReductionBp": 935,
+        "tenacity": 1411,
+        "tenacityPierce": 344,
+        "speed": 625
+      },
+      "passive": {
+        "name": "阵前号令",
+        "effect": {
+          "damageBonusPct": 3
+        }
+      },
+      "inheritance": {
+        "name": "共鸣号令",
+        "values": [
+          8,
+          10
+        ]
+      },
+      "resource": {
+        "code": "battle_fervor",
+        "name": "战意"
+      },
+      "rotation": [
+        "warlord_quake_command",
+        "piercing_thrust",
+        "warlord_break_formation",
+        "sweeping_slash",
+        "warlord_triumph_banner",
+        "warlord_hundred_battle_sweep"
+      ],
+      "lowHealthSkill": "warlord_triumph_banner"
+    }
+  },
+  {
+    "code": "ironbreaker",
+    "name": "铮然",
+    "build": {
+      "version": 3,
+      "armorSet": {
+        "name": "轻甲",
+        "count": 5,
+        "tier": 5,
+        "hitCorrectionPct": 0,
+        "evasionCorrectionPct": 0,
+        "critAvoidanceCorrectionPct": 0,
+        "critDamageCorrectionPct": 0,
+        "damageReductionPct": 0,
+        "panelPercent": {
+          "hpPct": 15,
+          "mpPct": 15
+        }
+      },
+      "professionCode": "ironbreaker",
+      "equipment": {
+        "level": 30,
+        "rarity": "传说",
+        "quality": 100,
+        "weapon": "裂隙长剑（长剑）",
+        "offhand": "断钢圆盾（盾牌）",
+        "armor": "轻甲毕业套装",
+        "secondaryAffixes": [
+          "命中",
+          "暴击",
+          "暴伤",
+          "生命",
+          "闪避",
+          "暴抗",
+          "韧性",
+          "速度"
+        ],
+        "mastery": [
+          "长剑精通：暴击属性+80%",
+          "盾牌精通：暴免、暴抗属性各+40%"
+        ]
+      },
+      "evolution": [
+        {
+          "name": "砺锋骨髓",
+          "effect": {
+            "physicalAttackPct": 5,
+            "critDamagePct": 4
+          }
+        },
+        {
+          "name": "裂隙瞳孔",
+          "effect": {
+            "critRatePct": 4,
+            "accuracyPct": 3
+          }
+        }
+      ],
+      "trainedAttributes": {
+        "constitution": 77.2,
+        "spirit": 35.7,
+        "strength": 134.6,
+        "intelligence": 35.7,
+        "agility": 59.4,
+        "perception": 87.1
+      },
+      "stats": {
+        "hpMax": 4386,
+        "mpMax": 1936,
+        "physicalAttack": 893,
+        "magicAttack": 224,
+        "physicalDefense": 1651,
+        "magicDefense": 1291,
+        "accuracy": 1323,
+        "evasion": 985,
+        "critRateBp": 2523,
+        "critDamageBp": 1320,
+        "critResistBp": 1782,
+        "critDamageReductionBp": 1007,
+        "tenacity": 1104,
+        "tenacityPierce": 371,
+        "speed": 1020
+      },
+      "passive": {
+        "name": "锋芒专注",
+        "effect": {
+          "critRatePct": 15
+        }
+      },
+      "inheritance": {
+        "name": "临界识破",
+        "values": [
+          10
+        ]
+      },
+      "resource": {
+        "code": "sunder_momentum",
+        "name": "裂势"
+      },
+      "rotation": [
+        "ironbreaker_armor_rend",
+        "sweeping_slash",
+        "ironbreaker_breaking_pursuit",
+        "piercing_thrust",
+        "ironbreaker_gap_execution",
+        "ironbreaker_steel_flash"
+      ]
+    }
+  },
+  {
+    "code": "elementalist",
+    "name": "澜烬",
+    "build": {
+      "version": 3,
+      "armorSet": {
+        "name": "布甲",
+        "count": 5,
+        "tier": 5,
+        "hitCorrectionPct": 33,
+        "evasionCorrectionPct": 33,
+        "critAvoidanceCorrectionPct": 0,
+        "critDamageCorrectionPct": 0,
+        "damageReductionPct": 0,
+        "panelPercent": {}
+      },
+      "professionCode": "elementalist",
+      "equipment": {
+        "level": 30,
+        "rarity": "传说",
+        "quality": 100,
+        "weapon": "四相法杖（法杖）",
+        "offhand": "风暴法书（法书）",
+        "armor": "布甲毕业套装",
+        "secondaryAffixes": [
+          "命中",
+          "暴击",
+          "暴伤",
+          "生命",
+          "闪避",
+          "暴抗",
+          "韧性",
+          "速度"
+        ],
+        "mastery": [
+          "法杖精通：暴伤属性+80%",
+          "法书精通：吟唱速度+80%"
+        ]
+      },
+      "evolution": [
+        {
+          "name": "四相灵核",
+          "effect": {
+            "magicAttackPct": 6,
+            "mpPct": 5
+          }
+        },
+        {
+          "name": "雷纹神经",
+          "effect": {
+            "speedPct": 4,
+            "tenacityPct": 3
+          }
+        }
+      ],
+      "trainedAttributes": {
+        "constitution": 43.6,
+        "spirit": 116.8,
+        "strength": 35.7,
+        "intelligence": 129.65,
+        "agility": 51.5,
+        "perception": 69.3
+      },
+      "stats": {
+        "hpMax": 3106,
+        "mpMax": 3899,
+        "physicalAttack": 229,
+        "magicAttack": 1387,
+        "physicalDefense": 1093,
+        "magicDefense": 1296,
+        "accuracy": 2082,
+        "evasion": 1604,
+        "critRateBp": 1138,
+        "critDamageBp": 2012,
+        "critResistBp": 803,
+        "critDamageReductionBp": 806,
+        "tenacity": 917,
+        "tenacityPierce": 322,
+        "speed": 1564
+      },
+      "passive": {
+        "name": "元素共鸣",
+        "effect": {
+          "magicDamagePct": 4
+        }
+      },
+      "inheritance": {
+        "name": "异相共鸣",
+        "values": [
+          4
+        ]
+      },
+      "resource": {
+        "code": "arcana",
+        "name": "奥能"
+      },
+      "rotation": [
+        "elementalist_cinderfrost_cycle",
+        "arcane_bolt",
+        "elementalist_storm_chain",
+        "elementalist_fourfold_resonance",
+        "elementalist_sky_sequence"
+      ]
+    }
+  },
+  {
+    "code": "spirit_summoner",
+    "name": "栖羽",
+    "build": {
+      "version": 3,
+      "armorSet": {
+        "name": "布甲",
+        "count": 5,
+        "tier": 5,
+        "hitCorrectionPct": 33,
+        "evasionCorrectionPct": 33,
+        "critAvoidanceCorrectionPct": 0,
+        "critDamageCorrectionPct": 0,
+        "damageReductionPct": 0,
+        "panelPercent": {}
+      },
+      "professionCode": "spirit_summoner",
+      "equipment": {
+        "level": 30,
+        "rarity": "传说",
+        "quality": 100,
+        "weapon": "灵巢法杖（法杖）",
+        "offhand": "灵契法书（法书）",
+        "armor": "布甲毕业套装",
+        "secondaryAffixes": [
+          "命中",
+          "暴击",
+          "暴伤",
+          "生命",
+          "闪避",
+          "暴抗",
+          "韧性",
+          "速度"
+        ],
+        "mastery": [
+          "法杖精通：暴伤属性+80%",
+          "法书精通：吟唱速度+80%"
+        ]
+      },
+      "evolution": [
+        {
+          "name": "共鸣胸腔",
+          "effect": {
+            "hpPct": 4,
+            "mpPct": 6
+          }
+        },
+        {
+          "name": "灵巢器官",
+          "effect": {
+            "magicDefensePct": 4,
+            "tenacityPct": 4
+          }
+        }
+      ],
+      "trainedAttributes": {
+        "constitution": 61.4,
+        "spirit": 129.65,
+        "strength": 35.7,
+        "intelligence": 116.8,
+        "agility": 43.6,
+        "perception": 69.3
+      },
+      "stats": {
+        "hpMax": 3610,
+        "mpMax": 4089,
+        "physicalAttack": 230,
+        "magicAttack": 1296,
+        "physicalDefense": 1124,
+        "magicDefense": 1361,
+        "accuracy": 2031,
+        "evasion": 1552,
+        "critRateBp": 1127,
+        "critDamageBp": 2011,
+        "critResistBp": 882,
+        "critDamageReductionBp": 868,
+        "tenacity": 1048,
+        "tenacityPierce": 310,
+        "speed": 1376
+      },
+      "passive": {
+        "name": "灵息",
+        "effect": {
+          "mpRegenPct": 2,
+          "spiritLimitBonus": 2
+        }
+      },
+      "inheritance": {
+        "name": "灵契余荫",
+        "values": [
+          8
+        ]
+      },
+      "resource": {
+        "code": "spirit_pact",
+        "name": "灵契"
+      },
+      "rotation": [
+        "summoner_contract_spirit",
+        "arcane_bolt",
+        "summoner_spirit_tether",
+        "summoner_returning_veil",
+        "summoner_star_pact"
+      ],
+      "lowHealthSkill": "summoner_returning_veil"
+    }
+  },
+  {
+    "code": "spellblade",
+    "name": "砺烬",
+    "build": {
+      "version": 3,
+      "armorSet": {
+        "name": "轻甲",
+        "count": 5,
+        "tier": 5,
+        "hitCorrectionPct": 0,
+        "evasionCorrectionPct": 0,
+        "critAvoidanceCorrectionPct": 0,
+        "critDamageCorrectionPct": 0,
+        "damageReductionPct": 0,
+        "panelPercent": {
+          "hpPct": 15,
+          "mpPct": 15
+        }
+      },
+      "professionCode": "spellblade",
+      "equipment": {
+        "level": 30,
+        "rarity": "传说",
+        "quality": 100,
+        "weapon": "相位法杖（法杖）",
+        "offhand": "术式法书（法书）",
+        "armor": "轻甲毕业套装",
+        "secondaryAffixes": [
+          "命中",
+          "暴击",
+          "暴伤",
+          "生命",
+          "闪避",
+          "暴抗",
+          "韧性",
+          "速度"
+        ],
+        "mastery": [
+          "法杖精通：暴伤属性+80%",
+          "法书精通：吟唱速度+80%"
+        ]
+      },
+      "evolution": [
+        {
+          "name": "咒钢骨板",
+          "effect": {
+            "physicalAttackPct": 4,
+            "magicAttackPct": 4
+          }
+        },
+        {
+          "name": "相位髓鞘",
+          "effect": {
+            "speedPct": 4,
+            "evasionPct": 3
+          }
+        }
+      ],
+      "trainedAttributes": {
+        "constitution": 69.3,
+        "spirit": 97,
+        "strength": 87.1,
+        "intelligence": 111.85,
+        "agility": 69.3,
+        "perception": 74.25
+      },
+      "stats": {
+        "hpMax": 4372,
+        "mpMax": 3854,
+        "physicalAttack": 371,
+        "magicAttack": 1329,
+        "physicalDefense": 1196,
+        "magicDefense": 1263,
+        "accuracy": 1424,
+        "evasion": 1159,
+        "critRateBp": 1204,
+        "critDamageBp": 2210,
+        "critResistBp": 1296,
+        "critDamageReductionBp": 1079,
+        "tenacity": 1310,
+        "tenacityPierce": 364,
+        "speed": 1166
+      },
+      "passive": {
+        "name": "咒钢护身",
+        "effect": {
+          "magicDamagePct": 2,
+          "damageReductionPct": 2
+        }
+      },
+      "inheritance": {
+        "name": "攻势换挡",
+        "values": [
+          12,
+          8
+        ]
+      },
+      "resource": {
+        "code": "spell_edge",
+        "name": "法刃"
+      },
+      "rotation": [
+        "arcane_bolt",
+        "spellblade_arcane_thrust",
+        "spellblade_phase_guard",
+        "spellblade_spellbreak_whirl",
+        "spellblade_starfire_duel"
+      ],
+      "lowHealthSkill": "spellblade_phase_guard"
+    }
+  },
+  {
+    "code": "nightblade",
+    "name": "影渡",
+    "build": {
+      "version": 3,
+      "armorSet": {
+        "name": "皮甲",
+        "count": 5,
+        "tier": 5,
+        "hitCorrectionPct": 25,
+        "evasionCorrectionPct": 0,
+        "critAvoidanceCorrectionPct": 0,
+        "critDamageCorrectionPct": 0,
+        "damageReductionPct": 0,
+        "panelPercent": {
+          "mpPct": 20
+        }
+      },
+      "professionCode": "nightblade",
+      "equipment": {
+        "level": 30,
+        "rarity": "传说",
+        "quality": 100,
+        "weapon": "夜痕匕首（匕首）",
+        "offhand": "黯影拳刃（拳刃）",
+        "armor": "皮甲毕业套装",
+        "secondaryAffixes": [
+          "命中",
+          "暴击",
+          "暴伤",
+          "生命",
+          "闪避",
+          "暴抗",
+          "韧性",
+          "速度"
+        ],
+        "mastery": [
+          "匕首精通：命中属性+80%",
+          "拳刃精通：暴击、暴伤属性各+40%"
+        ]
+      },
+      "evolution": [
+        {
+          "name": "暮影虹膜",
+          "effect": {
+            "critRatePct": 5,
+            "evasionPct": 4
+          }
+        },
+        {
+          "name": "静默神经",
+          "effect": {
+            "speedPct": 5,
+            "accuracyPct": 3
+          }
+        }
+      ],
+      "trainedAttributes": {
+        "constitution": 51.5,
+        "spirit": 45.6,
+        "strength": 94.05,
+        "intelligence": 43.6,
+        "agility": 131.65,
+        "perception": 111.85
+      },
+      "stats": {
+        "hpMax": 3342,
+        "mpMax": 2388,
+        "physicalAttack": 1227,
+        "magicAttack": 662,
+        "physicalDefense": 1180,
+        "magicDefense": 1134,
+        "accuracy": 4213,
+        "evasion": 1655,
+        "critRateBp": 2247,
+        "critDamageBp": 2064,
+        "critResistBp": 1036,
+        "critDamageReductionBp": 712,
+        "tenacity": 878,
+        "tenacityPierce": 403,
+        "speed": 2166
+      },
+      "passive": {
+        "name": "夜行专注",
+        "effect": {
+          "critRatePct": 10,
+          "critDamagePct": 10
+        }
+      },
+      "inheritance": {
+        "name": "低光狩猎",
+        "values": [
+          10
+        ]
+      },
+      "resource": {
+        "code": "opening",
+        "name": "破绽"
+      },
+      "rotation": [
+        "nightblade_shadow_mark",
+        "backstab",
+        "nightblade_gap_stab",
+        "nightblade_crescent_throat",
+        "nightblade_silent_finale"
+      ]
+    }
+  },
+  {
+    "code": "venomancer",
+    "name": "青蘅",
+    "build": {
+      "version": 3,
+      "armorSet": {
+        "name": "皮甲",
+        "count": 5,
+        "tier": 5,
+        "hitCorrectionPct": 25,
+        "evasionCorrectionPct": 0,
+        "critAvoidanceCorrectionPct": 0,
+        "critDamageCorrectionPct": 0,
+        "damageReductionPct": 0,
+        "panelPercent": {
+          "mpPct": 20
+        }
+      },
+      "professionCode": "venomancer",
+      "equipment": {
+        "level": 30,
+        "rarity": "传说",
+        "quality": 100,
+        "weapon": "蛇吻匕首（匕首）",
+        "offhand": "毒腺拳刃（拳刃）",
+        "armor": "皮甲毕业套装",
+        "secondaryAffixes": [
+          "命中",
+          "暴击",
+          "暴伤",
+          "生命",
+          "闪避",
+          "暴抗",
+          "韧性",
+          "速度"
+        ],
+        "mastery": [
+          "匕首精通：命中属性+80%",
+          "拳刃精通：暴击、暴伤属性各+40%"
+        ]
+      },
+      "evolution": [
+        {
+          "name": "滤毒胆囊",
+          "effect": {
+            "hpPct": 4,
+            "tenacityPct": 4
+          }
+        },
+        {
+          "name": "蛇行反射",
+          "effect": {
+            "accuracyPct": 4,
+            "critRatePct": 3
+          }
+        }
+      ],
+      "trainedAttributes": {
+        "constitution": 56.45,
+        "spirit": 71.3,
+        "strength": 81.2,
+        "intelligence": 86.15,
+        "agility": 108.9,
+        "perception": 111.85
+      },
+      "stats": {
+        "hpMax": 3656,
+        "mpMax": 3357,
+        "physicalAttack": 1194,
+        "magicAttack": 762,
+        "physicalDefense": 1183,
+        "magicDefense": 1217,
+        "accuracy": 4129,
+        "evasion": 1535,
+        "critRateBp": 2013,
+        "critDamageBp": 1904,
+        "critResistBp": 1093,
+        "critDamageReductionBp": 855,
+        "tenacity": 1041,
+        "tenacityPierce": 430,
+        "speed": 1791
+      },
+      "passive": {
+        "name": "蚀痕",
+        "effect": {
+          "venomDamagePct": 15
+        }
+      },
+      "inheritance": {
+        "name": "渗毒判断",
+        "values": [
+          8
+        ]
+      },
+      "resource": {
+        "code": "toxicity",
+        "name": "毒性"
+      },
+      "rotation": [
+        "venomancer_serpent_kiss",
+        "toxic_edge",
+        "venomancer_corrosion_mist",
+        "venomancer_venom_burst",
+        "venomancer_thousand_throat"
+      ]
+    }
+  },
+  {
+    "code": "trickster_ranger",
+    "name": "弦枢",
+    "build": {
+      "version": 3,
+      "armorSet": {
+        "name": "皮甲",
+        "count": 5,
+        "tier": 5,
+        "hitCorrectionPct": 25,
+        "evasionCorrectionPct": 0,
+        "critAvoidanceCorrectionPct": 0,
+        "critDamageCorrectionPct": 0,
+        "damageReductionPct": 0,
+        "panelPercent": {
+          "mpPct": 20
+        }
+      },
+      "professionCode": "trickster_ranger",
+      "equipment": {
+        "level": 30,
+        "rarity": "传说",
+        "quality": 100,
+        "weapon": "机关匕首（匕首）",
+        "offhand": "牵线拳刃（拳刃）",
+        "armor": "皮甲毕业套装",
+        "secondaryAffixes": [
+          "命中",
+          "暴击",
+          "暴伤",
+          "生命",
+          "闪避",
+          "暴抗",
+          "韧性",
+          "速度"
+        ],
+        "mastery": [
+          "匕首精通：命中属性+80%",
+          "拳刃精通：暴击、暴伤属性各+40%"
+        ]
+      },
+      "evolution": [
+        {
+          "name": "风纹角膜",
+          "effect": {
+            "accuracyPct": 5,
+            "evasionPct": 3
+          }
+        },
+        {
+          "name": "并列突触",
+          "effect": {
+            "speedPct": 4,
+            "tenacityPct": 3
+          }
+        }
+      ],
+      "trainedAttributes": {
+        "constitution": 56.45,
+        "spirit": 50.55,
+        "strength": 96.05,
+        "intelligence": 53.5,
+        "agility": 123.75,
+        "perception": 116.8
+      },
+      "stats": {
+        "hpMax": 3482,
+        "mpMax": 2624,
+        "physicalAttack": 1230,
+        "magicAttack": 687,
+        "physicalDefense": 1193,
+        "magicDefense": 1155,
+        "accuracy": 4262,
+        "evasion": 1624,
+        "critRateBp": 1977,
+        "critDamageBp": 1926,
+        "critResistBp": 1079,
+        "critDamageReductionBp": 756,
+        "tenacity": 956,
+        "tenacityPierce": 426,
+        "speed": 2047
+      },
+      "passive": {
+        "name": "猎手测距",
+        "effect": {
+          "actualHitRatePct": 5
+        }
+      },
+      "inheritance": {
+        "name": "猎线回响",
+        "values": [
+          10
+        ]
+      },
+      "resource": {
+        "code": "chips",
+        "name": "筹码"
+      },
+      "rotation": [
+        "ranger_grapple_trap",
+        "wind_blade",
+        "ranger_weakness_survey",
+        "ranger_guiding_smoke",
+        "ranger_hundred_hunt"
+      ],
+      "lowHealthSkill": "ranger_guiding_smoke"
+    }
+  },
+  {
+    "code": "saint_healer",
+    "name": "白芷",
+    "build": {
+      "version": 3,
+      "armorSet": {
+        "name": "布甲",
+        "count": 5,
+        "tier": 5,
+        "hitCorrectionPct": 33,
+        "evasionCorrectionPct": 33,
+        "critAvoidanceCorrectionPct": 0,
+        "critDamageCorrectionPct": 0,
+        "damageReductionPct": 0,
+        "panelPercent": {}
+      },
+      "professionCode": "saint_healer",
+      "equipment": {
+        "level": 30,
+        "rarity": "传说",
+        "quality": 100,
+        "weapon": "白枝法书（法书）",
+        "offhand": "祈愈法球（法球）",
+        "armor": "布甲毕业套装",
+        "secondaryAffixes": [
+          "命中",
+          "暴击",
+          "暴伤",
+          "生命",
+          "闪避",
+          "暴抗",
+          "韧性",
+          "速度"
+        ],
+        "mastery": [
+          "法书精通：吟唱速度+80%",
+          "法球精通：最大MP+80%"
+        ]
+      },
+      "evolution": [
+        {
+          "name": "回春腺",
+          "effect": {
+            "hpPct": 4,
+            "mpPct": 5
+          }
+        },
+        {
+          "name": "白枝皮层",
+          "effect": {
+            "magicDefensePct": 5,
+            "tenacityPct": 3
+          }
+        }
+      ],
+      "trainedAttributes": {
+        "constitution": 81.2,
+        "spirit": 131.65,
+        "strength": 35.7,
+        "intelligence": 101,
+        "agility": 43.6,
+        "perception": 66.35
+      },
+      "stats": {
+        "hpMax": 3991,
+        "mpMax": 7157,
+        "physicalAttack": 236,
+        "magicAttack": 1269,
+        "physicalDefense": 1159,
+        "magicDefense": 1365,
+        "accuracy": 2021,
+        "evasion": 1543,
+        "critRateBp": 1111,
+        "critDamageBp": 1101,
+        "critResistBp": 958,
+        "critDamageReductionBp": 881,
+        "tenacity": 1129,
+        "tenacityPierce": 288,
+        "speed": 1376
+      },
+      "passive": {
+        "name": "柔光",
+        "effect": {
+          "healingBonusPct": 5,
+          "regenerationBonusPct": 1
+        }
+      },
+      "inheritance": {
+        "name": "余辉援护",
+        "values": [
+          8
+        ]
+      },
+      "resource": {
+        "code": "faith",
+        "name": "信念"
+      },
+      "rotation": [
+        "saint_healer_mending_prayer",
+        "sanctified_bolt",
+        "saint_healer_absolution_hand",
+        "saint_healer_resonant_mass",
+        "saint_healer_revival_sanctuary"
+      ],
+      "lowHealthSkill": "saint_healer_revival_sanctuary"
+    }
+  },
+  {
+    "code": "aegis_priest",
+    "name": "砺誓",
+    "build": {
+      "version": 3,
+      "armorSet": {
+        "name": "板甲",
+        "count": 5,
+        "tier": 5,
+        "hitCorrectionPct": 0,
+        "evasionCorrectionPct": 0,
+        "critAvoidanceCorrectionPct": 12,
+        "critDamageCorrectionPct": 12,
+        "damageReductionPct": 4,
+        "panelPercent": {
+          "hpPct": 25
+        }
+      },
+      "professionCode": "aegis_priest",
+      "equipment": {
+        "level": 30,
+        "rarity": "传说",
+        "quality": 100,
+        "weapon": "壁垒法书（法书）",
+        "offhand": "守誓法球（法球）",
+        "armor": "板甲毕业套装",
+        "secondaryAffixes": [
+          "命中",
+          "暴击",
+          "暴伤",
+          "生命",
+          "闪避",
+          "暴抗",
+          "韧性",
+          "速度"
+        ],
+        "mastery": [
+          "法书精通：吟唱速度+80%",
+          "法球精通：最大MP+80%"
+        ]
+      },
+      "evolution": [
+        {
+          "name": "岩壳胎衣",
+          "effect": {
+            "hpPct": 6,
+            "physicalDefensePct": 5
+          }
+        },
+        {
+          "name": "锚定髋骨",
+          "effect": {
+            "magicDefensePct": 4,
+            "critDamageReductionPct": 4
+          }
+        }
+      ],
+      "trainedAttributes": {
+        "constitution": 116.8,
+        "spirit": 103.95,
+        "strength": 50.55,
+        "intelligence": 81.2,
+        "agility": 35.7,
+        "perception": 66.35
+      },
+      "stats": {
+        "hpMax": 5907,
+        "mpMax": 5766,
+        "physicalAttack": 266,
+        "magicAttack": 1209,
+        "physicalDefense": 1291,
+        "magicDefense": 1281,
+        "accuracy": 494,
+        "evasion": 372,
+        "critRateBp": 1090,
+        "critDamageBp": 1110,
+        "critResistBp": 2048,
+        "critDamageReductionBp": 1544,
+        "tenacity": 2194,
+        "tenacityPierce": 284,
+        "speed": 317
+      },
+      "passive": {
+        "name": "壁垒誓言",
+        "effect": {
+          "damageReductionPct": 3
+        }
+      },
+      "inheritance": {
+        "name": "守壁余响",
+        "values": [
+          20
+        ]
+      },
+      "resource": {
+        "code": "faith",
+        "name": "信念"
+      },
+      "rotation": [
+        "aegis_watch_bastion",
+        "sanctified_bolt",
+        "aegis_shared_vow",
+        "aegis_luminous_echo",
+        "aegis_undying_dome"
+      ],
+      "lowHealthSkill": "aegis_undying_dome"
+    }
+  },
+  {
+    "code": "dawn_inquisitor",
+    "name": "曦歌",
+    "build": {
+      "version": 3,
+      "armorSet": {
+        "name": "布甲",
+        "count": 5,
+        "tier": 5,
+        "hitCorrectionPct": 33,
+        "evasionCorrectionPct": 33,
+        "critAvoidanceCorrectionPct": 0,
+        "critDamageCorrectionPct": 0,
+        "damageReductionPct": 0,
+        "panelPercent": {}
+      },
+      "professionCode": "dawn_inquisitor",
+      "equipment": {
+        "level": 30,
+        "rarity": "传说",
+        "quality": 100,
+        "weapon": "晨星法书（法书）",
+        "offhand": "破晓法球（法球）",
+        "armor": "布甲毕业套装",
+        "secondaryAffixes": [
+          "命中",
+          "暴击",
+          "暴伤",
+          "生命",
+          "闪避",
+          "暴抗",
+          "韧性",
+          "速度"
+        ],
+        "mastery": [
+          "法书精通：吟唱速度+80%",
+          "法球精通：最大MP+80%"
+        ]
+      },
+      "evolution": [
+        {
+          "name": "恒星肺叶",
+          "effect": {
+            "magicAttackPct": 6,
+            "mpPct": 4
+          }
+        },
+        {
+          "name": "晨钟耳蜗",
+          "effect": {
+            "accuracyPct": 4,
+            "critRatePct": 3
+          }
+        }
+      ],
+      "trainedAttributes": {
+        "constitution": 71.3,
+        "spirit": 118.8,
+        "strength": 40.65,
+        "intelligence": 116.8,
+        "agility": 48.55,
+        "perception": 79.2
+      },
+      "stats": {
+        "hpMax": 3679,
+        "mpMax": 6983,
+        "physicalAttack": 252,
+        "magicAttack": 1373,
+        "physicalDefense": 1152,
+        "magicDefense": 1297,
+        "accuracy": 2180,
+        "evasion": 1617,
+        "critRateBp": 1217,
+        "critDamageBp": 1172,
+        "critResistBp": 939,
+        "critDamageReductionBp": 852,
+        "tenacity": 1026,
+        "tenacityPierce": 339,
+        "speed": 1456
+      },
+      "passive": {
+        "name": "晨祷余辉",
+        "effect": {
+          "lightSkillBonusPct": 6
+        }
+      },
+      "inheritance": {
+        "name": "晨钟裁意",
+        "values": [
+          10
+        ]
+      },
+      "resource": {
+        "code": "faith",
+        "name": "信念"
+      },
+      "rotation": [
+        "dawn_morning_mark",
+        "sanctified_bolt",
+        "dawn_exorcism_word",
+        "dawn_judgment_litany",
+        "dawn_daybreak_decree"
+      ]
+    }
+  }
+]

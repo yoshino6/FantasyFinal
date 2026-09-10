@@ -2,6 +2,7 @@ import type { CombatRules, RuleStatus, RuleUnit } from './combat-rule-registry';
 import type { AlchemyConsumableEffect } from './alchemy-catalog';
 import { bossControlChanceMultiplier } from './combat-math';
 import { canDispelCombatEffect } from './combat-dispel-policy';
+import { fireActive, hasTalent, talentState } from './talent-combat';
 
 const clamp = (value: number, low: number, high: number) => Math.max(low,Math.min(high,value));
 const data = (effect?: RuleStatus) => { try { return JSON.parse(effect?.data ?? '{}') as Record<string,number>; } catch { return {}; } };
@@ -12,7 +13,7 @@ export const alchemyStatusNames: Record<string,string> = { alchemy_regeneration:
 export const alchemyHealingFactor = (rules: CombatRules, target: RuleUnit) => 1-clamp(rules.value(target,'alchemy_antiheal'),0,90)/100;
 const healing = (rules: CombatRules, target: RuleUnit, hp: number, mp=0) => {
   if(target.hp<=0) return { healed:0,overflow:0 };
-  const amount = Math.max(0,Math.floor(hp*(1+Number(target.modifiers?.healingReceivedPct??0)/100)*alchemyHealingFactor(rules,target)));
+  const amount = fireActive(target)?0:Math.max(0,Math.floor(hp*(1+Number(target.modifiers?.healingReceivedPct??0)/100)*alchemyHealingFactor(rules,target)));
   const healed=Math.min(target.hpMax-target.hp,amount); const restored=Math.min(target.mpMax-target.mp,Math.max(0,Math.floor(mp)));
   target.hp+=healed; target.mp+=restored;
   rules.log.push(`　➥【${target.name}】恢复 ${healed} HP、${restored} MP。`); return { healed,overflow:Math.max(0,amount-healed) };
@@ -34,7 +35,7 @@ const direct = async (rules:CombatRules,source:RuleUnit,target:RuleUnit,raw:numb
   const base=raw*raw/Math.max(1,raw+defense);
   const amount=Math.max(0,Math.floor(base*rules.elementFactor(source,target,element)*(rules.hooks.directMultiplier?.(source,target,element,element!=='无',single,element)??1)*(1-clamp(rules.value(target,'reduction')+(rules.hooks.directMultiplier?0:rules.value(target,'barrier')),0,80)/100)*(1+rules.value(target,'exposed')/100)));
   const adjusted=await alchemyIncoming(rules,source,target,amount,element!=='无',false);
-  const old=target.hp; await rules.take(target,adjusted);
+  const old=target.hp; await rules.takeHit(target,adjusted,1,!single);
   rules.log.push(`　➥【${target.name}】受到 ${old-target.hp} 点${element}投掷伤害。`);
   // 投掷物属于直伤；不触发技能专精和技能追击，炼金引爆另有无递归边界。
   await alchemyAfterHit(rules,source,target,Math.max(0,old-target.hp),element);
@@ -59,7 +60,15 @@ export const useAlchemyCombat = async (rules:CombatRules,actor:RuleUnit,enemy:Ru
   if(effect.perBattleLimit && Number(actor.state.memory[key]??0)>=effect.perBattleLimit) return { consumed:false,message:'同类道具本场使用次数已达上限。' };
   const start=rules.log.length; const q=clamp(Number(effect.quality??1),1,1.4)*clamp(Number(effect.tacticPotency??1),1,1.3); let changed=false;
   const apply=(code:string,value:number,turns:number,to=target,debuff=false,payload?:Record<string,number>) => { changed=buff(rules,actor,to,code,value,turns,debuff,payload)||changed; };
-  const heal=(to:RuleUnit,hp:number,mp=0) => { const old=to.hp+to.mp; const result=healing(rules,to,hp,mp); changed=changed||to.hp+to.mp>old; return result; };
+  const heal=(to:RuleUnit,hp:number,mp=0) => {
+    if((hp>0&&to.hp<to.hpMax)||(mp>0&&to.mp<to.mpMax))talentState(to).poorBroken=true;
+    if(to.key===actor.key&&hp>0&&!effect.tactic&&hasTalent(actor,'I09')&&actor.opening?.settings?.invertPotion){
+      const amount=Math.floor(hp*2),old=Number(actor.state.memory.talentBottleShield??0);
+      if(amount>old){actor.state.memory.talentBottleShield=amount;actor.state.memory.talentBottleUntil=talentState(actor).clock+2;changed=true;rules.log.push(`　➥倒置药瓶形成${amount}点护盾。`);}
+      hp=0;
+    }
+    const old=to.hp+to.mp; const result=healing(rules,to,hp,mp); changed=changed||to.hp+to.mp>old; return result;
+  };
   const hit=async (scale:number,to=target,element='无') => { changed=true; return direct(rules,actor,to,standard(actor)*scale*q,element,to===target); };
   const cleanse=async (to:RuleUnit,debuff:boolean,max:number) => {
     const removed=await rules.remove(to,e=>e.debuff===debuff&&canDispelCombatEffect(e.code,'ordinary',Boolean(e.mechanism))&&!['alchemy_defer'].includes(e.code),max);
@@ -84,7 +93,9 @@ export const useAlchemyCombat = async (rules:CombatRules,actor:RuleUnit,enemy:Ru
     case 'thunder_seed': await hit(.65,target,'雷'); apply('alchemy_seed',1,2,target,true,{hits:1,last:rules.turn,damage:standard(actor)*.9*q}); rules.status(target,'alchemy_seed')!.until=rules.turn+2; break;
     case 'oil': await hit(.5,target,'火'); apply('alchemy_oil',1,3,target,true,{damage:standard(actor)*.8*q}); break;
     case 'frost_crack': { const bound=rules.status(target,'bind'); await hit(.6,target,'冰'); apply('armor_shatter',25,2,target,true); apply('magic_shatter',25,2,target,true); if(bound) await reaction(rules,actor,target,standard(actor)*.35*q,'霜裂','冰'); break; }
-    case 'chain': await hit(.8,target,'雷'); for(const other of rules.enemies(actor).filter(unit=>unit.key!==target.key).slice(0,2)) await hit(.35,other,'雷'); break;
+    case 'chain': await rules.areaDamage([target,...rules.enemies(actor).filter(unit=>unit.key!==target.key).slice(0,2)], async other => {
+      changed=true; await direct(rules,actor,other,standard(actor)*(other===target?.8:.35)*q,'雷',false);
+    }); break;
     case 'antiheal': await hit(.6); apply('alchemy_antiheal',40,2,target,true); break;
     case 'echo_damage': apply('alchemy_echo',20,2,target,true,{damage:0,cap:standard(actor)*1.2*q}); break;
     case 'steal_light': { const count=await cleanse(target,false,2); if(count) shield(rules,actor,actor,actor.hpMax*.06*q*count,2); break; }
@@ -97,7 +108,7 @@ export const useAlchemyCombat = async (rules:CombatRules,actor:RuleUnit,enemy:Ru
       if(effect.healPct||effect.restoreMpPct||effect.heal||effect.restoreMp) heal(target,target.hpMax*Number(effect.healPct??0)/100+Number(effect.heal??0),target.mpMax*Number(effect.restoreMpPct??0)/100+Number(effect.restoreMp??0));
       if(effect.cleanse) await cleanse(target,true,Infinity);
       const targets=effect.targetScope==='all'?rules.enemies(actor):[target];
-      if(effect.throwable) for(const victim of targets) { await direct(rules,actor,victim,Math.max(actor.attack,actor.magic)*effect.throwable.damageScale,effect.throwable.element,targets.length===1); changed=true; }
+      if(effect.throwable) await rules.areaDamage(targets, async victim => { await direct(rules,actor,victim,Math.max(actor.attack,actor.magic)*effect.throwable!.damageScale,effect.throwable!.element,targets.length===1); changed=true; });
       const status=effect.status;
       if(status) for(const victim of targets) {
         if(victim.hp<=0) continue;

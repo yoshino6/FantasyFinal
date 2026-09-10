@@ -1,3 +1,5 @@
+import { recordAchievement } from './achievement-events';
+import { playerGrowthShares } from './growth-rules';
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
@@ -28,7 +30,7 @@ const profileFor = async (connection: Db, character: RowDataPacket, input: strin
   const [visits] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_home_visits WHERE character_id=? LIMIT 1', [character.id]);
   if (visits.length) throw new Error('请先离开住宅，再与外面的域民切磋。');
   if (npc.pos_x === null || npc.pos_y === null) throw new Error('这位域民当前不在场。');
-  const perception = Number(character.perception) + Number(character.perception_growth) * Math.max(0, Number(character.level) - 1);
+  const perception = Number(character.perception) + Number(character.perception_growth) * playerGrowthShares(Number(character.level));
   const range = Math.max(1, Math.min(10, 2 + Math.floor(Number(character.level) / 5), 1 + Math.floor(Math.pow(Math.max(1, perception) / 7, .9))));
   if (Math.abs(Number(character.pos_x) - Number(npc.pos_x)) + Math.abs(Number(character.pos_y) - Number(npc.pos_y)) > range) throw new Error('这位域民已离开你的感知范围。');
   const [stages] = await connection.execute<RowDataPacket[]>("SELECT COALESCE(MAX(stage),0) AS stage FROM worldline_states WHERE JSON_UNQUOTE(JSON_EXTRACT(state_json,'$.regionCode'))=?", [npc.region_code]);
@@ -73,6 +75,8 @@ export const startNpcSparring = async (userId: string, code: string) => withTran
 });
 
 export const finishNpcSparring = async (connection: PoolConnection, sessionId: string, result: 'victory' | 'defeat' | 'escaped' | 'timeout') => {
+  const lamplight=await(await import('./lamplight-battle.service')).finishLamplightBattle(connection,sessionId,result);
+  if(lamplight)return lamplight;
   const [rows] = await connection.execute<RowDataPacket[]>('SELECT * FROM player_npc_spar_attempts WHERE session_id=? FOR UPDATE', [sessionId]);
   const attempt = rows[0]; if (!attempt || attempt.state !== 'active') return '切磋已经结算。';
   const profile = json(attempt.profile_json) as NpcSparProfile; const snapshot = json(attempt.snapshot_json);
@@ -100,6 +104,7 @@ export const finishNpcSparring = async (connection: PoolConnection, sessionId: s
   await connection.execute('DELETE FROM combat_status_effects WHERE session_id=?', [sessionId]);
   await connection.execute('DELETE FROM combat_spirits WHERE session_id=?', [sessionId]);
   await connection.execute('UPDATE combat_members SET pending_action=NULL WHERE session_id=?', [sessionId]);
+  if(result==='victory')recordAchievement(connection,Number(attempt.character_id),[{metric:'ACH_L18'},{metric:'ACH_L19',distinct:String(attempt.npc_code)}],'spar:'+sessionId);
   // 会话保留审计引用，清空临时实体的大块构筑；不会触发任何怪物击杀结算。
   await connection.execute("UPDATE monster_spawns s JOIN combat_targets ct ON ct.spawn_id=s.id SET s.current_hp=0,s.defeated_at=NOW(),s.traits_json=JSON_ARRAY(JSON_OBJECT('code','npc_sparring','name','')) WHERE ct.session_id=?", [sessionId]);
   return `切磋${result === 'victory' ? '胜利' : result === 'defeat' ? '落败' : result === 'timeout' ? '超时结束' : '结束'} · ${profile.name}\nHP、MP已恢复至切磋前。今日次数 1/1。\n${discovered ? `领悟线索：「${discovered.name}」已加入技能发现，可前往技能列表消耗 SP 学习。` : '这次交流有所启发，但尚未领悟新的技能。'}`;

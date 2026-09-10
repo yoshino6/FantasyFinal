@@ -1,3 +1,5 @@
+import { achievementTrade } from './achievement-trade';
+import { assertHiddenInstanceMutable } from './combat-loadout-lock.service';
 import type { RowDataPacket, PoolConnection, ResultSetHeader } from 'mysql2/promise';
 import { withTransaction } from '../database/pool';
 import { marketCharacterFor, marketWeeklySales, marketFeeForSale } from './market.service';
@@ -32,6 +34,7 @@ const resource=async(c:PoolConnection,ownerId:number,kind:string,id:number)=>{
     const p=craftJson<AutomatonState>(rows[0].state_json);return{name:p.name,snapshot:{name:p.name,level:p.level,personality:p.personality,stats:p.stats,skills:p.learned,creatorId:Number(rows[0].creator_id)}};
   }
   if(kind!=='instance')throw new Error('请选择装备异械或未认主人偶。');
+  await assertHiddenInstanceMutable(c,ownerId,id);
   const [rows]=await c.execute<RowDataPacket[]>(`SELECT ii.*,i.name,i.item_category,i.required_level,i.description,i.rarity,i.is_tradeable,i.effect_json AS definition_effect FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.id=? AND ii.character_id=? AND ii.bound_kind='none' AND ii.market_listing_id IS NULL FOR UPDATE`,[id,ownerId]);const row=rows[0];if(!row||!row.is_tradeable||row.rarity==='神器')throw new Error('该实例不可寄售。');
   const [active]=await c.execute<RowDataPacket[]>('SELECT instance_id FROM player_equipment WHERE instance_id=? UNION SELECT instance_id FROM player_active_devices WHERE instance_id=? UNION SELECT instance_id FROM player_home_storage_instances WHERE instance_id=?',[id,id,id]);if(active.length)throw new Error('使用中或仓储中的装备与异械不可寄售。');
   return{name:String(row.name),snapshot:{...row,effect_json:row.effect_json??row.definition_effect}};
@@ -65,6 +68,8 @@ export const confirmInstanceMarket=(user:string,token:string)=>withTransaction(a
       const fee=marketFeeForSale(week.gross,price);await c.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?',[price-fee,sellerId]);
       const table=row.kind==='automaton'?'player_automatons':'player_item_instances',ownerColumn=row.kind==='automaton'?'holder_id':'character_id';const [transferred]=await c.execute<ResultSetHeader>(`UPDATE ${table} SET ${ownerColumn}=?,bound_kind='trade',market_listing_id=NULL WHERE id=? AND market_listing_id=? AND ${ownerColumn}=? AND bound_kind='none'`,[characterId,row.resource_id,id,sellerId]);if(transferred.affectedRows!==1)throw new Error('托管实例状态不一致，未成交。');
       if(row.kind==='automaton')await recordAutomatonFirstEvent(c,Number(row.resource_id),characterId,'first_met',{name:String(row.name),source:'在交易行初识'});
+      let achievementItemId=0;if(row.kind!=='automaton'){const [items]=await c.execute<RowDataPacket[]>('SELECT item_id FROM player_item_instances WHERE id=?',[row.resource_id]);achievementItemId=Number(items[0]?.item_id??0);}
+      await achievementTrade(c,characterId,sellerId,achievementItemId,price,price-fee,'instance-market:'+token);
       await release(c,row,'filled');await c.execute('UPDATE market_instance_listings SET buyer_id=?,fee=? WHERE id=?',[characterId,fee,id]);await c.execute('UPDATE market_weekly_volume SET gross_sales=gross_sales+?,fee_paid=fee_paid+? WHERE character_id=? AND week_key=?',[price,fee,sellerId,week.key]);text=`已购得 ${row.name}，支付 ${price} 铜币，物品已绑定。`;
     }
   }

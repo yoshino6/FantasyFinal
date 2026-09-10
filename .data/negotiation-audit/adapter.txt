@@ -1,0 +1,139 @@
+
+/** 交涉与开战共用一条事务，已付体力、玩家记忆与结算均不可拆分提交。 */
+export const negotiateEncounter = async (qqUserId: string, requestedSpawnId: number, command: NegotiationCommand = { type: 'view' }): Promise<NegotiationResult> => withTransaction(async connection => {
+  let character = await characterFor(qqUserId, connection);
+  let members = await partyCombatants(connection, character);
+  await connection.execute(`SELECT id FROM characters WHERE id IN (${members.map(() => '?').join(',')}) ORDER BY id FOR UPDATE`, members.map(member => Number(member.id)));
+  character = await characterFor(qqUserId, connection);
+  const replay = await readNegotiationReplay(connection, Number(character.id), command); if (replay) return replay;
+  ensureActionAvailable(character);
+  const [parties] = await connection.execute<(RowDataPacket & { id: string; leader_character_id: number })[]>('SELECT p.id,p.leader_character_id FROM parties p JOIN party_members pm ON pm.party_id=p.id WHERE pm.character_id=? FOR UPDATE', [character.id]);
+  const battle = await activeCombatFor(connection, Number(character.id));
+  const battleMembers = battle ? await combatMembers(connection, battle.combat_id) : [];
+  members = battle ? battleMembers : await partyCombatants(connection, character);
+  if (members.some(member => Number(member.current_region_id) !== Number(character.current_region_id) || Number(member.pos_x) !== Number(character.pos_x) || Number(member.pos_y) !== Number(character.pos_y) || Number(member.pos_z) !== Number(character.pos_z))) throw new Error('请等全体队友到达同一位置后再交涉。');
+  const realMembers = members.filter(member => !member.npc_code);
+  if (!realMembers.length || realMembers.length > 4) throw new Error('交涉队伍人数无效。');
+  const ids = realMembers.map(member => Number(member.id)).sort((a, b) => a - b);
+  const leaderId = Number(parties[0]?.leader_character_id ?? character.id);
+  if (battle?.mode === 'spar') throw new Error('切磋请使用认输结束，不能以材料交涉。');
+  if (battle && battleMembers.find(member => Number(member.id) === Number(character.id))?.is_defeated) throw new Error('你已失去行动能力，无法出面交涉。');
+  const [pvp] = await connection.execute<RowDataPacket[]>(`SELECT id FROM player_pvp_battle_sessions WHERE state='active' AND (attacker_character_id IN (${ids.map(() => '?').join(',')}) OR defender_character_id IN (${ids.map(() => '?').join(',')})) LIMIT 1 FOR UPDATE`, [...ids, ...ids]);
+  if (pvp.length) throw new Error('玩家对战期间不能与怪物交涉。');
+  const [spawns] = await connection.execute<(SpawnRow & { code: string; defeated_at: Date | null })[]>(`SELECT s.id,s.template_id,t.code,t.name,t.monster_class,COALESCE(s.level,t.level) AS level,s.current_hp,s.defeated_at,s.traits_json,COALESCE(s.skill_sequence,t.skill_sequence) AS skill_sequence,${monsterAttributeColumns},t.experience,t.drops_json,t.weakness_json,t.resistance_json,t.element_mastery_json,t.element_resistance_json
+    FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id WHERE s.region_id=? AND s.pos_x=? AND s.pos_y=? AND s.pos_z=? AND ${visiblePursuitCondition('s')} ORDER BY s.id FOR UPDATE`, [character.current_region_id, character.pos_x, character.pos_y, character.pos_z, character.id, character.id, character.id, character.id, character.id]);
+  let target = spawns.find(spawn => Number(spawn.id) === requestedSpawnId && !spawn.defeated_at);
+  if (!target) throw new Error('目标已离开当前位置或已经结束遭遇。');
+  if (isBossComponent(target)) target = spawns.find(spawn => Number(spawn.id) === Number(bossComponentTrait(target!)?.body_spawn_id) && !spawn.defeated_at);
+  if (!target || isSummonedMonster(target)) throw new Error('临时召唤物不能独立交涉，请选择召唤它的本体。');
+  const groupId = kingbeastTrait(target)?.groupId;
+  if (groupId) target = spawns.find(spawn => kingbeastTrait(spawn)?.groupId === groupId && kingbeastRole(spawn) === 'king' && !spawn.defeated_at) ?? target;
+  const primary = target;
+  const peacefulTargets = spawns.filter(spawn => !spawn.defeated_at && (Number(spawn.id) === Number(primary.id) || Number(bossComponentTrait(spawn)?.body_spawn_id) === Number(primary.id) || Boolean(groupId && kingbeastTrait(spawn)?.groupId === groupId)));
+  const [occupants] = await connection.execute<(RowDataPacket & { session_id: string })[]>(`SELECT ct.session_id FROM combat_targets ct JOIN combat_sessions cs ON cs.id=ct.session_id WHERE ct.spawn_id=? AND cs.state='active' FOR UPDATE`, [primary.id]);
+  if (occupants.some(row => row.session_id !== battle?.combat_id) || battle && !occupants.some(row => row.session_id === battle.combat_id)) throw new Error('该目标不属于你们当前可以交涉的遭遇。');
+  const story = await forestGuideStatusFor(connection, Number(character.id));
+  if (story && story !== 'completed') throw new Error('请先完成当前初章剧情，剧情战斗需要实际战胜目标。');
+  const trial = peacefulTargets.some(spawn => isAdvancedProfessionTrialMonster(spawn) || isBossTestMonster(spawn));
+  const noLoot = trial || isCityPursuit(primary);
+  const drops: NegotiationDrop[] = [];
+  let capacity = 0;
+  // 容量按完整表的期望估值；互斥条目保留权重，到结算时再选，翻页不能重掷。
+  for (const spawn of peacefulTargets.filter(spawn => !isBossComponent(spawn) && !isSummonedMonster(spawn))) {
+    for (const raw of bossSkyDustDrops(jsonArray(spawn.drops_json).map(jsonObject), spawn)) {
+      const code = resolvedDropCode(raw, Number(spawn.level)); if (!code) continue;
+      const [items] = await connection.execute<(RowDataPacket & { trade_price: number; effect_json: unknown })[]>('SELECT trade_price,effect_json FROM item_definitions WHERE code=?', [code]);
+      const effect = jsonObject(items[0]?.effect_json);
+      const value = Number(({ copper_coin: 1, silver_coin: 100, gold_coin: 10000 } as Record<string, number>)[code] ?? Math.max(Number(items[0]?.trade_price ?? 0), Number(effect.referenceValue ?? 0)));
+      const min = Math.max(1, Math.floor(Number(raw.min_quantity ?? raw.quantity ?? 1))); const max = Math.max(min, Math.floor(Number(raw.max_quantity ?? raw.quantity ?? min)));
+      const chance = effectiveGoblinMaterialDropChance(spawn, raw);
+      const traitBonus = percentBonus(traitList(spawn.traits_json), 'dropPct') / 100;
+      capacity += Math.min(1, chance * (1 + traitBonus)) * (min + max) / 2 * value;
+      drops.push({ code, chance, min, max, value, traitBonus, group: raw.exclusive_group ? `${spawn.id}:${raw.exclusive_group}` : undefined });
+    }
+  }
+  const completionText = trial ? '和平结束不会完成击杀、转职或测试验收，请重新挑战完成目标。' : isCityPursuit(primary) ? '执法者离开也不会消除通缉、罚款或债务，本次不产生战利品。' : undefined;
+  return runNegotiation(connection, { actorId: Number(character.id), leaderId, memberIds: ids, target: { id: Number(primary.id), code: primary.code, name: primary.name }, battleId: battle?.combat_id, drops, capacity: Math.max(1, capacity), completionText }, command, {
+    activate: async () => {
+      for (const member of realMembers) ensureActionAvailable(member);
+      if (battle) {
+        if (jsonObject(battle.cooldowns).__bonusPhase || battleMembers.some(member => member.pending_action || readRuleState(jsonObject(member.cooldowns).__rules).cast)) throw new Error('请在回合开始、全队尚未确认行动时交涉。');
+        const [used] = await connection.execute<RowDataPacket[]>("SELECT id FROM negotiation_sessions WHERE battle_id=? AND state<>'preview' LIMIT 1 FOR UPDATE", [battle.combat_id]);
+        if (used.length) throw new Error('本场战斗已经使用过交涉机会。');
+        await connection.execute('UPDATE combat_sessions SET last_action_at=NOW() WHERE id=?', [battle.combat_id]);
+        return Object.fromEntries(battleMembers.filter(member => !member.npc_code).map(member => [String(member.id), Boolean(member.stamina_eligible)]));
+      }
+      return Object.fromEntries(await consumeEncounterStamina(connection, realMembers));
+    },
+    fight: async (eligibility, _sessionId, failed) => {
+      if (!battle) await chooseTargetInTransaction(connection, qqUserId, Number(primary.id), false, undefined, eligibility);
+      const result = await combatActionInTransaction(connection, qqUserId, 'attack', undefined, undefined, undefined, undefined, undefined, undefined, false, undefined, false, true);
+      return `${failed ? '交涉失败！' : '交涉结束。'}全队错失一次行动，敌方先行。\n${result.log}${result.ended ? '\n本场战斗已结束。' : ''}`;
+    },
+    settle: async (state, eligibility, frozenDrops, sessionId) => {
+      const lines: string[] = ['交涉成功！对方收起了敌意。'];
+      const recipients = realMembers.filter(member => eligibility[String(member.id)]);
+      const luck = new Map<number, number>(); const modifiers = new Map<number, CombatModifiers>(); const gains = new Map<number, string[]>();
+      for (const member of recipients) { luck.set(Number(member.id), (await hiddenAttributesFor(connection, Number(member.id))).luck); modifiers.set(Number(member.id), await modifiersFor(connection, Number(member.id))); gains.set(Number(member.id), []); }
+      const factor = teamLuckMultiplier([...luck.values()]) * moodDropMultiplier(state.mood);
+      const partyDrop = ({ 1: 0, 2: .6, 3: 1, 4: 1.5 } as Record<number, number>)[recipients.length] ?? 0;
+      const partyXp = ({ 1: 0, 2: .1, 3: .2, 4: .35 } as Record<number, number>)[recipients.length] ?? 0;
+      const globalDrop = await globalDropMultiplier(connection); const copper = await globalCopperMultiplier(connection);
+      const [buffs] = recipients.length ? await connection.execute<RowDataPacket[]>(`SELECT buff_code FROM player_battle_buffs WHERE remaining_battles>0 AND character_id IN (${recipients.map(() => '?').join(',')})`, recipients.map(member => Number(member.id))) : [[]];
+      const elixir = buffs.reduce((total, buff) => total + (buff.buff_code === 'minor_luck_elixir' ? .25 : Math.max(0, Number(/^alchemy_drop_(\d+(?:\.\d+)?)$/.exec(buff.buff_code)?.[1] ?? 0)) / 100), 0);
+      const [scholars] = recipients.length ? await connection.execute<RowDataPacket[]>(`SELECT MAX(sp.level) AS level FROM player_secondary_professions sp JOIN characters c ON c.id=sp.character_id WHERE c.secondary_profession_code='omniscient' AND sp.profession_code='omniscient' AND c.id IN (${recipients.map(() => '?').join(',')})`, recipients.map(member => Number(member.id))) : [[]];
+      const insight = secondaryProfessionBonus(Number(scholars[0]?.level ?? 0)) / 100;
+      if (!noLoot) {
+        for (const spawn of peacefulTargets) await connection.execute("INSERT INTO monster_reward_settlements (spawn_id,channel,session_id) VALUES (?,'negotiation',?)", [spawn.id, sessionId]);
+        const totalXp = peacefulTargets.filter(spawn => !isBossComponent(spawn) && !isSummonedMonster(spawn)).reduce((sum, spawn) => sum + Math.floor(Number(spawn.experience) * (1 + percentBonus(traitList(spawn.traits_json), 'experiencePct') / 100)), 0);
+        for (const member of recipients) {
+          const gain = await awardRealmExperience(connection, member, totalXp * .2 * (1 + partyXp) * modifiers.get(Number(member.id))!.experienceMultiplier);
+          if (gain.gainedPoints) await recalculateCharacterStats(connection, Number(member.id));
+          gains.get(Number(member.id))!.push(`经验 ${gain.experience}`);
+        }
+        const selectedDrops: NegotiationDrop[] = frozenDrops.filter(drop => !drop.group);
+        for (const group of new Set(frozenDrops.map(drop => drop.group).filter(Boolean))) {
+          let roll = Math.random();
+          for (const drop of frozenDrops.filter(drop => drop.group === group)) { roll -= drop.chance; if (roll < 0) { selectedDrops.push({ ...drop, chance: 1 }); break; } }
+        }
+        for (const drop of selectedDrops) {
+          if (!recipients.length) break;
+          const reference = recipients[random(0, recipients.length - 1)];
+          const base = (drop.chance * globalDrop * (1 + (drop.traitBonus ?? 0) + partyDrop + elixir + insight) + modifiers.get(Number(reference.id))!.dropBonus) * .2;
+          const batches = dropBatches(base, factor);
+          for (let batch = 0; batch < batches; batch++) {
+            const quantity = random(drop.min, drop.max);
+            for (let count = 0; count < quantity; count++) {
+              const recipient = weightedRecipient(recipients, member => luck.get(Number(member.id)) ?? 0);
+              const [items] = await connection.execute<(RowDataPacket & { id: number; name: string; item_type: string })[]>('SELECT id,name,item_type FROM item_definitions WHERE code=?', [drop.code]); const item = items[0]; if (!item) continue;
+              const coinValue = ({ copper_coin: 1, silver_coin: 100, gold_coin: 10000 } as Record<string, number>)[drop.code] ?? 0;
+              let amount = 1;
+              if (coinValue) { amount = Math.floor(copper); if (amount) await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [coinValue * amount, recipient.id]); }
+              else if (['equipment', 'device'].includes(item.item_type)) await connection.execute('INSERT INTO player_item_instances (character_id,item_id) VALUES (?,?)', [recipient.id, item.id]);
+              else await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,1) ON DUPLICATE KEY UPDATE quantity=quantity+1,acquired_at=NOW()', [recipient.id, item.id]);
+              await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [recipient.id, item.id]);
+              if (amount) gains.get(Number(recipient.id))!.push(`${item.name} ×${amount}`);
+            }
+          }
+        }
+      }
+      for (const member of realMembers) lines.push(`${member.name}：${noLoot ? '本次不产生奖励' : !eligibility[String(member.id)] ? '体力不足，未获得奖励' : gains.get(Number(member.id))?.join('、') || '未获得物品'}`);
+      if (completionText) lines.push(completionText);
+      const spawnIds = peacefulTargets.map(spawn => Number(spawn.id));
+      if (!trial) await connection.execute(`UPDATE monster_spawns SET current_hp=0,defeated_at=NOW() WHERE id IN (${spawnIds.map(() => '?').join(',')})`, spawnIds);
+      if (battle) {
+        await closeNegotiationSession(connection, sessionId, 'settled');
+        await connection.execute(`UPDATE combat_targets SET is_defeated=1 WHERE session_id=? AND spawn_id IN (${spawnIds.map(() => '?').join(',')})`, [battle.combat_id, ...spawnIds]);
+        const remaining = await combatTargets(connection, battle.combat_id, false);
+        if (!remaining.some(spawn => !spawn.is_defeated && !isSummonedMonster(spawn) && !isBossComponent(spawn))) {
+          await clearSummonedTargets(connection, battle.combat_id); await clearCombatSpirits(connection, battle.combat_id);
+          await connection.execute("UPDATE combat_sessions SET state='escaped' WHERE id=?", [battle.combat_id]);
+          await persistBattleMembers(connection, battleMembers); await consumeBattleBuffs(connection, battleMembers);
+          lines.push('战斗已和平结束。');
+        } else lines.push('其余敌人仍在场，返回战斗继续行动。');
+      }
+      if (trial) for (const member of realMembers) await connection.execute('INSERT INTO encounter_escape_tokens (character_id,region_id,pos_x,pos_y,pos_z) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE region_id=VALUES(region_id),pos_x=VALUES(pos_x),pos_y=VALUES(pos_y),pos_z=VALUES(pos_z)', [member.id, member.current_region_id, member.pos_x, member.pos_y, member.pos_z]);
+      return lines.join('\n');
+    }
+  });
+});

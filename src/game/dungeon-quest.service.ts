@@ -1,6 +1,7 @@
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { blindBoxBlueprints, blueprintRecipeCode, constructionBlueprintCodes } from './deconstructor-catalog';
+import { recordAchievement } from './achievement-events';
 
 const questCode = 'dungeon_secret';
 const passCode = 'demon_breaker_teleporter';
@@ -123,6 +124,7 @@ export const studyWorkshopBlueprint = async (qqUserId: string, code: string) => 
     await connection.execute('UPDATE oddworkshop_items SET stock_quantity=stock_quantity-1 WHERE item_id=?', [item.id]);
     await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,1) ON DUPLICATE KEY UPDATE quantity=quantity+1,acquired_at=NOW()', [character.id, rewardRows[0].id]);
     await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [character.id, rewardRows[0].id]);
+    recordAchievement(connection,Number(character.id),[{metric:'ACH_K08',value:Number(item.buy_price),life:true}]);
     return { name: item.name, price: Number(item.buy_price), rewardName: rewardRows[0].name };
   }
   if (constructionBlueprintCodes.has(code) && await ownsItem(connection, character.id, code)) throw new Error('这张图纸已经在你的背包中。');
@@ -130,6 +132,7 @@ export const studyWorkshopBlueprint = async (qqUserId: string, code: string) => 
   await connection.execute('UPDATE oddworkshop_items SET stock_quantity=stock_quantity-1 WHERE item_id=?', [item.id]);
   await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,1) ON DUPLICATE KEY UPDATE quantity=quantity+1,acquired_at=NOW()', [character.id, item.id]);
   await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [character.id, item.id]);
+  recordAchievement(connection,Number(character.id),[{metric:'ACH_K08',value:Number(item.buy_price),life:true}]);
   if (code === passCode) await completeDungeonSecretPurchase(connection, character.id);
   return { name: item.name, price: Number(item.buy_price), rewardName: blueprintRecipeCode(code) ? item.name : undefined };
 });

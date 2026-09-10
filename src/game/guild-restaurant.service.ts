@@ -1,6 +1,9 @@
+import { recordAchievement } from './achievement-events';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { recalculateCharacterStats } from './character.service';
+import { requireGuildService } from './guild-context';
+import { divineFoodSeconds, divineFoodValues } from './divine-effects';
 
 const PAGE_SIZE = 5;
 type Connection = PoolConnection | Awaited<ReturnType<typeof getPool>>;
@@ -31,12 +34,20 @@ export const foodBuffText = (buff: Record<string, unknown>) => {
 const characterFor = async (connection: Connection, qqUserId: string, lock = false) => {
   const [rows] = await connection.execute<CharacterRow[]>(`SELECT c.id,c.copper_coins FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1${lock ? ' FOR UPDATE' : ''}`, [qqUserId]);
   if (!rows[0]) throw new Error('请先注册角色。');
+  await requireGuildService(connection,Number(rows[0].id));
   return rows[0];
 };
 
 const activeFoodFor = async (connection: Connection, characterId: number) => {
   const [rows] = await connection.execute<ActiveFoodRow[]>(`SELECT i.name,b.buff_json,TIMESTAMPDIFF(SECOND,NOW(),b.expires_at) AS remaining_seconds FROM player_food_buffs b JOIN item_definitions i ON i.id=b.item_id WHERE b.character_id=? AND b.expires_at>NOW() LIMIT 1`, [characterId]);
   return rows[0] ? { name: rows[0].name, buff: jsonRecord(rows[0].buff_json), remainingSeconds: Math.max(0, Number(rows[0].remaining_seconds)) } : null;
+};
+
+export const freeGuildMealUses = async (qqUserId: string) => {
+  const pool = await getPool();
+  const character = await characterFor(pool, qqUserId);
+  const [rows] = await pool.execute<RowDataPacket[]>("SELECT uses FROM player_opening_services WHERE character_id=? AND code='meal'", [character.id]);
+  return Math.max(0, Number(rows[0]?.uses ?? 0));
 };
 
 const inventoryForRecipe = async (connection: Connection, characterId: number, ingredients: Ingredient[], lock = false) => {
@@ -69,8 +80,11 @@ export const enjoyRestaurantMeal = async (qqUserId: string, itemId: number) => w
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND quantity<=0', [character.id]);
   const previous = await activeFoodFor(connection, character.id);
   await connection.execute('DELETE FROM player_food_buffs WHERE character_id=?', [character.id]);
-  await connection.execute('INSERT INTO player_food_buffs (character_id,item_id,buff_json,expires_at) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL ? MINUTE))', [character.id, meal.id, JSON.stringify(jsonRecord(meal.buff_json)), Number(meal.duration_minutes)]);
+  const durationSeconds=await divineFoodSeconds(connection,Number(character.id),Number(meal.duration_minutes)*60);
+  const appliedBuff=await divineFoodValues(connection,Number(character.id),jsonRecord(meal.buff_json),Number(meal.duration_minutes)*60);
+  await connection.execute('INSERT INTO player_food_buffs (character_id,item_id,buff_json,expires_at) VALUES (?,?,?,DATE_ADD(NOW(),INTERVAL ? SECOND))', [character.id, meal.id, JSON.stringify(appliedBuff),durationSeconds]);
   await connection.execute('UPDATE characters SET copper_coins=copper_coins-? WHERE id=?', [meal.processing_fee, character.id]);
   await recalculateCharacterStats(connection, character.id);
-  return { name: meal.name, processingFee: Number(meal.processing_fee), ingredients, buff: jsonRecord(meal.buff_json), durationMinutes: Number(meal.duration_minutes), replaced: previous?.name ?? null };
+  recordAchievement(connection,Number(character.id),[{metric:'ACH_E22',distinct:String(meal.id)},{metric:'ACH_K19',distinct:String(meal.id)}]);
+  return { name: meal.name, processingFee: Number(meal.processing_fee), ingredients, buff: Object.fromEntries(Object.entries(appliedBuff).filter(([key])=>!key.startsWith('__talent'))), durationMinutes: durationSeconds/60, replaced: previous?.name ?? null };
 });

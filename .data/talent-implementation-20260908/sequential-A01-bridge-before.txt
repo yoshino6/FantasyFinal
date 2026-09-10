@@ -1,0 +1,33 @@
+TAP version 13
+# Subtest: A01 主动直击最终乘1.5，友伤与非本人直击不乘
+not ok 1 - A01 主动直击最终乘1.5，友伤与非本人直击不乘
+  ---
+  duration_ms: 4.5001
+  type: 'test'
+  location: 'E:\\猫拉瑞亚\\FantasyFinal\\test\\talent-combat.test.ts:178:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    150 !== 100
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 100
+  actual: 150
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (E:\猫拉瑞亚\FantasyFinal\test\talent-combat.test.ts:185:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# [2026-09-09 10:47:38][INFO] [alemonjs][exit] 进程退出，code=1
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 925.5497

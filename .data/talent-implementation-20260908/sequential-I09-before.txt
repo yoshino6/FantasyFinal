@@ -1,0 +1,52 @@
+TAP version 13
+# Subtest: 天赋A至I真实玩家公共路径：面板、天赋入口、开战、胜利及一次结算
+    # Subtest: I09 倒置药瓶 公共玩家路径
+    not ok 1 - I09 倒置药瓶 公共玩家路径
+      ---
+      duration_ms: 656.6072
+      type: 'test'
+      location: 'E:\\猫拉瑞亚\\FantasyFinal\\test\\talent-journey.integration.test.ts:59:42'
+      failureType: 'testCodeFailure'
+      error: |-
+        alchemy=false: 战斗<1>回合
+        ➤【天赋验收员】使用[微光草药]
+        　➥当前无需回复，未消耗道具。
+        ————
+        ➤【???】普通攻击
+        　➥【天赋验收员】闪避了攻击
+        
+        1003 !== 1002
+        
+      code: 'ERR_ASSERTION'
+      name: 'AssertionError'
+      expected: 1002
+      actual: 1003
+      operator: 'strictEqual'
+      stack: |-
+        TestContext.<anonymous> (E:\猫拉瑞亚\FantasyFinal\test\talent-journey.integration.test.ts:392:18)
+        process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+        async Test.run (node:internal/test_runner/test:1054:7)
+        async TestContext.<anonymous> (E:\猫拉瑞亚\FantasyFinal\test\talent-journey.integration.test.ts:59:34)
+        async Test.run (node:internal/test_runner/test:1054:7)
+        async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+      ...
+    1..1
+not ok 1 - 天赋A至I真实玩家公共路径：面板、天赋入口、开战、胜利及一次结算
+  ---
+  duration_ms: 8627.7929
+  type: 'test'
+  location: 'E:\\猫拉瑞亚\\FantasyFinal\\test\\talent-journey.integration.test.ts:15:1'
+  failureType: 'subtestsFailed'
+  error: '1 subtest failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# [2026-09-09 12:58:59][INFO] [alemonjs][exit] 进程退出，code=1
+1..1
+# tests 2
+# suites 0
+# pass 0
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 10030.5532

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
+import { openingHubs } from '../src/game/opening-world.config';
 import { advancedProfessionByCode, worldTreeAdvancedProfessions } from '../src/game/advanced-profession.config';
 
 // 执行实际服务/任务栏声明，注入只读数据库替身，避免启动机器人或初始化真实数据库。
@@ -11,7 +12,7 @@ const loadDeclarations = (path: string, names: string[], dependencies: Record<st
     && statement.declarationList.declarations.some(declaration => names.includes(declaration.name.getText(file))));
   assert.equal(declarations.length, names.length);
   const source = declarations.map(declaration => declaration.getText(file).replace(/^export\s+/, '')).join('\n');
-  const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
+  const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
   return new Function(...Object.keys(dependencies), `${compiled}\nreturn { ${names.join(',')} };`)(...Object.values(dependencies));
 };
 
@@ -36,9 +37,14 @@ const setup = (overrides: Record<string, unknown> = {}) => {
     if (sql.includes('FROM player_inventory')) return [[{ quantity: state.cores }]];
     throw new Error(`意外查询：${sql}`);
   } };
-  const career = loadDeclarations('../src/game/career-quest.service.ts', ['baseProfessionNames', 'careerCharacterFor', 'guildCareerQuestFor', 'guildCareerMainQuest', 'advancedProfessionMainQuest'], { getPool: async () => pool, advancedProfessionByCode, worldTreeAdvancedProfessions });
+  const career = loadDeclarations('../src/game/career-quest.service.ts', ['careerCharacterFor', 'guildCareerQuestFor', 'guildCareerMainQuest', 'advancedProfessionMainQuest'], { getPool: async () => pool, advancedProfessionByCode, worldTreeAdvancedProfessions, openingHubs });
   const main = loadDeclarations('../src/game/main-quest.service.ts', ['currentMainQuest'], {
     getPool: async () => pool, guildCareerMainQuest: career.guildCareerMainQuest,
+    require: (path: string) => {
+      assert.equal(path, './lamplight.service');
+      return { lamplightMainQuest: async () => null };
+    },
+    openingMainQuest: async () => null,
     girlGratitudeMainQuest: async () => ({ description: '世界树的叶影已记下这次同行。' }),
     experienceRequiredForLevel: (level: number) => level * 100
   });
@@ -61,6 +67,11 @@ test('主线依次为公会注册、主职业选择、地图准备，并跳过�
   assert.equal((await service.currentMainQuest('player')).title, '【主线·探索的准备】');
 });
 
+test('主线不再要求花技能点学习女神赠送的鉴识', async () => {
+  const service = setup({ level: 5, has_appraisal: 0, adventurer_registered: 0, profession_code: null });
+  assert.equal((await service.currentMainQuest('player')).title, '【主线·成为冒险者】');
+});
+
 test('公会导航读取实际位置，并在抵达后提供前台与选职操作', async () => {
   const service = setup({ adventurer_registered: 0, profession_code: null });
   assert.equal((await service.guildCareerMainQuest('player')).action.command, '/前往 -2 -161');
@@ -77,17 +88,82 @@ test('二转在25级开放，且不依赖生长结或其他剧情的进度', asy
   assert.equal((await service.advancedProfessionMainQuest('player')).title, '【主线·二转之路】');
 });
 
-test('二转只列出当前主职业适用的导师，抵达后可直接查看职业', async () => {
-  for (const [code, name] of Object.entries({ warrior: '战士', mage: '法师', rogue: '盗贼', priest: '牧师' })) {
+test('四种一转职业均列出全部普通二转导师，抵达后可直接查看职业', async () => {
+  for (const code of ['warrior', 'mage', 'rogue', 'priest']) {
     const service = setup({ profession_code: code });
-    const expected = worldTreeAdvancedProfessions.filter(route => route.baseProfession === name);
+    const expected = worldTreeAdvancedProfessions;
     const quest = await service.advancedProfessionMainQuest('player');
     assert.equal(quest.actions.length, expected.length);
+    assert.match(quest.description, /不受一转职业限制/);
     assert.deepEqual(quest.actions.map((action: { command: string }) => action.command), expected.map(route => `/前往 ${route.mentor.x} ${route.mentor.y}`));
     const route = expected[0];
     Object.assign(service.state.character, { region_code: 'world_tree', pos_x: route.mentor.x, pos_y: route.mentor.y });
     assert.equal((await service.advancedProfessionMainQuest('player')).actions[0].command, `/二转职业 ${route.mentor.code}`);
   }
+});
+
+const trialSetup = (base: string | null, code: string) => {
+  const profession = advancedProfessionByCode(code)!;
+  const character = { id: 7, level: 25, profession: base, region_code: 'world_tree', pos_x: profession.mentor.x, pos_y: profession.mentor.y };
+  const state = { character, completed: null as null | { profession_code: string; completed_at: Date }, active: [] as { profession_code: string; stage: number }[] };
+  const writes: { sql: string; values: unknown[] }[] = [];
+  const connection = { execute: async (sql: string, values: unknown[]) => {
+    if (sql.includes('FROM characters c')) return [[state.character]];
+    if (sql.startsWith('SELECT') && sql.includes('FROM player_advanced_professions')) return [state.completed ? [state.completed] : []];
+    if (sql.startsWith('SELECT') && sql.includes('FROM player_advanced_profession_quests')) return [state.active];
+    assert.match(sql, /^(INSERT INTO|DELETE FROM) player_advanced_profession_quests/);
+    writes.push({ sql, values }); return [{ affectedRows: 1 }];
+  } };
+  const service = loadDeclarations('../src/game/advanced-profession.service.ts', ['advancedProfessionRetrainCooldownMs', 'characterFor', 'assertAtMentor', 'beginAdvancedProfession'], {
+    withTransaction: (action: (connection: unknown) => unknown) => action(connection), advancedProfessionByCode, durationText: () => '24小时'
+  });
+  return { ...service, state, writes };
+};
+
+test('四种一转职业都能通过真实服务接取全部普通二转，保留原一转职业', async () => {
+  for (const base of ['warrior', 'mage', 'rogue', 'priest']) for (const profession of worldTreeAdvancedProfessions) {
+    const service = trialSetup(base, profession.code);
+    assert.equal((await service.beginAdvancedProfession('player', profession.code)).code, profession.code);
+    assert.equal(service.state.character.profession, base);
+    assert.equal(service.writes.length, 1);
+    assert.deepEqual(service.writes[0].values, [7, profession.code]);
+  }
+});
+
+test('跨系二转仍检查等级、初始职业、导师位置、冷却与任务切换确认', async () => {
+  const target = advancedProfessionByCode('elementalist')!;
+  for (const [patch, expected] of [
+    [{ level: 24 }, /Lv.25/], [{ profession: null }, /初始职业/], [{ pos_x: 999 }, /请前往世界树/]
+  ] as const) {
+    const service = trialSetup('warrior', target.code);
+    Object.assign(service.state.character, patch);
+    await assert.rejects(service.beginAdvancedProfession('player', target.code), expected);
+    assert.equal(service.writes.length, 0);
+  }
+  const service = trialSetup('warrior', target.code);
+  service.state.completed = { profession_code: 'bulwark_guard', completed_at: new Date() };
+  await assert.rejects(service.beginAdvancedProfession('player', target.code), /冷却/);
+  assert.equal(service.writes.length, 0);
+  service.state.completed.completed_at = new Date(Date.now() - 86400001);
+  service.state.active = [{ profession_code: 'bulwark_guard', stage: 2 }];
+  await assert.rejects(service.beginAdvancedProfession('player', target.code), /确认中断/);
+  assert.equal(service.writes.length, 0);
+  await service.beginAdvancedProfession('player', target.code, true);
+  assert.equal(service.writes.length, 2);
+  assert.match(service.writes[0].sql, /^DELETE/);
+  assert.deepEqual(service.writes[1].values, [7, target.code]);
+  assert.equal(service.state.completed.profession_code, 'bulwark_guard');
+});
+
+test('副职业隐藏二转仍要求十环资格及对应副职业', async () => {
+  const state = { profession: { code: 'hidden-test', secondary: 'blacksmith' }, character: { id: 7, profession_code: 'mage', adventurer_registered: 1, level: 25, secondary_profession_code: 'alchemist' }, row: { qualified_at: new Date(), stage: 11 } };
+  const service = loadDeclarations('../src/game/hidden-quest.service.ts', ['becomeHiddenProfession'], {
+    withTransaction: (action: (connection: unknown) => unknown) => action({ execute: () => assert.fail('资格检查不通过时不得写入或继续查询') }),
+    context: async () => state, assertCombatLoadoutMutable: async () => {}
+  });
+  await assert.rejects(service.becomeHiddenProfession('player', 'hidden-test'), /对应的副职业/);
+  state.row.stage = 10;
+  await assert.rejects(service.becomeHiddenProfession('player', 'hidden-test'), /十环委托/);
 });
 
 test('25级尚未选择主职业时，二转引导回公会补齐前置', async () => {
@@ -133,6 +209,7 @@ test('二转完成后收起引导，重新二转仍追踪新任务', async () =>
 
 test('任务栏同时呈现生长结与二转，主线分类和搜索保留二转操作', async () => {
   const service = setup();
+  const hidden = [{ title: '【二转·魔学者 1/10】四份对照药', description: '目标：交付药剂，回店找晴儿。', action: { label: '[返回导师]', command: '/前往 12 34' } }];
   const texts: string[] = []; const commands: string[] = [];
   const markdown: any = {};
   for (const method of ['addTitle', 'addText', 'addBlockquote']) markdown[method] = (value: string) => { texts.push(value); return markdown; };
@@ -144,6 +221,7 @@ test('任务栏同时呈现生长结与二转，主线分类和搜索保留二�
     ...service, playerBounties: async () => [], blacksmithQuest: emptyQuest, alchemistQuest: emptyQuest,
     deconstructorQuest: emptyQuest, omniscientQuest: emptyQuest, dungeonSecretProgress: emptyQuest,
     secondaryProfessionGuide: async () => false, evolutionObservationDashboard: async () => null,
+    alchemyCreationQuest: emptyQuest, currentDynamicEncounter: async () => null, hiddenTrackedQuests: async () => hidden,
     playerWorldSiteCommissions: async () => [], sequence: '①②③④⑤', taskButtons: () => ({}),
     Format: { createMarkdown: () => markdown, create: () => format }
   });
@@ -156,4 +234,9 @@ test('任务栏同时呈现生长结与二转，主线分类和搜索保留二�
   assert.doesNotMatch(texts.join('\n'), /主线·开化·生长结/);
   assert.match(texts.join('\n'), /主线·二转之路/);
   assert.ok(commands.includes('/前往 -8 -7'));
+  texts.length = 0; commands.length = 0;
+  await task.taskFormat('player', '支线', 1, '魔学者');
+  assert.match(texts.join('\n'), /四份对照药/);
+  assert.doesNotMatch(texts.join('\n'), /主线·二转之路/);
+  assert.deepEqual(commands, ['/前往 12 34']);
 });

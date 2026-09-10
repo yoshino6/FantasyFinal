@@ -1,3 +1,4 @@
+import { achievementLevel } from './achievement-hooks';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { experienceRequiredForLevel } from './constants';
@@ -294,6 +295,7 @@ export const injectEvolution = async (qqUserId: string, code: InjectionCode, req
   ]);
   // 生长结消耗的正是当前等级已满的经验；注射解除结后，立刻按普通升级规则结算下一等级与技能点。
   await connection.execute('UPDATE characters SET level=?,experience=0,skill_points=skill_points+1 WHERE id=?', [nextLevel, character.id]);
+  achievementLevel(connection,Number(character.id),nextLevel);
   await recordSkillPointChange(connection, Number(character.id), 1, 'level_up', null, `进化注射后升至 Lv.${nextLevel}`);
   await connection.execute(`INSERT INTO player_events (player_id,event_type,payload)
     SELECT player_id,'evolution.injected',? FROM characters WHERE id=?`, [JSON.stringify({ code, level: currentCap, mutation: mutation?.code ?? null, finalTraits: finalTraits.map(trait => trait.mutation_code), symbiosisTrait }), character.id]);

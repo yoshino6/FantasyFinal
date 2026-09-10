@@ -1,3 +1,4 @@
+import { armorPieceDescription } from '../game/armor-class';
 import { Format, logger, useEvent, useRoute } from 'alemonjs';
 import { useGameMessage as useMessage } from '../game/use-game-message';
 import { equipmentDetail, equippedEquipmentDetails } from '../game/adventure.service';
@@ -25,7 +26,7 @@ const artifactEffects: Record<string, string[]> = {
 };
 
 const slotNames: Record<string, string> = { weapon: '武器', offhand: '副手', shoulder: '头肩', upper: '上装', waist: '腰部', lower: '下装', feet: '脚部', necklace: '项链', bracelet: '手镯', ring: '戒指' };
-type EquipmentDetailItem = Awaited<ReturnType<typeof equipmentDetail>>;
+type EquipmentDetailItem = Omit<Awaited<ReturnType<typeof equipmentDetail>>, 'fusionEffects'> & { fusionEffects?: Array<{ materialName: string; key: string; value: number; createdAt: Date }> };
 
 const equipmentSections = (effectJson: unknown, quality: number, primaryJson: unknown, category: string, subtype: string | null) => {
   const effect = (typeof effectJson === 'string' ? JSON.parse(effectJson) : effectJson ?? {}) as Record<string, unknown>;
@@ -39,7 +40,7 @@ const equipmentSections = (effectJson: unknown, quality: number, primaryJson: un
   const scale = .6 + Math.max(0, Math.min(100, quality)) * .004;
   const labels: Record<string, string> = {
     hpMax: '生命', mpMax: '魔力', physicalAttack: '物攻', magicAttack: '魔攻', physicalDefense: '物防', magicDefense: '魔防', accuracy: '命中', evasion: '闪避', speed: '速度', critRateBp: '暴击', critDamageBp: '暴伤', critResistBp: '暴免', critDamageReductionBp: '暴抗', physicalAttackPct: '物攻',
-    magicAttackPct: '魔攻', physicalDefensePct: '物防', magicDefensePct: '魔防', critRatePct: '暴击', critDamagePct: '暴伤', accuracyPct: '命中', evasionPct: '闪避', speedPct: '速度', mpPct: '魔力', hpPct: '生命', tenacity: '韧性', tenacityPct: '韧性', tenacityPierce: '破韧', tenacityPiercePct: '破韧'
+    magicAttackPct: '魔攻', physicalDefensePct: '物防', magicDefensePct: '魔防', critRatePct: '暴击', critDamagePct: '暴伤', accuracyPct: '命中', evasionPct: '闪避', speedPct: '速度', mpPct: '魔力', hpPct: '生命', tenacity: '韧性', tenacityPct: '韧性', tenacityPierce: '破韧', tenacityPiercePct: '破韧', constitutionPct: '体质', spiritPct: '精神', strengthPct: '力量', intelligencePct: '智力', agilityPct: '敏捷', perceptionPct: '感知'
   };
   const attributeLabel = (key: string) => labels[key] ?? (key.startsWith('elementMastery_') ? `${key.slice('elementMastery_'.length)}元素精通` : key.startsWith('elementResistance_') ? `${key.slice('elementResistance_'.length)}元素抗性` : '');
   const normalOrder = ['hpMax', 'mpMax', 'physicalAttack', 'magicAttack', 'physicalDefense', 'magicDefense', 'accuracy', 'evasion', 'speed', 'critRateBp', 'critDamageBp', 'critResistBp', 'critDamageReductionBp', 'tenacity', 'tenacityPierce', 'hpPct', 'mpPct', 'physicalAttackPct', 'magicAttackPct', 'physicalDefensePct', 'magicDefensePct', 'accuracyPct', 'evasionPct', 'speedPct', 'critRatePct', 'critDamagePct', 'tenacityPct', 'tenacityPiercePct'];
@@ -68,6 +69,8 @@ const equipmentSections = (effectJson: unknown, quality: number, primaryJson: un
         ? `${prefix}${effectLabels[key]} ${Math.abs(Number(value))}%`
         : `${prefix}${effectLabels[key]} ${key === 'manaCostReduction' || key === 'magicChantBonus' ? value : `${value}%`}`;
     });
+  const armorText = armorPieceDescription(subtype, String(effect.slot ?? category), quality);
+  if (armorText) effects.unshift('甲类逐件乘算：' + armorText);
   if (effect.physicalForceCrit) effects.unshift('你的物理攻击必定暴击。');
   const artifact = String(effect.artifact ?? '');
   if (artifactEffects[artifact]) effects.unshift(...artifactEffects[artifact]);
@@ -87,6 +90,12 @@ const detailMarkdown = (item: EquipmentDetailItem, heading = '装备详情') => 
   for (const attribute of sections.attributes.length ? sections.attributes : ['无']) markdown.addBlockquote(attribute).addNewline();
   markdown.addNewline().addText('特殊属性：').addNewline();
   for (const effect of sections.effects.length ? sections.effects : ['无']) markdown.addBlockquote(effect.replaceAll('$', '\\$').replaceAll('#', '\\#')).addNewline();
+  const fusionLabels: Record<string, string> = { hpMax:'生命',mpMax:'魔力',physicalAttack:'物攻',magicAttack:'魔攻',physicalDefense:'物防',magicDefense:'魔防',accuracy:'命中',evasion:'闪避',critRateBp:'暴击',critDamageBp:'暴伤',critResistBp:'暴免',critDamageReductionBp:'暴抗',tenacity:'韧性',tenacityPierce:'破韧',speed:'速度',hpPct:'生命',mpPct:'魔力',physicalAttackPct:'物攻',magicAttackPct:'魔攻',physicalDefensePct:'物防',magicDefensePct:'魔防',accuracyPct:'命中',evasionPct:'闪避',critRatePct:'暴击',critDamagePct:'暴伤',critResistPct:'暴免',critDamageReductionPct:'暴抗',tenacityPct:'韧性',tenacityPiercePct:'破韧',speedPct:'速度',damageBonusPct:'造成伤害',constitutionPct:'体质',spiritPct:'精神',strengthPct:'力量',intelligencePct:'智力',agilityPct:'敏捷',perceptionPct:'感知' };
+  const fusionText = (entry: { materialName: string; key: string; value: number }) => { const label = fusionLabels[entry.key] ?? (entry.key.startsWith('elementMastery_') ? `${entry.key.slice('elementMastery_'.length)}元素精通` : entry.key.startsWith('elementResistance_') ? `${entry.key.slice('elementResistance_'.length)}元素抗性` : entry.key); return `${entry.materialName}：${label}+${Number(entry.value).toFixed(2)}${entry.key.endsWith('Pct') ? '%' : ''}`; };
+  if (item.fusionEffects?.length) {
+    markdown.addNewline().addText('熔铸记录：').addNewline();
+    for (const effect of item.fusionEffects) markdown.addBlockquote(fusionText(effect)).addNewline();
+  }
   return markdown.addNewline().addText('简介：').addNewline().addBlockquote(item.description);
 };
 

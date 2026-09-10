@@ -1,3 +1,4 @@
+import { recordAchievement } from './achievement-events';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { recordPvpLootSale } from './pvp.service';
@@ -41,5 +42,6 @@ export const sellOddWorkshopItem = async (qqUserId: string, itemId: number, quan
   await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [amount, character.id, item.id]);
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, item.id]);
   await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [price, character.id]);
+  recordAchievement(connection,Number(character.id),[{metric:'ACH_K09',value:Number(price),life:true}]);
   return { name: item.name, quantity: amount, price };
 });

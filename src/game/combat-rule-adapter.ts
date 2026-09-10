@@ -1,9 +1,13 @@
+import { armorSetsFor } from './armor-set';
+import { openingCombatEffectsFor } from './opening-combat';
+import { hasTalent, installTalentHealingGuard } from './talent-combat';
+import { initializeHiddenBattleUnits } from './hidden-battle.service';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { passiveSpecializationFactor } from './passive-specialization';
 import { CombatRules, readRuleState, type RuleStatus, type RuleUnit } from './combat-rule-registry';
 
 type CombatRow = Record<string, any>;
-type LegacyEffect = { id: number; target_kind: string; target_id: number; code: string; effect_type: string; value: number; stacks: number; remaining_turns: number };
+type LegacyEffect = { source_key?: string | null; id: number; target_kind: string; target_id: number; code: string; effect_type: string; value: number; stacks: number; remaining_turns: number };
 const record = (value: unknown): Record<string, any> => typeof value === 'string' ? JSON.parse(value) : (value ?? {}) as Record<string, any>;
 const negative = new Set(['vulnerability', 'armor_shatter', 'magic_shatter', 'imbalance', 'slow', 'bind', 'stun', 'exposed', 'poison', 'burn', 'bleed', 'bleeding', 'alchemy_confusion', 'advanced_hunt']);
 export const ruleAppraisalLevels = async (connection: PoolConnection, ids: number[]) => {
@@ -17,9 +21,11 @@ export const ruleAppraisalLevels = async (connection: PoolConnection, ids: numbe
 export const createCombatRules = async (connection: PoolConnection, sessionId: string, turn: number, members: CombatRow[], targets: CombatRow[],
   statsForTarget: (target: any) => Record<string, number>, effects: () => LegacyEffect[], log: string[], weather: string,
   absorb: (kind: 'member' | 'target', id: number, hpMax: number, amount: number) => Promise<{ absorbed: number; remaining: number; broken: boolean }>,
-  onExtra: (kind: 'member' | 'target', id: number) => void) => {
+  onExtra: (kind: 'member' | 'target', id: number) => void, openingPve=true) => {
   const ids = members.map(member => Number(member.id));
   const appraisal = await ruleAppraisalLevels(connection, ids);
+  const armorSets = await armorSetsFor(connection, ids);
+  const openingEffects = await openingCombatEffectsFor(connection, members.filter(member=>!member.npc_code).map(member=>Number(member.id)), openingPve);
   const [passives] = await connection.execute<(RowDataPacket & { character_id: number; code: string })[]>(`SELECT ps.character_id,s.code,s.tier,COALESCE(sp.level,1) AS potent_level FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id LEFT JOIN player_skill_specializations sp ON sp.character_id=ps.character_id AND sp.skill_id=s.id AND sp.specialization='potent' WHERE ps.character_id IN (${ids.map(() => '?').join(',')}) AND ps.passive_linked=1 AND s.code LIKE 'resident_%'`, ids);
   const [weapons] = await connection.execute<RowDataPacket[]>(`SELECT pe.character_id,COUNT(DISTINCT i.weapon_type) AS types FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id WHERE pe.character_id IN (${ids.map(() => '?').join(',')}) AND i.item_category IN ('武器','副手') GROUP BY pe.character_id`, ids);
   const make = (row: CombatRow, kind: 'member' | 'target'): RuleUnit => {
@@ -41,18 +47,38 @@ export const createCombatRules = async (connection: PoolConnection, sessionId: s
       weaponsDifferent: Number(weapons.find(weapon => Number(weapon.character_id) === Number(row.id))?.types ?? 0) > 1,
       mastery: record(row.element_mastery_json), resistance: record(row.element_resistance_json), appraisal: kind === 'target' ? 0 : appraisal.get(Number(row.id)) ?? 0,
       passiveSpecializations: Object.fromEntries(passives.filter(passive => Number(passive.character_id) === Number(row.id) && kind === 'member').map(passive => [passive.code, passiveSpecializationFactor(passive.potent_level, String(passive.tier))])),
+      armorSet: kind === 'member' ? armorSets.get(Number(row.id)) : profile?.armorSet ?? (Array.isArray(traits) ? traits.find(trait => trait.code === 'advanced_mentor_build')?.build?.armorSet : undefined),
+      opening: kind === 'member' && !row.npc_code ? openingEffects.get(Number(row.id)) : undefined,
       modifiers: profile?.advancedEffect ?? {}
     };
   };
   const units = [...members.map(row => make(row, 'member')), ...targets.map(row => make(row, 'target'))];
+  for (const unit of units) {
+    const row = [...members,...targets].find(row=>unit.key===`${unit.side}:${row.id}`);
+    if(row)installTalentHealingGuard(unit,row);
+  }
+  await initializeHiddenBattleUnits(connection, units);
   const identity = (unit: RuleUnit) => { const [kind, id] = unit.key.split(':'); return { kind: kind as 'member' | 'target', id: Number(id) }; };
   const removed = new Set<number>();
   const shieldResults = new Map<string, { absorbed: number; remaining: number; broken: boolean }>();
   const rule = new CombatRules(units, turn, log, {
+    strikeResolved: async (source,target,damage) => {
+      if(source.side!=='member'||target.side!=='target'||damage<=0)return;
+      await connection.execute('UPDATE combat_threat SET threat=threat+? WHERE session_id=? AND spawn_id=? AND character_id=?',[damage*(hasTalent(source,'A06')?1.5:1),sessionId,identity(target).id,identity(source).id]);
+    },
     absorb: async (unit, amount) => { const { kind, id } = identity(unit); const result = await absorb(kind, id, unit.hpMax, amount); shieldResults.set(unit.key, result); return result.absorbed; },
-    legacyEffects: unit => { const { kind, id } = identity(unit); return effects().filter(effect => effect.target_kind === kind && Number(effect.target_id) === id && !removed.has(Number(effect.id))).map(effect => ({ code: effect.code === 'alchemy_confusion' ? 'confusion' : effect.code, value: Number(effect.value), until: turn + Number(effect.remaining_turns), source: '', debuff: negative.has(effect.code) || ['control', 'damage_over_time'].includes(effect.effect_type), stacks: Number(effect.stacks), legacyId: Number(effect.id) } as RuleStatus)); },
+    legacyEffects: unit => { const { kind, id } = identity(unit); return effects().filter(effect => effect.target_kind === kind && Number(effect.target_id) === id && !removed.has(Number(effect.id))).map(effect => ({ code: effect.code === 'alchemy_confusion' ? 'confusion' : effect.code, value: Number(effect.value), until: turn + Number(effect.remaining_turns), source: String(effect.source_key ?? ''), debuff: negative.has(effect.code) || ['control', 'damage_over_time'].includes(effect.effect_type), stacks: Number(effect.stacks), legacyId: Number(effect.id) } as RuleStatus)); },
     removeLegacy: async id => { removed.add(id); const row = effects().find(effect => Number(effect.id) === id); if (row) { row.value = 0; row.stacks = 0; } await connection.execute('DELETE FROM combat_status_effects WHERE session_id=? AND id=?', [sessionId, id]); },
     updateLegacy: async effect => { if (!effect.legacyId) return; const row = effects().find(item => Number(item.id) === effect.legacyId); if (row) { row.value = effect.value; row.stacks = effect.stacks; } await connection.execute('UPDATE combat_status_effects SET value=?,stacks=? WHERE session_id=? AND id=?', [effect.value, effect.stacks, sessionId, effect.legacyId]); },
+    transferLegacy: async (effect, source, target) => {
+      const row = effects().find(e => Number(e.id) === effect.legacyId);
+      if (!row || removed.has(Number(row.id)) || row.remaining_turns <= 0) return false;
+      const destination = identity(target), origin = identity(source);
+      if (row.target_kind !== origin.kind || Number(row.target_id) !== origin.id) return false;
+      await connection.execute('UPDATE combat_status_effects SET target_kind=?,target_id=? WHERE session_id=? AND id=?', [destination.kind, destination.id, sessionId, row.id]);
+      row.target_kind = destination.kind; row.target_id = destination.id;
+      return true;
+    },
     extraAction: unit => { const { kind, id } = identity(unit); onExtra(kind, id); },
     swapThreat: async (a, b) => {
       if (a.side !== 'member' || b.side !== 'member' || a.key === b.key) return;
@@ -63,9 +89,10 @@ export const createCombatRules = async (connection: PoolConnection, sessionId: s
   const get = (kind: 'member' | 'target', id: number) => units.find(unit => unit.key === `${kind}:${id}`)!;
   const profile = targets.map(row => { const traits = typeof row.traits_json === 'string' ? JSON.parse(row.traits_json) : row.traits_json; return Array.isArray(traits) ? traits.find(trait => trait.code === 'npc_sparring')?.profile : undefined; }).find(Boolean);
   rule.sparLevelBand = profile?.band; rule.start();
-  const takeDamage = async (kind: 'member' | 'target', id: number, incoming: number) => {
+  const takeDamage = async (kind: 'member' | 'target', id: number, incoming: number, areaHit = false, source?: RuleUnit) => {
     const unit = get(kind, id); const ownBefore = rule.value(unit, 'shield');
-    const absorbed = await rule.take(unit, incoming); const ownAfter = rule.value(unit, 'shield'); const legacy = shieldResults.get(unit.key);
+    const result = await rule.takeHit(unit, incoming, 1, areaHit, source); incoming = result.damage;
+    const absorbed = result.absorbed; const ownAfter = rule.value(unit, 'shield'); const legacy = shieldResults.get(unit.key);
     return { incoming, absorbed, remaining: ownAfter + Number(legacy?.remaining ?? 0), broken: Boolean(legacy?.broken) || ownBefore > 0 && ownAfter <= 0 };
   };
   return { rule, get, takeDamage };

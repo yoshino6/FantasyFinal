@@ -1,3 +1,5 @@
+import { recordAchievement } from './achievement-events';
+import { assertHiddenInstanceMutable } from './combat-loadout-lock.service';
 import { buySecondaryFinished } from './secondary-shop.service';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
@@ -54,10 +56,10 @@ export const blacksmithSellCatalog = async (qqUserId: string, page = 1, keyword 
     LEFT JOIN blacksmith_shop_items si ON si.item_id=i.id
     WHERE ii.character_id=? AND pe.instance_id IS NULL AND i.is_tradeable=1 AND i.item_type='equipment' AND i.name LIKE ?`;
   const materialSql = `SELECT 'material' AS sale_kind,i.id AS sale_id,i.name,i.item_category,0 AS required_level,NULL AS quality,pi.quantity,
-      CEIL(i.trade_price*1.15) AS sell_price,pi.acquired_at
+      FLOOR(i.trade_price*.5) AS sell_price,pi.acquired_at
     FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id
     WHERE pi.character_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0 AND COALESCE(JSON_EXTRACT(i.effect_json,'$.noNpcSale'),0)=0
-      AND i.item_category IN ('怪材','锻材','粒子') AND i.name LIKE ?`;
+      AND (i.item_category IN ('怪材','锻材','稀有锻材','区域锻材','粒子') OR i.code='sky_dust') AND i.name LIKE ?`;
   const source = `(${equipmentSql} UNION ALL ${materialSql}) AS sale_items`;
   const [countRows] = await pool.execute<(RowDataPacket & { total: number })[]>(`SELECT COUNT(*) AS total FROM ${source}`, [character.id, term, character.id, term]);
   const paging = pageInfo(page, Number(countRows[0]?.total ?? 0));
@@ -69,6 +71,7 @@ export const buyBlacksmithEquipment = async (qqUserId: string, itemId: number, q
 
 export const sellBlacksmithEquipment = async (qqUserId: string, instanceId: number) => withTransaction(async connection => {
   const character = await characterFor(connection, qqUserId, true);
+  await assertHiddenInstanceMutable(connection, Number(character.id), instanceId);
   const [rows] = await connection.execute<(SellRow & { item_id: number })[]>(`SELECT ii.id AS instance_id,ii.item_id,i.name,i.item_category,i.required_level,ii.quality,COALESCE(si.sell_price,GREATEST(1,FLOOR(i.required_level*20))) AS sell_price
     FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
     LEFT JOIN player_equipment pe ON pe.character_id=ii.character_id AND pe.instance_id=ii.id
@@ -77,21 +80,23 @@ export const sellBlacksmithEquipment = async (qqUserId: string, instanceId: numb
   const item = rows[0]; if (!item) throw new Error('未找到可出售的未装备物品。');
   await connection.execute('DELETE FROM player_item_instances WHERE id=? AND character_id=?', [instanceId, character.id]);
   await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [item.sell_price, character.id]);
+  recordAchievement(connection,Number(character.id),[{metric:'ACH_K09',value:Number(item.sell_price),life:true}]);
   return { name: item.name, price: Number(item.sell_price) };
 });
 
 export const sellBlacksmithMaterial = async (qqUserId: string, itemId: number, quantity = 1) => withTransaction(async connection => {
   const amount = validMaterialQuantity(quantity); const character = await characterFor(connection, qqUserId, true);
-  const [rows] = await connection.execute<(RowDataPacket & { id: number; name: string; quantity: number; sell_price: number })[]>(`SELECT i.id,i.name,pi.quantity,CEIL(i.trade_price*1.15) AS sell_price
+  const [rows] = await connection.execute<(RowDataPacket & { id: number; name: string; quantity: number; sell_price: number })[]>(`SELECT i.id,i.name,pi.quantity,FLOOR(i.trade_price*.5) AS sell_price
     FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id
     WHERE pi.character_id=? AND pi.item_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0 AND COALESCE(JSON_EXTRACT(i.effect_json,'$.noNpcSale'),0)=0
-      AND i.item_category IN ('怪材','锻材','粒子') FOR UPDATE`, [character.id, itemId]);
-  const item = rows[0]; if (!item) throw new Error('小北只收购装备、怪材、锻材与粒子。');
+      AND (i.item_category IN ('怪材','锻材','稀有锻材','区域锻材','粒子') OR i.code='sky_dust') FOR UPDATE`, [character.id, itemId]);
+  const item = rows[0]; if (!item) throw new Error('小北只收购装备、怪材、锻材、粒子与天空粉尘。');
   if (Number(item.quantity) < amount) throw new Error(`背包数量不足，当前仅有 ${item.quantity} 个。`);
   const price = Number(item.sell_price) * amount;
   await recordPvpLootSale(connection, Number(character.id), Number(item.id), amount, price);
   await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [amount, character.id, item.id]);
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, item.id]);
   await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [price, character.id]);
+  recordAchievement(connection,Number(character.id),[{metric:'ACH_K09',value:Number(price),life:true}]);
   return { name: item.name, quantity: amount, price };
 });

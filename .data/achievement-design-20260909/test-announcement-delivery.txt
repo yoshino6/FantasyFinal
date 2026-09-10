@@ -1,0 +1,41 @@
+TAP version 13
+# Subtest: 成功回执标记已发送并保存平台消息编号
+ok 1 - 成功回执标记已发送并保存平台消息编号
+  ---
+  duration_ms: 1.9286
+  type: 'test'
+  ...
+# Subtest: 无权限的主动消息不再进入自动重试队列
+ok 2 - 无权限的主动消息不再进入自动重试队列
+  ---
+  duration_ms: 0.2416
+  type: 'test'
+  ...
+# Subtest: 超时或未知失败不重发，部分送达也保留待核查
+ok 3 - 超时或未知失败不重发，部分送达也保留待核查
+  ---
+  duration_ms: 0.1548
+  type: 'test'
+  ...
+# Subtest: 审计仅保存状态码和平台消息编号，不保存连接信息
+ok 4 - 审计仅保存状态码和平台消息编号，不保存连接信息
+  ---
+  duration_ms: 0.3173
+  type: 'test'
+  ...
+# Subtest: 隔离MySQL：原子达成、首位、回滚、重试、跨重修属性与无效身份排除
+ok 5 - 隔离MySQL：原子达成、首位、回滚、重试、跨重修属性与无效身份排除
+  ---
+  duration_ms: 848.7469
+  type: 'test'
+  ...
+# [2026-09-09 22:32:01][INFO] [alemonjs][exit] 进程退出，code=0
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1880.4184

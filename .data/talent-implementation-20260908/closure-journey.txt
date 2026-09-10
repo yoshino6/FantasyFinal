@@ -1,0 +1,558 @@
+TAP version 13
+# Subtest: 天赋A至I真实玩家公共路径：面板、天赋入口、开战、胜利及一次结算
+    # Subtest: A01 战意不灭 公共玩家路径
+    ok 1 - A01 战意不灭 公共玩家路径
+      ---
+      duration_ms: 420.2166
+      type: 'test'
+      ...
+    # Subtest: A02 守望之手 公共玩家路径
+    ok 2 - A02 守望之手 公共玩家路径
+      ---
+      duration_ms: 286.0046
+      type: 'test'
+      ...
+    # Subtest: A03 魔力潮汐 公共玩家路径
+    ok 3 - A03 魔力潮汐 公共玩家路径
+      ---
+      duration_ms: 542.6381
+      type: 'test'
+      ...
+    # Subtest: A04 破阵之眼 公共玩家路径
+    ok 4 - A04 破阵之眼 公共玩家路径
+      ---
+      duration_ms: 572.6371
+      type: 'test'
+      ...
+    # Subtest: A05 兵无常形 公共玩家路径
+    ok 5 - A05 兵无常形 公共玩家路径
+      ---
+      duration_ms: 246.3997
+      type: 'test'
+      ...
+    # Subtest: A06 誓约前锋 公共玩家路径
+    ok 6 - A06 誓约前锋 公共玩家路径
+      ---
+      duration_ms: 417.7568
+      type: 'test'
+      ...
+    # Subtest: A07 长夜猎手 公共玩家路径
+    ok 7 - A07 长夜猎手 公共玩家路径
+      ---
+      duration_ms: 625.982
+      type: 'test'
+      ...
+    # Subtest: A08 回锋听雨 公共玩家路径
+    ok 8 - A08 回锋听雨 公共玩家路径
+      ---
+      duration_ms: 609.6707
+      type: 'test'
+      ...
+    # Subtest: A09 百步穿星 公共玩家路径
+    ok 9 - A09 百步穿星 公共玩家路径
+      ---
+      duration_ms: 210.8635
+      type: 'test'
+      ...
+    # Subtest: A10 共鸣指挥 公共玩家路径
+    ok 10 - A10 共鸣指挥 公共玩家路径
+      ---
+      duration_ms: 235.5559
+      type: 'test'
+      ...
+    # Subtest: B01 风行旅途 公共玩家路径
+    ok 11 - B01 风行旅途 公共玩家路径
+      ---
+      duration_ms: 216.0426
+      type: 'test'
+      ...
+    # Subtest: B02 万象微光 公共玩家路径
+    ok 12 - B02 万象微光 公共玩家路径
+      ---
+      duration_ms: 290.5324
+      type: 'test'
+      ...
+    # Subtest: B03 命运余光 公共玩家路径
+    ok 13 - B03 命运余光 公共玩家路径
+      ---
+      duration_ms: 206.7082
+      type: 'test'
+      ...
+    # Subtest: B04 山河识途 公共玩家路径
+    ok 14 - B04 山河识途 公共玩家路径
+      ---
+      duration_ms: 266.9081
+      type: 'test'
+      ...
+    # Subtest: B05 拾荒王冠 公共玩家路径
+    ok 15 - B05 拾荒王冠 公共玩家路径
+      ---
+      duration_ms: 258.7462
+      type: 'test'
+      ...
+    # Subtest: B06 深境回声 公共玩家路径
+    ok 16 - B06 深境回声 公共玩家路径
+      ---
+      duration_ms: 275.9378
+      type: 'test'
+      ...
+    # Subtest: B07 地脉寻金 公共玩家路径
+    ok 17 - B07 地脉寻金 公共玩家路径
+      ---
+      duration_ms: 297.5643
+      type: 'test'
+      ...
+    # Subtest: B08 灰烬罗盘 公共玩家路径
+    ok 18 - B08 灰烬罗盘 公共玩家路径
+      ---
+      duration_ms: 304.8813
+      type: 'test'
+      ...
+    # Subtest: B09 秘境听潮 公共玩家路径
+    ok 19 - B09 秘境听潮 公共玩家路径
+      ---
+      duration_ms: 280.2484
+      type: 'test'
+      ...
+    # Subtest: B10 萤火归途 公共玩家路径
+    ok 20 - B10 萤火归途 公共玩家路径
+      ---
+      duration_ms: 205.5307
+      type: 'test'
+      ...
+    # Subtest: C01 星路学徒 公共玩家路径
+    ok 21 - C01 星路学徒 公共玩家路径
+      ---
+      duration_ms: 304.9001
+      type: 'test'
+      ...
+    # Subtest: C02 百战成书 公共玩家路径
+    ok 22 - C02 百战成书 公共玩家路径
+      ---
+      duration_ms: 227.2246
+      type: 'test'
+      ...
+    # Subtest: C03 大器晚成 公共玩家路径
+    ok 23 - C03 大器晚成 公共玩家路径
+      ---
+      duration_ms: 244.8758
+      type: 'test'
+      ...
+    # Subtest: C04 触类旁通 公共玩家路径
+    ok 24 - C04 触类旁通 公共玩家路径
+      ---
+      duration_ms: 303.1422
+      type: 'test'
+      ...
+    # Subtest: C05 行路为师 公共玩家路径
+    ok 25 - C05 行路为师 公共玩家路径
+      ---
+      duration_ms: 231.7802
+      type: 'test'
+      ...
+    # Subtest: C06 听见败因 公共玩家路径
+    ok 26 - C06 听见败因 公共玩家路径
+      ---
+      duration_ms: 230.4746
+      type: 'test'
+      ...
+    # Subtest: C07 一念通明 公共玩家路径
+    ok 27 - C07 一念通明 公共玩家路径
+      ---
+      duration_ms: 218.2152
+      type: 'test'
+      ...
+    # Subtest: C08 笨鸟先飞 公共玩家路径
+    ok 28 - C08 笨鸟先飞 公共玩家路径
+      ---
+      duration_ms: 226.4825
+      type: 'test'
+      ...
+    # Subtest: C09 众生皆师 公共玩家路径
+    ok 29 - C09 众生皆师 公共玩家路径
+      ---
+      duration_ms: 269.6947
+      type: 'test'
+      ...
+    # Subtest: C10 温故生新 公共玩家路径
+    ok 30 - C10 温故生新 公共玩家路径
+      ---
+      duration_ms: 282.2348
+      type: 'test'
+      ...
+    # Subtest: D01 万语聆听 公共玩家路径
+    ok 31 - D01 万语聆听 公共玩家路径
+      ---
+      duration_ms: 370.0661
+      type: 'test'
+      ...
+    # Subtest: D02 灵契之声 公共玩家路径
+    ok 32 - D02 灵契之声 公共玩家路径
+      ---
+      duration_ms: 388.7503
+      type: 'test'
+      ...
+    # Subtest: D03 人间灯火 公共玩家路径
+    ok 33 - D03 人间灯火 公共玩家路径
+      ---
+      duration_ms: 324.2261
+      type: 'test'
+      ...
+    # Subtest: D04 言出有契 公共玩家路径
+    ok 34 - D04 言出有契 公共玩家路径
+      ---
+      duration_ms: 261.1835
+      type: 'test'
+      ...
+    # Subtest: D05 共席之人 公共玩家路径
+    ok 35 - D05 共席之人 公共玩家路径
+      ---
+      duration_ms: 362.0114
+      type: 'test'
+      ...
+    # Subtest: D06 名字会开花 公共玩家路径
+    ok 36 - D06 名字会开花 公共玩家路径
+      ---
+      duration_ms: 246.3529
+      type: 'test'
+      ...
+    # Subtest: D07 化干戈 公共玩家路径
+    ok 37 - D07 化干戈 公共玩家路径
+      ---
+      duration_ms: 334.0765
+      type: 'test'
+      ...
+    # Subtest: D08 无价之礼 公共玩家路径
+    ok 38 - D08 无价之礼 公共玩家路径
+      ---
+      duration_ms: 192.9775
+      type: 'test'
+      ...
+    # Subtest: D09 众口成碑 公共玩家路径
+    ok 39 - D09 众口成碑 公共玩家路径
+      ---
+      duration_ms: 246.7247
+      type: 'test'
+      ...
+    # Subtest: D10 同心结 公共玩家路径
+    ok 40 - D10 同心结 公共玩家路径
+      ---
+      duration_ms: 267.8525
+      type: 'test'
+      ...
+    # Subtest: E01 丰穰之手 公共玩家路径
+    ok 41 - E01 丰穰之手 公共玩家路径
+      ---
+      duration_ms: 253.3067
+      type: 'test'
+      ...
+    # Subtest: E02 炉火记忆 公共玩家路径
+    ok 42 - E02 炉火记忆 公共玩家路径
+      ---
+      duration_ms: 257.1406
+      type: 'test'
+      ...
+    # Subtest: E03 百味共鸣 公共玩家路径
+    ok 43 - E03 百味共鸣 公共玩家路径
+      ---
+      duration_ms: 211.4203
+      type: 'test'
+      ...
+    # Subtest: E04 营造之心 公共玩家路径
+    ok 44 - E04 营造之心 公共玩家路径
+      ---
+      duration_ms: 222.2166
+      type: 'test'
+      ...
+    # Subtest: E05 公道之秤 公共玩家路径
+    ok 45 - E05 公道之秤 公共玩家路径
+      ---
+      duration_ms: 333.535
+      type: 'test'
+      ...
+    # Subtest: E06 机巧知音 公共玩家路径
+    ok 46 - E06 机巧知音 公共玩家路径
+      ---
+      duration_ms: 213.7633
+      type: 'test'
+      ...
+    # Subtest: E07 百炼成纹 公共玩家路径
+    ok 47 - E07 百炼成纹 公共玩家路径
+      ---
+      duration_ms: 218.7888
+      type: 'test'
+      ...
+    # Subtest: E08 丹心未冷 公共玩家路径
+    ok 48 - E08 丹心未冷 公共玩家路径
+      ---
+      duration_ms: 209.473
+      type: 'test'
+      ...
+    # Subtest: E09 巧手无余 公共玩家路径
+    ok 49 - E09 巧手无余 公共玩家路径
+      ---
+      duration_ms: 316.1654
+      type: 'test'
+      ...
+    # Subtest: E10 种梦之人 公共玩家路径
+    ok 50 - E10 种梦之人 公共玩家路径
+      ---
+      duration_ms: 272.3578
+      type: 'test'
+      ...
+    # Subtest: F01 朱雀血脉 公共玩家路径
+    ok 51 - F01 朱雀血脉 公共玩家路径
+      ---
+      duration_ms: 541.7324
+      type: 'test'
+      ...
+    # Subtest: F02 青龙血脉 公共玩家路径
+    ok 52 - F02 青龙血脉 公共玩家路径
+      ---
+      duration_ms: 248.8011
+      type: 'test'
+      ...
+    # Subtest: F03 玄武血脉 公共玩家路径
+    ok 53 - F03 玄武血脉 公共玩家路径
+      ---
+      duration_ms: 261.0844
+      type: 'test'
+      ...
+    # Subtest: F04 白虎血脉 公共玩家路径
+    ok 54 - F04 白虎血脉 公共玩家路径
+      ---
+      duration_ms: 218.4701
+      type: 'test'
+      ...
+    # Subtest: F05 麒麟血脉 公共玩家路径
+    ok 55 - F05 麒麟血脉 公共玩家路径
+      ---
+      duration_ms: 224.4541
+      type: 'test'
+      ...
+    # Subtest: F06 烛龙血脉 公共玩家路径
+    ok 56 - F06 烛龙血脉 公共玩家路径
+      ---
+      duration_ms: 456.5014
+      type: 'test'
+      ...
+    # Subtest: F07 鲲鹏血脉 公共玩家路径
+    ok 57 - F07 鲲鹏血脉 公共玩家路径
+      ---
+      duration_ms: 203.6482
+      type: 'test'
+      ...
+    # Subtest: F08 九尾血脉 公共玩家路径
+    ok 58 - F08 九尾血脉 公共玩家路径
+      ---
+      duration_ms: 330.3707
+      type: 'test'
+      ...
+    # Subtest: F09 饕餮血脉 公共玩家路径
+    ok 59 - F09 饕餮血脉 公共玩家路径
+      ---
+      duration_ms: 203.1309
+      type: 'test'
+      ...
+    # Subtest: F10 应龙血脉 公共玩家路径
+    ok 60 - F10 应龙血脉 公共玩家路径
+      ---
+      duration_ms: 250.2087
+      type: 'test'
+      ...
+    # Subtest: G01 饮血之躯 公共玩家路径
+    ok 61 - G01 饮血之躯 公共玩家路径
+      ---
+      duration_ms: 477.786
+      type: 'test'
+      ...
+    # Subtest: G02 磐心壁垒 公共玩家路径
+    ok 62 - G02 磐心壁垒 公共玩家路径
+      ---
+      duration_ms: 452.1605
+      type: 'test'
+      ...
+    # Subtest: G03 苍天霸体 公共玩家路径
+    ok 63 - G03 苍天霸体 公共玩家路径
+      ---
+      duration_ms: 249.3277
+      type: 'test'
+      ...
+    # Subtest: G04 先天道体 公共玩家路径
+    ok 64 - G04 先天道体 公共玩家路径
+      ---
+      duration_ms: 369.9322
+      type: 'test'
+      ...
+    # Subtest: G05 荒古圣体 公共玩家路径
+    ok 65 - G05 荒古圣体 公共玩家路径
+      ---
+      duration_ms: 252.8042
+      type: 'test'
+      ...
+    # Subtest: G06 太阴玄体 公共玩家路径
+    ok 66 - G06 太阴玄体 公共玩家路径
+      ---
+      duration_ms: 278.9686
+      type: 'test'
+      ...
+    # Subtest: G07 琉璃无垢体 公共玩家路径
+    ok 67 - G07 琉璃无垢体 公共玩家路径
+      ---
+      duration_ms: 216.4039
+      type: 'test'
+      ...
+    # Subtest: G08 万劫不灭体 公共玩家路径
+    ok 68 - G08 万劫不灭体 公共玩家路径
+      ---
+      duration_ms: 479.4749
+      type: 'test'
+      ...
+    # Subtest: G09 混沌黑体 公共玩家路径
+    ok 69 - G09 混沌黑体 公共玩家路径
+      ---
+      duration_ms: 199.6786
+      type: 'test'
+      ...
+    # Subtest: G10 星辰道骨 公共玩家路径
+    ok 70 - G10 星辰道骨 公共玩家路径
+      ---
+      duration_ms: 477.904
+      type: 'test'
+      ...
+    # Subtest: H01 玻璃王冠 公共玩家路径
+    ok 71 - H01 玻璃王冠 公共玩家路径
+      ---
+      duration_ms: 254.4789
+      type: 'test'
+      ...
+    # Subtest: H02 背水誓约 公共玩家路径
+    ok 72 - H02 背水誓约 公共玩家路径
+      ---
+      duration_ms: 195.6822
+      type: 'test'
+      ...
+    # Subtest: H03 焚命者 公共玩家路径
+    ok 73 - H03 焚命者 公共玩家路径
+      ---
+      duration_ms: 203.272
+      type: 'test'
+      ...
+    # Subtest: H04 无声祷告 公共玩家路径
+    ok 74 - H04 无声祷告 公共玩家路径
+      ---
+      duration_ms: 218.8804
+      type: 'test'
+      ...
+    # Subtest: H05 一剑封喉 公共玩家路径
+    ok 75 - H05 一剑封喉 公共玩家路径
+      ---
+      duration_ms: 466.7143
+      type: 'test'
+      ...
+    # Subtest: H06 赌命丰收 公共玩家路径
+    ok 76 - H06 赌命丰收 公共玩家路径
+      ---
+      duration_ms: 236.6832
+      type: 'test'
+      ...
+    # Subtest: H07 贫者之刃 公共玩家路径
+    ok 77 - H07 贫者之刃 公共玩家路径
+      ---
+      duration_ms: 214.984
+      type: 'test'
+      ...
+    # Subtest: H08 断契狂徒 公共玩家路径
+    ok 78 - H08 断契狂徒 公共玩家路径
+      ---
+      duration_ms: 355.8736
+      type: 'test'
+      ...
+    # Subtest: H09 一炉定生死 公共玩家路径
+    ok 79 - H09 一炉定生死 公共玩家路径
+      ---
+      duration_ms: 236.7549
+      type: 'test'
+      ...
+    # Subtest: H10 末日借火 公共玩家路径
+    ok 80 - H10 末日借火 公共玩家路径
+      ---
+      duration_ms: 202.1346
+      type: 'test'
+      ...
+    # Subtest: I01 因果欠条 公共玩家路径
+    ok 81 - I01 因果欠条 公共玩家路径
+      ---
+      duration_ms: 477.4346
+      type: 'test'
+      ...
+    # Subtest: I02 折页行囊 公共玩家路径
+    ok 82 - I02 折页行囊 公共玩家路径
+      ---
+      duration_ms: 199.4821
+      type: 'test'
+      ...
+    # Subtest: I03 昨日来信 公共玩家路径
+    ok 83 - I03 昨日来信 公共玩家路径
+      ---
+      duration_ms: 205.9655
+      type: 'test'
+      ...
+    # Subtest: I04 第零回合 公共玩家路径
+    ok 84 - I04 第零回合 公共玩家路径
+      ---
+      duration_ms: 204.7468
+      type: 'test'
+      ...
+    # Subtest: I05 影子代班 公共玩家路径
+    ok 85 - I05 影子代班 公共玩家路径
+      ---
+      duration_ms: 485.5405
+      type: 'test'
+      ...
+    # Subtest: I06 空白之名 公共玩家路径
+    ok 86 - I06 空白之名 公共玩家路径
+      ---
+      duration_ms: 218.7979
+      type: 'test'
+      ...
+    # Subtest: I07 万物借位 公共玩家路径
+    ok 87 - I07 万物借位 公共玩家路径
+      ---
+      duration_ms: 230.4451
+      type: 'test'
+      ...
+    # Subtest: I08 口袋里的雨季 公共玩家路径
+    ok 88 - I08 口袋里的雨季 公共玩家路径
+      ---
+      duration_ms: 286.8853
+      type: 'test'
+      ...
+    # Subtest: I09 倒置药瓶 公共玩家路径
+    ok 89 - I09 倒置药瓶 公共玩家路径
+      ---
+      duration_ms: 210.7694
+      type: 'test'
+      ...
+    # Subtest: I10 第二种结局 公共玩家路径
+    ok 90 - I10 第二种结局 公共玩家路径
+      ---
+      duration_ms: 206.1441
+      type: 'test'
+      ...
+    1..90
+ok 1 - 天赋A至I真实玩家公共路径：面板、天赋入口、开战、胜利及一次结算
+  ---
+  duration_ms: 33902.6643
+  type: 'test'
+  ...
+# [2026-09-09 09:57:01][INFO] [alemonjs][exit] 进程退出，code=0
+1..1
+# tests 91
+# suites 0
+# pass 91
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 35286.9501

@@ -1,0 +1,11 @@
+{
+  "finding": "C10 full queue replaces unresolved candidate without user selection",
+  "queued": [
+    150,
+    300,
+    450
+  ],
+  "candidateBefore": 600,
+  "candidateAfter": 750,
+  "oldCandidateRetained": false
+}

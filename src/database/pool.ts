@@ -1,6 +1,7 @@
 import { createPool, type Pool, type PoolConnection } from 'mysql2/promise';
 import { initializeSchema } from './bootstrap';
 import { getDatabaseConfig } from './config';
+import { takeAchievementEvents } from '../game/achievement-events';
 
 let pool: Pool | undefined;
 let initialization: Promise<Pool> | undefined;
@@ -40,6 +41,12 @@ export const withTransaction = async <T>(work: (connection: PoolConnection) => P
     try {
       await connection.beginTransaction();
       const result = await work(connection);
+      const achievementEvents = takeAchievementEvents(connection);
+      if (achievementEvents.length) {
+        const dirty = await (await import('../game/achievement.service')).flushAchievements(connection, achievementEvents);
+        const { recalculateCharacterStats } = await import('../game/character.service');
+        for (const id of dirty) await recalculateCharacterStats(connection, id);
+      }
       await connection.commit();
       return result;
     } catch (error: any) {
@@ -49,6 +56,7 @@ export const withTransaction = async <T>(work: (connection: PoolConnection) => P
       // 很短的退避可让竞争事务先提交，避免立即重试时再次撞上同一把锁。
       await new Promise<void>(resolve => setTimeout(resolve, 25 * (attempt + 1)));
     } finally {
+      takeAchievementEvents(connection);
       connection.release();
     }
   }

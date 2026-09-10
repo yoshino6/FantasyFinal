@@ -2,6 +2,7 @@ import { Format, useEvent, useRoute } from 'alemonjs';
 import { useGameMessage as useMessage } from '../game/use-game-message';
 import { equip, equipment, equipmentCandidates, unequip } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
+import { equipmentSetSummary } from '../game/equipment-set-summary';
 
 const slotNames: Record<string, string> = {
   weapon: '武器', offhand: '副手', shoulder: '头肩', upper: '上装', waist: '腰部',
@@ -17,6 +18,7 @@ export default async () => {
     const equippedBySlot = new Map(items.map(item => [item.slot, item]));
     for (const slot of slotOrder) {
       const item = equippedBySlot.get(slot);
+      if(item?.appearanceName)markdown.addBlockquote(`外观投影：${item.appearanceName}`).addNewline();
       markdown.addText(`\n【${slotNames[slot]}】`);
       if (item) {
         if (item.instance_id) markdown.addButton(item.name, { data: `/装备详情 ${item.instance_id}`, autoEnter: false });
@@ -24,6 +26,10 @@ export default async () => {
         markdown.addText(' ').addButton('[卸下]', { data: `/卸下装备 ${slot}`, autoEnter: false }).addText(' ').addButton('[切换]', { data: `/选择装备 ${slot}`, autoEnter: false });
       } else markdown.addText('无 ').addButton('[装备]', { data: `/选择装备 ${slot}`, autoEnter: false });
     }
+    const sets = equipmentSetSummary(items);
+    markdown.addNewline().addNewline().addBold('已生效套装效果').addNewline();
+    if (!sets.length) markdown.addBlockquote('暂无已生效套装效果。');
+    for (const set of sets) markdown.addBlockquote(`**${set.title}**\n> ${set.effects.join('\n> ')}`).addNewline();
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow()
       .addButton('装备详情', '/已装备详情', { type: 'command', autoEnter: true, style: 'blue' })
       .addButton('操作面板', '/面板', { type: 'command', autoEnter: true, style: 'blue' })) });

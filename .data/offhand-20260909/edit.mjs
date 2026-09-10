@@ -1,0 +1,28 @@
+import fs from 'node:fs';
+let s=fs.readFileSync('src/game/character.service.ts','utf8').replaceAll('\r\n','\n');
+const replace=(a,b)=>{if(!s.includes(a))throw Error('missing '+a.slice(0,90));s=s.replace(a,b)};
+replace('neutralFood=false): Promise<DerivedStats>','neutralFood=false, offhandMultiplier=.5): Promise<DerivedStats>');
+replace('scale: equipmentQualityMultiplier(Number(row.quality)) }','scale: equipmentQualityMultiplier(Number(row.quality)) * (row.slot === \'offhand\' ? offhandMultiplier : 1) }');
+replace('Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)), 0)]));','Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)) * (row.slot === \'offhand\' ? offhandMultiplier : 1), 0)]));');
+const start=s.indexOf('export const effectiveCharacterAttributes ='),end=s.indexOf('const foodBuffText',start);
+let part=s.slice(start,end);
+part=part.replace('  const [[timedRows]', '  const mastery = await weaponMasteryBonusesFor(connection, characterId);\n  const [[timedRows]');
+part=part.replace('effect_json: unknown; quality: number','effect_json: unknown; quality: number; slot: string').replace('SELECT COALESCE(ii.effect_json','SELECT pe.slot,COALESCE(ii.effect_json');
+part=part.replace('equipmentQualityMultiplier(Number(row.quality)), 0)','equipmentQualityMultiplier(Number(row.quality)) * (row.slot === \'offhand\' ? mastery.offhandAttributeMultiplier : 1), 0)');
+s=s.slice(0,start)+part+s.slice(end);
+const es=s.indexOf('const withEquipmentElements ='),ee=s.indexOf('export const recalculateCharacterStats',es);
+part=s.slice(es,ee).replace('baseResistance: Record<string, unknown>)','baseResistance: Record<string, unknown>, offhandMultiplier=.5)').replace('effect_json: unknown; quality: number','effect_json: unknown; quality: number; slot: string').replace('SELECT COALESCE(ii.effect_json','SELECT pe.slot,COALESCE(ii.effect_json').replace('equipmentQualityMultiplier(Number(row.quality)), 0)','equipmentQualityMultiplier(Number(row.quality)) * (row.slot === \'offhand\' ? offhandMultiplier : 1), 0)');
+s=s.slice(0,es)+part+s.slice(ee);
+replace('  const masteryBonuses = await weaponMasteryBonusesFor(connection, characterId);\n','');
+replace('  const [equipmentAttributeRows]', '  const masteryBonuses = await weaponMasteryBonusesFor(connection, characterId);\n  const [equipmentAttributeRows]');
+replace('const [equipmentAttributeRows] = await connection.execute<(RowDataPacket & { effect_json: unknown; quality: number })[]>(`SELECT COALESCE(ii.effect_json','const [equipmentAttributeRows] = await connection.execute<(RowDataPacket & { effect_json: unknown; quality: number; slot: string })[]>(`SELECT pe.slot,COALESCE(ii.effect_json');
+replace('const equipmentAttributeBonus = (key: string) => equipmentAttributeRows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)), 0);', 'const equipmentAttributeBonus = (key: string) => equipmentAttributeRows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)) * (row.slot === \'offhand\' ? masteryBonuses.offhandAttributeMultiplier : 1), 0);');
+replace("epic.setCode === 'valk_forge_regalia' && epic.setCount >= 3 ? { hpPct: 6 } : {}\n  ]);", "epic.setCode === 'valk_forge_regalia' && epic.setCount >= 3 ? { hpPct: 6 } : {}\n  ], false, masteryBonuses.offhandAttributeMultiplier);");
+replace('baseMastery, baseResistance);','baseMastery, baseResistance, masteryBonuses.offhandAttributeMultiplier);');
+replace("{hpPct:6}:{}],true),Number(character.level)","{hpPct:6}:{}],true,masteryBonuses.offhandAttributeMultiplier),Number(character.level)");
+fs.writeFileSync('src/game/character.service.ts',s);
+s=fs.readFileSync('src/response/skill-list.ts','utf8');
+replace("focus >= 6 ? '效果无衰减。' : `仅有${50 + (focus - 1) * 10}%效果。`", "focus >= 6 ? '主、副词条发挥100%。' : `主、副词条发挥${50 + (focus - 1) * 10}%。`");
+replace('每提升一级，副手装备效果+10%。','每提升一级，对应武器类型的副手主、副词条发挥提高10个百分点，最高100%；装备特殊效果不衰减。');
+fs.writeFileSync('src/response/skill-list.ts',s);
+

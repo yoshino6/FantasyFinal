@@ -1,3 +1,4 @@
+import { achievementInstanceVictory } from './achievement-state';
 import { combatUnitLabel } from './combat-unit-label';
 import { effectiveAutomatonState } from './automaton';
 import { realmLevelCap } from './constants';
@@ -36,6 +37,9 @@ export const finishCombatAutomatons=async(connection:PoolConnection,sessionId:st
   const [rows]=await connection.execute<RowDataPacket[]>('SELECT automaton_id,owner_id,state_json FROM combat_automatons WHERE session_id=? FOR UPDATE',[sessionId]);
   for(const row of rows){const battle=craftJson<AutomatonBattleState>(row.state_json);const {row:stored,state}=await automatonFor(connection,Number(row.owner_id),Number(row.automaton_id));state.hp=battle.pet.hp>0?Math.max(1,Math.floor(battle.pet.hp/Math.floor(battle.pet.stats[0]!)*Math.floor(state.stats[0]!))):0;state.mp=Math.floor(battle.pet.mp/Math.floor(battle.pet.stats[1]!)*Math.floor(state.stats[1]!));
     if(victory){
+      const evidence=(battle.rule.memory as any).achievement;
+      const [eligible]=await connection.execute<RowDataPacket[]>('SELECT stamina_eligible FROM combat_members WHERE session_id=? AND character_id=?',[sessionId,row.owner_id]);
+      if(eligible[0]?.stamina_eligible&&(Number(evidence?.damage)>0||Number(evidence?.healed)>0||Number(evidence?.playerSupport)>0))await achievementInstanceVictory(connection,Number(row.owner_id),Number(row.automaton_id),sessionId,'ACH_J11');
       await automatonIntimacy(connection,Number(row.owner_id),state,'victory',Number(row.automaton_id));
       await recordAutomatonFirstEvent(connection,Number(row.automaton_id),Number(row.owner_id),'first_victory',{name:state.name,sessionId});
       const [bosses]=await connection.execute<RowDataPacket[]>("SELECT DISTINCT t.code,t.name,COALESCE(s.level,t.level) level FROM combat_targets ct JOIN monster_spawns s ON s.id=ct.spawn_id JOIN monster_templates t ON t.id=s.template_id WHERE ct.session_id=? AND ct.is_defeated=1 AND t.monster_class='boss' AND NOT JSON_CONTAINS(COALESCE(s.traits_json,JSON_ARRAY()),JSON_OBJECT('code','boss_component')) AND NOT JSON_CONTAINS(COALESCE(s.traits_json,JSON_ARRAY()),JSON_OBJECT('code','boss_test')) AND NOT JSON_CONTAINS(COALESCE(s.traits_json,JSON_ARRAY()),JSON_OBJECT('code','npc_sparring'))",[sessionId]);
@@ -47,9 +51,15 @@ export const finishCombatAutomatons=async(connection:PoolConnection,sessionId:st
   await connection.execute('DELETE FROM combat_automatons WHERE session_id=?',[sessionId]);
 };
 export const appendAutomatonBattleQuotes=async(connection:PoolConnection,sessionId:string,pets:AutomatonCombatant[],log:string[],victory:boolean)=>{
+  if(!pets.length)return;
+  const ownerIds=[...new Set(pets.map(p=>p.ownerId))];
+  const [automatic]=await connection.execute<RowDataPacket[]>(`SELECT character_id FROM player_auto_battle_settings WHERE enabled=1 AND character_id IN (${ownerIds.map(()=>'?').join(',')})`,ownerIds);
+  const mutedOwners=new Set(automatic.map(row=>Number(row.character_id)));
+  if(pets.every(p=>mutedOwners.has(p.ownerId)))return;
   const [existing]=await connection.execute<RowDataPacket[]>('SELECT automaton_id,event_type FROM automaton_dialogues WHERE event_key LIKE ?',[`battle:${sessionId}:%`]);
   let teamCount=existing.length;
   for(const p of pets){
+    if(mutedOwners.has(p.ownerId))continue;
     if(teamCount>=4)continue;
     const shown=existing.filter(row=>Number(row.automaton_id)===p.id).map(row=>String(row.event_type));if(shown.length>=2)continue;
     const memory=p.unit.state.memory;

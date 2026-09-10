@@ -1,0 +1,13 @@
+import fs from 'node:fs';
+import path from 'node:path';
+const dir='.data/enemy-balance-20260908';
+let source=fs.readFileSync(dir+'/baseline/adventure.service.ts','utf8');
+source=source.replace(/((?:from\s*|import\s*\()\s*)(['"])(\.[^'"]+)\2/g,(_,prefix,quote,target)=>prefix+quote+path.relative(path.resolve(dir),path.resolve('src/game',target)).replaceAll('\\','/')+quote);
+source=source.replace('const monsterAttributes =','export const monsterAttributes =').replace('const monsterCombatStats =','export const monsterCombatStats =');
+fs.writeFileSync(dir+'/legacy-adventure.ts',source);
+let bootstrap=fs.readFileSync('src/database/bootstrap.ts','utf8');
+const start='ON DUPLICATE KEY UPDATE name=VALUES(name),npc_id=VALUES(npc_id),level=VALUES(level),hp_max=VALUES(hp_max)';
+const at=bootstrap.indexOf(start);if(at<0)throw Error('missing NPC seed');
+const end=bootstrap.indexOf('`);',at);
+bootstrap=bootstrap.slice(0,at)+'ON DUPLICATE KEY UPDATE name=VALUES(name),npc_id=VALUES(npc_id),level=VALUES(level)'+bootstrap.slice(end);
+fs.writeFileSync('src/database/bootstrap.ts',bootstrap);

@@ -1,3 +1,5 @@
+import { talentSchema } from '../src/game/talent-data';
+import { achievementSchema } from '../src/database/achievements';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -9,6 +11,8 @@ import { initializeAlchemyV2 } from '../src/database/alchemy-v2';
 import { initializeInventoryBinding } from '../src/database/inventory-binding';
 import { initializeAutomaton } from '../src/database/automaton';
 import { initializeInstanceMarket } from '../src/database/instance-market';
+import { initializeHiddenProfessions } from '../src/database/hidden-professions';
+import { hiddenSkills, hiddenProfessions } from '../src/game/hidden-profession.config';
 
 const database=process.env.AUTOMATON_TEST_DATABASE;
 test('机巧真实 SQL：隔离迁移、绑定、失败净扣料、幂等认主培养与回滚',{skip:!database&&'设置 AUTOMATON_TEST_DATABASE 运行隔离数据库验证'},async t=>{
@@ -20,11 +24,18 @@ test('机巧真实 SQL：隔离迁移、绑定、失败净扣料、幂等认主�
   await admin.query('CREATE DATABASE '+database+' CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
   const pool=createPool({...original,database,connectionLimit:4,charset:'utf8mb4'});
   try{
+    for(const sql of achievementSchema)await pool.query(sql);
     const parsed=ts.createSourceFile('bootstrap.ts',readFileSync('src/database/bootstrap.ts','utf8'),ts.ScriptTarget.Latest,true);
     const declaration=parsed.statements.filter(ts.isVariableStatement).flatMap(s=>[...s.declarationList.declarations]).find(d=>d.name.getText(parsed)==='schemaStatements')!;
     for(const sql of new Function(`return ${declaration.initializer!.getText(parsed)}`)() as string[])await pool.query(sql);
-    for(let repeat=0;repeat<2;repeat++){await initializeAlchemyV2(pool);await initializeInventoryBinding(pool);await initializeAutomaton(pool);await initializeInstanceMarket(pool);}
-    const transaction=async(work:any)=>{const c=await pool.getConnection();try{await c.beginTransaction();const result=await work(c);await c.commit();return result;}catch(error){await c.rollback();throw error;}finally{c.release();}};
+    for(const sql of talentSchema)await pool.query(sql);
+    for(let repeat=0;repeat<2;repeat++){await initializeAlchemyV2(pool);await initializeInventoryBinding(pool);await initializeAutomaton(pool);await initializeInstanceMarket(pool);await initializeHiddenProfessions(pool);}
+    await t.test('共享初始化的隐藏技能使用真实技能表字段且重复执行不新增副本',async()=>{
+      const [skills]=await pool.query<any[]>("SELECT code,range_type FROM skill_definitions WHERE code LIKE 'hidden\\_%'");
+      assert.equal(skills.length,hiddenSkills.length+hiddenProfessions.length);
+      for(const skill of hiddenSkills)assert.equal(skills.find(row=>row.code===skill.code)?.range_type,'远程');
+    });
+    const transaction=async(work:any)=>{const c=await pool.getConnection();try{await c.beginTransaction();const result=await work(c);await load('src/game/achievement.service').flushAchievements(c,load('src/game/achievement-events').takeAchievementEvents(c));await c.commit();return result;}catch(error){await c.rollback();throw error;}finally{load('src/game/achievement-events').takeAchievementEvents(c);c.release();}};
     const cache=new Map<string,any>();let failEvent=false,portraitHostFails=false,portraitHostCalls=0;
     const load=(relative:string):any=>{const path=resolve(relative.endsWith('.ts')?relative:relative+'.ts');if(cache.has(path))return cache.get(path).exports;const module={exports:{} as any};cache.set(path,module);
       const local=(id:string):any=>id==='alemonjs'?{logger:{warn:()=>{}}}:id.endsWith('/automaton-portrait-host')?{uploadPortraitToHost:async()=>{portraitHostCalls++;if(portraitHostFails)throw Error('host unavailable');return 'https://example.com/approved.webp';}}:id.endsWith('/automaton-portrait-image')?{readPortrait:async()=>Buffer.from('mock image'),removePortrait:async()=>{}}:id.endsWith('/pool')?{getPool:async()=>pool,withTransaction:transaction}:id.startsWith('.')?load(resolve(dirname(path),id)):require(id);
@@ -77,6 +88,7 @@ test('机巧真实 SQL：隔离迁移、绑定、失败净扣料、幂等认主�
       assert.equal(preview.recipe.chance,.6);assert.equal(preview.ingredients.find((i:any)=>i.code==='sky_dust').quantity,20);
       const old=Math.random;Math.random=()=>.6;let results:any[];try{results=await Promise.all([service.confirmAutomatonCraft('automaton_test_1',preview.token),service.confirmAutomatonCraft('automaton_test_1',preview.token)]);}finally{Math.random=old;}
       assert.deepEqual(results![0],results![1]);assert.equal((await stock('sky_dust')).quantity,before.quantity-2);assert.equal((await stock('automaton_body')).quantity,body.quantity);
+      const [activities]=await pool.execute<any[]>("SELECT value_json FROM achievement_progress WHERE identity_key=? AND metric IN ('ACH_A24','ACH_A25')",['automaton_test_1']);assert.equal(activities.length,0);
       const [logs]=await pool.query<any[]>('SELECT batches_json FROM player_alchemy_journal');const batches=typeof logs[0].batches_json==='string'?JSON.parse(logs[0].batches_json):logs[0].batches_json;assert.deepEqual(batches[0].consumed.map((i:any)=>[i.code,i.quantity]),[['sky_dust',2]]);
       const journal=load('src/game/alchemy-journal.service');
       const current=await journal.alchemyJournalPage('automaton_test_1',1,'点灵'),legacy=await journal.alchemyJournalPage('automaton_test_1',1,'造物');
@@ -84,7 +96,8 @@ test('机巧真实 SQL：隔离迁移、绑定、失败净扣料、幂等认主�
     });
     let petId=0;
     await t.test('出生固定、交易绑定材料制造得到未绑定新实例、认主幂等',async()=>{
-      const preview=await service.previewAutomatonCraft('automaton_test_1','automaton');const old=Math.random;Math.random=()=>.599;try{await service.confirmAutomatonCraft('automaton_test_1',preview.token);}finally{Math.random=old;}
+      const preview=await service.previewAutomatonCraft('automaton_test_1','automaton');const old=Math.random;Math.random=()=>.599;let made:any;try{made=await service.confirmAutomatonCraft('automaton_test_1',preview.token);}finally{Math.random=old;}assert.deepEqual(await service.confirmAutomatonCraft('automaton_test_1',preview.token),made);
+      const [activities]=await pool.execute<any[]>("SELECT metric,value_json FROM achievement_progress WHERE identity_key=? AND metric IN ('ACH_A24','ACH_A25') ORDER BY metric",['automaton_test_1']);assert.equal(activities.length,2);for(const activity of activities){const state=typeof activity.value_json==='string'?JSON.parse(activity.value_json):activity.value_json;assert.equal(state.count,1);assert.equal(state.seen.length,1);}
       const list=await service.automatonList('automaton_test_1');petId=Number(list.items[0].row.id);const born=list.items[0].state;assert.equal(list.items[0].row.bound_kind,'none');
       const claim=await service.previewAutomatonMutation('automaton_test_1',petId,'认主',[]);await assert.rejects(service.confirmAutomatonMutation('automaton_test_2',claim.token),/不属于/);
       const results=await Promise.all([service.confirmAutomatonMutation('automaton_test_1',claim.token),service.confirmAutomatonMutation('automaton_test_1',claim.token)]);assert.deepEqual(results[0],results[1]);
@@ -265,6 +278,7 @@ test('机巧真实 SQL：隔离迁移、绑定、失败净扣料、幂等认主�
       const snapshot=typeof journals[0].snapshot_json==='string'?JSON.parse(journals[0].snapshot_json):journals[0].snapshot_json;assert.equal(snapshot.level,5);assert.equal(snapshot.chance,.65);
       await pool.execute('UPDATE player_secondary_professions SET level=4 WHERE character_id=1');
     });
+    await t.test('低门槛机巧成就停发，真实装配不再新增公告',async()=>{const [rows]=await pool.query<any[]>("SELECT achievement_id FROM achievement_completions WHERE identity_key=?",['automaton_test_1']);for(const id of ["ACH_J04","ACH_J15"])assert.ok(!rows.some(r=>r.achievement_id===id),id);});
     assert.equal(failEvent,false);
   }finally{await pool.end();await admin.query('DROP DATABASE '+database);await admin.end();}
 });

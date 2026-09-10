@@ -1,0 +1,17 @@
+TAP version 13
+# Subtest: A09 只按远程标记增幅，魔法类别本身不能代替远程
+ok 1 - A09 只按远程标记增幅，魔法类别本身不能代替远程
+  ---
+  duration_ms: 3.5209
+  type: 'test'
+  ...
+# [2026-09-09 10:46:41][INFO] [alemonjs][exit] 进程退出，code=0
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 870.5215

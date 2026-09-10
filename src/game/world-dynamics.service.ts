@@ -1,3 +1,5 @@
+import { recordAchievement } from './achievement-events';
+import { achievementActivity } from './achievement-hooks';
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
@@ -417,6 +419,8 @@ export const completeWorldSiteCommissionsAtSite = async (qqUserId: string, siteC
   await connection.execute('UPDATE player_world_site_commissions SET status=\'completed\',completed_at=NOW() WHERE character_id=? AND target_site_code=? AND status=\'accepted\'', [player.id, siteCode]);
   const notices: string[] = [];
   for (const row of rows) {
+    // 只在委托已经到达目标站点、并由在场前台完成交接后累计；接取、催促回站和领奖均不计入。
+    recordAchievement(connection, Number(player.id), ['ACH_F24'], `site-commission:${row.id}`);
     let contributed = false; let regionalDailyLimitReached = false;
     if (row.worldline_code) {
       const [daily] = await connection.execute<ResultSetHeader>(`INSERT IGNORE INTO player_worldline_daily_contributions (character_id,worldline_code,contribution_date,commission_id)
@@ -444,6 +448,7 @@ export const claimWorldSiteCommission = async (qqUserId: string, commissionId: n
   const commission = rows[0]; if (!commission) throw new Error('未找到这份站点委托。'); if (commission.status !== 'completed') throw new Error('请先抵达委托指定的站点完成巡检。');
   await connection.execute('UPDATE player_world_site_commissions SET status=\'claimed\',claimed_at=NOW() WHERE id=?', [commissionId]);
   await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [commission.reward_copper, player.id]);
+  recordAchievement(connection,Number(player.id),[{metric:'ACH_K09',value:Number(commission.reward_copper),life:true}],`site-commission-income:${commissionId}`);
   await writeLedger(connection, 'site.commission', 'claimed', 'task_panel', { commissionId, reward: Number(commission.reward_copper) }, Number(player.id), Number(player.region_id));
   return { title: commission.title, copper: Number(commission.reward_copper) };
 });
@@ -491,7 +496,7 @@ export const useWorldSite = async (qqUserId: string, siteCode: string, action: W
     const [inventoryRows] = await connection.execute<(RowDataPacket & { quantity: number })[]>('SELECT quantity FROM player_inventory WHERE character_id=? AND item_id=? FOR UPDATE', [player.id, item.id]);
     if (Number(inventoryRows[0]?.quantity ?? 0) < 3) throw new Error(`交换需要 3 个${item.name}。`);
     await connection.execute('UPDATE player_inventory SET quantity=quantity-3 WHERE character_id=? AND item_id=?', [player.id, item.id]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [player.id, item.id]);
-    reward = 30 + Math.min(20, Number(site.worldline_stage ?? 0)); materialName = item.name; await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [reward, player.id]); text = `你交付了区域材料，站点按当日行情结算铜币 ×${reward}。`;
+    reward = 30 + Math.min(20, Number(site.worldline_stage ?? 0)); materialName = item.name; await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [reward, player.id]); recordAchievement(connection,Number(player.id),[{metric:'ACH_K09',value:reward,life:true}]); text = `你交付了区域材料，站点按当日行情结算铜币 ×${reward}。`;
   } else if (action === 'clues') {
     const [rows] = await connection.execute<(RowDataPacket & { flag_code: string; value_int: number })[]>('SELECT flag_code,value_int FROM player_destiny_flags WHERE character_id=? AND (flag_code LIKE ? OR flag_code LIKE ?) ORDER BY updated_at DESC LIMIT 8', [player.id, `${player.region_code}_%`, `${site.worldline_code ?? ''}%`]);
     clues = rows.map((row, index) => `区域线索 ${index + 1}（已记录 ${Number(row.value_int)} 次）`); text = clues.length ? `档案阁为你调出已发现线索：${clues.join('、')}。` : '档案阁暂未找到你在本区域留下的可回看线索；完成奇遇后再来试试。';
@@ -679,11 +684,16 @@ const settleSceneWitnesses = async (connection: PoolConnection, sceneId: string,
   if (!scene || scene.status !== 'active') return 0;
   await connection.execute("UPDATE world_scene_instances SET status='resolved',resolved_at=NOW() WHERE id=?", [sceneId]);
   const [participants] = await connection.execute<(RowDataPacket & { character_id: number; role: string; contribution_code: string | null })[]>("SELECT p.character_id,p.role,c.contribution_code FROM world_scene_participants p LEFT JOIN world_scene_contributions c ON c.scene_id=p.scene_id AND c.character_id=p.character_id WHERE p.scene_id=? AND p.reward_claimed_at IS NULL AND p.role IN ('witness','assistant') FOR UPDATE", [sceneId]);
+  recordAchievement(connection,Number(scene.discoverer_character_id),[{metric:'ACH_D23'},{metric:'ACH_D25',distinct:templateCode}],'scene-discovery:'+sceneId);
+  const assistants=participants.filter(p=>p.role==='assistant'&&p.contribution_code);
+  if(new Set(assistants.map(p=>p.contribution_code)).size>=2)for(const p of assistants)recordAchievement(connection,Number(p.character_id),[{metric:'ACH_G12',cooperationKey:'scene:'+sceneId}],'scene-cooperate:'+sceneId);
+  if(assistants.length&&participants.some(p=>p.role==='witness'))for(const id of [Number(scene.discoverer_character_id),...participants.map(p=>Number(p.character_id))])recordAchievement(connection,id,[{metric:'ACH_G25',cooperationKey:'scene:'+sceneId}],'scene-roles:'+sceneId);
   const witnessCopper = Math.max(1, Math.floor(copper * .25));
   for (const participant of participants) {
     const contributionCopper = participant.role === 'assistant' && participant.contribution_code ? Math.max(witnessCopper, Math.floor(copper * .4)) : witnessCopper;
     await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [contributionCopper, participant.character_id]);
     await connection.execute('UPDATE world_scene_participants SET reward_claimed_at=NOW() WHERE scene_id=? AND character_id=?', [sceneId, participant.character_id]);
+    if(participant.role==='assistant'&&participant.contribution_code)recordAchievement(connection,Number(participant.character_id),[{metric:'ACH_D24',cooperationKey:'scene:'+sceneId},{metric:'ACH_D25',distinct:templateCode}],'scene-assist:'+sceneId);
     if (participant.contribution_code) await connection.execute('UPDATE world_scene_contributions SET settled_at=NOW() WHERE scene_id=? AND character_id=? AND settled_at IS NULL', [sceneId, participant.character_id]);
   }
   await writeLedger(connection, 'scene.resolved', 'shared_reward', templateCode, { witnesses: participants.length, baseCopperEach: witnessCopper, contributors: participants.filter(item => item.contribution_code).length }, Number(scene.discoverer_character_id), regionId, sceneId);
@@ -774,6 +784,12 @@ export const resolveDynamicEncounter = async (qqUserId: string, choiceCode: stri
   if (worldline && (!patrol || stage !== 0)) { await connection.execute(`UPDATE worldline_states SET stage=stage+?,state_json=JSON_SET(state_json,'$.lastDecision',?,'$.lastActor',?,'$.updatedByEncounter',true) WHERE code=?`, [stage, choice.code, player.id, worldline]); worldlineResult = await applyWorldlineEffects(connection, worldline, Number(player.id), Number(player.region_id), active.id); }
   const reward = await grantHiddenReward(connection, Number(player.id), active.id, choice); const context = json<{ sceneId?: string }>(active.context_json, {}); const sharedWitnesses = context.sceneId ? await settleSceneWitnesses(connection, context.sceneId, copper, Number(player.region_id), active.template_code) : 0;
   await writeLedger(connection, 'encounter.resolved', 'resolved', active.template_code, { choice: choice.code, copper, flag, worldline, stage, reward: reward?.name ?? null, sharedWitnesses }, Number(player.id), Number(player.region_id), active.id);
+  if(choice.code!=='leave')achievementActivity(connection,Number(player.id));
+  if(patrol&&choice.code!=='leave'){
+    const facts=['ACH_F20'];
+    if(active.node_code==='handoff'&&choice.code==='deliver'){if(patrol.kind==='escort')facts.push('ACH_F21');if(patrol.kind==='rescue')facts.push('ACH_F22');}
+    recordAchievement(connection,Number(player.id),facts,'patrol:'+active.id);
+  }
   if (patrol) await writeLedger(connection, 'patrol.resolved', 'completed', patrol.npcCode, { patrol, choice: choice.code, copper, stage, position: { x: player.pos_x, y: player.pos_y, z: player.pos_z } }, Number(player.id), Number(player.region_id), active.id);
   return { ...renderEncounter(active, player.region_name), choice: { ...choice, copper, flag, worldline, stage }, worldline, completed: true, reward, sharedWitnesses, worldlineResult };
 });

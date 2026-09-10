@@ -1,0 +1,10 @@
+const fs=require('node:fs');const r=JSON.parse(fs.readFileSync('.data/xiandao-early-design-20260909/live-catalog.json','utf8'));
+const names=new Map(r.data.regions.map(x=>[x.id,x.name]));
+const codes=['blacksmith','alchemy_sweetshop','oddworkshop','bookshop','guild_counter','church','evolution_lab'];
+console.log('NPC',JSON.stringify(r.data.npcs.filter(n=>codes.includes(n.code)||/莫妮卡|维萝|小北|漠北|晴儿|唯薇安|思诺|噶|凯娅/.test(n.name)).map(n=>({code:n.code,name:n.name,region:names.get(n.region_id),kind:n.interaction_kind,description:n.description})),null,2));
+const wanted=['healing_herb','beast_core','beast_bone','living_wood','meteor_iron','forge_repair_kit','novice_hp_potion_small','novice_mp_potion_small','glimmer_potion','magic_unit','energy_ember','blood_residue','wood_particle','metal_particle','stone_particle','alchemy_skill_reset_elixir','evolution_seed','evolution_active_material','evolution_medium','evolution_catalyst'];
+console.log('ITEMS',JSON.stringify(r.data.items.filter(x=>wanted.includes(x.code)).map(x=>({code:x.code,name:x.name,type:x.item_type,category:x.item_category,level:x.required_level,rarity:x.rarity,effect:x.effect_json})),null,2));
+console.log('MATERIALS',JSON.stringify(r.data.items.filter(x=>x.item_type==='material'&&(!x.required_level||x.required_level<=30)).slice(0,35).map(x=>({code:x.code,name:x.name,level:x.required_level,category:x.item_category})),null,2));
+console.log('REGIONS',JSON.stringify(r.data.regions));
+const src=fs.readFileSync('src/game/talent.config.ts','utf8');const ts=JSON.parse(src.match(/export const talentDefinitions: readonly TalentDefinition\[\] = (\[[\s\S]*?\n\]);/)[1]);
+console.log('TALENT',JSON.stringify(ts.filter(t=>['C01','C04','D01','D03','D04','D08','H01','H04','H08','H09','H10'].includes(t.number)).map(t=>({number:t.number,name:t.name,effect:t.description})),null,2));

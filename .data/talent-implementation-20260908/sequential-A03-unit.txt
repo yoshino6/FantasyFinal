@@ -1,0 +1,23 @@
+TAP version 13
+# Subtest: A03 MP支付向上取整，零耗与资源转赠不变
+ok 1 - A03 MP支付向上取整，零耗与资源转赠不变
+  ---
+  duration_ms: 1.7145
+  type: 'test'
+  ...
+# Subtest: A03 魔力转赠按固定公式支付与到账，不经过天赋折扣
+ok 2 - A03 魔力转赠按固定公式支付与到账，不经过天赋折扣
+  ---
+  duration_ms: 1.6487
+  type: 'test'
+  ...
+# [2026-09-09 10:38:57][INFO] [alemonjs][exit] 进程退出，code=0
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 936.1772

@@ -1,3 +1,5 @@
+import { purifiedCraftMaterialCode, purifiedMaterialForArmor } from '../game/monster-crafting-material.service';
+
 export type EpicSetCode = 'mountainheart_regalia' | 'valk_forge_regalia' | 'mistmother_cocoon' | 'goblin_court_hunt';
 export type EpicArmorSlot = '头肩' | '上装' | '腰部' | '下装' | '脚部';
 
@@ -70,10 +72,10 @@ const setProfiles: SetProfile[] = [
 
 const commonArmorMaterials = (profile: SetProfile, regionalAmount: number, craftAmount: number, partAmount: number) => [
   { code: 'sun_gold', quantity: 1 }, { code: 'moon_silver', quantity: 1 }, { code: 'star_copper', quantity: 3 }, { code: 'meteor_iron', quantity: 10 },
-  { code: profile.regionMaterial, quantity: regionalAmount }, { code: profile.bossPart, quantity: partAmount }, { code: profile.armorType === '布甲' ? 'spellcloth_bolt' : profile.armorType === '皮甲' ? 'tanned_spirit_leather' : profile.armorType === '重甲' ? 'cast_shell_plate' : 'laminated_scale_plate', quantity: craftAmount }
+  { code: profile.regionMaterial, quantity: regionalAmount }, { code: profile.bossPart, quantity: partAmount }, { code: purifiedMaterialForArmor(profile.armorType, 30), quantity: craftAmount }
 ];
 
-const weaponMaterialFor = (weaponType: string) => weaponType === '匕首' ? 'tanned_spirit_leather' : weaponType === '法杖' || weaponType === '法书' || weaponType === '法球' ? 'spellcloth_bolt' : weaponType === '盾牌' ? 'cast_shell_plate' : 'bone_steel_plate';
+const weaponMaterialFor = (weaponType: string) => weaponType === '匕首' ? purifiedCraftMaterialCode('gel_skin', 30) : weaponType === '法杖' || weaponType === '法书' || weaponType === '法球' ? purifiedCraftMaterialCode('hair', 30) : weaponType === '盾牌' ? purifiedCraftMaterialCode('shell', 30) : purifiedCraftMaterialCode('bone', 30);
 
 export const epicForgeRecipes: EpicForgeRecipe[] = setProfiles.flatMap(profile => [
   ...slots.map(([category, regionalAmount, craftAmount, partAmount]) => ({
@@ -93,4 +95,3 @@ export const epicForgeRecipes: EpicForgeRecipe[] = setProfiles.flatMap(profile =
 export const epicSetProfile = (code: string) => setProfiles.find(profile => profile.code === code) ?? null;
 export const epicRecipeByBlueprint = (code: string) => epicForgeRecipes.find(recipe => recipe.blueprintCode === code) ?? null;
 export const epicRecipesByBoss = (bossCode: string) => epicForgeRecipes.filter(recipe => recipe.bossCode === bossCode);
-

@@ -1,0 +1,1580 @@
+TAP version 13
+# Subtest: 有效静态目录逐项账本验收
+    # Subtest: ACH_A09 四种思路
+    ok 1 - ACH_A09 四种思路
+      ---
+      duration_ms: 87.6044
+      type: 'test'
+      ...
+    # Subtest: ACH_A12 初窥门径
+    ok 2 - ACH_A12 初窥门径
+      ---
+      duration_ms: 32.996
+      type: 'test'
+      ...
+    # Subtest: ACH_A13 更远的地方
+    ok 3 - ACH_A13 更远的地方
+      ---
+      duration_ms: 43.0465
+      type: 'test'
+      ...
+    # Subtest: ACH_A14 三十而行
+    ok 4 - ACH_A14 三十而行
+      ---
+      duration_ms: 26.6841
+      type: 'test'
+      ...
+    # Subtest: ACH_A15 第一道门
+    ok 5 - ACH_A15 第一道门
+      ---
+      duration_ms: 48.8569
+      type: 'test'
+      ...
+    # Subtest: ACH_A17 更深一层
+    ok 6 - ACH_A17 更深一层
+      ---
+      duration_ms: 32.1698
+      type: 'test'
+      ...
+    # Subtest: ACH_A18 行家入门
+    ok 7 - ACH_A18 行家入门
+      ---
+      duration_ms: 41.659
+      type: 'test'
+      ...
+    # Subtest: ACH_A19 熟能生巧
+    ok 8 - ACH_A19 熟能生巧
+      ---
+      duration_ms: 67.2595
+      type: 'test'
+      ...
+    # Subtest: ACH_A20 炉边十年
+    ok 9 - ACH_A20 炉边十年
+      ---
+      duration_ms: 32.5458
+      type: 'test'
+      ...
+    # Subtest: ACH_A23 别来无恙
+    ok 10 - ACH_A23 别来无恙
+      ---
+      duration_ms: 36.8745
+      type: 'test'
+      ...
+    # Subtest: ACH_A24 七日行旅
+    ok 11 - ACH_A24 七日行旅
+      ---
+      duration_ms: 38.0023
+      type: 'test'
+      ...
+    # Subtest: ACH_A25 三十日见闻
+    ok 12 - ACH_A25 三十日见闻
+      ---
+      duration_ms: 34.4121
+      type: 'test'
+      ...
+    # Subtest: ACH_B03 十战磨锋
+    ok 13 - ACH_B03 十战磨锋
+      ---
+      duration_ms: 32.2509
+      type: 'test'
+      ...
+    # Subtest: ACH_B04 百战余温
+    ok 14 - ACH_B04 百战余温
+      ---
+      duration_ms: 31.3205
+      type: 'test'
+      ...
+    # Subtest: ACH_B05 千战行者
+    ok 15 - ACH_B05 千战行者
+      ---
+      duration_ms: 32.1307
+      type: 'test'
+      ...
+    # Subtest: ACH_B07 狩猎精英
+    ok 16 - ACH_B07 狩猎精英
+      ---
+      duration_ms: 32.1189
+      type: 'test'
+      ...
+    # Subtest: ACH_B09 首领见证人
+    ok 17 - ACH_B09 首领见证人
+      ---
+      duration_ms: 32.0056
+      type: 'test'
+      ...
+    # Subtest: ACH_B10 旧敌新知
+    ok 18 - ACH_B10 旧敌新知
+      ---
+      duration_ms: 30.3687
+      type: 'test'
+      ...
+    # Subtest: ACH_B11 百怪行记
+    ok 19 - ACH_B11 百怪行记
+      ---
+      duration_ms: 30.2169
+      type: 'test'
+      ...
+    # Subtest: ACH_B22 一敌多形
+    ok 20 - ACH_B22 一敌多形
+      ---
+      duration_ms: 31.1243
+      type: 'test'
+      ...
+    # Subtest: ACH_B23 先折其翼
+    ok 21 - ACH_B23 先折其翼
+      ---
+      duration_ms: 35.0369
+      type: 'test'
+      ...
+    # Subtest: ACH_B24 重整旗鼓
+    ok 22 - ACH_B24 重整旗鼓
+      ---
+      duration_ms: 27.7193
+      type: 'test'
+      ...
+    # Subtest: ACH_B25 归来仍少年
+    ok 23 - ACH_B25 归来仍少年
+      ---
+      duration_ms: 28.3837
+      type: 'test'
+      ...
+    # Subtest: ACH_C05 不让你倒下
+    ok 24 - ACH_C05 不让你倒下
+      ---
+      duration_ms: 27.6221
+      type: 'test'
+      ...
+    # Subtest: ACH_C07 尘毒尽去
+    ok 25 - ACH_C07 尘毒尽去
+      ---
+      duration_ms: 27.4739
+      type: 'test'
+      ...
+    # Subtest: ACH_C08 封住这一招
+    ok 26 - ACH_C08 封住这一招
+      ---
+      duration_ms: 25.1017
+      type: 'test'
+      ...
+    # Subtest: ACH_C09 趁其未发
+    ok 27 - ACH_C09 趁其未发
+      ---
+      duration_ms: 23.7524
+      type: 'test'
+      ...
+    # Subtest: ACH_C10 破盾者
+    ok 28 - ACH_C10 破盾者
+      ---
+      duration_ms: 25.3249
+      type: 'test'
+      ...
+    # Subtest: ACH_C11 余烬收尾
+    ok 29 - ACH_C11 余烬收尾
+      ---
+      duration_ms: 27.1585
+      type: 'test'
+      ...
+    # Subtest: ACH_C14 以小博大
+    ok 30 - ACH_C14 以小博大
+      ---
+      duration_ms: 27.021
+      type: 'test'
+      ...
+    # Subtest: ACH_C15 留一口气
+    ok 31 - ACH_C15 留一口气
+      ---
+      duration_ms: 24.8549
+      type: 'test'
+      ...
+    # Subtest: ACH_C17 全身而退
+    ok 32 - ACH_C17 全身而退
+      ---
+      duration_ms: 23.0949
+      type: 'test'
+      ...
+    # Subtest: ACH_C19 变招之人
+    ok 33 - ACH_C19 变招之人
+      ---
+      duration_ms: 24.6378
+      type: 'test'
+      ...
+    # Subtest: ACH_C20 见机行事
+    ok 34 - ACH_C20 见机行事
+      ---
+      duration_ms: 24.7419
+      type: 'test'
+      ...
+    # Subtest: ACH_C23 收放自如
+    ok 35 - ACH_C23 收放自如
+      ---
+      duration_ms: 23.09
+      type: 'test'
+      ...
+    # Subtest: ACH_C25 守到最后
+    ok 36 - ACH_C25 守到最后
+      ---
+      duration_ms: 23.5967
+      type: 'test'
+      ...
+    # Subtest: ACH_D20 十地图志
+    ok 37 - ACH_D20 十地图志
+      ---
+      duration_ms: 23.5561
+      type: 'test'
+      ...
+    # Subtest: ACH_D23 意外的发现
+    ok 38 - ACH_D23 意外的发现
+      ---
+      duration_ms: 23.9636
+      type: 'test'
+      ...
+    # Subtest: ACH_D24 不是路过
+    ok 39 - ACH_D24 不是路过
+      ---
+      duration_ms: 23.0682
+      type: 'test'
+      ...
+    # Subtest: ACH_D25 大地有声
+    ok 40 - ACH_D25 大地有声
+      ---
+      duration_ms: 26.5976
+      type: 'test'
+      ...
+    # Subtest: ACH_E03 百物随身
+    ok 41 - ACH_E03 百物随身
+      ---
+      duration_ms: 23.4898
+      type: 'test'
+      ...
+    # Subtest: ACH_E04 百材识性
+    ok 42 - ACH_E04 百材识性
+      ---
+      duration_ms: 22.612
+      type: 'test'
+      ...
+    # Subtest: ACH_E05 怪物手札
+    ok 43 - ACH_E05 怪物手札
+      ---
+      duration_ms: 24.1333
+      type: 'test'
+      ...
+    # Subtest: ACH_E06 兽行千姿
+    ok 44 - ACH_E06 兽行千姿
+      ---
+      duration_ms: 23.2348
+      type: 'test'
+      ...
+    # Subtest: ACH_E07 兵器谱
+    ok 45 - ACH_E07 兵器谱
+      ---
+      duration_ms: 24.5148
+      type: 'test'
+      ...
+    # Subtest: ACH_E08 五衣百态
+    ok 46 - ACH_E08 五衣百态
+      ---
+      duration_ms: 22.3077
+      type: 'test'
+      ...
+    # Subtest: ACH_E11 稀有之物
+    ok 47 - ACH_E11 稀有之物
+      ---
+      duration_ms: 24.9814
+      type: 'test'
+      ...
+    # Subtest: ACH_E12 一段史诗
+    ok 48 - ACH_E12 一段史诗
+      ---
+      duration_ms: 23.6807
+      type: 'test'
+      ...
+    # Subtest: ACH_E13 遗落的神光
+    ok 49 - ACH_E13 遗落的神光
+      ---
+      duration_ms: 24.7664
+      type: 'test'
+      ...
+    # Subtest: ACH_E14 草木有名
+    ok 50 - ACH_E14 草木有名
+      ---
+      duration_ms: 23.7432
+      type: 'test'
+      ...
+    # Subtest: ACH_E15 山石有骨
+    ok 51 - ACH_E15 山石有骨
+      ---
+      duration_ms: 24.216
+      type: 'test'
+      ...
+    # Subtest: ACH_E16 炼材小集
+    ok 52 - ACH_E16 炼材小集
+      ---
+      duration_ms: 22.6984
+      type: 'test'
+      ...
+    # Subtest: ACH_E17 三域之心
+    ok 53 - ACH_E17 三域之心
+      ---
+      duration_ms: 22.8822
+      type: 'test'
+      ...
+    # Subtest: ACH_E18 九色尘埃
+    ok 54 - ACH_E18 九色尘埃
+      ---
+      duration_ms: 28.2358
+      type: 'test'
+      ...
+    # Subtest: ACH_E19 微光未散
+    ok 55 - ACH_E19 微光未散
+      ---
+      duration_ms: 32.5176
+      type: 'test'
+      ...
+    # Subtest: ACH_E20 装备备忘
+    ok 56 - ACH_E20 装备备忘
+      ---
+      duration_ms: 32.8108
+      type: 'test'
+      ...
+    # Subtest: ACH_E21 药瓶小柜
+    ok 57 - ACH_E21 药瓶小柜
+      ---
+      duration_ms: 28.113
+      type: 'test'
+      ...
+    # Subtest: ACH_E22 料理见闻
+    ok 58 - ACH_E22 料理见闻
+      ---
+      duration_ms: 25.6489
+      type: 'test'
+      ...
+    # Subtest: ACH_E23 书香十卷
+    ok 59 - ACH_E23 书香十卷
+      ---
+      duration_ms: 31.9889
+      type: 'test'
+      ...
+    # Subtest: ACH_E24 自制图录
+    ok 60 - ACH_E24 自制图录
+      ---
+      duration_ms: 24.8746
+      type: 'test'
+      ...
+    # Subtest: ACH_E25 不止一面
+    ok 61 - ACH_E25 不止一面
+      ---
+      duration_ms: 33.9298
+      type: 'test'
+      ...
+    # Subtest: ACH_F03 五种语言
+    ok 62 - ACH_F03 五种语言
+      ---
+      duration_ms: 27.0895
+      type: 'test'
+      ...
+    # Subtest: ACH_F04 言有回声
+    ok 63 - ACH_F04 言有回声
+      ---
+      duration_ms: 24.9972
+      type: 'test'
+      ...
+    # Subtest: ACH_F06 被拒以后
+    ok 64 - ACH_F06 被拒以后
+      ---
+      duration_ms: 25.5663
+      type: 'test'
+      ...
+    # Subtest: ACH_F07 彼此理解
+    ok 65 - ACH_F07 彼此理解
+      ---
+      duration_ms: 20.4205
+      type: 'test'
+      ...
+    # Subtest: ACH_F08 街巷熟面
+    ok 66 - ACH_F08 街巷熟面
+      ---
+      duration_ms: 20.8795
+      type: 'test'
+      ...
+    # Subtest: ACH_F09 人情往来
+    ok 67 - ACH_F09 人情往来
+      ---
+      duration_ms: 20.0331
+      type: 'test'
+      ...
+    # Subtest: ACH_F20 巡路相逢
+    ok 68 - ACH_F20 巡路相逢
+      ---
+      duration_ms: 20.2749
+      type: 'test'
+      ...
+    # Subtest: ACH_F21 送你一程
+    ok 69 - ACH_F21 送你一程
+      ---
+      duration_ms: 21.5125
+      type: 'test'
+      ...
+    # Subtest: ACH_F22 带人回家
+    ok 70 - ACH_F22 带人回家
+      ---
+      duration_ms: 19.2311
+      type: 'test'
+      ...
+    # Subtest: ACH_F24 二十件托付
+    ok 71 - ACH_F24 二十件托付
+      ---
+      duration_ms: 20.5851
+      type: 'test'
+      ...
+    # Subtest: ACH_F25 各有喜好
+    ok 72 - ACH_F25 各有喜好
+      ---
+      duration_ms: 20.9927
+      type: 'test'
+      ...
+    # Subtest: ACH_G03 十次同路
+    ok 73 - ACH_G03 十次同路
+      ---
+      duration_ms: 22.7272
+      type: 'test'
+      ...
+    # Subtest: ACH_G04 百战同行
+    ok 74 - ACH_G04 百战同行
+      ---
+      duration_ms: 22.2298
+      type: 'test'
+      ...
+    # Subtest: ACH_G05 两人一心
+    ok 75 - ACH_G05 两人一心
+      ---
+      duration_ms: 20.947
+      type: 'test'
+      ...
+    # Subtest: ACH_G07 合力越峰
+    ok 76 - ACH_G07 合力越峰
+      ---
+      duration_ms: 24.2815
+      type: 'test'
+      ...
+    # Subtest: ACH_G08 不缺一人
+    ok 77 - ACH_G08 不缺一人
+      ---
+      duration_ms: 24.3123
+      type: 'test'
+      ...
+    # Subtest: ACH_G09 把后背交给你
+    ok 78 - ACH_G09 把后背交给你
+      ---
+      duration_ms: 21.8535
+      type: 'test'
+      ...
+    # Subtest: ACH_G10 前排不退
+    ok 79 - ACH_G10 前排不退
+      ---
+      duration_ms: 19.466
+      type: 'test'
+      ...
+    # Subtest: ACH_G11 手把手
+    ok 80 - ACH_G11 手把手
+      ---
+      duration_ms: 23.1143
+      type: 'test'
+      ...
+    # Subtest: ACH_G12 协力调查
+    ok 81 - ACH_G12 协力调查
+      ---
+      duration_ms: 22.533
+      type: 'test'
+      ...
+    # Subtest: ACH_G15 久别有信
+    ok 82 - ACH_G15 久别有信
+      ---
+      duration_ms: 20.1183
+      type: 'test'
+      ...
+    # Subtest: ACH_G17 誓约已立
+    ok 83 - ACH_G17 誓约已立
+      ---
+      duration_ms: 21.9164
+      type: 'test'
+      ...
+    # Subtest: ACH_G19 十页旧事
+    ok 84 - ACH_G19 十页旧事
+      ---
+      duration_ms: 21.0518
+      type: 'test'
+      ...
+    # Subtest: ACH_G20 灵契初成
+    ok 85 - ACH_G20 灵契初成
+      ---
+      duration_ms: 20.2274
+      type: 'test'
+      ...
+    # Subtest: ACH_G22 三种相逢
+    ok 86 - ACH_G22 三种相逢
+      ---
+      duration_ms: 24.4702
+      type: 'test'
+      ...
+    # Subtest: ACH_G23 旧友识途
+    ok 87 - ACH_G23 旧友识途
+      ---
+      duration_ms: 25.15
+      type: 'test'
+      ...
+    # Subtest: ACH_G25 共同见证
+    ok 88 - ACH_G25 共同见证
+      ---
+      duration_ms: 20.4666
+      type: 'test'
+      ...
+    # Subtest: ACH_H02 袋中渐满
+    ok 89 - ACH_H02 袋中渐满
+      ---
+      duration_ms: 23.3651
+      type: 'test'
+      ...
+    # Subtest: ACH_H03 熟悉土地
+    ok 90 - ACH_H03 熟悉土地
+      ---
+      duration_ms: 31.7506
+      type: 'test'
+      ...
+    # Subtest: ACH_H04 草木之友
+    ok 91 - ACH_H04 草木之友
+      ---
+      duration_ms: 23.4942
+      type: 'test'
+      ...
+    # Subtest: ACH_H05 山中取材
+    ok 92 - ACH_H05 山中取材
+      ---
+      duration_ms: 23.799
+      type: 'test'
+      ...
+    # Subtest: ACH_H06 三地收获
+    ok 93 - ACH_H06 三地收获
+      ---
+      duration_ms: 24.8928
+      type: 'test'
+      ...
+    # Subtest: ACH_H07 带着风险
+    ok 94 - ACH_H07 带着风险
+      ---
+      duration_ms: 23.525
+      type: 'test'
+      ...
+    # Subtest: ACH_H08 封存时刻
+    ok 95 - ACH_H08 封存时刻
+      ---
+      duration_ms: 23.8874
+      type: 'test'
+      ...
+    # Subtest: ACH_H11 不同的芽
+    ok 96 - ACH_H11 不同的芽
+      ---
+      duration_ms: 21.9143
+      type: 'test'
+      ...
+    # Subtest: ACH_H13 二十炉火
+    ok 97 - ACH_H13 二十炉火
+      ---
+      duration_ms: 23.2699
+      type: 'test'
+      ...
+    # Subtest: ACH_H14 百炉余香
+    ok 98 - ACH_H14 百炉余香
+      ---
+      duration_ms: 21.6166
+      type: 'test'
+      ...
+    # Subtest: ACH_H15 三槽成方
+    ok 99 - ACH_H15 三槽成方
+      ---
+      duration_ms: 24.7136
+      type: 'test'
+      ...
+    # Subtest: ACH_H18 不只是回复
+    ok 100 - ACH_H18 不只是回复
+      ---
+      duration_ms: 24.3636
+      type: 'test'
+      ...
+    # Subtest: ACH_H19 初次大成功
+    ok 101 - ACH_H19 初次大成功
+      ---
+      duration_ms: 20.0818
+      type: 'test'
+      ...
+    # Subtest: ACH_H20 灰中再起
+    ok 102 - ACH_H20 灰中再起
+      ---
+      duration_ms: 20.2302
+      type: 'test'
+      ...
+    # Subtest: ACH_H22 不同的配伍
+    ok 103 - ACH_H22 不同的配伍
+      ---
+      duration_ms: 20.716
+      type: 'test'
+      ...
+    # Subtest: ACH_H24 先加工再入炉
+    ok 104 - ACH_H24 先加工再入炉
+      ---
+      duration_ms: 22.2652
+      type: 'test'
+      ...
+    # Subtest: ACH_H25 药到实处
+    ok 105 - ACH_H25 药到实处
+      ---
+      duration_ms: 19.7918
+      type: 'test'
+      ...
+    # Subtest: ACH_I02 十锻成器
+    ok 106 - ACH_I02 十锻成器
+      ---
+      duration_ms: 20.5262
+      type: 'test'
+      ...
+    # Subtest: ACH_I03 百锻成章
+    ok 107 - ACH_I03 百锻成章
+      ---
+      duration_ms: 21.5774
+      type: 'test'
+      ...
+    # Subtest: ACH_I08 五衣成套
+    ok 108 - ACH_I08 五衣成套
+      ---
+      duration_ms: 20.8023
+      type: 'test'
+      ...
+    # Subtest: ACH_I15 伴我百战
+    ok 109 - ACH_I15 伴我百战
+      ---
+      duration_ms: 21.145
+      type: 'test'
+      ...
+    # Subtest: ACH_I16 再淬一层
+    ok 110 - ACH_I16 再淬一层
+      ---
+      duration_ms: 22.5161
+      type: 'test'
+      ...
+    # Subtest: ACH_I17 熔铸留痕
+    ok 111 - ACH_I17 熔铸留痕
+      ---
+      duration_ms: 20.4821
+      type: 'test'
+      ...
+    # Subtest: ACH_I18 双材相合
+    ok 112 - ACH_I18 双材相合
+      ---
+      duration_ms: 21.3028
+      type: 'test'
+      ...
+    # Subtest: ACH_I19 星铁入炉
+    ok 113 - ACH_I19 星铁入炉
+      ---
+      duration_ms: 19.3339
+      type: 'test'
+      ...
+    # Subtest: ACH_I20 地域铭记
+    ok 114 - ACH_I20 地域铭记
+      ---
+      duration_ms: 21.8015
+      type: 'test'
+      ...
+    # Subtest: ACH_I21 不是摆设
+    ok 115 - ACH_I21 不是摆设
+      ---
+      duration_ms: 23.1314
+      type: 'test'
+      ...
+    # Subtest: ACH_I23 回炉有据
+    ok 116 - ACH_I23 回炉有据
+      ---
+      duration_ms: 19.1044
+      type: 'test'
+      ...
+    # Subtest: ACH_I24 一器一名
+    ok 117 - ACH_I24 一器一名
+      ---
+      duration_ms: 20.418
+      type: 'test'
+      ...
+    # Subtest: ACH_I25 匠心留赠
+    ok 118 - ACH_I25 匠心留赠
+      ---
+      duration_ms: 21.2525
+      type: 'test'
+      ...
+    # Subtest: ACH_J04 亲手组装
+    ok 119 - ACH_J04 亲手组装
+      ---
+      duration_ms: 20.1849
+      type: 'test'
+      ...
+    # Subtest: ACH_J07 五味育成
+    ok 120 - ACH_J07 五味育成
+      ---
+      duration_ms: 23.7925
+      type: 'test'
+      ...
+    # Subtest: ACH_J08 十二味谱
+    ok 121 - ACH_J08 十二味谱
+      ---
+      duration_ms: 24.1026
+      type: 'test'
+      ...
+    # Subtest: ACH_J11 二十场默契
+    ok 122 - ACH_J11 二十场默契
+      ---
+      duration_ms: 23.9577
+      type: 'test'
+      ...
+    # Subtest: ACH_J13 它的打法
+    ok 123 - ACH_J13 它的打法
+      ---
+      duration_ms: 21.1459
+      type: 'test'
+      ...
+    # Subtest: ACH_J15 不只是一件货物
+    ok 124 - ACH_J15 不只是一件货物
+      ---
+      duration_ms: 23.5263
+      type: 'test'
+      ...
+    # Subtest: ACH_J17 学以致用
+    ok 125 - ACH_J17 学以致用
+      ---
+      duration_ms: 22.8569
+      type: 'test'
+      ...
+    # Subtest: ACH_J18 三卷各异
+    ok 126 - ACH_J18 三卷各异
+      ---
+      duration_ms: 26.4872
+      type: 'test'
+      ...
+    # Subtest: ACH_J21 微尘成簇
+    ok 127 - ACH_J21 微尘成簇
+      ---
+      duration_ms: 25.3434
+      type: 'test'
+      ...
+    # Subtest: ACH_J22 五材识微
+    ok 128 - ACH_J22 五材识微
+      ---
+      duration_ms: 23.2253
+      type: 'test'
+      ...
+    # Subtest: ACH_J23 理解后重组
+    ok 129 - ACH_J23 理解后重组
+      ---
+      duration_ms: 22.5523
+      type: 'test'
+      ...
+    # Subtest: ACH_J24 纸上不是全部
+    ok 130 - ACH_J24 纸上不是全部
+      ---
+      duration_ms: 23.3525
+      type: 'test'
+      ...
+    # Subtest: ACH_J25 知识有人用
+    ok 131 - ACH_J25 知识有人用
+      ---
+      duration_ms: 23.8098
+      type: 'test'
+      ...
+    # Subtest: ACH_K05 十位来客
+    ok 132 - ACH_K05 十位来客
+      ---
+      duration_ms: 22.8899
+      type: 'test'
+      ...
+    # Subtest: ACH_K08 花在刀刃上
+    ok 133 - ACH_K08 花在刀刃上
+      ---
+      duration_ms: 28.6162
+      type: 'test'
+      ...
+    # Subtest: ACH_K09 劳有所得
+    ok 134 - ACH_K09 劳有所得
+      ---
+      duration_ms: 24.3594
+      type: 'test'
+      ...
+    # Subtest: ACH_K10 一处落脚
+    ok 135 - ACH_K10 一处落脚
+      ---
+      duration_ms: 25.0763
+      type: 'test'
+      ...
+    # Subtest: ACH_K14 五件小幸福
+    ok 136 - ACH_K14 五件小幸福
+      ---
+      duration_ms: 24.1555
+      type: 'test'
+      ...
+    # Subtest: ACH_K16 串门有礼
+    ok 137 - ACH_K16 串门有礼
+      ---
+      duration_ms: 24.6501
+      type: 'test'
+      ...
+    # Subtest: ACH_K19 餐桌新味
+    ok 138 - ACH_K19 餐桌新味
+      ---
+      duration_ms: 23.0643
+      type: 'test'
+      ...
+    # Subtest: ACH_K24 办妥再归
+    ok 139 - ACH_K24 办妥再归
+      ---
+      duration_ms: 23.2081
+      type: 'test'
+      ...
+    # Subtest: ACH_K25 有序的一天
+    ok 140 - ACH_K25 有序的一天
+      ---
+      duration_ms: 23.6218
+      type: 'test'
+      ...
+    # Subtest: ACH_L01 私人的第一封信
+    ok 141 - ACH_L01 私人的第一封信
+      ---
+      duration_ms: 26.1154
+      type: 'test'
+      ...
+    # Subtest: ACH_L02 一地灯火
+    ok 142 - ACH_L02 一地灯火
+      ---
+      duration_ms: 24.5907
+      type: 'test'
+      ...
+    # Subtest: ACH_L03 来路相接
+    ok 143 - ACH_L03 来路相接
+      ---
+      duration_ms: 24.4519
+      type: 'test'
+      ...
+    # Subtest: ACH_L04 世界仍有回声
+    ok 144 - ACH_L04 世界仍有回声
+      ---
+      duration_ms: 23.5633
+      type: 'test'
+      ...
+    # Subtest: ACH_L05 王都来客
+    ok 145 - ACH_L05 王都来客
+      ---
+      duration_ms: 23.3614
+      type: 'test'
+      ...
+    # Subtest: ACH_L06 雪灯照归程
+    ok 146 - ACH_L06 雪灯照归程
+      ---
+      duration_ms: 21.035
+      type: 'test'
+      ...
+    # Subtest: ACH_L07 云上修理
+    ok 147 - ACH_L07 云上修理
+      ---
+      duration_ms: 20.5666
+      type: 'test'
+      ...
+    # Subtest: ACH_L08 公议之席
+    ok 148 - ACH_L08 公议之席
+      ---
+      duration_ms: 20.6225
+      type: 'test'
+      ...
+    # Subtest: ACH_L09 生者入天门
+    ok 149 - ACH_L09 生者入天门
+      ---
+      duration_ms: 19.0839
+      type: 'test'
+      ...
+    # Subtest: ACH_L10 第十三间房
+    ok 150 - ACH_L10 第十三间房
+      ---
+      duration_ms: 22.9497
+      type: 'test'
+      ...
+    # Subtest: ACH_L11 六地同信
+    ok 151 - ACH_L11 六地同信
+      ---
+      duration_ms: 21.3286
+      type: 'test'
+      ...
+    # Subtest: ACH_L12 界路有归途
+    ok 152 - ACH_L12 界路有归途
+      ---
+      duration_ms: 19.9533
+      type: 'test'
+      ...
+    # Subtest: ACH_L13 矿城的门
+    ok 153 - ACH_L13 矿城的门
+      ---
+      duration_ms: 21.0805
+      type: 'test'
+      ...
+    # Subtest: ACH_L14 迷宫归人
+    ok 154 - ACH_L14 迷宫归人
+      ---
+      duration_ms: 20.9576
+      type: 'test'
+      ...
+    # Subtest: ACH_L15 通缉之外的功劳
+    ok 155 - ACH_L15 通缉之外的功劳
+      ---
+      duration_ms: 20.6858
+      type: 'test'
+      ...
+    # Subtest: ACH_L16 二十张委托单
+    ok 156 - ACH_L16 二十张委托单
+      ---
+      duration_ms: 24.7419
+      type: 'test'
+      ...
+    # Subtest: ACH_L17 四店藏门
+    ok 157 - ACH_L17 四店藏门
+      ---
+      duration_ms: 23.267
+      type: 'test'
+      ...
+    # Subtest: ACH_L18 切磋有度
+    ok 158 - ACH_L18 切磋有度
+      ---
+      duration_ms: 21.6074
+      type: 'test'
+      ...
+    # Subtest: ACH_L19 三位对手
+    ok 159 - ACH_L19 三位对手
+      ---
+      duration_ms: 21.6894
+      type: 'test'
+      ...
+    # Subtest: ACH_L20 留下性命
+    ok 160 - ACH_L20 留下性命
+      ---
+      duration_ms: 25.5763
+      type: 'test'
+      ...
+    # Subtest: ACH_L21 丹中见路
+    ok 161 - ACH_L21 丹中见路
+      ---
+      duration_ms: 6.1413
+      type: 'test'
+      ...
+    # Subtest: ACH_L22 器中见我
+    ok 162 - ACH_L22 器中见我
+      ---
+      duration_ms: 5.6372
+      type: 'test'
+      ...
+    # Subtest: ACH_L23 阵外有路
+    ok 163 - ACH_L23 阵外有路
+      ---
+      duration_ms: 6.8256
+      type: 'test'
+      ...
+    # Subtest: ACH_L24 纸上留息
+    ok 164 - ACH_L24 纸上留息
+      ---
+      duration_ms: 6.4172
+      type: 'test'
+      ...
+    # Subtest: ACH_L25 木中回声
+    ok 165 - ACH_L25 木中回声
+      ---
+      duration_ms: 5.7691
+      type: 'test'
+      ...
+    # Subtest: ACH_P01 两锋相见
+    ok 166 - ACH_P01 两锋相见
+      ---
+      duration_ms: 20.7132
+      type: 'test'
+      ...
+    # Subtest: ACH_P02 胜负初分
+    ok 167 - ACH_P02 胜负初分
+      ---
+      duration_ms: 20.4066
+      type: 'test'
+      ...
+    # Subtest: ACH_P03 五次回响
+    ok 168 - ACH_P03 五次回响
+      ---
+      duration_ms: 21.6081
+      type: 'test'
+      ...
+    # Subtest: ACH_P04 交锋成章
+    ok 169 - ACH_P04 交锋成章
+      ---
+      duration_ms: 19.2723
+      type: 'test'
+      ...
+    # Subtest: ACH_P05 百折锋芒
+    ok 170 - ACH_P05 百折锋芒
+      ---
+      duration_ms: 20.2903
+      type: 'test'
+      ...
+    # Subtest: ACH_P06 百战有名
+    ok 171 - ACH_P06 百战有名
+      ---
+      duration_ms: 20.8491
+      type: 'test'
+      ...
+    # Subtest: ACH_P07 三种答案
+    ok 172 - ACH_P07 三种答案
+      ---
+      duration_ms: 21.2224
+      type: 'test'
+      ...
+    # Subtest: ACH_P08 十面来风
+    ok 173 - ACH_P08 十面来风
+      ---
+      duration_ms: 23.5902
+      type: 'test'
+      ...
+    # Subtest: ACH_P09 众锋之间
+    ok 174 - ACH_P09 众锋之间
+      ---
+      duration_ms: 19.9199
+      type: 'test'
+      ...
+    # Subtest: ACH_P10 寸步不让
+    ok 175 - ACH_P10 寸步不让
+      ---
+      duration_ms: 20.7275
+      type: 'test'
+      ...
+    # Subtest: ACH_P11 门前五战
+    ok 176 - ACH_P11 门前五战
+      ---
+      duration_ms: 21.465
+      type: 'test'
+      ...
+    # Subtest: ACH_P12 不动之界
+    ok 177 - ACH_P12 不动之界
+      ---
+      duration_ms: 19.0024
+      type: 'test'
+      ...
+    # Subtest: ACH_P13 剑先于言
+    ok 178 - ACH_P13 剑先于言
+      ---
+      duration_ms: 24.3644
+      type: 'test'
+      ...
+    # Subtest: ACH_P14 十步问锋
+    ok 179 - ACH_P14 十步问锋
+      ---
+      duration_ms: 22.2842
+      type: 'test'
+      ...
+    # Subtest: ACH_P15 破阵之人
+    ok 180 - ACH_P15 破阵之人
+      ---
+      duration_ms: 20.0918
+      type: 'test'
+      ...
+    # Subtest: ACH_P16 三日磨剑
+    ok 181 - ACH_P16 三日磨剑
+      ---
+      duration_ms: 23.272
+      type: 'test'
+      ...
+    # Subtest: ACH_P17 七日不锈
+    ok 182 - ACH_P17 七日不锈
+      ---
+      duration_ms: 21.1601
+      type: 'test'
+      ...
+    # Subtest: ACH_P18 月下常锋
+    ok 183 - ACH_P18 月下常锋
+      ---
+      duration_ms: 21.3715
+      type: 'test'
+      ...
+    # Subtest: ACH_P19 势均之胜
+    ok 184 - ACH_P19 势均之胜
+      ---
+      duration_ms: 26.5701
+      type: 'test'
+      ...
+    # Subtest: ACH_P20 同阶争鸣
+    ok 185 - ACH_P20 同阶争鸣
+      ---
+      duration_ms: 23.0629
+      type: 'test'
+      ...
+    # Subtest: ACH_P21 抬头见锋
+    ok 186 - ACH_P21 抬头见锋
+      ---
+      duration_ms: 21.7959
+      type: 'test'
+      ...
+    # Subtest: ACH_P22 越阶而行
+    ok 187 - ACH_P22 越阶而行
+      ---
+      duration_ms: 21.5222
+      type: 'test'
+      ...
+    # Subtest: ACH_P23 余烬未冷
+    ok 188 - ACH_P23 余烬未冷
+      ---
+      duration_ms: 22.4302
+      type: 'test'
+      ...
+    # Subtest: ACH_P24 长夜决锋
+    ok 189 - ACH_P24 长夜决锋
+      ---
+      duration_ms: 23.5528
+      type: 'test'
+      ...
+    # Subtest: ACH_P25 五地留锋
+    ok 190 - ACH_P25 五地留锋
+      ---
+      duration_ms: 22.5608
+      type: 'test'
+      ...
+    # Subtest: ACH_EGG01 你怎么又来了
+    ok 191 - ACH_EGG01 你怎么又来了
+      ---
+      duration_ms: 22.9648
+      type: 'test'
+      ...
+    # Subtest: ACH_EGG02 这次轮到你了
+    ok 192 - ACH_EGG02 这次轮到你了
+      ---
+      duration_ms: 22.5108
+      type: 'test'
+      ...
+    # Subtest: ACH_EGG03 血条只是装饰
+    ok 193 - ACH_EGG03 血条只是装饰
+      ---
+      duration_ms: 22.4319
+      type: 'test'
+      ...
+    # Subtest: ACH_EGG04 彩虹不是天气
+    ok 194 - ACH_EGG04 彩虹不是天气
+      ---
+      duration_ms: 20.6958
+      type: 'test'
+      ...
+    # Subtest: ACH_EGG05 全员拒绝躺平
+    ok 195 - ACH_EGG05 全员拒绝躺平
+      ---
+      duration_ms: 21.1462
+      type: 'test'
+      ...
+    # Subtest: ACH_EGG06 这盾售后很忙
+    ok 196 - ACH_EGG06 这盾售后很忙
+      ---
+      duration_ms: 19.9271
+      type: 'test'
+      ...
+    # Subtest: ACH_EGG07 房顶比配方先熟
+    ok 197 - ACH_EGG07 房顶比配方先熟
+      ---
+      duration_ms: 21.6158
+      type: 'test'
+      ...
+    # Subtest: ACH_EGG08 运气开始收费
+    ok 198 - ACH_EGG08 运气开始收费
+      ---
+      duration_ms: 21.2873
+      type: 'test'
+      ...
+    # Subtest: ACH_EGG09 配方拒绝署名
+    ok 199 - ACH_EGG09 配方拒绝署名
+      ---
+      duration_ms: 21.6078
+      type: 'test'
+      ...
+    # Subtest: ACH_EGG10 请把剑寄存在门口
+    ok 200 - ACH_EGG10 请把剑寄存在门口
+      ---
+      duration_ms: 21.7383
+      type: 'test'
+      ...
+    # Subtest: ACH_EGG11 万物皆有螺丝
+    ok 201 - ACH_EGG11 万物皆有螺丝
+      ---
+      duration_ms: 20.6198
+      type: 'test'
+      ...
+    # Subtest: ACH_EGG12 地皮有话要说
+    ok 202 - ACH_EGG12 地皮有话要说
+      ---
+      duration_ms: 21.1902
+      type: 'test'
+      ...
+    1..202
+ok 1 - 有效静态目录逐项账本验收
+  ---
+  duration_ms: 5493.4717
+  type: 'test'
+  ...
+# [2026-09-09 23:20:04][INFO] [alemonjs][exit] 进程退出，code=0
+# Subtest: 成功回执标记已发送并保存平台消息编号
+ok 2 - 成功回执标记已发送并保存平台消息编号
+  ---
+  duration_ms: 2.6554
+  type: 'test'
+  ...
+# Subtest: 无权限的主动消息不再进入自动重试队列
+ok 3 - 无权限的主动消息不再进入自动重试队列
+  ---
+  duration_ms: 0.373
+  type: 'test'
+  ...
+# Subtest: 超时或未知失败不重发，部分送达也保留待核查
+ok 4 - 超时或未知失败不重发，部分送达也保留待核查
+  ---
+  duration_ms: 0.2486
+  type: 'test'
+  ...
+# Subtest: 审计仅保存状态码和平台消息编号，不保存连接信息
+ok 5 - 审计仅保存状态码和平台消息编号，不保存连接信息
+  ---
+  duration_ms: 0.4133
+  type: 'test'
+  ...
+# Subtest: ACH_P01 正式PVP结算条件
+ok 6 - ACH_P01 正式PVP结算条件
+  ---
+  duration_ms: 34.3726
+  type: 'test'
+  ...
+# Subtest: ACH_P02 正式PVP结算条件
+ok 7 - ACH_P02 正式PVP结算条件
+  ---
+  duration_ms: 0.8901
+  type: 'test'
+  ...
+# Subtest: ACH_P03 正式PVP结算条件
+ok 8 - ACH_P03 正式PVP结算条件
+  ---
+  duration_ms: 0.7628
+  type: 'test'
+  ...
+# Subtest: ACH_P04 正式PVP结算条件
+ok 9 - ACH_P04 正式PVP结算条件
+  ---
+  duration_ms: 1.2159
+  type: 'test'
+  ...
+# Subtest: ACH_P05 正式PVP结算条件
+ok 10 - ACH_P05 正式PVP结算条件
+  ---
+  duration_ms: 1.3842
+  type: 'test'
+  ...
+# Subtest: ACH_P06 正式PVP结算条件
+ok 11 - ACH_P06 正式PVP结算条件
+  ---
+  duration_ms: 0.8804
+  type: 'test'
+  ...
+# Subtest: ACH_P07 正式PVP结算条件
+ok 12 - ACH_P07 正式PVP结算条件
+  ---
+  duration_ms: 0.5883
+  type: 'test'
+  ...
+# Subtest: ACH_P08 正式PVP结算条件
+ok 13 - ACH_P08 正式PVP结算条件
+  ---
+  duration_ms: 0.3996
+  type: 'test'
+  ...
+# Subtest: ACH_P09 正式PVP结算条件
+ok 14 - ACH_P09 正式PVP结算条件
+  ---
+  duration_ms: 0.7901
+  type: 'test'
+  ...
+# Subtest: ACH_P10 正式PVP结算条件
+ok 15 - ACH_P10 正式PVP结算条件
+  ---
+  duration_ms: 0.9472
+  type: 'test'
+  ...
+# Subtest: ACH_P11 正式PVP结算条件
+ok 16 - ACH_P11 正式PVP结算条件
+  ---
+  duration_ms: 1.3177
+  type: 'test'
+  ...
+# Subtest: ACH_P12 正式PVP结算条件
+ok 17 - ACH_P12 正式PVP结算条件
+  ---
+  duration_ms: 0.6154
+  type: 'test'
+  ...
+# Subtest: ACH_P13 正式PVP结算条件
+ok 18 - ACH_P13 正式PVP结算条件
+  ---
+  duration_ms: 0.5215
+  type: 'test'
+  ...
+# Subtest: ACH_P14 正式PVP结算条件
+ok 19 - ACH_P14 正式PVP结算条件
+  ---
+  duration_ms: 0.4072
+  type: 'test'
+  ...
+# Subtest: ACH_P15 正式PVP结算条件
+ok 20 - ACH_P15 正式PVP结算条件
+  ---
+  duration_ms: 0.4204
+  type: 'test'
+  ...
+# Subtest: ACH_P16 正式PVP结算条件
+ok 21 - ACH_P16 正式PVP结算条件
+  ---
+  duration_ms: 1.7625
+  type: 'test'
+  ...
+# Subtest: ACH_P17 正式PVP结算条件
+ok 22 - ACH_P17 正式PVP结算条件
+  ---
+  duration_ms: 0.4699
+  type: 'test'
+  ...
+# Subtest: ACH_P18 正式PVP结算条件
+ok 23 - ACH_P18 正式PVP结算条件
+  ---
+  duration_ms: 0.2366
+  type: 'test'
+  ...
+# Subtest: ACH_P19 正式PVP结算条件
+ok 24 - ACH_P19 正式PVP结算条件
+  ---
+  duration_ms: 0.2538
+  type: 'test'
+  ...
+# Subtest: ACH_P20 正式PVP结算条件
+ok 25 - ACH_P20 正式PVP结算条件
+  ---
+  duration_ms: 0.2716
+  type: 'test'
+  ...
+# Subtest: ACH_P21 正式PVP结算条件
+ok 26 - ACH_P21 正式PVP结算条件
+  ---
+  duration_ms: 0.2706
+  type: 'test'
+  ...
+# Subtest: ACH_P22 正式PVP结算条件
+ok 27 - ACH_P22 正式PVP结算条件
+  ---
+  duration_ms: 0.2813
+  type: 'test'
+  ...
+# Subtest: ACH_P23 正式PVP结算条件
+ok 28 - ACH_P23 正式PVP结算条件
+  ---
+  duration_ms: 0.356
+  type: 'test'
+  ...
+# Subtest: ACH_P24 正式PVP结算条件
+ok 29 - ACH_P24 正式PVP结算条件
+  ---
+  duration_ms: 0.6344
+  type: 'test'
+  ...
+# Subtest: ACH_P25 正式PVP结算条件
+ok 30 - ACH_P25 正式PVP结算条件
+  ---
+  duration_ms: 0.3942
+  type: 'test'
+  ...
+# Subtest: PVP排除未结束、逃跑、零伤害、同身份、过低等级，检查精确边界
+ok 31 - PVP排除未结束、逃跑、零伤害、同身份、过低等级，检查精确边界
+  ---
+  duration_ms: 3.4121
+  type: 'test'
+  ...
+# Subtest: 隔离MySQL：原子达成、首位、回滚、重试、跨重修属性与无效身份排除
+ok 32 - 隔离MySQL：原子达成、首位、回滚、重试、跨重修属性与无效身份排除
+  ---
+  duration_ms: 2151.1362
+  type: 'test'
+  ...
+# [2026-09-09 23:20:00][INFO] [alemonjs][exit] 进程退出，code=0
+# Subtest: 目录为202项非隐藏路线成就，史诗高于传说，条件仅服务端保留
+ok 33 - 目录为202项非隐藏路线成就，史诗高于传说，条件仅服务端保留
+  ---
+  duration_ms: 1.2709
+  type: 'test'
+  ...
+# Subtest: 结算队列只属于当前事务连接，取出后清除，重试不能继承失败队列
+ok 34 - 结算队列只属于当前事务连接，取出后清除，重试不能继承失败队列
+  ---
+  duration_ms: 0.2402
+  type: 'test'
+  ...
+# Subtest: 完成率处理零分母、小百分比与上限
+ok 35 - 完成率处理零分母、小百分比与上限
+  ---
+  duration_ms: 0.2649
+  type: 'test'
+  ...
+# Subtest: 首位公告公开角色名、成就名与引用简介，不公开条件，每条只显示一项
+ok 36 - 首位公告公开角色名、成就名与引用简介，不公开条件，每条只显示一项
+  ---
+  duration_ms: 1.6685
+  type: 'test'
+  ...
+# Subtest: 空列表顶部仅有全部；10条编号与蓝色链接不自动发送
+ok 37 - 空列表顶部仅有全部；10条编号与蓝色链接不自动发送
+  ---
+  duration_ms: 0.8041
+  type: 'test'
+  ...
+# Subtest: 详情采用白名单字段，即使输入附带条件也不能渲染
+ok 38 - 详情采用白名单字段，即使输入附带条件也不能渲染
+  ---
+  duration_ms: 0.3048
+  type: 'test'
+  ...
+# Subtest: 永久表不向人物表设置外键，达成名次与身份成就都有唯一约束
+ok 39 - 永久表不向人物表设置外键，达成名次与身份成就都有唯一约束
+  ---
+  duration_ms: 0.2863
+  type: 'test'
+  ...
+# Subtest: PVP25项独立分类；首领各难度分开且改名不重编成就编号
+ok 40 - PVP25项独立分类；首领各难度分开且改名不重编成就编号
+  ---
+  duration_ms: 0.5638
+  type: 'test'
+  ...
+# Subtest: 17组首领的12档文案完整独立，替换文案不改变编号
+ok 41 - 17组首领的12档文案完整独立，替换文案不改变编号
+  ---
+  duration_ms: 4.6561
+  type: 'test'
+  ...
+# Subtest: 合作首发公告合并队员署名，成就名普通加粗、简介引用加粗、奖励普通文本
+ok 42 - 合作首发公告合并队员署名，成就名普通加粗、简介引用加粗、奖励普通文本
+  ---
+  duration_ms: 0.6937
+  type: 'test'
+  ...
+# Subtest: Boss新难度奖励与六维目录总量符合确认表
+ok 43 - Boss新难度奖励与六维目录总量符合确认表
+  ---
+  duration_ms: 4.805
+  type: 'test'
+  ...
+# Subtest: 低门槛条目已退出有效目录，保留合作Boss并加入十二个秘闻
+ok 44 - 低门槛条目已退出有效目录，保留合作Boss并加入十二个秘闻
+  ---
+  duration_ms: 0.2787
+  type: 'test'
+  ...
+# [2026-09-09 23:19:58][INFO] [alemonjs][exit] 进程退出，code=0
+# Subtest: 灯火剧情标题、人物详情与引用排版，长选项蓝色输入链接和十键完整转换
+ok 45 - 灯火剧情标题、人物详情与引用排版，长选项蓝色输入链接和十键完整转换
+  ---
+  duration_ms: 9.8285
+  type: 'test'
+  ...
+# Subtest: 初行报酬仅在结算首页以加深提示显示，后续剧情与交接不重复
+ok 46 - 初行报酬仅在结算首页以加深提示显示，后续剧情与交接不重复
+  ---
+  duration_ms: 11.0373
+  type: 'test'
+  ...
+# Subtest: 天赋确认先引导打开面板，初行场景使用正文而选项保持正文
+ok 47 - 天赋确认先引导打开面板，初行场景使用正文而选项保持正文
+  ---
+  duration_ms: 21.1891
+  type: 'test'
+  ...
+# Subtest: 初行阅读页的进度紧跟标题，选项页不重复显示
+ok 48 - 初行阅读页的进度紧跟标题，选项页不重复显示
+  ---
+  duration_ms: 9.1126
+  type: 'test'
+  ...
+# Subtest: 全部初行路线的安全区交接延续当事人物，不再落入通用接引文案
+ok 49 - 全部初行路线的安全区交接延续当事人物，不再落入通用接引文案
+  ---
+  duration_ms: 0.5198
+  type: 'test'
+  ...
+# Subtest: 神技全部目录、分类、搜索与详情经本机QQ适配器转换，不产生不支持的cmd-enter show
+ok 50 - 神技全部目录、分类、搜索与详情经本机QQ适配器转换，不产生不支持的cmd-enter show
+  ---
+  duration_ms: 16.3015
+  type: 'test'
+  ...
+# Subtest: 相同注册阶段重发保存的完整正文，女神更替只在新页面明确交接
+ok 51 - 相同注册阶段重发保存的完整正文，女神更替只在新页面明确交接
+  ---
+  duration_ms: 18.6515
+  type: 'test'
+  ...
+# Subtest: 世界树人物页和满员随从名册经过QQ转换，不丢人物、邀请或返回按钮
+ok 52 - 世界树人物页和满员随从名册经过QQ转换，不丢人物、邀请或返回按钮
+  ---
+  duration_ms: 47.4967
+  type: 'test'
+  ...
+# Subtest: 世界树前台沿用百纳镇业务分组，登记和闲聊均留在维萝柜台，QQ按钮完整
+ok 53 - 世界树前台沿用百纳镇业务分组，登记和闲聊均留在维萝柜台，QQ按钮完整
+  ---
+  duration_ms: 85.9946
+  type: 'test'
+  ...
+# Subtest: 六地大厅统一五行九键，第四行后勤与休息，服务归入对应区域
+ok 54 - 六地大厅统一五行九键，第四行后勤与休息，服务归入对应区域
+  ---
+  duration_ms: 54.3192
+  type: 'test'
+  ...
+# Subtest: 公会交接逐段引用场景与对白，结算提示独立显示
+ok 55 - 公会交接逐段引用场景与对白，结算提示独立显示
+  ---
+  duration_ms: 5.5048
+  type: 'test'
+  ...
+# Subtest: 旧建筑按键进入和离开六地公会使用同一状态，区域入口仍可抵达各服务
+ok 56 - 旧建筑按键进入和离开六地公会使用同一状态，区域入口仍可抵达各服务
+  ---
+  duration_ms: 63.6631
+  type: 'test'
+  ...
+# Subtest: 公会交谈只发人物引用消息，详情链接正确且保留鉴识和当地公会限制
+ok 57 - 公会交谈只发人物引用消息，详情链接正确且保留鉴识和当地公会限制
+  ---
+  duration_ms: 67.8925
+  type: 'test'
+  ...
+# Subtest: 天赋分类引言随分类和翻页显示，详情不依赖设计文档章节
+ok 58 - 天赋分类引言随分类和翻页显示，详情不依赖设计文档章节
+  ---
+  duration_ms: 1.3259
+  type: 'test'
+  ...
+# Subtest: 未解锁隐藏路线不泄漏分类、搜索或详情，旧分类回退普通目录
+ok 59 - 未解锁隐藏路线不泄漏分类、搜索或详情，旧分类回退普通目录
+  ---
+  duration_ms: 1.2578
+  type: 'test'
+  ...
+1..59
+# tests 261
+# suites 0
+# pass 261
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 6729.9088

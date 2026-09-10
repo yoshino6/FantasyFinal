@@ -1,0 +1,2 @@
+{"mode":"apply","directory":".data/enemy-stat-migration/2026-09-08T14-53-32-738Z","alreadyApplied":false,"templates":204,"liveSpawns":4776,"oldSpawns":4776,"newSpawns":0,"spawnChanges":3835,"profileChanges":49,"characterChanges":0,"mapNpcs":116,"sparNpcs":64,"scenarioCount":384,"blocked":[]}
+[2026-09-08 22:53:33][INFO] [alemonjs][exit] 进程退出，code=0

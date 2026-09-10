@@ -1,3 +1,4 @@
+import { recordAchievement } from './achievement-events';
 import { randomUUID } from 'node:crypto';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
@@ -21,6 +22,8 @@ export const recordSkillPointChange = async (
   skillId: number | null = null,
   detail: string | null = null
 ) => {
+  const metric: Record<string,string> = { learn_skill:'ACH_A06',upgrade_skill:'ACH_A07',upgrade_specialization:'ACH_A08',upgrade_appraisal:'ACH_A21' };
+  if(amount<0 && metric[kind]) recordAchievement(connection,characterId,[metric[kind]]);
   if (!amount && !['legacy_opening_balance','legacy_level_reset'].includes(kind)) return;
   await connection.execute(
     'INSERT INTO player_skill_point_ledger (character_id,amount,change_kind,skill_id,detail) VALUES (?,?,?,?,?)',

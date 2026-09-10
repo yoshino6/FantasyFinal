@@ -6,13 +6,14 @@ import { automatonSkills } from './automaton-skill-catalog';
 export type AutomatonFeedChunk = { code: string; xp: number };
 export type AutomatonLevel = { level: number; contributions: AutomatonFeedChunk[]; vector: AutomatonVector; gain: number[]; counts: number[]; skills: string[] };
 export type AutomatonState = {
-  version: 3; seed: string; name: string; personality: AutomatonPersonality; level: number;
+  version: 3; growthBalanceVersion?: number; seed: string; name: string; personality: AutomatonPersonality; level: number;
   stats: number[]; hp: number; mp: number; levels: AutomatonLevel[]; progress: AutomatonFeedChunk[]; reserve: AutomatonFeedChunk[];
   learned: string[]; equipped: string[]; pendingSpecial: number; intimacy: number;
   ownerAddress: string; selfAddress: string; publicQuotes: boolean; greeting: boolean; guard: boolean;
   participation?: '参战' | '陪伴'; appearance?: string;
   archived?: boolean; named?: boolean; renameDay?: string; renameCount?: number;
   lastInteractionAt?: string;
+  origin?: { kind:'crafted'|'opening'; code?:string };
   portrait?: {key:string;width:number;height:number;url?:string};
   strategy: '性格' | '进攻' | '守护' | '节能'; customQuotes: Record<string,string[]>; preferences: Record<string,number>;
 };
@@ -21,7 +22,7 @@ export const createAutomaton = (seed: string): AutomatonState => {
   const learned: string[] = [];
   const count = automatonRandom(seed,'birth-count') < .6 ? 1 : 2;
   for (let i = 0; i < count; i++) { const skill = drawAutomatonSkill(seed,`birth-skill:${i}`,personality,learned,false,i === 0); if (skill) learned.push(skill); }
-  const state: AutomatonState = {version:3,seed,name:'机巧人偶',personality,level:1,stats,hp:stats[0]!,mp:stats[1]!,levels:[],progress:[],reserve:[],learned,equipped:[],pendingSpecial:0,intimacy:0,
+  const state: AutomatonState = {version:3,growthBalanceVersion:3,seed,name:'机巧人偶',personality,level:1,stats,hp:stats[0]!,mp:stats[1]!,levels:[],progress:[],reserve:[],learned,equipped:[],pendingSpecial:0,intimacy:0,
     ownerAddress:personality.ownerAddress,selfAddress:personality.selfAddress,publicQuotes:false,greeting:true,guard:true,participation:'参战',strategy:'性格',customQuotes:{},preferences:{}};
   autoEquipAutomaton(state);
   return state;
@@ -54,6 +55,23 @@ const append = (chunks: AutomatonFeedChunk[], next: AutomatonFeedChunk) => {
 const preserveRatio = (state: AutomatonState, oldStats: number[], oldHp: number, oldMp: number) => {
   state.hp = oldHp > 0 ? Math.max(1,Math.floor(oldHp / Math.floor(oldStats[0]!) * Math.floor(state.stats[0]!))) : 0;
   state.mp = Math.floor(oldMp / Math.floor(oldStats[1]!) * Math.floor(state.stats[1]!));
+};
+
+/** 复用每级培养向量和原随机种子，仅重放数值；技能、性格及材料记录保持原样。 */
+export const migrateAutomatonGrowth = (original: AutomatonState): AutomatonState => {
+  if (Number(original.growthBalanceVersion ?? 0) >= 3) return original;
+  if (original.levels.length !== original.level - 1 || original.levels.some((entry, i) => entry.level !== i + 2)) throw new Error('机巧成长历史不完整，不能自动迁移。');
+  const state = structuredClone(original);
+  // 从旧面板减去历史升级贡献以保留出生值及其他永久增量。
+  state.stats = original.stats.map((value, i) => value - original.levels.reduce((sum, entry) => sum + entry.gain[i]!, 0));
+  for (const history of state.levels) {
+    const growth = allocateAutomatonGrowth(history.level, state.personality.vector, history.vector, state.seed);
+    history.gain = growth.values; history.counts = growth.counts;
+    growth.values.forEach((value, i) => { state.stats[i]! += value; });
+  }
+  preserveRatio(state, original.stats, original.hp, original.mp);
+  state.growthBalanceVersion = 3;
+  return state;
 };
 /** 仅处理已扣除的材料流；封顶时保留带类型的余额，不制造无类型经验。 */
 export const cultivateAutomaton = (original: AutomatonState, bottles: {code:string;count:number}[], cap: number, stopAt = cap) => {

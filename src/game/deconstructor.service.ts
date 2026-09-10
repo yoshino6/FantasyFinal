@@ -1,3 +1,10 @@
+import { achievementActivity, achievementItem, achievementSecondaryLevel } from './achievement-hooks';
+import { recordAchievement } from './achievement-events';
+import { addMaterialCosts, takeMaterialCosts, recoveryMaterialBudget, scaleMaterialCost, type MaterialCost } from './talent-material-recovery';
+import { fixedTalentMaterials, consumeTalentMaterial, recordTalentProduct } from './talent-production';
+import { ownedTalent, readTalentData } from './talent-data';
+import { talentProficiency, talentProductionRecord } from './talent-rewards';
+import { currentSecondaryShop, shopProgressFor, shopProficiency } from './secondary-shop-context';
 import { consumeInventory, grantInventory, productionBinding, type Binding } from './inventory-binding';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
@@ -62,12 +69,14 @@ export const claimDeconstructorQuest = async (qqUserId: string) => withTransacti
   await connection.execute('UPDATE player_side_quests SET status=\'claimed\',claimed_at=NOW() WHERE character_id=? AND quest_code=?', [characterId, questCode]);
   await connection.execute('UPDATE characters SET secondary_profession_code=\'deconstructor\' WHERE id=?', [characterId]);
   await connection.execute('INSERT IGNORE INTO player_secondary_professions (character_id,profession_code,level,proficiency) VALUES (?,\'deconstructor\',1,0)', [characterId]);
+  recordAchievement(connection,characterId,['ACH_A05']);
   return { name: '解构师', characterName: characters[0]?.name ?? '冒险者', giftName: '唯薇安的赠礼' };
 });
 
 export const deconstructorProgress = async (qqUserId: string) => {
   const pool = await getPool();
   const characterId = await characterIdFor(pool, qqUserId);
+  const shop=await shopProgressFor(pool,characterId,'deconstructor');if(shop)return shop;
   const [rows] = await pool.execute<(RowDataPacket & { level: number; proficiency: number })[]>('SELECT level,proficiency FROM player_secondary_professions WHERE character_id=? AND profession_code=\'deconstructor\' LIMIT 1', [characterId]);
   const level = Math.min(secondaryProfessionMaxLevel, Math.max(1, Number(rows[0]?.level ?? 1)));
   const proficiency = level >= secondaryProfessionMaxLevel ? 0 : Number(rows[0]?.proficiency ?? 0);
@@ -186,6 +195,7 @@ const categoryType: Record<DeconstructionCategory, string> = { 装备: 'equipmen
 const requiredFor = secondaryProfessionProficiencyRequired;
 
 const deconstructorProgressFor = async (connection: PoolConnection | Awaited<ReturnType<typeof getPool>>, characterId: number, lock = false) => {
+  const shop=await shopProgressFor(connection,characterId,'deconstructor');if(shop)return shop;
   const [characters] = await connection.execute<(RowDataPacket & { secondary_profession_code: string | null })[]>(`SELECT secondary_profession_code FROM characters WHERE id=?${lock ? ' FOR UPDATE' : ''}`, [characterId]);
   if (characters[0]?.secondary_profession_code !== 'deconstructor') throw new Error('只有解构师可以进行分解。');
   await connection.execute("INSERT IGNORE INTO player_secondary_professions (character_id,profession_code,level,proficiency) VALUES (?,'deconstructor',1,0)", [characterId]);
@@ -197,11 +207,14 @@ const deconstructorProgressFor = async (connection: PoolConnection | Awaited<Ret
 
 const addDeconstructorProficiency = async (connection: PoolConnection, characterId: number, gained = 1) => {
   const current = await deconstructorProgressFor(connection, characterId, true);
+  if(currentSecondaryShop())return current;
+  gained=await talentProficiency(connection,characterId,gained,{profession:'deconstructor'});
   let level = current.level;
   let proficiency = level >= secondaryProfessionMaxLevel ? 0 : current.proficiency + Math.max(0, Math.round(gained));
   while (level < secondaryProfessionMaxLevel && proficiency >= requiredFor(level)) { proficiency -= requiredFor(level); level += 1; }
   if (level >= secondaryProfessionMaxLevel) proficiency = 0;
   await connection.execute("UPDATE player_secondary_professions SET level=?,proficiency=? WHERE character_id=? AND profession_code='deconstructor'", [level, proficiency, characterId]);
+  achievementSecondaryLevel(connection,Number(characterId),level);
   return { level, proficiency, required: requiredFor(level), bonus: secondaryProfessionBonus(level) };
 };
 
@@ -244,7 +257,7 @@ const unlockedConstructionCodes = async (connection: PoolConnection | Awaited<Re
     JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.quantity>0 AND i.code REGEXP '_blueprint$'${suffix}`, [characterId]);
   const unlockedCodes = new Set<string>();
   const [autoUnlock] = await connection.execute<RowDataPacket[]>("SELECT level FROM player_secondary_professions WHERE character_id=? AND profession_code='deconstructor'", [characterId]);
-  if (Number(autoUnlock[0]?.level ?? 0) >= 4) for (const code of ['kinetic_frame','servo_bundle','memory_polymer','shadow_filament','pulse_regulator','luminous_lens','energy_core']) constructionClosureFor(code, unlockedCodes);
+  if (!currentSecondaryShop() && Number(autoUnlock[0]?.level ?? 0) >= 4) for (const code of ['kinetic_frame','servo_bundle','memory_polymer','shadow_filament','pulse_regulator','luminous_lens','energy_core']) constructionClosureFor(code, unlockedCodes);
   for (const row of ownedBlueprintRows) {
     const recipeCode = blueprintRecipeCode(row.code);
     if (recipeCode) constructionClosureFor(recipeCode, unlockedCodes);
@@ -313,34 +326,37 @@ export const constructItemFor = async (connection:PoolConnection,qqUserId:string
     const blueprint = materials.get(recipe.blueprintCode);
     if (!blueprint || Number(blueprint.quantity) < 1) throw new Error('缺少该异械的图纸。');
   }
-  for (const ingredient of recipe.ingredients) {
-    const material = materials.get(ingredient.code);
-    if (!material || Number(material.quantity) < ingredient.quantity) throw new Error(`材料不足：需要【${material?.name ?? ingredient.code}】×${ingredient.quantity}。`);
-  }
-  const ingredientBindings = new Map<number, Binding>();
+  const paymentMaterials=await fixedTalentMaterials(connection,characterId,recipe.ingredients,recipe.ingredients.slice(1).map(i=>i.code),!currentSecondaryShop());
+  const talent=await ownedTalent(connection,characterId),data=await readTalentData(connection,characterId);
+  const risk=!currentSecondaryShop()&&talent?.number==='H09'&&data.settings.riskCraft===true;
+  const [talentOutputs]=await connection.execute<RowDataPacket[]>('SELECT rarity FROM item_definitions WHERE code=?',[recipe.code]);
+  if(risk&&(talentOutputs[0]?.rarity!=='普通'||paymentMaterials[0]?.item.rarity!=='普通'))throw new Error('孤注制作仅可用于普通主材、普通产物配方。');
+  const ingredientRecovery=new Map<number,MaterialCost>();
+  const ingredientBindings = new Map<number, Binding>(),paidQuantities=new Map<number,number>();
   const usedBinding: Binding = {unbound:0,trade:0,personal:0};
-  for (const ingredient of recipe.ingredients) {
-    const material = materials.get(ingredient.code)!;
-    const used = await consumeInventory(connection, characterId, Number(material.id), ingredient.quantity);
-    ingredientBindings.set(Number(material.id), used);
+  for (const ingredient of paymentMaterials) {
+    const payment=await consumeTalentMaterial(connection,characterId,Number(ingredient.item.id),ingredient.quantity,'craft',!currentSecondaryShop()),used=payment.binding;
+    ingredientRecovery.set(Number(ingredient.item.id),payment.recovery);
+    ingredientBindings.set(Number(ingredient.item.id), used);paidQuantities.set(Number(ingredient.item.id),payment.paid);
     for (const key of ['unbound','trade','personal'] as const) usedBinding[key] += used[key];
-    await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [characterId, material.id]);
   }
   const gap = constructionGapFor(recipe, progress.level);
-  const refundRate = constructionRefundRate(gap);
-  const successRate = constructionSuccessRate(recipe.recommendedSecondaryLevel, progress.level);
+  const refundRate = risk?0:constructionRefundRate(gap);
+  const successRate = constructionSuccessRate(recipe.recommendedSecondaryLevel, progress.level)*(risk?.7:1);
   const success = Math.random() * 100 < successRate;
-  const proficiencyGain = constructionProficiencyGain(recipe.constructionCategory);
+  const proficiencyGain = shopProficiency(constructionProficiencyGain(recipe.constructionCategory));
+  if(!currentSecondaryShop())await talentProductionRecord(connection,characterId,`construction:${recipe.code}`,success?proficiencyGain:0);
   const next = await addDeconstructorProficiency(connection, characterId, success ? proficiencyGain : Math.ceil(proficiencyGain * .5));
   if (!success) {
     const refunded: { name: string; quantity: number }[] = [];
-    for (const ingredient of recipe.ingredients) {
-      const material = materials.get(ingredient.code)!;
+    for (const ingredient of paymentMaterials) {
+      const material = ingredient.item;
       let quantity = 0;
-      for (let index = 0; index < ingredient.quantity; index += 1) if (Math.random() < refundRate) quantity += 1;
+      for (let index = 0; index < Number(paidQuantities.get(Number(material.id))??0); index += 1) if (Math.random() < refundRate) quantity += 1;
       if (!quantity) continue;
       const consumed = ingredientBindings.get(Number(material.id))!;
       const personal = Math.min(consumed.personal, quantity), trade = Math.min(consumed.trade, quantity - personal);
+      const cost=ingredientRecovery.get(Number(material.id));if(cost?.quantity)await addMaterialCosts(connection,'stock',characterId,Number(material.id),scaleMaterialCost(cost,quantity/Number(paidQuantities.get(Number(material.id)))));
       await grantInventory(connection, characterId, Number(material.id), {personal,trade,unbound:quantity-personal-trade});
       refunded.push({ name: material.name, quantity });
     }
@@ -351,15 +367,20 @@ export const constructItemFor = async (connection:PoolConnection,qqUserId:string
   if (!output) throw new Error('构造产物尚未初始化，请重启机器人后重试。');
   if (recipe.outputType === 'device') {
     const [instance] = await connection.execute<any>('INSERT INTO player_item_instances (character_id,item_id,effect_json,bound_kind) VALUES (?,?,?,?)', [characterId, output.id, JSON.stringify(recipe.effect ?? {}),usedBinding.personal?'personal':'none']);
+    if(risk)for(let i=0;i<3;i++)await connection.execute('INSERT INTO player_item_instances(character_id,item_id,effect_json,bound_kind) VALUES (?,?,?,?)',[characterId,output.id,JSON.stringify(recipe.effect??{}),usedBinding.personal?'personal':'none']);
     await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [characterId, output.id]);
+    if(!currentSecondaryShop())achievementActivity(connection,characterId);
     return { success: true as const, recipe, successRate, outputName: output.name, instanceId: Number(instance.insertId), proficiencyGain, progress: next };
   }
-  await grantInventory(connection, characterId, Number(output.id), productionBinding(usedBinding, 1, true));
+  await grantInventory(connection, characterId, Number(output.id), productionBinding(usedBinding, risk?4:1, true));
+  if(recipe.outputType==='material')await addMaterialCosts(connection,'stock',characterId,Number(output.id),{quantity:risk?4:1,paid:Object.fromEntries(paymentMaterials.map(m=>[String(m.item.code),Number(paidQuantities.get(Number(m.item.id))??0)])),children:Object.fromEntries(paymentMaterials.filter(m=>ingredientRecovery.get(Number(m.item.id))?.quantity).map(m=>[String(m.item.code),ingredientRecovery.get(Number(m.item.id))!]))});
+  if(!currentSecondaryShop())await recordTalentProduct(connection,characterId,Number(output.id),risk?4:1);
   await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [characterId, output.id]);
   if (recipe.code === 'demon_breaker_teleporter') {
     const { completeDungeonSecretPurchase } = await import('./dungeon-quest.service');
     await completeDungeonSecretPurchase(connection, characterId);
   }
+  if(!currentSecondaryShop())achievementActivity(connection,characterId);
   return { success: true as const, recipe, successRate, outputName: output.name, proficiencyGain, progress: next };
 };
 export const constructItem = async (qqUserId:string,recipeCode:string)=>withTransaction(connection=>constructItemFor(connection,qqUserId,recipeCode));
@@ -388,7 +409,15 @@ export const deconstructItems = async (qqUserId: string, itemId: number, quantit
   if (Number(item.quantity) < quantity) throw new Error(`物品不足，最多可分解 ${item.quantity} 份。`);
   const outputs = new Map<string, number>(); const add = (code: string, amount: number) => outputs.set(code, (outputs.get(code) ?? 0) + amount);
   const bonusMultiplier = 1 + progress.bonus / 100;
+  const constructed=constructedMaterialRecipes.get(item.code);
+  const materialCost=constructed?await takeMaterialCosts(connection,'stock',characterId,itemId,quantity):undefined;
+  if(constructed&&materialCost){
+    const recovery=constructed.constructionCategory==='构件'?.65:.60;
+    for(const ingredient of recoveryMaterialBudget(materialCost,quantity,constructed.ingredients))
+      for(let n=0;n<ingredient.quantity;n++)if(Math.random()<Math.min(1,recovery*bonusMultiplier))add(ingredient.code,1);
+  }
   for (let index = 0; index < quantity; index += 1) {
+    if(constructed)continue;
     const slimeDust = coloredSlimeGelDust[item.code];
     const ordinary = ordinaryProfiles[item.code];
     if (deconstructMonsterCraftMaterial(item, bonusMultiplier, add)) {
@@ -400,12 +429,6 @@ export const deconstructItems = async (qqUserId: string, itemId: number, quantit
       add('energy_ember', chainedYield(Math.min(1, ordinary.ember * bonusMultiplier), 0.5, 3));
     } else if (forgeMaterialProfiles[item.code]) {
       for (const output of forgeMaterialProfiles[item.code]) add(output.code, chainedYield(1, Math.min(1, output.decay * bonusMultiplier), output.limit));
-    } else if (constructedMaterialRecipes.has(item.code)) {
-      const recipe = constructedMaterialRecipes.get(item.code)!;
-      const recovery = recipe.constructionCategory === '构件' ? .65 : .60;
-      for (const ingredient of recipe.ingredients) {
-        for (let input = 0; input < ingredient.quantity; input += 1) if (Math.random() < Math.min(1, recovery * bonusMultiplier)) add(ingredient.code, 1);
-      }
     } else {
       const particleCount = chainedYield(1, Math.min(1, 0.6 * bonusMultiplier), 6);
       for (let particle = 0; particle < particleCount; particle += 1) add(Math.random() < 0.5 ? 'blood_residue' : 'energy_ember', 1);
@@ -420,12 +443,16 @@ export const deconstructItems = async (qqUserId: string, itemId: number, quantit
     const [definitions] = await connection.execute<(RowDataPacket & { id: number; code: string; name: string })[]>(`SELECT id,code,name FROM item_definitions WHERE code IN (${codes.map(() => '?').join(',')}) FOR UPDATE`, codes);
     for (const definition of definitions) {
       const amount = outputs.get(definition.code) ?? 0; if (amount <= 0) continue;
+      const child=materialCost?.children?.[definition.code],paid=materialCost?.paid[definition.code];
+      if(child&&paid)await addMaterialCosts(connection,'stock',characterId,Number(definition.id),scaleMaterialCost(child,Math.min(1,amount/paid)));
       await grantInventory(connection, characterId, Number(definition.id), productionBinding(deconstructedBinding, amount, false));
       await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [characterId, definition.id]);
+      if(!currentSecondaryShop()){await achievementItem(connection,characterId,Number(definition.id));if(!constructed&&['wood','metal','water','ice','dark','fire','thunder','light','wind'].some(e=>definition.code===e+'_element_dust'))recordAchievement(connection,characterId,[{metric:'ACH_J21',distinct:definition.code}]);}
       results.push({ name: definition.name, quantity: amount });
     }
   }
-  const proficiencyGain = Math.round(quantity * deconstructionMapMaterialGain(item));
+  const proficiencyGain = shopProficiency(Math.round(quantity * deconstructionMapMaterialGain(item)));
   const next = await addDeconstructorProficiency(connection, characterId, proficiencyGain);
+  if(!constructed&&results.length&&!currentSecondaryShop())recordAchievement(connection,characterId,[{metric:'ACH_EGG11',distinct:String(itemId)},{metric:'ACH_J20'},...(item.item_type==='material'?[{metric:'ACH_J22',distinct:String(itemId)}]:[])]);
   return { inputName: item.name, inputQuantity: quantity, results, proficiencyGain, progress: next };
 });

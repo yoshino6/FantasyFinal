@@ -1,3 +1,8 @@
+import { negotiationSchema } from '../src/database/negotiation';
+import { openingSchema } from '../src/database/opening';
+import { initializeInventoryBinding } from '../src/database/inventory-binding';
+import { talentSchema } from '../src/game/talent-data';
+import { achievementSchema } from '../src/database/achievements';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -21,12 +26,17 @@ test('炼金V2真实SQL与事务回归',{skip:!database&&'设置 ALCHEMY_TEST_DA
   await admin.query('CREATE DATABASE '+database+' CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
   const pool=createPool({...original,database,connectionLimit:4,charset:'utf8mb4'});
   try{
+    for(const sql of achievementSchema)await pool.query(sql);
     const parsed=ts.createSourceFile('bootstrap.ts',readFileSync('src/database/bootstrap.ts','utf8'),ts.ScriptTarget.Latest,true);
     const declaration=parsed.statements.filter(ts.isVariableStatement).flatMap(s=>[...s.declarationList.declarations]).find(d=>d.name.getText(parsed)==='schemaStatements')!;
     const schema=new Function(`return ${declaration.initializer!.getText(parsed)}`)() as string[];
     for(const sql of schema) await pool.query(sql);
+    for(const sql of talentSchema)await pool.query(sql);
+    for(const sql of openingSchema)await pool.query(sql);
+    for(const sql of negotiationSchema)await pool.query(sql);
+    await initializeInventoryBinding(pool);
     await initializeAlchemyV2(pool);await initializeAlchemyV2(pool);
-    const transaction=async(work:any)=>{const c=await pool.getConnection();try{await c.beginTransaction();const result=await work(c);await c.commit();return result;}catch(error){await c.rollback();throw error;}finally{c.release();}};
+    const transaction=async(work:any)=>{const c=await pool.getConnection();try{await c.beginTransaction();const result=await work(c);await load('src/game/achievement.service').flushAchievements(c,load('src/game/achievement-events').takeAchievementEvents(c));await c.commit();return result;}catch(error){await c.rollback();throw error;}finally{load('src/game/achievement-events').takeAchievementEvents(c);c.release();}};
     const cache=new Map<string,any>();let failJournal=false;
     const load=(relative:string):any=>{
       const path=resolve(relative.endsWith('.ts')?relative:relative+'.ts');if(cache.has(path))return cache.get(path).exports;
@@ -118,9 +128,9 @@ test('炼金V2真实SQL与事务回归',{skip:!database&&'设置 ALCHEMY_TEST_DA
       await assert.rejects(shops.discoverSecondaryFinished('alchemy_test_2','blacksmith',codex),/不在/);
       const highCodex=String(2300000+high);await pool.execute('UPDATE item_definitions SET codex_id=? WHERE id=?',[highCodex,high]);await assert.rejects(shops.discoverSecondaryFinished('alchemy_test_2','alchemy_sweetshop',highCodex),/不在/);
       const recipeLow=await addItem('simple_launcher','简易发射器','equipment','异械');const recipeHigh=await addItem('rocket_propeller','火箭推进器','equipment','异械');
-      assert.equal(shops.isSecondaryFinishedProduct('oddworkshop',{code:'simple_launcher',item_type:'equipment',item_category:'异械'}),true);
+      assert.equal(shops.isSecondaryFinishedProduct('oddworkshop',{code:'simple_launcher',item_type:'equipment',item_category:'异械'}),false);
       await assert.rejects(shops.buySecondaryFinished('alchemy_test_2','oddworkshop',recipeHigh,1),/不在/);
-      const devicePage=await shops.secondaryFinishedCatalog('alchemy_test_2','oddworkshop',1,'','主动异械');assert.ok(devicePage.items.some((item:any)=>item.id===recipeLow));
+      const devicePage=await shops.secondaryFinishedCatalog('alchemy_test_2','oddworkshop',1,'','主动异械');assert.ok(!devicePage.items.some((item:any)=>item.id===recipeLow));await assert.rejects(shops.buySecondaryFinished('alchemy_test_2','oddworkshop',recipeLow,1),/不在/);
       const smith=await addItem('shop_basic_test','基础铁剑','equipment','武器');await pool.execute("UPDATE item_definitions SET required_level=15,rarity='普通' WHERE id=?",[smith]);
       await shops.buySecondaryFinished('alchemy_test_2','blacksmith',smith,1);await pool.execute("UPDATE item_definitions SET required_level=20 WHERE id=?",[smith]);await assert.rejects(shops.buySecondaryFinished('alchemy_test_2','blacksmith',smith,1),/不在/);
       await pool.execute("UPDATE item_definitions SET required_level=15,rarity='稀有' WHERE id=?",[smith]);await assert.rejects(shops.buySecondaryFinished('alchemy_test_2','blacksmith',smith,1),/不在/);
@@ -210,7 +220,7 @@ test('炼金V2真实SQL与事务回归',{skip:!database&&'设置 ALCHEMY_TEST_DA
       const names=['skillList','learnSkill'];const statements=source.statements.filter(ts.isVariableStatement).filter(node=>node.declarationList.declarations.some(d=>names.includes(d.name.getText(source))));assert.equal(statements.length,2);
       const compiled=ts.transpileModule(statements.map(node=>node.getText(source).replace(/^export\s+/,'')).join('\n'),{compilerOptions:{module:ts.ModuleKind.None,target:ts.ScriptTarget.ES2022}}).outputText;
       const characterFor=async()=>{const[rows]=await pool.query<any[]>('SELECT * FROM characters WHERE id=2');return rows[0];};
-      const api=new Function('characterFor','getPool','withTransaction','recordSkillPointChange',`${compiled};return {skillList,learnSkill}`)(characterFor,async()=>pool,transaction,ledger.recordSkillPointChange);
+      const api=new Function('characterFor','getPool','withTransaction','recordSkillPointChange','talentByCode','achievementBookLearned',`${compiled};return {skillList,learnSkill}`)(characterFor,async()=>pool,transaction,ledger.recordSkillPointChange,load('src/game/talent.config').talentByCode,load('src/game/achievement-state').achievementBookLearned);
       assert.ok((await api.skillList('alchemy_test_2')).discoveries.some((item:any)=>Number(item.id)===skill));
       const learned=await api.learnSkill('alchemy_test_2',skill);assert.equal(learned.cost,2);
       const listed=await api.skillList('alchemy_test_2');assert.equal(listed.skillPoints,21);assert.ok(listed.skills.some((item:any)=>Number(item.id)===skill&&Number(item.level)===1));assert.ok(!listed.discoveries.some((item:any)=>Number(item.id)===skill));
@@ -281,5 +291,6 @@ test('炼金V2真实SQL与事务回归',{skip:!database&&'设置 ALCHEMY_TEST_DA
       const before=await money();const sold=await smithShop.sellBlacksmithEquipment('alchemy_test_2',insert.insertId);assert.equal(await money(),before+sold.price);
       await assert.rejects(smithShop.sellBlacksmithEquipment('alchemy_test_2',insert.insertId),/未找到/);assert.equal(await money(),before+sold.price);
     });
+    await t.test('真实业务产生的成就与永久奖励已经落库',async()=>{const [rows]=await pool.query<any[]>("SELECT achievement_id FROM achievement_completions WHERE identity_key=?",['alchemy_test_1']);for(const id of ["ACH_H15","ACH_H19","ACH_H20"])assert.ok(rows.some(r=>r.achievement_id===id),id);});
   }finally{await pool.end();await admin.query('DROP DATABASE '+database);await admin.end();}
 });

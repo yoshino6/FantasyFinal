@@ -1,3 +1,5 @@
+import { recordAchievement } from './achievement-events';
+import { achievementItem } from './achievement-hooks';
 import { grantInventory } from './inventory-binding';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
@@ -6,6 +8,7 @@ import { craftCharacterId } from './alchemy-journal.service';
 import { alchemyOutputDefinitions } from './alchemy-catalog';
 import { activeDeviceCodes, constructionRecipes } from './deconstructor-catalog';
 import { secondaryFinishedPrice } from './secondary-shop-pricing';
+import { openingShopQuote, payOpeningShopDiscount } from './divine-effects';
 
 export const secondaryShopNames = { blacksmith:'铁匠铺',alchemy_sweetshop:'糖水屋',oddworkshop:'异工坊' };
 export type SecondaryShop = keyof typeof secondaryShopNames;
@@ -34,6 +37,12 @@ export const matchesSecondaryShopCategory = (item:ShopItem,category:string) => {
   return item.item_category===category||item.weapon_type===category;
 };
 const priceFor = (shop:SecondaryShop,item:RowDataPacket) => secondaryFinishedPrice(shop,item as any,secondaryShopBasicLevel[shop]);
+const quoteFor = async(connection:Pick<PoolConnection,'execute'>,id:number,shop:SecondaryShop,item:RowDataPacket,quantity:number)=>{
+  const price=priceFor(shop,item);
+  if(shop==='alchemy_sweetshop'&&item.rarity==='普通'&&matchesSecondaryShopCategory(item as ShopItem,'回复'))
+    return openingShopQuote(connection,id,{item_type:String(item.item_type),item_category:String(item.item_category),rarity:String(item.rarity),trade_price:Number(item.trade_price),buy_price:price,personalBoundOnly:true},quantity);
+  return {base:price*quantity,price:price*quantity,credit:0,discount:0};
+};
 const checkShop = (shop:string):SecondaryShop => { if(!Object.hasOwn(secondaryShopNames,shop)) throw new Error('未知成品商店。'); return shop as SecondaryShop; };
 export const secondaryFinishedCatalog = async (user:string,shopName:string,page=1,keyword='',category='全部') => {
   const shop=checkShop(shopName); await requireNpcAtCurrentPosition(user,shop); const pool=await getPool();
@@ -41,7 +50,9 @@ export const secondaryFinishedCatalog = async (user:string,shopName:string,page=
   category=secondaryShopCategories[shop].includes(category)?category:'全部';
   keyword=keyword.trim().slice(0,80); const items=all.filter(item=>isSecondaryFinishedProduct(shop,item as any)&&matchesSecondaryShopCategory(item as any,category)&&(!keyword||`${item.name} ${item.item_category} ${item.weapon_type??''}`.toLocaleLowerCase().includes(keyword.toLocaleLowerCase())));
   const pages=Math.max(1,Math.ceil(items.length/5)); page=Math.min(pages,Math.max(1,Math.floor(page)||1));
-  return { shop,name:secondaryShopNames[shop],basicLevel:secondaryShopBasicLevel[shop],categories:secondaryShopCategories[shop],category,page,pages,keyword,items:items.slice((page-1)*5,page*5).map(item=>({id:Number(item.id),name:String(item.name),category:String(item.item_category),description:String(item.description),codex:String(item.codex_id),price:priceFor(shop,item),stock:Number(item.stock)})) };
+  const id=await craftCharacterId(pool,user);
+  const visible=await Promise.all(items.slice((page-1)*5,page*5).map(async item=>({id:Number(item.id),name:String(item.name),category:String(item.item_category),description:String(item.description),codex:String(item.codex_id),price:(await quoteFor(pool,id,shop,item,1)).price,stock:Number(item.stock)})));
+  return { shop,name:secondaryShopNames[shop],basicLevel:secondaryShopBasicLevel[shop],categories:secondaryShopCategories[shop],category,page,pages,keyword,items:visible };
 };
 export const discoverSecondaryFinished = async(user:string,shopName:string,codex:string) => {
   const shop=checkShop(shopName);await requireNpcAtCurrentPosition(user,shop);
@@ -66,12 +77,15 @@ const buyFinishedFor = async (connection:PoolConnection,user:string,shop:Seconda
   await connection.execute('UPDATE secondary_finished_stock SET quantity=30,stock_day=CURDATE() WHERE shop_code=? AND item_id=? AND stock_day<CURDATE()',[shop,itemId]);
   const [stock]=await connection.execute<RowDataPacket[]>('SELECT quantity FROM secondary_finished_stock WHERE shop_code=? AND item_id=? FOR UPDATE',[shop,itemId]);
   if(Number(stock[0]?.quantity??0)<quantity) throw new Error('成品库存不足，请减少数量或次日再来。');
-  const price=priceFor(shop,item)*quantity;
+  const quote=await quoteFor(connection,id,shop,item,quantity),price=quote.price;
   const [paid]=await connection.execute<any>('UPDATE characters SET copper_coins=copper_coins-? WHERE id=? AND copper_coins>=?',[price,id,price]);
   if(!paid.affectedRows) throw new Error(`铜币不足，需要 ${price} 铜币。`);
+  await payOpeningShopDiscount(connection,id,quote);
   await connection.execute('UPDATE secondary_finished_stock SET quantity=quantity-? WHERE shop_code=? AND item_id=?',[quantity,shop,itemId]);
   if(item.item_type==='device'||item.item_type==='equipment') for(let count=0;count<quantity;count++) await connection.execute("INSERT INTO player_item_instances (character_id,item_id,bound_kind,bound_at,bound_reason) VALUES (?,?,'trade',NOW(),'npc_purchase')",[id,itemId]);
-  else await grantInventory(connection,id,itemId,{personal:0,trade:quantity,unbound:0});
+  else await grantInventory(connection,id,itemId,{personal:quote.credit||quote.discount?quantity:0,trade:quote.credit||quote.discount?0:quantity,unbound:0});
   await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)',[id,itemId]);
+  recordAchievement(connection,id,[{metric:'ACH_K01'},{metric:'ACH_K08',value:price,life:true}]);
+  await achievementItem(connection,id,itemId);
   return { name:String(item.name),quantity,price };
 };

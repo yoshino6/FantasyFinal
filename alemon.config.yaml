@@ -18,3 +18,11 @@ redis:
 
 login: "qq-bot"
 port: 17117
+
+FantasyFinal:
+  automatonPortrait:
+    host:
+      provider: generic
+      uploadUrl: "https://img.czl.net/api/v1/upload"
+      # Replace with your API Token only; do not include the Bearer prefix.
+      token: "56|czlimg_0Ar1Na26MKPxqWQ2TVFjEKpG2ibdNWMvnIqX307vd6cff4ae"

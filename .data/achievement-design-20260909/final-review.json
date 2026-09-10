@@ -1,0 +1,35 @@
+{
+  "scope": "Document consistency only; no game, database or messaging actions",
+  "ordinary": 300,
+  "hidden": 10,
+  "descriptions": 310,
+  "secretNodes": 70,
+  "rarityCounts": {
+    "普通": 65,
+    "优秀": 162,
+    "精良": 56,
+    "稀有": 13,
+    "传说": 4,
+    "史诗": 10
+  },
+  "attributeTotals": {
+    "体质": 159,
+    "精神": 160,
+    "力量": 103,
+    "智力": 117,
+    "敏捷": 87,
+    "感知": 148
+  },
+  "totalAttributePoints": 774,
+  "playerRowsHaveOnly": "Design review document now includes a sixth requirements column; runtime must omit it and return only personally unlocked achievements.",
+  "checks": [
+    "IDs and names unique",
+    "310 unique descriptions",
+    "each hidden chain has 7 nodes",
+    "reward amount matches rarity",
+    "maintenance/player copy synchronized",
+    "relative links exist",
+    "superseded first-reward coupons removed"
+  ],
+  "requirementRows": 310
+}

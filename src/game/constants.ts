@@ -1,4 +1,5 @@
 import type { Allocation, DerivedStats } from './types';
+import { standardPlayerAttribute } from './growth-rules';
 
 export const SESSION_TTL_MINUTES = 30;
 
@@ -65,7 +66,7 @@ export const forgeRarityMultiplier: Record<string, number> = {
 export const equipmentQualityMultiplier = (quality: number) => .6 + Math.max(0, Math.min(100, Number(quality))) / 250;
 
 /** 锻造不读取角色实际六维，固定以总基础 100、总成长 10 的六维均分白板为锚点。 */
-export const forgedEquipmentBase = (level: number, category: '武器' | '防具') => {
+export const legacyForgedEquipmentBase = (level: number, category: '武器' | '防具') => {
   const normalizedLevel = Math.max(1, Math.floor(Number(level) || 1));
   const equalAttribute = 100 / 6 + 10 / 6 * (normalizedLevel - 1);
   const levelMultiplier = Math.pow(1.2, Math.floor(normalizedLevel / 10));
@@ -75,6 +76,24 @@ export const forgedEquipmentBase = (level: number, category: '武器' | '防具'
   return (category === '武器'
     ? (physicalAttack + physicalAttack) / 2
     : (physicalDefense + magicDefense) / 4) * levelMultiplier;
+};
+
+/** 普通满品质：一把武器为标准躯体攻击的 1/2，五件防具合计每项双防为躯体的 1 倍。 */
+export const forgedEquipmentBase = (level: number, category: '武器' | '防具', slot?: string) => {
+  const body = 8 + standardPlayerAttribute(level) * 4.3;
+  if (category === '武器') return body * .5;
+  if (['upper', 'lower', '上装', '下装'].includes(slot ?? '')) return body * .24;
+  if (['shoulder', 'waist', 'feet', '头肩', '腰部', '脚部'].includes(slot ?? '')) return body * 13 / 75;
+  return body / 5; // 未指定部位时仅表示五件平均预算。
+};
+
+export const forgedPrimaryStats = (category: string, subtype: string, level: number, rarity: string, slot = category): Record<string,number> => {
+  const weapon = category === '武器' || category === '副手';
+  const value = forgedEquipmentBase(level,weapon?'武器':'防具',slot) * (forgeRarityMultiplier[rarity] ?? 1);
+  if (!weapon) return {physicalDefense:value,magicDefense:value};
+  if (subtype === '盾牌') return {physicalDefense:value,magicDefense:value*.5};
+  if (subtype === '匕首') return {physicalAttack:value*.9,magicAttack:value*.9};
+  return { [['法杖','法书','法球'].includes(subtype)?'magicAttack':'physicalAttack']:value };
 };
 
 // 副词条独立于六维成长：攻防 : 命闪等 : 生命魔力 = 1 : 2 : 4。
@@ -98,7 +117,8 @@ const affixCapMultiplier: Record<string, number> = {
 const standardAffixes = ['hpMax', 'mpMax', 'physicalAttack', 'magicAttack', 'physicalDefense', 'magicDefense', 'accuracy', 'evasion', 'critRateBp', 'critDamageBp', 'critResistBp', 'critDamageReductionBp', 'tenacity', 'tenacityPierce', 'speed'];
 const elementNames = ['水', '火', '土', '木', '风', '冰', '雷', '光', '暗'];
 const elementalAffixes = elementNames.flatMap(element => [`elementMastery_${element}`, `elementResistance_${element}`]);
-const elementalAffixCap = (level: number) => Math.max(0, Math.floor(Math.max(0, Number(level)) / 10) * 11);
+/** 元素词条按原档位的一半发放，避免单条精通或抗性压过同级主词条。 */
+const elementalAffixCap = (level: number) => Math.max(0, Math.floor(Math.max(0, Number(level)) / 10) * 5.5);
 
 /** 不含主词条本体的单项辅词条上限，按当前六维均分时各派生属性的成长贡献折算。 */
 export const forgedAffixCap = (category: '武器' | '防具', key: string, level: number, rarity: string) => {
@@ -106,7 +126,7 @@ export const forgedAffixCap = (category: '武器' | '防具', key: string, level
     const matchingKind = category === '武器' ? key.startsWith('elementMastery_') : key.startsWith('elementResistance_');
     return matchingKind ? elementalAffixCap(level) * (forgeRarityMultiplier[rarity] ?? 1) : 0;
   }
-  const base = forgedEquipmentBase(level, category) * (forgeRarityMultiplier[rarity] ?? 1);
+  const base = legacyForgedEquipmentBase(level, category) * (forgeRarityMultiplier[rarity] ?? 1);
   if (category === '武器') {
     if (key === 'physicalDefense' || key === 'magicDefense') return 0;
     if (key === 'hpMax' || key === 'tenacity') return 0;
@@ -117,8 +137,8 @@ export const forgedAffixCap = (category: '武器' | '防具', key: string, level
 };
 
 /** 成品词条总上限；主词条可额外叠加一条同类辅词条。 */
-export const forgedEquipmentCaps = (category: '武器' | '防具', level: number, rarity: string, primaryKeys: readonly string[]) => {
-  const base = forgedEquipmentBase(level, category) * (forgeRarityMultiplier[rarity] ?? 1);
+export const forgedEquipmentCaps = (category: '武器' | '防具', level: number, rarity: string, primaryKeys: readonly string[], slot?: string) => {
+  const base = forgedEquipmentBase(level, category, slot) * (forgeRarityMultiplier[rarity] ?? 1);
   return Object.fromEntries([...standardAffixes, ...elementalAffixes].map(key => {
     const offTypeWeaponAttack = category === '武器' && (key === 'physicalAttack' || key === 'magicAttack') && !primaryKeys.includes(key);
     return [key, (offTypeWeaponAttack ? 0 : forgedAffixCap(category, key, level, rarity)) + (primaryKeys.includes(key) ? base : 0)];
@@ -168,11 +188,12 @@ const addDerivedStats = (target: DerivedStats, source: DerivedStats, multiplier 
  * 怪物虚拟套装：一把同级主武器与五件防具。
  * 主词条遵循品质与稀有度，精英与 Boss 再按正式打造的副词条数量、上限和期望掷值补全套装属性。
  */
-export const virtualEquipmentStats = (level: number, tier: VirtualEquipmentTier, physicalAttack: number, magicAttack: number, customLoadout?: VirtualEquipmentLoadout): DerivedStats => {
+export const virtualEquipmentStats = (level: number, tier: VirtualEquipmentTier, physicalAttack: number, magicAttack: number, customLoadout?: VirtualEquipmentLoadout, armorBudget: 'monster' | 'resident' = 'monster'): DerivedStats => {
   const loadout = customLoadout ?? virtualEquipmentLoadouts[tier];
   const primaryMultiplier = (forgeRarityMultiplier[loadout.rarity] ?? 1) * equipmentQualityMultiplier(loadout.quality);
   const weapon = forgedEquipmentBase(level, '武器') * primaryMultiplier;
-  const armor = forgedEquipmentBase(level, '防具') * primaryMultiplier;
+  // 怪物虚拟防具沿用独立预算：整套每项双防为 B/2，不跟随玩家实物防具翻倍。
+  const armor = weapon / 5 * (armorBudget === 'resident' ? 2 : 1);
   const bonus = emptyDerivedStats();
   if (physicalAttack >= magicAttack) bonus.physicalAttack = weapon;
   else bonus.magicAttack = weapon;

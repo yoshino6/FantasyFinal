@@ -1,0 +1,17 @@
+{
+  "at": "2026-09-08T11:48:45.963Z",
+  "passed": true,
+  "growthBoundaries": 6,
+  "allLevelIncrements": 29,
+  "equipmentLevelRarityQualityCases": 540,
+  "allPlayerRows": 42,
+  "independentMonsterComparisons": 2442,
+  "finiteActualMonsterRows": 4423,
+  "templateRows": 204,
+  "armorMixes": 3125,
+  "armorSensitivityRows": 90,
+  "sourceHashesMatched": 11,
+  "typescriptCommand": "npx tsc --noEmit",
+  "typescriptExitCode": 0,
+  "limitations": "static calculation and source checks only; no gameplay implementation or full combat replay"
+}

@@ -1,0 +1,17 @@
+TAP version 13
+# Subtest: D07 交涉失败前两个正常时点半伤，额外行动不消耗时点，PVP关闭
+ok 1 - D07 交涉失败前两个正常时点半伤，额外行动不消耗时点，PVP关闭
+  ---
+  duration_ms: 2.6405
+  type: 'test'
+  ...
+# [2026-09-09 11:29:58][INFO] [alemonjs][exit] 进程退出，code=0
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 888.2615

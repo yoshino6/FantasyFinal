@@ -1,3 +1,6 @@
+import { achievementTrade } from './achievement-trade';
+import { recordAchievement } from './achievement-events';
+import { takeMaterialCosts, addMaterialCosts, moveMaterialCosts, type MaterialCost } from './talent-material-recovery';
 import { consumeInventory, grantInventory } from './inventory-binding';
 import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
@@ -104,12 +107,14 @@ const settleMatch = async (connection: PoolConnection, sell: OrderRow, buy: Orde
   if(sellerWeek.gross+gross>cap)throw new Error('卖家本周交易额度已满，请选择其他订单。');
   const fee = feeForSale(sellerWeek.gross, gross);
   const refund = Math.max(0, number(buy.unit_price) - price) * quantity;
+  await moveMaterialCosts(connection,'market',number(sell.id),'stock',number(buy.character_id),number(buy.item_id),quantity);
   await grantInventory(connection, number(buy.character_id), number(buy.item_id), {unbound:0,personal:0,trade:quantity});
   await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [gross - fee, sell.character_id]);
   if (refund) await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [refund, buy.character_id]);
   await connection.execute('UPDATE market_weekly_volume SET gross_sales=gross_sales+?,fee_paid=fee_paid+? WHERE character_id=? AND week_key=?', [gross, fee, sell.character_id, sellerWeek.key]);
-  await connection.execute(`INSERT INTO market_trades (buy_order_id,sell_order_id,item_id,quantity,unit_price,gross_copper,fee_copper,seller_net_copper)
+  const [achievementTradeRow]=await connection.execute<any>(`INSERT INTO market_trades (buy_order_id,sell_order_id,item_id,quantity,unit_price,gross_copper,fee_copper,seller_net_copper)
     VALUES (?,?,?,?,?,?,?,?)`, [buy.id, sell.id, sell.item_id, quantity, price, gross, fee, gross - fee]);
+  await achievementTrade(connection,Number(buy.character_id),Number(sell.character_id),Number(sell.item_id),gross,gross-fee,'market:'+achievementTradeRow.insertId);
   for (const order of [sell, buy]) {
     const remain = number(order.quantity_remaining) - quantity;
     const reserved = order.side === 'buy' ? Math.max(0, number(order.reserved_copper) - number(order.unit_price) * quantity) : 0;
@@ -142,7 +147,7 @@ const matchOrder = async (connection: PoolConnection, order: OrderRow, reference
 const releaseExpiredOwned = async (connection: PoolConnection, characterId: number) => {
   const [orders] = await connection.execute<OrderRow[]>(`SELECT * FROM market_orders WHERE character_id=? AND status IN ('open','partial') AND expires_at<=NOW() FOR UPDATE`, [characterId]);
   for (const order of orders) {
-    if (order.side === 'sell') await addInventory(connection, characterId, number(order.item_id), number(order.quantity_remaining));
+    if (order.side === 'sell') {await moveMaterialCosts(connection,'market',number(order.id),'stock',characterId,number(order.item_id),number(order.quantity_remaining));await addInventory(connection, characterId, number(order.item_id), number(order.quantity_remaining));}
     else if (number(order.reserved_copper)) await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [order.reserved_copper, characterId]);
     await connection.execute(`UPDATE market_orders SET status='expired',reserved_copper=0 WHERE id=?`, [order.id]);
     await connection.execute('DELETE FROM market_escrow_items WHERE order_id=?', [order.id]);
@@ -205,9 +210,11 @@ const createOrder = async (qqUserId: string, itemId: number, unitPrice: number, 
   const [held]=await connection.execute<RowDataPacket[]>("SELECT COALESCE(SUM(unit_price*quantity_remaining),0) reserved FROM market_orders WHERE character_id=? AND side='sell' AND status IN ('open','partial')",[character.id]);
   if (side === 'sell' && week.gross + number(held[0]?.reserved)+number(instances[0]?.reserved)+price * amount > weeklyCap) throw new Error(`本周寄售额将超过 ${weeklyCap} 铜币的交易额度。`);
   let reserved = 0;
+  let materialCost:MaterialCost={quantity:0,paid:{}};
   if (side === 'sell') {
     const [inventory] = await connection.execute<(RowDataPacket & { quantity: number })[]>('SELECT quantity FROM player_inventory WHERE character_id=? AND item_id=? FOR UPDATE', [character.id, itemId]);
     if (number(inventory[0]?.quantity) < amount) throw new Error('背包中的物品数量不足。');
+    materialCost=await takeMaterialCosts(connection,'stock',character.id,itemId,amount);
     await consumeInventory(connection, character.id, itemId, amount, true);
     await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, itemId]);
   } else {
@@ -219,10 +226,12 @@ const createOrder = async (qqUserId: string, itemId: number, unitPrice: number, 
   const [insert] = await connection.execute<ResultSetHeader>(`INSERT INTO market_orders (character_id,item_id,side,unit_price,quantity_total,quantity_remaining,reserved_copper,expires_at)
     VALUES (?,?,?,?,?,?,?,DATE_ADD(NOW(),INTERVAL 72 HOUR))`, [character.id, itemId, side, price, amount, amount, reserved]);
   const order = { id: number(insert.insertId), character_id: character.id, item_id: itemId, side, unit_price: price, quantity_total: amount, quantity_remaining: amount, reserved_copper: reserved, status: 'open', created_at: new Date(), expires_at: new Date(Date.now() + 72 * 3600000) } as OrderRow;
+  if(side==='sell')await addMaterialCosts(connection,'market',Number(order.id),itemId,materialCost);
   if (side === 'sell') await connection.execute('INSERT INTO market_escrow_items (order_id,character_id,item_id,quantity) VALUES (?,?,?,?)', [order.id, character.id, itemId, amount]);
   await matchOrder(connection, order, state.reference);
   await rebalanceReference(connection, itemId, state.reference);
   const [current] = await connection.execute<OrderRow[]>('SELECT * FROM market_orders WHERE id=? LIMIT 1', [order.id]);
+  if(side==='sell')recordAchievement(connection,Number(character.id),['ACH_K03']);
   return { name: item.name, side, price, quantity: amount, remaining: number(current[0]?.quantity_remaining), status: current[0]?.status ?? 'open' };
 });
 
@@ -245,7 +254,7 @@ export const cancelMarketOrder = (qqUserId: string, orderId: number) => withTran
   const rapidCancel = Date.now() - new Date(order.created_at).getTime() < 2 * 60 * 1000;
   const rate = rapidCancel ? (volume.cancellations >= 5 ? 0.02 : 0.005) : 0;
   const fee = rate ? Math.max(1, Math.ceil(number(order.quantity_remaining) * number(order.unit_price) * rate)) : 0;
-  if (order.side === 'sell') await addInventory(connection, character.id, number(order.item_id), number(order.quantity_remaining));
+  if (order.side === 'sell') {await moveMaterialCosts(connection,'market',number(order.id),'stock',character.id,number(order.item_id),number(order.quantity_remaining));await addInventory(connection, character.id, number(order.item_id), number(order.quantity_remaining));}
   if (order.side === 'buy' && number(order.reserved_copper)) {
     const refund = number(order.reserved_copper) - fee;
     if (refund < 0) throw new Error('该订单的托管余额不足以支付快速撤单费用。');
@@ -259,6 +268,7 @@ export const cancelMarketOrder = (qqUserId: string, orderId: number) => withTran
   await connection.execute(`UPDATE market_orders SET status='cancelled',reserved_copper=0 WHERE id=?`, [order.id]);
   await connection.execute('DELETE FROM market_escrow_items WHERE order_id=?', [order.id]);
   await connection.execute('UPDATE market_weekly_volume SET cancellation_count=cancellation_count+1 WHERE character_id=? AND week_key=?', [character.id, volume.key]);
+  recordAchievement(connection,Number(character.id),['ACH_K07']);
   return { side: order.side, quantity: number(order.quantity_remaining), fee };
 });
 

@@ -1,3 +1,6 @@
+import { fixedTalentMaterials, consumeTalentMaterial, recordTalentProduct } from './talent-production';
+import { grantInventory, productionBinding, type Binding } from './inventory-binding';
+import { shopProgressFor, currentSecondaryShop } from './secondary-shop-context';
 import type { RowDataPacket,PoolConnection } from 'mysql2/promise';
 import { getPool,withTransaction } from '../database/pool';
 import { craftCharacterId } from './alchemy-journal.service';
@@ -18,13 +21,11 @@ export const useForgeRepairKit=async(user:string,instanceId:number)=>withTransac
 });
 export const craftForgeRepairKit=async(user:string)=>withTransaction(async connection=>{
   const id=await craftCharacterId(connection,user,true);await outsideBattle(connection,id);
-  const[characters]=await connection.execute<RowDataPacket[]>('SELECT secondary_profession_code FROM characters WHERE id=?',[id]);if(characters[0]?.secondary_profession_code!=='blacksmith')throw new Error('制作维修包需要个人锻造师资格。');
-  for(const[code,quantity]of [['living_wood',1],['metal_element_dust',3]] as const){
-    const[rows]=await connection.execute<RowDataPacket[]>('SELECT pi.item_id,pi.quantity,i.name FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.code=? FOR UPDATE',[id,code]);if(!rows[0]||Number(rows[0].quantity)<quantity)throw new Error('材料不足：需要活木×1、金元素微尘×3。');
-    await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?',[quantity,id,rows[0].item_id]);
-  }
+  const[characters]=await connection.execute<RowDataPacket[]>('SELECT secondary_profession_code FROM characters WHERE id=?',[id]);if(!await shopProgressFor(connection,id,'blacksmith')&&characters[0]?.secondary_profession_code!=='blacksmith')throw new Error('制作维修包需要个人锻造师资格。');
+  const materials=await fixedTalentMaterials(connection,id,[{code:'living_wood',quantity:1},{code:'metal_element_dust',quantity:3}],[],!currentSecondaryShop()),binding:Binding={personal:0,trade:0,unbound:0};
+  for(const material of materials){const payment=await consumeTalentMaterial(connection,id,Number(material.item.id),material.quantity,'craft',!currentSecondaryShop());for(const key of ['personal','trade','unbound'] as const)binding[key]+=payment.binding[key];}
   const[paid]=await connection.execute<any>('UPDATE characters SET copper_coins=copper_coins-10 WHERE id=? AND copper_coins>=10',[id]);if(!paid.affectedRows)throw new Error('需要制作费10铜币。');
   const[definitions]=await connection.execute<RowDataPacket[]>("SELECT id FROM item_definitions WHERE code='forge_repair_kit'");if(!definitions[0])throw new Error('维修包尚未初始化。');
-  await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,1) ON DUPLICATE KEY UPDATE quantity=quantity+1',[id,definitions[0].id]);await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND quantity<=0',[id]);
+  await grantInventory(connection,id,Number(definitions[0].id),productionBinding(binding,1,true));if(!currentSecondaryShop())await recordTalentProduct(connection,id,Number(definitions[0].id),1);await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND quantity<=0',[id]);
   await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)',[id,definitions[0].id]);
 });

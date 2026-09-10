@@ -1,0 +1,251 @@
+{
+  "checkedAt": "2026-09-10T12:03:32.884Z",
+  "births": [
+    {
+      "code": "dark_forest",
+      "name": "幽暗密林",
+      "tier": 1,
+      "enabled": true,
+      "public": true,
+      "newbie": 1,
+      "danger": 3,
+      "areas": 1
+    },
+    {
+      "code": "worldtree_meadow",
+      "name": "世界树草原环带",
+      "tier": 1,
+      "enabled": true,
+      "public": true,
+      "newbie": 1,
+      "danger": 1,
+      "areas": 1
+    },
+    {
+      "code": "morningdew_riverbank",
+      "name": "晨露河岸",
+      "tier": 1,
+      "enabled": true,
+      "public": true,
+      "newbie": 1,
+      "danger": 3,
+      "areas": 2
+    },
+    {
+      "code": "gravelwind_shore",
+      "name": "砾风石滩",
+      "tier": 2,
+      "enabled": true,
+      "public": true,
+      "newbie": 1,
+      "danger": 4,
+      "areas": 1
+    },
+    {
+      "code": "dark_forest_deep",
+      "name": "幽暗密林深处",
+      "tier": 2,
+      "enabled": true,
+      "public": true,
+      "newbie": 1,
+      "danger": 4,
+      "areas": 1
+    },
+    {
+      "code": "ridge_foothills",
+      "name": "岩脊山麓",
+      "tier": 2,
+      "enabled": true,
+      "public": true,
+      "newbie": 1,
+      "danger": 5,
+      "areas": 1
+    },
+    {
+      "code": "rediron_pass",
+      "name": "赤铁山道",
+      "tier": 2,
+      "enabled": true,
+      "public": true,
+      "newbie": 1,
+      "danger": 6,
+      "areas": 1
+    },
+    {
+      "code": "mistalgae_marsh",
+      "name": "雾藻湿地",
+      "tier": 2,
+      "enabled": true,
+      "public": true,
+      "newbie": 1,
+      "danger": 7,
+      "areas": 1
+    },
+    {
+      "code": "fallenstar_swamp",
+      "name": "沉星沼泽",
+      "tier": 3,
+      "enabled": false,
+      "public": false,
+      "newbie": 1,
+      "danger": 8,
+      "areas": 1
+    },
+    {
+      "code": "frostcrown_plateau",
+      "name": "霜冠高原",
+      "tier": 3,
+      "enabled": false,
+      "public": false,
+      "newbie": 1,
+      "danger": 9,
+      "areas": 1
+    },
+    {
+      "code": "thundercliff",
+      "name": "雷鸣断崖",
+      "tier": 3,
+      "enabled": false,
+      "public": false,
+      "newbie": 1,
+      "danger": 10,
+      "areas": 1
+    },
+    {
+      "code": "eclipse_ruins",
+      "name": "月蚀遗迹",
+      "tier": 3,
+      "enabled": false,
+      "public": false,
+      "newbie": 1,
+      "danger": 11,
+      "areas": 1
+    },
+    {
+      "code": "baina_town",
+      "name": "百纳镇",
+      "tier": 0,
+      "enabled": true,
+      "public": true,
+      "newbie": 1,
+      "danger": 99,
+      "areas": 1
+    },
+    {
+      "code": "world_tree",
+      "name": "世界树",
+      "tier": 0,
+      "enabled": true,
+      "public": true,
+      "newbie": 1,
+      "danger": 2,
+      "areas": 1
+    }
+  ],
+  "hubs": [
+    {
+      "code": "baina_town",
+      "enabled": true,
+      "public": true,
+      "danger": 99,
+      "spawnEnabled": 0,
+      "guild": {
+        "code": "guild_counter",
+        "region_id": 3,
+        "pos_x": -2,
+        "pos_y": -181,
+        "pos_z": 0,
+        "interaction_kind": "building"
+      },
+      "validPoint": true,
+      "mapItem": true
+    },
+    {
+      "code": "world_tree",
+      "enabled": true,
+      "public": true,
+      "danger": 2,
+      "spawnEnabled": 0,
+      "guild": {
+        "code": "world_tree_adventurer_guild",
+        "region_id": 1,
+        "pos_x": -5,
+        "pos_y": -3,
+        "pos_z": 0,
+        "interaction_kind": "building"
+      },
+      "validPoint": true,
+      "mapItem": true
+    },
+    {
+      "code": "floating_leaf_town",
+      "enabled": true,
+      "public": true,
+      "danger": 0,
+      "spawnEnabled": 0,
+      "guild": {
+        "code": "windbranch_guild",
+        "region_id": 1006,
+        "pos_x": 12,
+        "pos_y": 0,
+        "pos_z": 30,
+        "interaction_kind": "building"
+      },
+      "validPoint": true,
+      "mapItem": true
+    },
+    {
+      "code": "snowlamp_hollow",
+      "enabled": true,
+      "public": true,
+      "danger": 0,
+      "spawnEnabled": 0,
+      "guild": {
+        "code": "snowlamp_guild",
+        "region_id": 1007,
+        "pos_x": 0,
+        "pos_y": 330,
+        "pos_z": 1,
+        "interaction_kind": "building"
+      },
+      "validPoint": true,
+      "mapItem": true
+    },
+    {
+      "code": "frost_dragon_inn",
+      "enabled": true,
+      "public": true,
+      "danger": 0,
+      "spawnEnabled": 0,
+      "guild": {
+        "code": "dragon_inn_counter",
+        "region_id": 1008,
+        "pos_x": 18,
+        "pos_y": 335,
+        "pos_z": 1,
+        "interaction_kind": "building"
+      },
+      "validPoint": true,
+      "mapItem": true
+    },
+    {
+      "code": "sleepwhale_market",
+      "enabled": true,
+      "public": true,
+      "danger": 0,
+      "spawnEnabled": 0,
+      "guild": {
+        "code": "whale_guild",
+        "region_id": 1009,
+        "pos_x": 180,
+        "pos_y": 190,
+        "pos_z": 40,
+        "interaction_kind": "building"
+      },
+      "validPoint": true,
+      "mapItem": true
+    }
+  ],
+  "missingTables": [],
+  "missingBaseItems": []
+}

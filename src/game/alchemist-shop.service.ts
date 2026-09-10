@@ -1,3 +1,4 @@
+import { recordAchievement } from './achievement-events';
 import { buySecondaryFinished } from './secondary-shop.service';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
@@ -41,16 +42,18 @@ export const alchemistSellCatalog = async (qqUserId: string, page = 1, keyword =
 
 export const sellAlchemistItem = async (qqUserId: string, itemId: number, quantity = 1) => withTransaction(async connection => {
   const amount = validQuantity(quantity); const character = await characterFor(connection, qqUserId, true);
-  const [rows] = await connection.execute<SellRow[]>(`SELECT i.id,i.name,i.item_category,pi.quantity,CEIL(i.trade_price*1.15) AS sell_price
+  const [rows] = await connection.execute<(SellRow & {personal_bound_quantity:number;trade_bound_quantity:number})[]>(`SELECT i.id,i.name,i.item_category,pi.quantity,pi.personal_bound_quantity,pi.trade_bound_quantity,CEIL(i.trade_price*1.15) AS sell_price
     FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id
     WHERE pi.character_id=? AND pi.item_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0 AND COALESCE(JSON_EXTRACT(i.effect_json,'$.noNpcSale'),0)=0
       AND (i.item_category IN ('药剂','食物','粒子','炼材','怪材') OR i.code='healing_herb') FOR UPDATE`, [character.id, itemId]);
   const item = rows[0]; if (!item) throw new Error('晴儿只收购药剂、食物、草药与炼金相关素材。');
   if (Number(item.quantity) < amount) throw new Error(`背包数量不足，当前仅有 ${item.quantity} 个。`);
+  if(Number(item.quantity)-Number(item.personal_bound_quantity)<amount)throw new Error('可出售数量不足，个人绑定的补给不能回售。');
   const price = Number(item.sell_price) * amount;
   await recordPvpLootSale(connection, Number(character.id), Number(item.id), amount, price);
-  await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [amount, character.id, item.id]);
+  await connection.execute('UPDATE player_inventory SET quantity=quantity-?,trade_bound_quantity=trade_bound_quantity-?,binding_revision=binding_revision+1 WHERE character_id=? AND item_id=?', [amount,Math.min(amount,Number(item.trade_bound_quantity)), character.id, item.id]);
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, item.id]);
   await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [price, character.id]);
+  recordAchievement(connection,Number(character.id),[{metric:'ACH_K09',value:Number(price),life:true}]);
   return { name: item.name, quantity: amount, price };
 });

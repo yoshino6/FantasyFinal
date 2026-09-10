@@ -1,0 +1,778 @@
+TAP version 13
+# Subtest: 器阵实例仅在所属职业战斗中锁定，非登记物品与战后仍可操作
+ok 1 - 器阵实例仅在所属职业战斗中锁定，非登记物品与战后仍可操作
+  ---
+  duration_ms: 23.5167
+  type: 'test'
+  ...
+# Subtest: 调配治疗含持续回复按最终数值封顶，后续增益不能抬高已预留预算
+ok 2 - 调配治疗含持续回复按最终数值封顶，后续增益不能抬高已预留预算
+  ---
+  duration_ms: 6.1573
+  type: 'test'
+  ...
+# Subtest: 四种个人演练由真实战斗状态验收，账目闭合
+ok 3 - 四种个人演练由真实战斗状态验收，账目闭合
+  ---
+  duration_ms: 21.9387
+  type: 'test'
+  ...
+# Subtest: 全部16个主动技能可执行；材料、资源、MP及冷却只支付一次
+ok 4 - 全部16个主动技能可执行；材料、资源、MP及冷却只支付一次
+  ---
+  duration_ms: 8.7907
+  type: 'test'
+  ...
+# Subtest: 无效资源、器阵、异械、粒子在支付前拒绝
+ok 5 - 无效资源、器阵、异械、粒子在支付前拒绝
+  ---
+  duration_ms: 0.699
+  type: 'test'
+  ...
+# Subtest: 异械能力协议接受未来设备声明，纯回流与未知机制不会被免费执行
+ok 6 - 异械能力协议接受未来设备声明，纯回流与未知机制不会被免费执行
+  ---
+  duration_ms: 0.2185
+  type: 'test'
+  ...
+# Subtest: 接应在扣血之前形成护盾，调度不改变位置时只返还筹策
+ok 7 - 接应在扣血之前形成护盾，调度不改变位置时只返还筹策
+  ---
+  duration_ms: 2.338
+  type: 'test'
+  ...
+# Subtest: 调配事故与后续持续伤害不产生友方攻击资源，中和只能处理自身事故
+ok 8 - 调配事故与后续持续伤害不产生友方攻击资源，中和只能处理自身事故
+  ---
+  duration_ms: 2.0381
+  type: 'test'
+  ...
+# Subtest: 紧急回避只闪避物理攻击；同轮追加驱动在支付前被拒绝
+ok 9 - 紧急回避只闪避物理攻击；同轮追加驱动在支付前被拒绝
+  ---
+  duration_ms: 1.2163
+  type: 'test'
+  ...
+# Subtest: 落子多段共享单动作上限，消耗筹策后待命预案仍能在敌方行动返筹
+ok 10 - 落子多段共享单动作上限，消耗筹策后待命预案仍能在敌方行动返筹
+  ---
+  duration_ms: 2.8707
+  type: 'test'
+  ...
+# Subtest: 隐藏职业专精白名单与既有专精一致，协同受最终治疗预算约束
+ok 11 - 隐藏职业专精白名单与既有专精一致，协同受最终治疗预算约束
+  ---
+  duration_ms: 1.0005
+  type: 'test'
+  ...
+# Subtest: H03 先核验生命再扣粒子，纯治疗调配不收费
+ok 12 - H03 先核验生命再扣粒子，纯治疗调配不收费
+  ---
+  duration_ms: 0.9141
+  type: 'test'
+  ...
+# [2026-09-09 13:02:56][INFO] [alemonjs][exit] 进程退出，code=0
+# Subtest: 冰霜护盾按队友生命计算，强效受40%盾值上限限制、过充不增强护盾
+ok 13 - 冰霜护盾按队友生命计算，强效受40%盾值上限限制、过充不增强护盾
+  ---
+  duration_ms: 340.5215
+  type: 'test'
+  ...
+# Subtest: 原生生命护盾消耗共鸣节拍并实际增加护盾
+ok 14 - 原生生命护盾消耗共鸣节拍并实际增加护盾
+  ---
+  duration_ms: 161.3312
+  type: 'test'
+  ...
+# Subtest: 净化之光对选定友方生效，最多2层且不移除石化
+ok 15 - 净化之光对选定友方生效，最多2层且不移除石化
+  ---
+  duration_ms: 115.6172
+  type: 'test'
+  ...
+# Subtest: 原生强效普通增益落入实际状态写入，不只改详情
+ok 16 - 原生强效普通增益落入实际状态写入，不只改详情
+  ---
+  duration_ms: 109.6284
+  type: 'test'
+  ...
+# Subtest: 治疗专精在封顶前结算且只影响本次原生治疗量
+ok 17 - 治疗专精在封顶前结算且只影响本次原生治疗量
+  ---
+  duration_ms: 227.581
+  type: 'test'
+  ...
+# Subtest: 威力描述与最终配置一致
+ok 18 - 威力描述与最终配置一致
+  ---
+  duration_ms: 0.459
+  type: 'test'
+  ...
+# Subtest: 梦魇被动兼容仅清理自己的旧主动快捷栏，不重置学习和自动设置
+ok 19 - 梦魇被动兼容仅清理自己的旧主动快捷栏，不重置学习和自动设置
+  ---
+  duration_ms: 1.5957
+  type: 'test'
+  ...
+# Subtest: 原生DOT使用保存的施加者，真实承伤、未知来源和琉璃减伤走实际回合入口
+ok 20 - 原生DOT使用保存的施加者，真实承伤、未知来源和琉璃减伤走实际回合入口
+  ---
+  duration_ms: 123.0488
+  type: 'test'
+  ...
+# Subtest: 104 skills are unique and restricted to the three pre-50 tiers
+ok 21 - 104 skills are unique and restricted to the three pre-50 tiers
+  ---
+  duration_ms: 2.2442
+  type: 'test'
+  ...
+# Subtest: active executor A01 万象扩散
+ok 22 - active executor A01 万象扩散
+  ---
+  duration_ms: 1.6287
+  type: 'test'
+  ...
+# Subtest: active executor A02 三相附锋
+ok 23 - active executor A02 三相附锋
+  ---
+  duration_ms: 0.3544
+  type: 'test'
+  ...
+# Subtest: active executor A03 风切回环
+ok 24 - active executor A03 风切回环
+  ---
+  duration_ms: 3.419
+  type: 'test'
+  ...
+# Subtest: active executor A04 雷鸣导体
+ok 25 - active executor A04 雷鸣导体
+  ---
+  duration_ms: 0.621
+  type: 'test'
+  ...
+# Subtest: active executor A05 炽痕引爆
+ok 26 - active executor A05 炽痕引爆
+  ---
+  duration_ms: 0.4598
+  type: 'test'
+  ...
+# Subtest: active executor A06 元素折光
+ok 27 - active executor A06 元素折光
+  ---
+  duration_ms: 0.2138
+  type: 'test'
+  ...
+# Subtest: active executor B01 失序粉尘
+ok 28 - active executor B01 失序粉尘
+  ---
+  duration_ms: 0.4045
+  type: 'test'
+  ...
+# Subtest: active executor B02 石化咒
+ok 29 - active executor B02 石化咒
+  ---
+  duration_ms: 0.3163
+  type: 'test'
+  ...
+# Subtest: active executor B03 惑心低语
+ok 30 - active executor B03 惑心低语
+  ---
+  duration_ms: 0.8992
+  type: 'test'
+  ...
+# Subtest: active executor B04 余烬惊魇
+ok 31 - active executor B04 余烬惊魇
+  ---
+  duration_ms: 0.6072
+  type: 'test'
+  ...
+# Subtest: active executor B05 缄默针
+ok 32 - active executor B05 缄默针
+  ---
+  duration_ms: 0.4745
+  type: 'test'
+  ...
+# Subtest: active executor B06 反响失焦
+ok 33 - active executor B06 反响失焦
+  ---
+  duration_ms: 0.4283
+  type: 'test'
+  ...
+# Subtest: active executor C01 时隙赠礼
+ok 34 - active executor C01 时隙赠礼
+  ---
+  duration_ms: 0.1514
+  type: 'test'
+  ...
+# Subtest: active executor C02 后发先至
+ok 35 - active executor C02 后发先至
+  ---
+  duration_ms: 0.2139
+  type: 'test'
+  ...
+# Subtest: active executor C03 迟暮沙漏
+ok 36 - active executor C03 迟暮沙漏
+  ---
+  duration_ms: 0.3725
+  type: 'test'
+  ...
+# Subtest: active executor C04 预支星刻
+ok 37 - active executor C04 预支星刻
+  ---
+  duration_ms: 0.1556
+  type: 'test'
+  ...
+# Subtest: active executor C05 追秒步
+ok 38 - active executor C05 追秒步
+  ---
+  duration_ms: 0.4304
+  type: 'test'
+  ...
+# Subtest: active executor C06 断章换位
+ok 39 - active executor C06 断章换位
+  ---
+  duration_ms: 0.1703
+  type: 'test'
+  ...
+# Subtest: active executor D01 魔力转赠
+ok 40 - active executor D01 魔力转赠
+  ---
+  duration_ms: 0.2027
+  type: 'test'
+  ...
+# Subtest: active executor D03 空杯咏唱
+ok 41 - active executor D03 空杯咏唱
+  ---
+  duration_ms: 0.3109
+  type: 'test'
+  ...
+# Subtest: active executor D04 汲流符
+ok 42 - active executor D04 汲流符
+  ---
+  duration_ms: 0.1023
+  type: 'test'
+  ...
+# Subtest: active executor D05 以血换魔
+ok 43 - active executor D05 以血换魔
+  ---
+  duration_ms: 0.102
+  type: 'test'
+  ...
+# Subtest: active executor D06 寂流断路
+ok 44 - active executor D06 寂流断路
+  ---
+  duration_ms: 0.2739
+  type: 'test'
+  ...
+# Subtest: active executor E01 祛厄逆爆
+ok 45 - active executor E01 祛厄逆爆
+  ---
+  duration_ms: 1.136
+  type: 'test'
+  ...
+# Subtest: active executor E02 五厄夺冠
+ok 46 - active executor E02 五厄夺冠
+  ---
+  duration_ms: 0.1316
+  type: 'test'
+  ...
+# Subtest: active executor E03 倒灌印记
+ok 47 - active executor E03 倒灌印记
+  ---
+  duration_ms: 0.0956
+  type: 'test'
+  ...
+# Subtest: active executor E04 剥离之环
+ok 48 - active executor E04 剥离之环
+  ---
+  duration_ms: 0.5066
+  type: 'test'
+  ...
+# Subtest: active executor E05 祛痛疗愈
+ok 49 - active executor E05 祛痛疗愈
+  ---
+  duration_ms: 0.1155
+  type: 'test'
+  ...
+# Subtest: active executor E06 腐化回声
+ok 50 - active executor E06 腐化回声
+  ---
+  duration_ms: 0.3496
+  type: 'test'
+  ...
+# Subtest: active executor F01 法镜返照
+ok 51 - active executor F01 法镜返照
+  ---
+  duration_ms: 0.1904
+  type: 'test'
+  ...
+# Subtest: active executor F02 铁门半开
+ok 52 - active executor F02 铁门半开
+  ---
+  duration_ms: 0.1052
+  type: 'test'
+  ...
+# Subtest: active executor F03 余火护幕
+ok 53 - active executor F03 余火护幕
+  ---
+  duration_ms: 0.19
+  type: 'test'
+  ...
+# Subtest: active executor F04 借伤誓约
+ok 54 - active executor F04 借伤誓约
+  ---
+  duration_ms: 0.0925
+  type: 'test'
+  ...
+# Subtest: active executor F05 相位假身
+ok 55 - active executor F05 相位假身
+  ---
+  duration_ms: 0.0777
+  type: 'test'
+  ...
+# Subtest: active executor F06 反冲铆钉
+ok 56 - active executor F06 反冲铆钉
+  ---
+  duration_ms: 0.2803
+  type: 'test'
+  ...
+# Subtest: active executor G02 锋杖互换
+ok 57 - active executor G02 锋杖互换
+  ---
+  duration_ms: 0.0806
+  type: 'test'
+  ...
+# Subtest: active executor G03 铸脉横斩
+ok 58 - active executor G03 铸脉横斩
+  ---
+  duration_ms: 0.4331
+  type: 'test'
+  ...
+# Subtest: active executor G04 咒刃引线
+ok 59 - active executor G04 咒刃引线
+  ---
+  duration_ms: 0.3582
+  type: 'test'
+  ...
+# Subtest: active executor G05 轻重翻面
+ok 60 - active executor G05 轻重翻面
+  ---
+  duration_ms: 0.2213
+  type: 'test'
+  ...
+# Subtest: active executor G06 断刃化光
+ok 61 - active executor G06 断刃化光
+  ---
+  duration_ms: 0.4304
+  type: 'test'
+  ...
+# Subtest: active executor H01 协同号令
+ok 62 - active executor H01 协同号令
+  ---
+  duration_ms: 0.0843
+  type: 'test'
+  ...
+# Subtest: active executor H02 双锋夹角
+ok 63 - active executor H02 双锋夹角
+  ---
+  duration_ms: 0.0772
+  type: 'test'
+  ...
+# Subtest: active executor H03 远近换守
+ok 64 - active executor H03 远近换守
+  ---
+  duration_ms: 0.1248
+  type: 'test'
+  ...
+# Subtest: active executor H04 补位口令
+ok 65 - active executor H04 补位口令
+  ---
+  duration_ms: 0.0968
+  type: 'test'
+  ...
+# Subtest: active executor H05 共鸣节拍
+ok 66 - active executor H05 共鸣节拍
+  ---
+  duration_ms: 0.078
+  type: 'test'
+  ...
+# Subtest: active executor H06 断后旗
+ok 67 - active executor H06 断后旗
+  ---
+  duration_ms: 0.1454
+  type: 'test'
+  ...
+# Subtest: active executor I02 血签突进
+ok 68 - active executor I02 血签突进
+  ---
+  duration_ms: 0.3894
+  type: 'test'
+  ...
+# Subtest: active executor I03 危境凝神
+ok 69 - active executor I03 危境凝神
+  ---
+  duration_ms: 0.1106
+  type: 'test'
+  ...
+# Subtest: active executor I04 逆脉回流
+ok 70 - active executor I04 逆脉回流
+  ---
+  duration_ms: 0.1039
+  type: 'test'
+  ...
+# Subtest: active executor I05 断灯处决
+ok 71 - active executor I05 断灯处决
+  ---
+  duration_ms: 0.2301
+  type: 'test'
+  ...
+# Subtest: active executor I06 绝境佯死
+ok 72 - active executor I06 绝境佯死
+  ---
+  duration_ms: 0.1343
+  type: 'test'
+  ...
+# Subtest: active executor J01 雾线提灯
+ok 73 - active executor J01 雾线提灯
+  ---
+  duration_ms: 0.1173
+  type: 'test'
+  ...
+# Subtest: active executor J02 炉渣引燃
+ok 74 - active executor J02 炉渣引燃
+  ---
+  duration_ms: 0.294
+  type: 'test'
+  ...
+# Subtest: active executor J03 回风短哨
+ok 75 - active executor J03 回风短哨
+  ---
+  duration_ms: 0.1066
+  type: 'test'
+  ...
+# Subtest: active executor J04 雷缆牵引
+ok 76 - active executor J04 雷缆牵引
+  ---
+  duration_ms: 0.2884
+  type: 'test'
+  ...
+# Subtest: active executor J05 浮草渡步
+ok 77 - active executor J05 浮草渡步
+  ---
+  duration_ms: 0.1202
+  type: 'test'
+  ...
+# Subtest: active executor J06 雪幕迷踪
+ok 78 - active executor J06 雪幕迷踪
+  ---
+  duration_ms: 0.1274
+  type: 'test'
+  ...
+# Subtest: active executor K01 临锻回火
+ok 79 - active executor K01 临锻回火
+  ---
+  duration_ms: 0.0762
+  type: 'test'
+  ...
+# Subtest: active executor K02 应急调剂
+ok 80 - active executor K02 应急调剂
+  ---
+  duration_ms: 0.1896
+  type: 'test'
+  ...
+# Subtest: active executor K03 拆解脉冲
+ok 81 - active executor K03 拆解脉冲
+  ---
+  duration_ms: 0.228
+  type: 'test'
+  ...
+# Subtest: active executor K04 识破增益
+ok 82 - active executor K04 识破增益
+  ---
+  duration_ms: 0.1081
+  type: 'test'
+  ...
+# Subtest: active executor K05 猎人量距
+ok 83 - active executor K05 猎人量距
+  ---
+  duration_ms: 0.0728
+  type: 'test'
+  ...
+# Subtest: active executor K06 绳结救援
+ok 84 - active executor K06 绳结救援
+  ---
+  duration_ms: 0.0855
+  type: 'test'
+  ...
+# Subtest: active executor L02 灯下假影
+ok 85 - active executor L02 灯下假影
+  ---
+  duration_ms: 0.0667
+  type: 'test'
+  ...
+# Subtest: active executor L03 暗门静步
+ok 86 - active executor L03 暗门静步
+  ---
+  duration_ms: 0.4588
+  type: 'test'
+  ...
+# Subtest: active executor L04 噤声断咒
+ok 87 - active executor L04 噤声断咒
+  ---
+  duration_ms: 0.1364
+  type: 'test'
+  ...
+# Subtest: active executor L05 谎言罗盘
+ok 88 - active executor L05 谎言罗盘
+  ---
+  duration_ms: 0.141
+  type: 'test'
+  ...
+# Subtest: active executor L06 影缝标记
+ok 89 - active executor L06 影缝标记
+  ---
+  duration_ms: 0.2269
+  type: 'test'
+  ...
+# Subtest: active executor M01 星环回拨
+ok 90 - active executor M01 星环回拨
+  ---
+  duration_ms: 0.0777
+  type: 'test'
+  ...
+# Subtest: active executor M02 援护回响
+ok 91 - active executor M02 援护回响
+  ---
+  duration_ms: 0.0743
+  type: 'test'
+  ...
+# Subtest: active executor M03 断罪之光
+ok 92 - active executor M03 断罪之光
+  ---
+  duration_ms: 0.2773
+  type: 'test'
+  ...
+# Subtest: active executor M04 正反之轮
+ok 93 - active executor M04 正反之轮
+  ---
+  duration_ms: 0.0818
+  type: 'test'
+  ...
+# Subtest: active executor M05 根系共鸣
+ok 94 - active executor M05 根系共鸣
+  ---
+  duration_ms: 0.0682
+  type: 'test'
+  ...
+# Subtest: active executor M06 蚀印终结
+ok 95 - active executor M06 蚀印终结
+  ---
+  duration_ms: 0.3196
+  type: 'test'
+  ...
+# Subtest: MP pricing uses overload, discounts, pain focus and caps consistently
+ok 96 - MP pricing uses overload, discounts, pain focus and caps consistently
+  ---
+  duration_ms: 0.4099
+  type: 'test'
+  ...
+# Subtest: extra action is a bounded callback, never a free recursive attack
+ok 97 - extra action is a bounded callback, never a free recursive attack
+  ---
+  duration_ms: 0.2914
+  type: 'test'
+  ...
+# Subtest: sleep wakes on direct damage; protected controls cannot be replaced by ordinary controls; bosses resist charm
+ok 98 - sleep wakes on direct damage; protected controls cannot be replaced by ordinary controls; bosses resist charm
+  ---
+  duration_ms: 1.1821
+  type: 'test'
+  ...
+# Subtest: reflection cannot recurse and does not erase incoming damage
+ok 99 - reflection cannot recurse and does not erase incoming damage
+  ---
+  duration_ms: 0.6979
+  type: 'test'
+  ...
+# Subtest: expansion hits secondary targets without consuming blood twice
+ok 100 - expansion hits secondary targets without consuming blood twice
+  ---
+  duration_ms: 0.9483
+  type: 'test'
+  ...
+# Subtest: NPC damage-only advancement effects are actually used in damage and healing
+ok 101 - NPC damage-only advancement effects are actually used in damage and healing
+  ---
+  duration_ms: 0.3191
+  type: 'test'
+  ...
+# Subtest: NPC profiles use the player formula once, including equipment, evolution and first/second advancement
+not ok 102 - NPC profiles use the player formula once, including equipment, evolution and first/second advancement
+  ---
+  duration_ms: 5.3881
+  type: 'test'
+  location: 'E:\\猫拉瑞亚\\FantasyFinal\\test\\resident-combat.test.ts:73:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+      {
+    +   accuracy: 1659,
+    -   accuracy: 1945,
+        critDamageBp: 2240,
+    +   critDamageReductionBp: 3009,
+    -   critDamageReductionBp: 1922,
+        critRateBp: 1941,
+    +   critResistBp: 4381,
+    +   evasion: 1408,
+    +   hpMax: 16641,
+    -   critResistBp: 2799,
+    -   evasion: 1945,
+    -   hpMax: 13313,
+        magicAttack: 595,
+    +   magicDefense: 1896,
+    -   magicDefense: 1324,
+        mpMax: 6181,
+        physicalAttack: 1690,
+    +   physicalDefense: 2695,
+    +   speed: 1279,
+    +   tenacity: 3905,
+    -   physicalDefense: 2122,
+    -   speed: 1767,
+    -   tenacity: 2494,
+        tenacityPierce: 891
+      }
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    hpMax: 13313
+    mpMax: 6181
+    physicalAttack: 1690
+    magicAttack: 595
+    physicalDefense: 2122
+    magicDefense: 1324
+    accuracy: 1945
+    evasion: 1945
+    critRateBp: 1941
+    critDamageBp: 2240
+    critResistBp: 2799
+    critDamageReductionBp: 1922
+    tenacity: 2494
+    tenacityPierce: 891
+    speed: 1767
+  actual:
+    hpMax: 16641
+    mpMax: 6181
+    physicalAttack: 1690
+    magicAttack: 595
+    physicalDefense: 2695
+    magicDefense: 1896
+    accuracy: 1659
+    evasion: 1408
+    critRateBp: 1941
+    critDamageBp: 2240
+    critResistBp: 4381
+    critDamageReductionBp: 3009
+    tenacity: 3905
+    tenacityPierce: 891
+    speed: 1279
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (E:\猫拉瑞亚\FantasyFinal\test\resident-combat.test.ts:79:198)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: low-level NPCs have low rarity, no evolution/second advancement; high-level rarity is varied and stable
+ok 103 - low-level NPCs have low rarity, no evolution/second advancement; high-level rarity is varied and stable
+  ---
+  duration_ms: 23.7822
+  type: 'test'
+  ...
+# Subtest: insight pool is exactly this encounter loadout, never the role library or an old broad pool
+ok 104 - insight pool is exactly this encounter loadout, never the role library or an old broad pool
+  ---
+  duration_ms: 12.6646
+  type: 'test'
+  ...
+# Subtest: legacy effects can be removed by ID even when the adapter returns fresh objects
+ok 105 - legacy effects can be removed by ID even when the adapter returns fresh objects
+  ---
+  duration_ms: 1.1117
+  type: 'test'
+  ...
+# Subtest: support echo copies half of actual gains without paying blood twice
+ok 106 - support echo copies half of actual gains without paying blood twice
+  ---
+  duration_ms: 0.4351
+  type: 'test'
+  ...
+# Subtest: roots has a shared team limit of three even with two owners
+ok 107 - roots has a shared team limit of three even with two owners
+  ---
+  duration_ms: 9.0595
+  type: 'test'
+  ...
+# Subtest: half-strength refraction really halves reduction and reflected damage
+ok 108 - half-strength refraction really halves reduction and reflected damage
+  ---
+  duration_ms: 0.3473
+  type: 'test'
+  ...
+# Subtest: indexed dispel prioritizes the revealed buff and consumes the mark
+ok 109 - indexed dispel prioritizes the revealed buff and consumes the mark
+  ---
+  duration_ms: 0.2394
+  type: 'test'
+  ...
+# Subtest: confused direct skills attach their status to the unit actually hit
+ok 110 - confused direct skills attach their status to the unit actually hit
+  ---
+  duration_ms: 0.3612
+  type: 'test'
+  ...
+# Subtest: silence interruption refunds once and removes the queued cast
+ok 111 - silence interruption refunds once and removes the queued cast
+  ---
+  duration_ms: 0.216
+  type: 'test'
+  ...
+# Subtest: nightmare masks enemy skill/resource details but leaves the observer visible
+ok 112 - nightmare masks enemy skill/resource details but leaves the observer visible
+  ---
+  duration_ms: 0.2686
+  type: 'test'
+  ...
+# Subtest: daily limit uses Shanghai midnight independent of host timezone
+ok 113 - daily limit uses Shanghai midnight independent of host timezone
+  ---
+  duration_ms: 7.6112
+  type: 'test'
+  ...
+# Subtest: settlement SQL contract uses the encounter loadout once and restores only HP/MP
+ok 114 - settlement SQL contract uses the encounter loadout once and restores only HP/MP
+  ---
+  duration_ms: 57.3737
+  type: 'test'
+  ...
+# Subtest: migration SQL contract seeds all 104 rules, is repeatable and leaves player settings alone
+ok 115 - migration SQL contract seeds all 104 rules, is repeatable and leaves player settings alone
+  ---
+  duration_ms: 1.6865
+  type: 'test'
+  ...
+# [2026-09-09 13:02:56][INFO] [alemonjs][exit] 进程退出，code=1
+1..115
+# tests 115
+# suites 0
+# pass 114
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2131.2295

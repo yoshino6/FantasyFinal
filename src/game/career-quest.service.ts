@@ -2,13 +2,13 @@ import type { Pool, RowDataPacket } from 'mysql2/promise';
 import { getPool } from '../database/pool';
 import { advancedProfessionByCode, worldTreeAdvancedProfessions, type AdvancedProfession } from './advanced-profession.config';
 import type { MainQuest } from './main-quest.service';
+import { openingHubs, type OpeningHubCode } from './opening-world.config';
 
 type CareerCharacter = RowDataPacket & {
   id: number; level: number; adventurer_registered: number; profession_code: string | null;
   current_region_id: number; region_code: string; pos_x: number; pos_y: number; pos_z: number;
 };
 type CareerTrial = RowDataPacket & { profession_code: string; stage: number; story_kills: number; proof_kills: number };
-const baseProfessionNames: Record<string, AdvancedProfession['baseProfession']> = { warrior: '战士', mage: '法师', rogue: '盗贼', priest: '牧师' };
 
 const careerCharacterFor = async (pool: Pool, qqUserId: string) => {
   const [rows] = await pool.execute<CareerCharacter[]>(`SELECT c.id,c.level,c.adventurer_registered,c.profession_code,c.current_region_id,
@@ -21,6 +21,12 @@ const careerCharacterFor = async (pool: Pool, qqUserId: string) => {
 /** 公会登记和主职业沿用已有角色状态；任务栏只读取进度，不补写或重复发奖。 */
 const guildCareerQuestFor = async (pool: Pool, character: CareerCharacter): Promise<MainQuest | null> => {
   if (Number(character.adventurer_registered) && character.profession_code) return null;
+  const local=openingHubs[character.region_code as OpeningHubCode];
+  if(local&&character.region_code!=='baina_town')return{
+    title:Number(character.adventurer_registered)?'【主线·选择主职业】':'【主线·成为冒险者】',
+    description:Number(character.adventurer_registered)?`${local.host}把四份职业介绍摆到你面前：“要怎么往前走，由你自己决定。”\n\n在${local.guildName}查看战士、法师、盗贼与牧师的介绍，再确认一个主职业。登记后领取普通适配武器。`:`${local.description}\n\n${local.host}替你翻开登记簿。到${local.guildName}登记姓名，领取冒险者卡，让这段旅途有一个正式的开始。`,
+    action:{label:'[当地公会]',command:'/初行公会'}
+  };
   const [guilds] = await pool.execute<(RowDataPacket & { region_id: number; pos_x: number; pos_y: number; pos_z: number })[]>(`
     SELECT n.region_id,n.pos_x,n.pos_y,n.pos_z FROM map_npcs n JOIN map_regions r ON r.id=n.region_id
     WHERE n.code='guild_counter' AND r.code='baina_town' LIMIT 1`);
@@ -67,10 +73,10 @@ export const advancedProfessionMainQuest = async (qqUserId: string): Promise<Mai
   if (!active) {
     const prerequisite = await guildCareerQuestFor(pool, character);
     if (prerequisite) return { ...prerequisite, title: '【主线·二转之路】', description: '你已达到 Lv.25，可以开始寻找二转导师。先完成冒险者注册与主职业选择，再决定要深入哪一条道路。\n\n' + prerequisite.description };
-    const routes = worldTreeAdvancedProfessions.filter(route => route.baseProfession === baseProfessionNames[character.profession_code ?? '']);
+    const routes = worldTreeAdvancedProfessions;
     return {
       title: '【主线·二转之路】',
-      description: '一路积累的经验让你开始理解自己的长处。世界树上的导师们各自守着一份传承，或许有人能引你走向更深的道路。\n\n前往世界树，拜访适合当前主职业的导师，打开【关于 职业】了解传承，再接受试炼任务。\n\n' + routes.map(route => `${route.name}：${route.mentor.title}·${route.mentor.name}（${route.mentor.x}, ${route.mentor.y}）`).join('\n'),
+      description: '一路积累的经验让你开始理解自己的长处。世界树上的导师们各自守着一份传承，或许有人能引你走向更深的道路。\n\n前往世界树，自由选择任意二转导师，不受一转职业限制。打开【关于 职业】了解传承，再接受试炼任务。\n\n' + routes.map(route => `${route.name}：${route.mentor.title}·${route.mentor.name}（${route.mentor.x}, ${route.mentor.y}）`).join('\n'),
       actions: routes.map(mentorAction)
     };
   }

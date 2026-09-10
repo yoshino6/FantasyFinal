@@ -1,0 +1,17 @@
+TAP version 13
+# Subtest: A07 同根多段只推进一次，第五次封顶，主动非攻击和换目标重置
+ok 1 - A07 同根多段只推进一次，第五次封顶，主动非攻击和换目标重置
+  ---
+  duration_ms: 5.828
+  type: 'test'
+  ...
+# [2026-09-09 10:44:23][INFO] [alemonjs][exit] 进程退出，code=0
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 870.9987
