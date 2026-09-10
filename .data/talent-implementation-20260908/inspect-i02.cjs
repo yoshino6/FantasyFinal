@@ -1,2 +1,0 @@
-const fs=require('node:fs'),yaml=require('yaml'),mysql=require('mysql2/promise');
-(async()=>{const cfg=yaml.parse(fs.readFileSync('alemon.config.yaml','utf8'));const c=await mysql.createConnection(cfg.FantasyFinal?.database??cfg.mysql);try{const [rows]=await c.query("SELECT code,item_category,rarity,required_level,trade_price FROM item_definitions WHERE code IN ('magic_gear','flesh_atrium','shadow_filament','flame_matrix','living_wood','bone_steel_plate','tanned_spirit_leather','spellcloth_bolt','cast_shell_plate')");console.log(rows);}finally{await c.end();}})();

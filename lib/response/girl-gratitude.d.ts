@@ -1,0 +1,11 @@
+import { Format } from 'alemonjs';
+export declare const girlGratitudeStartHandler: () => Promise<void>;
+export declare const girlGratitudeStartFormat: (qqUserId: string) => Promise<Format>;
+export declare const girlGratitudeContinueHandler: () => Promise<void>;
+export declare const worldGateFormat: () => Promise<void>;
+export declare const worldGateTeleportPanelHandler: () => Promise<void>;
+export declare const worldTreeTeleportHandler: () => Promise<void>;
+export declare const worldTreeGateFormat: () => Promise<void>;
+export declare const worldTreeGateReturnHandler: () => Promise<void>;
+export declare const worldExchangeFormat: () => Promise<void>;
+export declare const receiveGirlGratitudeGiftHandler: () => Promise<void>;

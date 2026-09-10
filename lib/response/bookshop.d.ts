@@ -1,0 +1,18 @@
+import { Format } from 'alemonjs';
+export declare const bookshopHandler: () => Promise<void>;
+export declare const bookshopBuyHandler: () => Promise<void>;
+export declare const bookshopBuySearchHandler: () => Promise<void>;
+export declare const bookshopPurchaseHandler: () => Promise<void>;
+export declare const bookshopSellHandler: () => Promise<void>;
+export declare const bookshopSellSearchHandler: () => Promise<void>;
+export declare const bookshopSellItemHandler: () => Promise<void>;
+export declare const bookshopChatHandler: () => Promise<void>;
+export declare const readBookHandler: () => Promise<void>;
+export declare const omniscientAboutHandler: () => Promise<void>;
+export declare const omniscientProfessionSelectHandler: () => Promise<void>;
+export declare const acceptOmniscientQuestHandler: () => Promise<void>;
+export declare const claimOmniscientQuestHandler: () => Promise<void>;
+export declare const omniscientProfessionFormat: (qqUserId: string) => Promise<Format>;
+export declare const omniscientInsightHandler: () => Promise<void>;
+export declare const omniscientTraceHandler: () => Promise<void>;
+export declare const omniscientIngenuityHandler: () => Promise<void>;

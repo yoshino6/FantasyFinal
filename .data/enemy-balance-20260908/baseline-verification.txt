@@ -1,2 +1,0 @@
-{"liveLegacyHpMismatches":0,"invalidStats":0,"first":[]}
-[2026-09-08 22:52:11][INFO] [alemonjs][exit] 进程退出，code=0

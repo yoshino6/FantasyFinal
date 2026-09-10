@@ -1,0 +1,16 @@
+import { Format } from 'alemonjs';
+export declare const advancedMentorFormat: (qqUserId: string, mentorCode: string) => Promise<Format>;
+export declare const advancedProfessionDetailFormat: (qqUserId: string, mentorCode: string) => Promise<Format>;
+export declare const inheritanceStudyFormat: (qqUserId: string, mentorCode: string) => Promise<Format>;
+export declare const advancedMentorHandler: () => Promise<void>;
+export declare const advancedProfessionDetailHandler: () => Promise<void>;
+export declare const inheritanceStudyHandler: () => Promise<void>;
+export declare const advancedMentorChatHandler: () => Promise<void>;
+export declare const acceptAdvancedProfessionHandler: () => Promise<void>;
+export declare const confirmAdvancedProfessionSwitchHandler: () => Promise<void>;
+export declare const advanceAdvancedProfessionHandler: () => Promise<void>;
+export declare const submitAdvancedProfessionHandler: () => Promise<void>;
+export declare const beginInheritanceStudyHandler: () => Promise<void>;
+export declare const completeInheritanceStudyHandler: () => Promise<void>;
+export declare const toggleInheritanceStudyHandler: () => Promise<void>;
+export declare const startAdvancedProfessionTrialHandler: () => Promise<void>;

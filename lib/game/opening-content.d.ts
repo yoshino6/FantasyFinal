@@ -1,0 +1,10 @@
+import type { OpeningChoice, OpeningRoute } from './opening.types';
+export { talentDefinitions } from './talent.config';
+export declare const openingLessonText: (route: OpeningRoute, choice: OpeningChoice) => string;
+export declare const openingRouteVersions: OpeningRoute[];
+export declare const openingRoutes: OpeningRoute[];
+export declare const openingRouteByCode: (code: string, version?: number) => OpeningRoute | undefined;
+export declare const openingNewcomerText: (text: string) => string;
+export declare const openingNarrativeText: (text: string) => string;
+export declare const openingFirstMeetingIntroduction: (route: OpeningRoute) => string;
+export declare const openingFirstMeetingText: (route: OpeningRoute, text: string, pageIndex?: number) => string;

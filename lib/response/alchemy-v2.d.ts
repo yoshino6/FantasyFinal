@@ -1,0 +1,15 @@
+import { Format } from 'alemonjs';
+import { executeAlchemy } from '../game/alchemist.service';
+type AlchemyResult = Awaited<ReturnType<typeof executeAlchemy>>;
+export declare const alchemyResultFormat: (result: AlchemyResult) => Format;
+export declare const alchemyExecuteV2Handler: () => Promise<void>;
+export declare const alchemyConfirmV2Handler: () => Promise<void>;
+export declare const alchemyCancelV2Handler: () => Promise<void>;
+export declare const alchemyRandomHandler: () => Promise<void>;
+export declare const alchemyReplaceHandler: () => Promise<void>;
+export declare const alchemySearchContinueHandler: () => Promise<void>;
+export declare const alchemyTryContinueHandler: () => Promise<void>;
+export declare const alchemyJournalHandler: () => Promise<void>;
+export declare const alchemyJournalDetailHandler: () => Promise<void>;
+export declare const alchemyJournalReloadHandler: () => Promise<void>;
+export {};

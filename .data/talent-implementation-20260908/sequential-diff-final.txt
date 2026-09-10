@@ -1,7 +1,0 @@
-warning: in the working copy of 'src/database/bootstrap.ts', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/game/adventure.service.ts', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/game/automaton-combat.ts', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/game/automaton.service.ts', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/game/combat-dispel-policy.ts', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/game/combat-rule-registry.ts', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'src/game/guild-restaurant.service.ts', LF will be replaced by CRLF the next time Git touches it

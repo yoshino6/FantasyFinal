@@ -1,9 +1,0 @@
-{
-  "baseDefinitions": 300,
-  "wiredBase": 151,
-  "pendingBase": 149,
-  "pvpDefinitions": 25,
-  "bossMode": "dynamic actual template and difficulty",
-  "liveRestart": false,
-  "allPlayerPathsAccepted": false
-}

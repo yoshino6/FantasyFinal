@@ -1,0 +1,13 @@
+import type { PoolConnection } from 'mysql2/promise';
+export declare const updateAchievementState: (c: PoolConnection, characterId: number, metric: string, event: string, life: boolean, apply: (state: any) => void) => Promise<void>;
+export declare const achievementAlchemyRecovery: (c: PoolConnection, id: number, token: string, signature: string, successes: number, failures: number) => Promise<void>;
+export declare const achievementPeerProgress: (c: PoolConnection, id: number, peerIdentity: string, kind: "friend" | "oath", event: string) => Promise<void>;
+export declare const achievementAutomatonFeeds: (c: PoolConnection, id: number, pet: number, event: string, codes: string[]) => Promise<void>;
+export declare const achievementSocialPair: (c: PoolConnection, left: number, right: number, kind: "friend" | "oath", event: string) => Promise<void>;
+export declare const achievementBattlePeers: (c: PoolConnection, event: string, ids: number[]) => Promise<void>;
+export declare const achievementBookSource: (c: PoolConnection, id: number, skill: number, book: number) => Promise<void>;
+export declare const achievementBookLearned: (c: PoolConnection, id: number, skill: number) => Promise<void>;
+export declare const achievementBookSkillUsed: (c: PoolConnection, id: number, skill: number, event: string) => Promise<void>;
+export declare const achievementCraftedWeapon: (c: PoolConnection, id: number, instance: number) => Promise<void>;
+export declare const achievementCraftedWeaponUsed: (c: PoolConnection, id: number, instance: number, event: string) => Promise<void>;
+export declare const achievementInstanceVictory: (c: PoolConnection, id: number, instance: number, event: string, metric: "ACH_J11" | "ACH_I15" | "ACH_G23") => Promise<void>;

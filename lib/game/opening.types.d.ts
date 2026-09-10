@@ -1,0 +1,68 @@
+export type OpeningBranch = 'A' | 'B' | 'C';
+export type OpeningEntry = 'move' | 'hunt' | 'continue';
+export type OpeningPage = {
+    title: string;
+    text: string;
+};
+export type OpeningRewardKind = '路费' | '药袋' | '餐食' | '工料' | '手艺' | '照料';
+export type OpeningChoice = {
+    code: OpeningBranch;
+    label: string;
+    pages: OpeningPage[];
+    quest: string;
+    task: string;
+    farewell: string;
+    rewardCode: string;
+    rewardName: string;
+    rewardUse: string;
+    future: string;
+    pack?: string;
+    rewardKind?: OpeningRewardKind;
+    bonusItem?: string;
+    rewardItems?: {
+        code: string;
+        quantity: number;
+    }[];
+    rewardCopper?: number;
+    rewardEquipment?: 'random_weapon' | 'random_armor' | 'auxiliary_aiming_scope';
+};
+export type OpeningRoute = {
+    code: string;
+    version: number;
+    title: string;
+    region: string;
+    destination: string;
+    moveEntry: string;
+    huntEntry: string;
+    pages: OpeningPage[];
+    choices: OpeningChoice[];
+    arrival: OpeningPage[];
+    person?: {
+        name: string;
+        description: string;
+    };
+    lessonText?: string;
+};
+export type OpeningState = 'armed' | 'reading' | 'choice' | 'branch' | 'arrival' | 'lesson' | 'completed';
+export type OpeningView = {
+    route: string;
+    title: string;
+    state: OpeningState;
+    revision: number;
+    text: string;
+    page: number;
+    pages: number;
+    branch: OpeningBranch | null;
+    choices: {
+        code: string;
+        label: string;
+    }[];
+    action?: string;
+    reward?: string;
+    destination?: string;
+    worldChanged?: boolean;
+    person?: {
+        code: string;
+        name: string;
+    };
+};

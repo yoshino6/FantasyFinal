@@ -1,0 +1,23 @@
+export declare const attributes: readonly ["constitution", "spirit", "strength", "intelligence", "agility", "perception"];
+export type AttributeKey = (typeof attributes)[number];
+export type Allocation = Record<AttributeKey, number>;
+export type Growth = Record<AttributeKey, number>;
+export type DerivedStats = {
+    hpMax: number;
+    mpMax: number;
+    physicalAttack: number;
+    magicAttack: number;
+    physicalDefense: number;
+    magicDefense: number;
+    accuracy: number;
+    evasion: number;
+    critRateBp: number;
+    critDamageBp: number;
+    critResistBp: number;
+    critDamageReductionBp: number;
+    tenacity: number;
+    tenacityPierce: number;
+    speed: number;
+};
+export declare const emptyAllocation: () => Allocation;
+export declare const emptyGrowth: () => Growth;

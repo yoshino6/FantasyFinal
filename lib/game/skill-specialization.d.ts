@@ -1,0 +1,46 @@
+export type Specialization = 'overcharge' | 'instant' | 'efficient' | 'potent';
+export type SkillSpecializations = Partial<Record<Specialization, number>>;
+export type SpecializationBase = {
+    code: string;
+    category: string;
+    tier?: string;
+    power: number;
+    mana_cost: number;
+    cooldown_turns: number;
+    chant_turns?: number;
+};
+export declare const manaTransferCost: (currentMp: number) => number;
+export declare const specializationMaximum: (tier?: string) => 10 | 20 | 40;
+export declare const specializationInvestedPoints: (level: unknown, tier?: string) => number;
+export declare const specializationUpgradeCost: (level: unknown) => number;
+export declare const specializationBenefitWeight: (point: number) => number;
+export declare const specializationGrowthFactor: (level: unknown, tier: string | undefined, initialChange: number) => number;
+export declare const specializationDescriptions: {
+    readonly overcharge: "每级威力×1.06，蓝耗×1.12。";
+    readonly potent: "每级普通效果、可成长时长与控制概率系数×1.06，蓝耗×1.12。";
+    readonly instant: "每级冷却与吟唱时间基数×0.94，蓝耗×1.12。";
+    readonly efficient: "每级蓝耗×0.88。";
+};
+export declare const specializeTime: (base: number, change: number) => number;
+export declare const skillSpecialization: (base: SpecializationBase, levels?: SkillSpecializations) => {
+    power: number;
+    mana: number;
+    cooldown: number;
+    chant: number;
+    powerFactor: number;
+    effectFactor: number;
+    supportFactor: number;
+    damageFactor: number;
+    timeChange: number;
+    timeFactor: number;
+    manaFactor: number;
+    manaPenaltyFactor: number;
+    efficientFactor: number;
+    durationChange: number;
+    controlChanceFactor: number;
+};
+export type SkillSpecializationResult = ReturnType<typeof skillSpecialization>;
+export declare const specializationOptions: (base: SpecializationBase, hasOrdinaryEffect?: boolean) => Specialization[];
+export declare const specializeEffectValue: (code: string, value: number, factor?: number) => number;
+export declare const specializeControlChance: (chance: number, factor?: number) => number;
+export declare const specializeEffectDuration: (code: string, turns: number, change?: number) => number;

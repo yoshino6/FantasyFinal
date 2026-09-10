@@ -1,0 +1,18 @@
+import { Format } from 'alemonjs';
+export declare const bountyBoardFormat: (qqUserId: string, page?: number, keyword?: string) => Promise<Format>;
+export declare const bountyBoardHandler: () => Promise<void>;
+export declare const bountyBoardPageHandler: () => Promise<void>;
+export declare const bountyBoardSearchHandler: () => Promise<void>;
+declare const taskCategories: readonly ["主线", "支线", "悬赏", "委托", "其他"];
+type TaskCategory = typeof taskCategories[number];
+export declare const taskFormat: (qqUserId: string, category?: TaskCategory, page?: number, keyword?: string) => Promise<Format>;
+export declare const taskHandler: () => Promise<void>;
+export declare const taskCategoryHandler: () => Promise<void>;
+export declare const taskPageHandler: () => Promise<void>;
+export declare const taskSearchHandler: () => Promise<void>;
+export declare const clearInvalidBountyHandler: () => Promise<void>;
+export declare const abandonBountyHandler: () => Promise<void>;
+export declare const abandonSecondaryQuestHandler: () => Promise<void>;
+export declare const acceptBountyHandler: () => Promise<void>;
+export declare const claimBountyHandler: () => Promise<void>;
+export {};

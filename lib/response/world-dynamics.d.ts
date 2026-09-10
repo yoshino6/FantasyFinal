@@ -1,0 +1,12 @@
+import { Format } from 'alemonjs';
+import { currentDynamicEncounter } from '../game/world-dynamics.service';
+declare const encounterFormat: (encounter: Awaited<ReturnType<typeof currentDynamicEncounter>>) => Format;
+export declare const weatherHandler: () => Promise<void>;
+export declare const dynamicEncounterHandler: () => Promise<void>;
+export declare const dynamicEncounterChoiceHandler: () => Promise<void>;
+export declare const nearbyDynamicSceneHandler: () => Promise<void>;
+export declare const joinDynamicSceneHandler: () => Promise<void>;
+export declare const contributeDynamicSceneHandler: () => Promise<void>;
+export { encounterFormat };
+export declare const patrolMeetingFormat: (qqUserId: string, npcCode: string, name: string, continuingChat?: boolean, affinity?: number) => Promise<Format | null>;
+export declare const patrolEncounterHandler: () => Promise<void>;

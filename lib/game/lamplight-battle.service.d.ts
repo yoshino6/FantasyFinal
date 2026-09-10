@@ -1,0 +1,34 @@
+import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
+import type { LamplightNode } from './lamplight.types';
+export declare const lamplightBattleProfile: (node: Pick<LamplightNode, "code" | "gate" | "minLevel">, stage: number) => {
+    balanceVersion: number;
+    birthAttributes: import("./types").Allocation;
+    fixedGrowth: import("./types").Allocation;
+    trainedAttributes: import("./types").Allocation;
+    stats: import("./types").DerivedStats;
+    armorSet: import("./armor-set").ArmorSet | null;
+    armorType: string;
+    name: string;
+    level: number;
+    band: [number, number];
+    profession: string;
+    advancedCode: undefined;
+    advancedName: string;
+    advancedEffect: {};
+    equipment: {
+        level: number;
+        quality: number;
+        pieces: number;
+        rarity: string;
+        secondaryAffixes: number;
+    };
+    evolution: {};
+    injections: number;
+    rotation: string[];
+    passives: string[];
+    pool: string[];
+    code: string;
+    worldStage: number;
+};
+export declare const startLamplightBattle: (c: PoolConnection, character: RowDataPacket, node: LamplightNode, stage: number) => Promise<`${string}-${string}-${string}-${string}-${string}`>;
+export declare const finishLamplightBattle: (c: PoolConnection, session: string, result: "victory" | "defeat" | "escaped" | "timeout") => Promise<string | null>;
