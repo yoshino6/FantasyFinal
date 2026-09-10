@@ -1135,6 +1135,15 @@ const schemaStatements = [
   ) ENGINE=InnoDB`
 ];
 
+const seedWorldSurfaceRegions = async (pool: Pool) => {
+  for (const region of worldSurfaceRegions) {
+    await pool.execute(`INSERT INTO map_regions (code,name,description,min_x,max_x,min_y,max_y,min_z,max_z,is_spawn_enabled,danger_level,is_owner_only,is_enabled,is_release_managed)
+      VALUES (?,?,?,?,?,?,?,0,0,1,?,1,0,1)
+      ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),min_x=VALUES(min_x),max_x=VALUES(max_x),min_y=VALUES(min_y),max_y=VALUES(max_y),is_spawn_enabled=VALUES(is_spawn_enabled),danger_level=VALUES(danger_level)`,
+    [region.code, region.name, region.description, region.minX, region.maxX, region.minY, region.maxY, region.danger]);
+  }
+};
+
 const seedWorldSurfaceContent = async (pool: Pool) => {
   await pool.query(`INSERT INTO skill_definitions (code,name,category,damage_type,skill_kind,element,range_type,mana_cost,cooldown_turns,power,learn_cost,max_level,description) VALUES
     ('water_bolt','水箭','magic','水','元素','水','远程',18,2,112,1,5,'凝结水流射向目标，并压低其行动速度。'),
@@ -1144,11 +1153,8 @@ const seedWorldSurfaceContent = async (pool: Pool) => {
     ((SELECT id FROM skill_definitions WHERE code='water_bolt'),(SELECT id FROM effect_definitions WHERE code='slow'),1,10,2,'enemy','on_hit'),
     ((SELECT id FROM skill_definitions WHERE code='slow'),(SELECT id FROM effect_definitions WHERE code='slow'),1,15,2,'enemy','on_hit')
     ON DUPLICATE KEY UPDATE effect_level=VALUES(effect_level),value_override=VALUES(value_override),duration_override=VALUES(duration_override),target_scope=VALUES(target_scope),trigger_timing=VALUES(trigger_timing)`);
+  await seedWorldSurfaceRegions(pool);
   for (const region of worldSurfaceRegions) {
-    await pool.execute(`INSERT INTO map_regions (code,name,description,min_x,max_x,min_y,max_y,min_z,max_z,is_spawn_enabled,danger_level,is_owner_only,is_enabled,is_release_managed)
-      VALUES (?,?,?,?,?,?,?,0,0,1,?,1,0,1)
-      ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),min_x=VALUES(min_x),max_x=VALUES(max_x),min_y=VALUES(min_y),max_y=VALUES(max_y),is_spawn_enabled=VALUES(is_spawn_enabled),danger_level=VALUES(danger_level)`,
-    [region.code, region.name, region.description, region.minX, region.maxX, region.minY, region.maxY, region.danger]);
     await pool.execute(`INSERT INTO map_terrain_zones (code,name,description,min_x,max_x,min_y,max_y,min_z,max_z,priority,tags_json)
       VALUES (?,?,?,?,?,?,?,0,0,?,?)
       ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),min_x=VALUES(min_x),max_x=VALUES(max_x),min_y=VALUES(min_y),max_y=VALUES(max_y),priority=VALUES(priority),tags_json=VALUES(tags_json)`,
@@ -1723,6 +1729,8 @@ export const initializeSchema = async (pool: Pool) => {
   await pool.execute(`INSERT INTO map_regions (code,name,description,min_x,max_x,min_y,max_y,min_z,max_z,is_spawn_enabled,danger_level,is_owner_only)
     VALUES ('boss_test_arena','首领测试场','仅供主人发起的首领强度测试使用；首领只会对测试队伍可见。',-400,-381,380,400,0,0,0,1000,1)
     ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),min_x=VALUES(min_x),max_x=VALUES(max_x),min_y=VALUES(min_y),max_y=VALUES(max_y),min_z=VALUES(min_z),max_z=VALUES(max_z),is_spawn_enabled=VALUES(is_spawn_enabled),danger_level=VALUES(danger_level),is_owner_only=VALUES(is_owner_only)`);
+  // 边界通过 INSERT ... SELECT 关联区域 ID；全新数据库必须先创建地表区域，不能依赖后续内容种子。
+  await seedWorldSurfaceRegions(pool);
   const releaseManagedCodes = ['dark_forest_deep', ...worldSurfaceRegions.map(region => region.code)];
   // 旧版本曾把“已开放”只写入 is_enabled，导致保留 is_owner_only 的半开放状态；按原开放意图补全。
   await pool.execute('UPDATE map_regions SET is_owner_only=0 WHERE is_release_managed=1 AND is_enabled=1 AND is_owner_only=1');
