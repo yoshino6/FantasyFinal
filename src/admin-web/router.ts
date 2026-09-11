@@ -18,12 +18,14 @@ const loopback = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const remoteAddress = (ctx: Context) => String(ctx.req?.socket?.remoteAddress ?? '');
 const configFor = () => getAdminWebConfig();
 const expectedHost = (config: ReturnType<typeof configFor>) => config.publicBaseUrl ? new URL(config.publicBaseUrl).host.toLowerCase() : null;
+const secureCookie = (config: ReturnType<typeof configFor>) => config.publicBaseUrl?.startsWith('https://') ?? false;
 
 const secureAdminRequest = (ctx: Context) => {
   const config = configFor(); if (!config.enabled) return false;
   const remote = remoteAddress(ctx); const trustedProxy = config.trustedProxyIps.includes(remote);
   const host = String(ctx.get('host') ?? '').toLowerCase(); const expected = expectedHost(config);
   if (expected) {
+    if (config.allowInsecurePublicHttp) return host === expected;
     const forwardedProto = trustedProxy ? String(ctx.get('x-forwarded-proto')).split(',')[0].trim().toLowerCase() : '';
     return trustedProxy && forwardedProto === 'https' && host === expected;
   }
@@ -94,16 +96,16 @@ export const registerAdminWebRoutes = (router: koaRouter) => {
     try {
       if (!secureAdminRequest(ctx)) { apiError(ctx, 404, '未找到接口。'); return; }
       const body = await parseBody(ctx); const login = await loginAdminWeb({ username: body.username, password: body.password, ip: clientIp(ctx) });
-      const config = configFor(); ctx.cookies.set(cookieName, login.token, { httpOnly: true, sameSite: 'strict', secure: Boolean(config.publicBaseUrl), maxAge: config.sessionAbsoluteMinutes * 60_000, overwrite: true });
-      ctx.cookies.set(csrfCookieName, login.csrfToken, { httpOnly: false, sameSite: 'strict', secure: Boolean(config.publicBaseUrl), maxAge: config.sessionAbsoluteMinutes * 60_000, overwrite: true });
+      const config = configFor(); ctx.cookies.set(cookieName, login.token, { httpOnly: true, sameSite: 'strict', secure: secureCookie(config), maxAge: config.sessionAbsoluteMinutes * 60_000, overwrite: true });
+      ctx.cookies.set(csrfCookieName, login.csrfToken, { httpOnly: false, sameSite: 'strict', secure: secureCookie(config), maxAge: config.sessionAbsoluteMinutes * 60_000, overwrite: true });
       ctx.type = 'application/json'; ctx.body = { username: login.session.username, role: login.session.role };
     } catch (error) { apiError(ctx, 400, error instanceof Error ? error.message : '登录失败。'); }
   });
 
   router.delete('/api/admin/session', async (ctx: Context) => {
     const session = await auth(ctx, true); if (!session) return;
-    await logoutAdminWeb(sessionToken(ctx)); ctx.cookies.set(cookieName, '', { httpOnly: true, sameSite: 'strict', secure: Boolean(configFor().publicBaseUrl), maxAge: 0, overwrite: true });
-    ctx.cookies.set(csrfCookieName, '', { httpOnly: false, sameSite: 'strict', secure: Boolean(configFor().publicBaseUrl), maxAge: 0, overwrite: true });
+    await logoutAdminWeb(sessionToken(ctx)); ctx.cookies.set(cookieName, '', { httpOnly: true, sameSite: 'strict', secure: secureCookie(configFor()), maxAge: 0, overwrite: true });
+    ctx.cookies.set(csrfCookieName, '', { httpOnly: false, sameSite: 'strict', secure: secureCookie(configFor()), maxAge: 0, overwrite: true });
     ctx.type = 'application/json'; ctx.body = { ok: true };
   });
   router.get('/api/admin/dashboard', ctx => api(ctx, async () => adminDashboard()));
