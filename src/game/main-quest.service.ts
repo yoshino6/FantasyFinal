@@ -84,18 +84,13 @@ const createGoblinKingEncounter = async (connection: QuestConnection, ownerChara
 };
 
 /** 主线只保留当前阶段，由角色等级、剧情进度与地图持有状态自动推导。 */
-export const currentMainQuest = async (qqUserId: string, skipLamplight = false): Promise<MainQuest> => {
+export const currentMainQuest = async (qqUserId: string, _skipLamplight = false): Promise<MainQuest> => {
   const opening = await openingMainQuest(qqUserId);
   if (opening) return opening;
-  if (!skipLamplight) {
-    const lamplight = await (await import('./lamplight.service')).lamplightMainQuest(qqUserId);
-    if (lamplight) return lamplight;
-  }
   const pool = await getPool();
-  const [rows] = await pool.execute<(RowDataPacket & { id: number; level: number; experience: number; realm_stage: number; pos_x: number; pos_y: number; adventurer_registered: number; profession_code: string | null; forest_status: string | null; owns_forest_map: number; owns_sky_dust: number; barrier_stage: number; evolution_stage: number; evolution_cap: number | null })[]>(`
+  const [rows] = await pool.execute<(RowDataPacket & { id: number; level: number; experience: number; realm_stage: number; pos_x: number; pos_y: number; adventurer_registered: number; profession_code: string | null; forest_status: string | null; owns_sky_dust: number; barrier_stage: number; evolution_stage: number; evolution_cap: number | null })[]>(`
     SELECT c.id,c.level,c.experience,c.realm_stage,c.pos_x,c.pos_y,c.adventurer_registered,c.profession_code,
       (SELECT sp.status FROM player_story_progress sp WHERE sp.character_id=c.id AND sp.story_code='forest_guide' LIMIT 1) AS forest_status,
-      EXISTS(SELECT 1 FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=c.id AND i.code='map_dark_forest' AND pi.quantity>0) AS owns_forest_map,
       EXISTS(SELECT 1 FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=c.id AND i.code='sky_dust' AND pi.quantity>0) AS owns_sky_dust,
       COALESCE((SELECT qp.stage FROM player_main_quest_progress qp WHERE qp.character_id=c.id AND qp.quest_code='realm_barrier' LIMIT 1),0) AS barrier_stage,
       COALESCE((SELECT qp.stage FROM player_main_quest_progress qp WHERE qp.character_id=c.id AND qp.quest_code='evolution_barrier' LIMIT 1),0) AS evolution_stage,
@@ -107,14 +102,15 @@ export const currentMainQuest = async (qqUserId: string, skipLamplight = false):
   const level = Number(character.level);
   const experience = Number(character.experience);
 
-  if (level < 5) return {
-    title: '【主线·初入异界】',
-    description: `提升至Lv.5\n当前等级：Lv.${level}/5`
-  };
   if (['awaiting_arrival', 'arrival_story', 'guild_story'].includes(character.forest_status ?? '')) return {
     title: '【主线·前往百纳镇】',
     description: '森林史莱姆的战斗已经结束。继续入镇剧情，跟随梨子喵认识百纳镇，前往冒险者公会。',
     action: { label: '[继续 剧情]', command: '/继续剧情' }
+  };
+  if(['joined','declined'].includes(character.forest_status??''))return{
+    title:'【主线·讨伐森林史莱姆】',
+    description:'与莱昂、伊芙和希娅并肩击败眼前的森林史莱姆。战斗结束后，他们会带你返回百纳镇。',
+    action:{label:'[继续战斗]',command:'/继续剧情'}
   };
   if (character.forest_status !== 'completed') return {
     title: '【主线·寻找出路】',
@@ -124,14 +120,15 @@ export const currentMainQuest = async (qqUserId: string, skipLamplight = false):
     const careerQuest = await guildCareerMainQuest(qqUserId);
     if (careerQuest) return careerQuest;
   }
-  if (!Number(character.owns_forest_map)) return {
-    title: '【主线·探索的准备】',
-    description: '前往冒险者公会商店，购买【地图·幽暗密林】。',
-    action: { label: '[前往 冒险者公会]', command: '/前往 -2 -181' }
+  if (Number(character.realm_stage) === 1 && (level < 10 || experience < experienceRequiredForLevel(10))) return {
+    title: '【主线·初入异界】',
+    description: level < 10
+      ? `以冒险者的身份继续历练，提升至 Lv.10。\n当前等级：Lv.${level}/10`
+      : `你已经抵达 Lv.10。继续历练，让当前等级的经验达到满值。\n当前经验：${experience}/${experienceRequiredForLevel(10)}`
   };
   if (Number(character.realm_stage) === 1 && level >= 10 && experience >= experienceRequiredForLevel(10)) {
     const stage = barrierStage(character.barrier_stage);
-    if (stage === 0) return { title: '【主线·无形的禁锢】', description: '你决定去找专业的人来请教这件事情。\n先去冒险者公会里面问问吧。', action: { label: '[前往 冒险者公会]', command: '/前往 -2 -181' } };
+    if (stage === 0) return { title: '【主线·无形的禁锢】', description: '体内的力量已经积蓄到极限，却被一道看不见的屏障牢牢挡住。\n前往百纳镇的糖水屋，向老板请教这种异常。', action: { label: '[前往 糖水屋]', command: '/前往 -12 -196' } };
     if (stage === 1) return { title: '【主线·寻访晴儿】', description: '前台小姐姐建议你去找炼金师晴儿。\n前往糖水屋，询问这道无形的禁锢。', action: { label: '[前往 糖水屋]', command: '/前往 -12 -196' } };
     if (stage === 2 && !Number(character.owns_sky_dust)) return { title: '【主线·追寻天空粉尘】', description: '击败幽影狼王，收集一份【天空粉尘】。\n它或许能帮助你感悟这方世界。' };
     if (stage === 2 || stage === 3) return { title: '【主线·归还天空粉尘】', description: '你已获得【天空粉尘】。\n回到糖水屋，把它交给晴儿看看。', action: { label: '[前往 糖水屋]', command: '/前往 -12 -196' } };
@@ -289,11 +286,8 @@ const evolutionCharacterFor = async (connection: PoolConnection, qqUserId: strin
     FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1${lock ? ' FOR UPDATE' : ''}`, [qqUserId]);
   const character = rows[0];
   if (!character) throw new Error('请先注册角色。');
-  const [lamplight] = await connection.execute<RowDataPacket[]>("SELECT 1 FROM player_lamplight_progress WHERE character_id=? AND (phase IN ('world','completed') OR phase='join' AND node_index>=3)", [character.id]);
-  if (!lamplight.length) {
-    if (Number(character.goblin_quest_stage) < 11) throw new Error('先完成「失踪的少女」，再处理这道新的瓶颈。');
-    if (Number(character.gratitude_stage) < 6) throw new Error('先完成与梨子喵在世界树上的同行，再处理这道新的瓶颈。');
-  }
+  if (Number(character.goblin_quest_stage) < 11) throw new Error('先完成「失踪的少女」，再处理这道新的瓶颈。');
+  if (Number(character.gratitude_stage) < 6) throw new Error('先完成与梨子喵在世界树上的同行，再处理这道新的瓶颈。');
   if (Number(character.realm_stage) !== 2 || Number(character.level) < 20 || Number(character.experience) < experienceRequiredForLevel(20)) throw new Error('你的积累尚未触及这道新的灵阶枷锁。');
   return character;
 };
@@ -398,7 +392,7 @@ export const advanceRealmBarrier = async (qqUserId: string, source: 'guild' | 'a
   const current = barrierStage(character.barrier_stage);
   const next = source === 'guild'
     ? current === 0 ? 1 : current
-    : current === 1 ? Number(character.owns_sky_dust) ? 4 : 2 : current === 2 && Number(character.owns_sky_dust) ? 4 : current;
+    : current === 0 || current === 1 ? Number(character.owns_sky_dust) ? 4 : 2 : current === 2 && Number(character.owns_sky_dust) ? 4 : current;
   await connection.execute('INSERT INTO player_main_quest_progress (character_id,quest_code,stage) VALUES (?,?,?) ON DUPLICATE KEY UPDATE stage=VALUES(stage)', [character.id, barrierQuestCode, next]);
   return { previous: current, stage: next as BarrierStage };
 });

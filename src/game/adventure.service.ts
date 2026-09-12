@@ -3755,7 +3755,7 @@ export const currentEncounter = async (qqUserId: string) => {
   return { character, spawns, occupied: occupiedRows.some(row => Number(row.spawn_id) === Number(spawns[0]?.id)), cityPursuit, canAmbush: !cityPursuit && members.every(member => Number(member.speed) > fastestMonster), text: cityPursuit ? '城镇执法者仍在原地严阵以待，已封住你的去路。' : texts[0]?.description ?? `${spawns[0].name} 拦住了你的去路。` };
 };
 
-export type TownArrivalStory = { stage: number; text: string; completed: boolean; chapter: 'town' | 'guild'; arrivalBuilding?: 'guild_counter' };
+export type TownArrivalStory = { stage: number; text: string; completed: boolean; chapter: 'town' | 'guild'; arrivalBuilding?: 'guild_counter'; directGuild?: boolean };
 
 const townArrivalScenes: Record<number, string> = {
   1: '三人冒险队将你带到百纳镇——猫拉瑞亚的边缘。\n城镇看上去规模不小，先映入眼帘的是目光望不到头的城墙。城墙约莫五六米高，由厚重的石砖堆砌而成，其缝隙有青苔蔓延，但表面却光亮整洁。它看上去被维护得很好。\n古旧的金属城门旁，驻守着两名士兵模样的壮汉。我们进城时，他们友好地向我们打了个招呼。\n此时天色正晌，城门后一幅熙熙攘攘的景象。',
@@ -3779,6 +3779,18 @@ export const continueForestArrival = async (qqUserId: string): Promise<TownArriv
   if (!story || !['awaiting_arrival', 'arrival_story', 'guild_story'].includes(story.status)) throw new Error('当前没有待继续的剧情。');
   const [town] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM map_regions WHERE code=\'baina_town\' LIMIT 1');
   if (!town[0]) throw new Error('百纳镇地图尚未准备好。');
+
+  const [openingRows]=await connection.execute<RowDataPacket[]>("SELECT 1 FROM player_opening_stories WHERE character_id=? AND route_code='F03' LIMIT 1",[character.id]);
+  if(story.status==='awaiting_arrival'&&openingRows[0]){
+    const [guildRows]=await connection.execute<(RowDataPacket & { pos_x:number;pos_y:number;pos_z:number })[]>("SELECT pos_x,pos_y,pos_z FROM map_npcs WHERE region_id=? AND code='guild_counter' LIMIT 1",[town[0].id]);
+    const guild=guildRows[0];if(!guild)throw new Error('百纳镇冒险者公会尚未准备好。');
+    await connection.execute("UPDATE characters SET current_region_id=?,pos_x=?,pos_y=?,pos_z=?,activity_status='active' WHERE id=?",[town[0].id,guild.pos_x,guild.pos_y,guild.pos_z,character.id]);
+    await connection.execute("UPDATE player_story_progress SET status='completed',stage=0 WHERE character_id=? AND story_code='forest_guide'",[character.id]);
+    await grantTownMap(connection,Number(character.id));
+    const [party]=await connection.execute<(RowDataPacket & { id:string })[]>('SELECT id FROM parties WHERE leader_character_id=? LIMIT 1',[character.id]);
+    if(party[0])await connection.execute('DELETE FROM parties WHERE id=?',[party[0].id]);
+    return{stage:1,completed:true,chapter:'town',arrivalBuilding:'guild_counter',directGuild:true,text:'森林史莱姆的核心在最后一击中碎成微光，庞大的胶质随之塌落。莱昂确认它不再恢复，才把沾满黏液的盾背回身后；伊芙一路抱怨火焰烘不干袖口，希娅则替我检查了伤势。\n\n四个人沿南边林道返回百纳镇。城墙出现在树梢尽头时，莱昂指着街心最高的魔石灯：“公会就在那边，我们正好要回去交悬赏。”伊芙催他少说两句快点走，希娅笑着让我跟在队伍中间。我们穿过城门，一同来到挂着剑盾徽记的冒险者公会。'};
+  }
 
   if (story.status === 'awaiting_arrival') {
     await connection.execute('UPDATE characters SET current_region_id=?,pos_x=-22,pos_y=-178 WHERE id=?', [town[0].id, character.id]);

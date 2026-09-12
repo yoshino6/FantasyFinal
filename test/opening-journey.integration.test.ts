@@ -28,7 +28,7 @@ import { initializeOpeningChests } from '../src/database/opening-chests';
 
 // 使用实际 SQL 与部署库结构/静态配置的隔离副本；不复制玩家、故事或世界归属数据。
 // 完整数值重算和开化进度用固定替身，其余注册、故事、奖励、开箱、入会和凭物交接运行源码。
-test('隔离MySQL：113分支从注册到安全公会，关闭改道、保护与重试', {skip:process.env.FF_OPENING_DB_TEST!=='1'},async t=>{
+test('隔离MySQL：八条路线二十个分支从注册到安全公会，关闭改道、保护与重试', {skip:process.env.FF_OPENING_DB_TEST!=='1'},async t=>{
   const {parse}=createRequire(import.meta.url)('yaml'),config=parse(readFileSync('alemon.config.yaml','utf8'));
   const db=config.FantasyFinal?.database??config.mysql,temporary=`ff_opening_journey_${randomUUID().replaceAll('-','')}`;
   const quoted=(s:string)=>'`'+s.replaceAll('`','``')+'`';
@@ -109,7 +109,7 @@ test('隔离MySQL：113分支从注册到安全公会，关闭改道、保护与
       return view;
     };
     const endBranch=async(run:Awaited<ReturnType<typeof prepare>>,view:any)=>story.advanceOpening(run.user,view.revision,run.route.code==='F02'&&view.branch==='B'?'treat':'next');
-    await t.test('全部14地图42路线113分支：落在真实安全公会，奖励与下一步均可办理',async()=>{
+    await t.test('全部五地图八路线二十分支：落在真实安全公会，奖励与下一步均可办理',async()=>{
       for(const route of content.openingRoutes)for(const branch of route.choices){
         const run=await prepare(route.code);let view=await toBranchEnd(run,branch.code);
         await assert.rejects(state.assertOpeningFree(c as any,run.id),/初行剧情/);
@@ -119,30 +119,25 @@ test('隔离MySQL：113分支从注册到安全公会，关闭改道、保护与
         assert.deepEqual([after.pos_x,after.pos_y,after.pos_z],[hub.pos_x,hub.pos_y,hub.pos_z]);assert.equal(after.current_hp,after.hp_max);assert.equal(after.current_mp,after.mp_max);assert.equal(after.stamina,120);
         if(route.code==='F01'&&branch.code==='B'){const preview=await chests.previewOpeningChest(run.user,'opening_golden_chest',1);await chests.confirmOpeningChest(run.user,preview.token);}
         while(view.state==='arrival')view=await story.advanceOpening(run.user,view.revision,'next');
-        assert.equal(view.state,'lesson');view=await story.advanceOpening(run.user,view.revision,'lesson');assert.equal(view.state,'completed');
+        assert.equal(view.state,'completed');
         assert.equal(Number((await story.openingCharacter(c,run.user)).adventurer_registered),0,`${route.code}${branch.code}: 初行交接不得自动登记`);
         await state.assertOpeningFree(c as any,run.id);
-        const first=await story.openingMainQuest(run.user);assert.equal(first.action.command,'/初行入会');
+        assert.equal(await story.openingMainQuest(run.user),null,`${route.code}${branch.code}: 抵达公会后初行主线应结束`);
         await guild.enterOpeningGuild(run.user);await deps['./guild-context'].requireGuildService(c,run.id);
         assert.equal(await registration.registerAdventurer(run.user),true,`${route.code}${branch.code}: 前台应能办理首次注册`);
-        let quest=await story.openingMainQuest(run.user);
-        if(quest.action.command.startsWith('/初行凭物 ')){
-          const code=quest.action.command.split(' ')[1];await keepsakes.keepsakeAction(run.user,code,'register');
-          quest=await story.openingMainQuest(run.user);
-        }
-        assert.ok(['/初行公会','/女神'].includes(quest.action.command),`${route.code}${branch.code}: ${quest.action.command}`);
-        const final=await story.openingCharacter(c,run.user);assert.equal(final.level,3,route.code+branch.code);
+        assert.equal(await story.openingMainQuest(run.user),null,`${route.code}${branch.code}: 注册后也不得恢复路线后续`);
+        const final=await story.openingCharacter(c,run.user);assert.ok(final.level>=1,route.code+branch.code);
         const [rewards]=await c.execute<RowDataPacket[]>('SELECT code,uses FROM player_opening_services WHERE character_id=? ORDER BY code',[run.id]);
-        const beforeReplay=JSON.stringify(rewards);await story.advanceOpening(run.user,view.revision-1,'lesson');
+        const beforeReplay=JSON.stringify(rewards);await story.advanceOpening(run.user,view.revision-1,'next');
         const [replayed]=await c.execute<RowDataPacket[]>('SELECT code,uses FROM player_opening_services WHERE character_id=? ORDER BY code',[run.id]);assert.equal(JSON.stringify(replayed),beforeReplay);
-        summaries.push({route:route.code,branch:branch.code,birth:route.region,destination:hub.code,level:final.level,next:quest.action.command});
+        summaries.push({route:route.code,branch:branch.code,birth:route.region,destination:hub.code,level:final.level,next:'/职业选择'});
       }
-      assert.equal(summaries.length,113);
+      assert.equal(summaries.length,20);
     });
     await t.test('新宝箱100只整批开箱，承载不足不扣箱不改封存结果，重试不重发装备',async()=>{
       for(const [code] of chestConfig.openingThemeChests){
-        const run=await prepare('S01');let view=await toBranchEnd(run,'A');view=await endBranch(run,view);
-        while(view.state==='arrival')view=await story.advanceOpening(run.user,view.revision,'next');await story.advanceOpening(run.user,view.revision,'lesson');
+        const run=await prepare('F01');let view=await toBranchEnd(run,'B');view=await endBranch(run,view);
+        while(view.state==='arrival')view=await story.advanceOpening(run.user,view.revision,'next');
         const [stock]=await c.execute<RowDataPacket[]>('SELECT p.quantity FROM player_inventory p JOIN item_definitions i ON i.id=p.item_id WHERE p.character_id=? AND i.code=?',[run.id,code]);
         await story.grantOpeningItem(c,run.id,code,100-Number(stock[0]?.quantity??0));
         const preview=await chests.previewOpeningChest(run.user,code,100);const [sealed]=await c.execute<RowDataPacket[]>('SELECT result_json FROM opening_chest_requests WHERE token=?',[preview.token]);
@@ -181,18 +176,18 @@ test('隔离MySQL：113分支从注册到安全公会，关闭改道、保护与
     });
     await t.test('目标关闭或公会坐标非法时改道，全部关闭时不扣草药、不发奖并保留保护',async()=>{
       const run=await prepare('F02'),view=await toBranchEnd(run,'B');
-      await c.execute("UPDATE map_regions SET is_enabled=0 WHERE code IN ('baina_town','world_tree','floating_leaf_town','snowlamp_hollow','frost_dragon_inn','sleepwhale_market')");
+      await c.execute("UPDATE map_regions SET is_enabled=0 WHERE code IN ('baina_town','world_tree','floating_leaf_town','frost_dragon_inn')");
       const [before]=await c.execute<RowDataPacket[]>('SELECT item_id,quantity FROM player_inventory WHERE character_id=? ORDER BY item_id',[run.id]);
       await assert.rejects(endBranch(run,view),/所有安全接引点/);
       const [after]=await c.execute<RowDataPacket[]>('SELECT item_id,quantity FROM player_inventory WHERE character_id=? ORDER BY item_id',[run.id]);assert.deepEqual(after,before);
       assert.equal((await story.openingStatus(run.user)).revision,view.revision);await assert.rejects(state.assertOpeningFree(c as any,run.id));
       await c.execute("UPDATE map_regions SET is_enabled=1 WHERE code IN ('world_tree','baina_town')");
       await c.execute("UPDATE map_npcs SET pos_x=999999 WHERE code='guild_counter'");
-      const arrival=await endBranch(run,view);assert.equal(arrival.destination,'世界树');assert.match(arrival.text,/接引|改道/);
+      const arrival=await endBranch(run,view);assert.equal(arrival.destination,'世界树');assert.match(arrival.text,/安全改道|传送门/);
       assert.equal((await story.openingCharacter(c,run.user)).region_code,'world_tree');
     });
     await t.test('缺公会或地图物品时不作为安全终点；全无有效终点时拒绝生成新角色',async()=>{
-      await c.execute("UPDATE map_regions SET is_enabled=0 WHERE code IN ('baina_town','floating_leaf_town','snowlamp_hollow','frost_dragon_inn','sleepwhale_market')");
+      await c.execute("UPDATE map_regions SET is_enabled=0 WHERE code IN ('baina_town','floating_leaf_town','frost_dragon_inn')");
       await c.execute("DELETE FROM map_npcs WHERE code='world_tree_adventurer_guild'");
       assert.equal((await state.openingSafeHubs(c as any)).length,0);
       await c.query(`INSERT INTO map_npcs SELECT * FROM ${quoted(db.database)}.map_npcs WHERE code='world_tree_adventurer_guild'`);

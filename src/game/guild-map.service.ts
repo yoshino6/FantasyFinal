@@ -7,9 +7,7 @@ export const guildMapRegions: Record<OpeningHubCode, readonly string[]> = {
   baina_town: ['dark_forest', 'dark_forest_deep', 'world_tree'],
   world_tree: ['worldtree_meadow', 'morningdew_riverbank', 'dark_forest', 'ridge_foothills', 'rediron_pass', 'mistalgae_marsh', 'baina_town'],
   floating_leaf_town: ['worldtree_meadow', 'morningdew_riverbank', 'world_tree'],
-  snowlamp_hollow: ['frostcrown_plateau', 'rediron_pass', 'frost_dragon_inn'],
-  frost_dragon_inn: ['frostcrown_plateau', 'rediron_pass', 'snowlamp_hollow'],
-  sleepwhale_market: ['thundercliff', 'mistalgae_marsh', 'world_tree']
+  frost_dragon_inn: ['frostcrown_plateau', 'rediron_pass', 'world_tree']
 };
 
 // danger_level 是旧的区域序号；资料按实际魔物等级（含区域 Boss）分级。

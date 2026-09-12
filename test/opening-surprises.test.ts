@@ -63,9 +63,9 @@ test('剧情中的锻材与异械按现有物品和独立装备实例发放',asy
   assert.ok(calls.some(call=>/INSERT INTO player_opening_keepsakes/.test(call.sql)&&/archived/.test(call.sql)),'普通奖励只保存归档记录');
 });
 
-test('伙伴奇遇优先于通用礼包结算，继承的旧奖励类型不能吞掉认主结果',()=>{
+test('云巢伙伴奇遇优先于通用礼包结算，继承的旧奖励类型不能吞掉认主结果',()=>{
   const source=readFileSync('src/game/opening.service.ts','utf8');
   const settlement=source.slice(source.indexOf('const settleArrival='),source.indexOf('export const advanceOpening'));
   assert.ok(settlement.indexOf("row.route_code==='S03'")<settlement.indexOf('if(choice.rewardKind)'));
-  assert.ok(settlement.indexOf("row.route_code==='I02'")<settlement.indexOf('if(choice.rewardKind)'));
+  assert.doesNotMatch(settlement,/row\.route_code==='I02'/);
 });

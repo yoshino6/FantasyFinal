@@ -16,7 +16,7 @@ try {
   const [areas] = await connection.query<any[]>('SELECT a.*,r.danger_level FROM map_region_areas a JOIN map_regions r ON r.id=a.region_id');
   const codes = Object.values(openingHubs).map(hub => hub.guild);
   const [npcs] = await connection.execute<RowDataPacket[]>(`SELECT code,region_id,pos_x,pos_y,pos_z,interaction_kind FROM map_npcs WHERE code IN (${codes.map(() => '?').join(',')})`, codes);
-  const [items] = await connection.query<RowDataPacket[]>("SELECT code FROM item_definitions WHERE code LIKE 'map_%' OR code IN ('healing_herb','opening_last_ration','opening_staff','opening_clothes','opening_golden_chest','adventurer_card')");
+  const [items] = await connection.query<RowDataPacket[]>("SELECT code FROM item_definitions WHERE code LIKE 'map_%' OR code IN ('healing_herb','opening_last_ration','opening_mineral_water','opening_staff','opening_clothes','opening_golden_chest','adventurer_card')");
   const itemCodes = new Set(items.map(row => String(row.code)));
   const hubs = Object.entries(openingHubs).map(([code, hub]) => {
     const region = regions.find(row => row.code === code);
@@ -30,7 +30,7 @@ try {
   });
   const report = { checkedAt: new Date().toISOString(), births, hubs,
     missingTables: ['opening_world','player_opening_stories','player_opening_actions','player_opening_services','player_opening_visits','player_opening_keepsakes','player_companions','opening_chest_requests'].filter(name => !names.has(name)),
-    missingBaseItems: ['healing_herb','opening_last_ration','opening_staff','opening_clothes','opening_golden_chest','adventurer_card'].filter(code => !itemCodes.has(code)) };
+    missingBaseItems: ['healing_herb','opening_last_ration','opening_mineral_water','opening_staff','opening_clothes','opening_golden_chest','adventurer_card'].filter(code => !itemCodes.has(code)) };
   mkdirSync('.data/opening-audit-20260908', { recursive: true });
   writeFileSync('.data/opening-audit-20260908/world.json', JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));

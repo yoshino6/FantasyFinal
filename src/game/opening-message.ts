@@ -20,11 +20,13 @@ export const openingFormat = (story: OpeningView) => {
     for(const choice of story.choices){md.addNewline().addNewline().addBold(`${choice.code} · ${choice.label}`);buttons.addRow().addButton(`选择 ${choice.code}`,`/初行选择 ${story.revision} ${choice.code}`,{type:'command',autoEnter:true,style:'blue'});}
   }
   else if(story.state==='armed')buttons.addRow().addButton('打开面板','/面板',{type:'command',autoEnter:true,style:'blue'});
-  else if(story.state==='completed')buttons.addRow().addButton('进入公会','/初行公会',{type:'command',autoEnter:true,style:'blue'}).addButton('未解之事','/初行见闻',{type:'command',autoEnter:true});
+  else if(story.state==='completed')buttons.addRow().addButton('进入公会','/初行公会',{type:'command',autoEnter:true,style:'blue'});
   else{
     const treat=story.route==='F02'&&story.branch==='B'&&story.state==='branch'&&story.page===story.pages;
+    const forestBattle=story.route==='F03'&&story.state==='branch'&&story.page===story.pages;
     const action=story.state==='lesson'?'lesson':treat?'treat':'next';
-    buttons.addRow().addButton(story.state==='lesson'?'继续':treat?'敷上微光草药并继续':'继续',`/初行选择 ${story.revision} ${action}`,{type:'command',autoEnter:true,style:'blue'});
+    const entering=story.state==='arrival'&&story.page===story.pages;
+    buttons.addRow().addButton(story.state==='lesson'?'进入公会':entering?'进入公会':forestBattle?'迎战史莱姆':treat?'敷上微光草药并继续':'继续',`/初行选择 ${story.revision} ${action}`,{type:'command',autoEnter:true,style:'blue'});
   }
   buttons.addRow().addButton('任务','/任务',{type:'command',autoEnter:true});
   return Format.create().addMarkdown(md).addButtonGroup(buttons);

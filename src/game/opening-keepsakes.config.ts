@@ -51,7 +51,7 @@ const entries:[string,string,string,KeepsakeService,string,string?][] = [
   ['E03-C','档案员墨穗','旧判决核验台','record','墨穗核对空白判决与囚像记录，确认旧执行命令已经解除。“空白不能由后来的人随手补成有罪。”她封好副本，把真正签发者记进待查栏。','已核验囚像解除执行命令，保存判决副本与签发者线索。']
 ];
 
-export const keepsakeDefinitions:KeepsakeDefinition[] = entries.map(([branch,npc,desk,kind,dialogue,extra])=>{
+export const keepsakeDefinitions:KeepsakeDefinition[] = entries.filter(([branch])=>openingRoutes.some(route=>route.code===branch.slice(0,3))).map(([branch,npc,desk,kind,dialogue,extra])=>{
   const route=openingRoutes.find(r=>r.code===branch.slice(0,3))!;
   const choice=route.choices.find(c=>c.code===branch.at(-1))!;
   return{branch,code:choice.rewardCode,npc,desk,kind,dialogue,home:route.destination,result:kind==='travel'?'已核验交通凭据，额外行程可在此办理。':extra??'核验完成，免费服务已为你保留；不使用时不会扣除次数。',destination:kind==='travel'?extra:undefined,repairKind:branch==='A02-C'?'weapon':undefined};

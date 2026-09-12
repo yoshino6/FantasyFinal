@@ -30,7 +30,7 @@ export const openingGuildFormat=async(user:string,area='大厅')=>{
   }else if(area==='人物'){
     md.addBlockquote(view.hub.description);
     if(view.code==='world_tree')for(const [index,person] of rootGuildPeople.entries()){md.addNewline().addNewline().addText(`${person.name} · ${person.role}`);if(index%2===0)buttons.addRow();add(person.name.split('·').at(-1)!,`/初行服务 chat ${person.code}`);}
-    else md.addNewline().addNewline().addBlockquote(`“${view.code==='sleepwhale_market'?'请慢慢看，停在柜台前也不会按分钟收费。':view.code==='frost_dragon_inn'?'我已经把结实的椅子摆好了。别急，尾巴也给你们让开。':view.code==='floating_leaf_town'?'云上也有人会迷路，不必为了刚到这里而难为情。':view.code==='snowlamp_hollow'?'手暖起来，字也会写得顺些。': '欢迎回来，需要什么帮助？'}”`);
+    else md.addNewline().addNewline().addBlockquote(`“${view.code==='frost_dragon_inn'?'我已经把结实的椅子摆好了。别急，尾巴也给你们让开。':view.code==='floating_leaf_town'?'云上也有人会迷路，不必为了刚到这里而难为情。':'欢迎回来，需要什么帮助？'}”`);
     buttons.addRow();add('返回休息区','/初行公会 休息区');
   }else if(area==='礼包'){
     md.addBlockquote('接引员翻开你的初行记录，将应领的奖励逐项核准，再把适合所选职业的武器登记在册。');

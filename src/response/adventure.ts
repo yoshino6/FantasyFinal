@@ -181,8 +181,9 @@ const ambushStartFormat = (battle: Awaited<ReturnType<typeof battleStatus>>) => 
     .addBlockquote('（首回合直击伤害+50%）').addNewline().addNewline();
   return Format.create().addMarkdown(appendBattleState(markdown, battle)).addButtonGroup(battleButtons(battle));
 };
-export const battleStartFormat = (text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => {
+export const battleStartFormat = (text: string, battle: Awaited<ReturnType<typeof battleStatus>>, reward?:string) => {
   const markdown = Format.createMarkdown().addTitle(battle.mode === 'spar' ? battleRoundTitle(battle.mode, battle.turn) : '战斗开始').addNewline().addNewline().addBlockquote(text).addNewline().addNewline();
+  if(reward)markdown.addBold(`已获得：${reward}`).addNewline().addNewline();
   return Format.create().addMarkdown(appendBattleState(markdown, battle)).addButtonGroup(battleButtons(battle));
 };
 const negotiationFailureFormat = (text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => {
@@ -236,8 +237,8 @@ const realmBarrierFormat = () => Format.create()
     .addText('你感觉到身体能量已趋于饱和，无法再吸收更多。').addNewline().addNewline()
     .addText('主线变更【无形的禁锢】').addNewline()
     .addText('你决定去找专业的人来请教这件事情。').addNewline()
-    .addText('先去冒险者公会里面问问吧。'))
-  .addButtonGroup(Format.createButtonGroup().addRow().addButton('任务', '/任务', { type: 'command', autoEnter: true, style: 'blue' }));
+    .addText('去百纳镇的糖水屋，向老板请教这种异常。'))
+  .addButtonGroup(Format.createButtonGroup().addRow().addButton('前往 糖水屋', '/前往 -12 -196', { type: 'command', autoEnter: true, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true, style: 'blue' }));
 const evolutionBarrierFormat = () => Format.create()
   .addMarkdown(Format.createMarkdown().addTitle('未知的枷锁').addNewline().addNewline()
     .addText('一股精纯的能量冲入你的体壳，却没有像往常一样化作成长的养分。它在体内盘桓片刻，最终悄无声息地散去。').addNewline().addNewline()
@@ -761,7 +762,6 @@ export const guildFrontDeskFormat = async (qqUserId: string, text?: string, cont
   const buttons = Format.createButtonGroup().addRow().addButton(profile.adventurer_registered ? '冒险者 晋升' : '冒险者 注册', '/公会注册', { type: 'command', autoEnter: true, style: 'blue' });
   buttons.addButton('职业选择', '/职业选择', { type: 'command', autoEnter: true, style: profile.adventurer_registered ? 'blue' : undefined });
   buttons.addRow().addButton('切磋 莫妮卡', '/切磋 guild_counter', { type: 'command', autoEnter: true, style: 'blue' }).addButton('闲聊 莫妮卡', '/前台闲聊', { type: 'command', autoEnter: true, style: 'blue' });
-  if (mainQuest.title === '【主线·无形的禁锢】') buttons.addRow().addButton('关于 无形的禁锢', '/关于无形的禁锢', { type: 'command', autoEnter: true, style: 'blue' });
   if (mainQuest.title === '【主线·未知的枷锁】') buttons.addRow().addButton('询问 等级停滞', '/询问等级停滞', { type: 'command', autoEnter: true, style: 'blue' });
   if (mainQuest.title === '【主线·失踪的少女】' && mainQuest.description.startsWith('最近哥布林')) buttons.addRow().addButton('了解 少女失踪事件', '/关于深处的阴谋', { type: 'command', autoEnter: true, style: 'blue' });
   if (dungeonSecret.stage === 1) buttons.addRow().addButton('关于 地下的秘密', '/询问地下的秘密', { type: 'command', autoEnter: true, style: 'blue' });
@@ -1018,6 +1018,12 @@ export const continueStoryHandler = async () => {
       return;
     }
     const story = await continueForestArrival(event.current.UserId);
+    if(story.directGuild){
+      await message.send({format:Format.create().addMarkdown(Format.createMarkdown().addTitle('初章·一同回城').addNewline().addNewline().addText(story.text))});
+      await(await import('../game/opening-guild.service')).enterOpeningGuild(event.current.UserId,true);
+      await message.send({format:await(await import('./opening-guild')).openingGuildFormat(event.current.UserId)});
+      return;
+    }
     const storyFormat = await townArrivalFormat(story.stage, story.text, story.completed, story.chapter === 'guild');
     if (storyFormat) {
       if (story.chapter === 'guild' && story.stage === 1 && !isPublicImageUrl(gameAssetUrls.pearGuideImageUrl)) {
@@ -1345,6 +1351,19 @@ export const ambushHandler = async () => { const [event] = useEvent(); const [ro
 export const queueAmbushHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const spawnId = Number(route.param('id')); const channelId = String(event.current.ChannelId ?? ''); const delivery = { scope: !event.current.IsPrivate && channelId ? 'group' as const : 'c2c' as const, targetId: !event.current.IsPrivate && channelId ? channelId : String(event.current.UserId), botId: String(event.current.BotId ?? '') || undefined }; const result = await queueAmbush(event.current.UserId, spawnId, delivery); if (result.ready) { await chooseTarget(event.current.UserId, result.spawnId ?? spawnId); const battle = await battleStatus(event.current.UserId); await message.send({ format: battleStartFormat(result.residualParty ? '前一支队伍击败了目标，但伤势未愈。你抓住破绽，伏击其残余队伍！' : '前一场战斗已经结束，你趁目标尚未恢复时切入战场。', battle) }); await startAutoBattle(message, event.current.UserId); return; } await message.send({ format: messageFormat('伏击等待', '你已埋伏在战场边缘。当前战斗结束后，机器人会在你发送伏击的会话中通知并自动接管后续战斗。') }); } catch (error) { await fail(message, error, '无法伏击'); } };
 export const leaveOccupiedBattleHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await leaveOccupiedBattle(event.current.UserId); const panel = await movementPanel(event.current.UserId, '你避开了正在进行的战斗，可以继续移动。'); const nearby = await nearbyPoints(event.current.UserId); await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); } catch (error) { await fail(message, error, '无法离开战场'); } };
 export const forestGuideHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const progress = await forestGuideAdvance(event.current.UserId, String(route.param('action'))); if (!progress.battleChoice) { await message.send({ format: chapterFormat(progress.stage, progress.text) }); return; } await message.send({ format: chapterFormat(5, progress.text) }); const result = await forestGuideChoice(event.current.UserId, progress.battleChoice); await chooseTarget(event.current.UserId, result.spawnId); const battle = await battleStatus(event.current.UserId); await message.send({ format: battleStartFormat(`${result.text}\n本场剧情战斗将暂时关闭自动战斗。`, battle) }); } catch (error) { await fail(message, error, '初章推进失败'); } };
+
+/** F03 初行路线复用原有的三人冒险团、虚弱森林史莱姆与真实战斗系统。 */
+export const startOpeningForestBattle=async(qqUserId:string,choice:'join'|'depart',message:{send:(params:any)=>Promise<any>})=>{
+  let intro='莱昂举起盾牌，伊芙与希娅在两侧站定，三人把我护在能够彼此照应的位置。';
+  let battle:Awaited<ReturnType<typeof battleStatus>>;
+  try{battle=await battleStatus(qqUserId);}
+  catch{
+    const prepared=await forestGuideChoice(qqUserId,choice);intro=prepared.text;
+    await chooseTarget(qqUserId,prepared.spawnId);battle=await battleStatus(qqUserId);
+  }
+  const reward=await(await import('../game/opening.service')).completeOpeningForestBattleStart(qqUserId);
+  await message.send({format:battleStartFormat(`${intro}\n本场剧情战斗将暂时关闭自动战斗。`,battle,reward)});
+};
 export const switchTargetHandler = async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
   try {

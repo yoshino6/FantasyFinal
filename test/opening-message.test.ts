@@ -45,6 +45,14 @@ test('初行报酬仅在结算首页以加深提示显示，后续剧情与交�
   }
 });
 
+test('初行结束页只引导进入公会，不再展开路线后续',()=>{
+  const {openingFormat}=load('src/game/opening-message.ts',{alemonjs:{Format},'./narrative-voice':{firstPersonNarrative}});
+  const format=openingFormat({route:'F01',branch:'A',title:'草窝里的金光',text:'我推开公会大门。',state:'completed',page:1,pages:1,revision:12,choices:[]});
+  const buttons=converter.createButtonsData(format.value.find((value:any)=>value.type==='BT.group').value).rows.flatMap((row:any)=>row.buttons);
+  assert.deepEqual(buttons.map((button:any)=>button.action.data),['/初行公会','/任务']);
+  assert.ok(!buttons.some((button:any)=>button.action.data==='/初行见闻'));
+});
+
 test('伙伴认主与破壳使用旅程变化提示，不伪装成物品报酬',()=>{
   const {openingFormat}=load('src/game/opening-message.ts',{alemonjs:{Format},'./narrative-voice':{firstPersonNarrative}});
   for(const reward of ['旅程变化：风羽幼鸟破壳后选择与你同行','旅程变化：无主机偶 #7 主动认主并开始随行']){
@@ -100,8 +108,8 @@ test('初行叙事以第一人称呈现，NPC对白仍以对主角说话的口�
 });
 
 test('全部初行路线抵达公会后延续当事人物，不再落入通用接引文案',()=>{
-  assert.equal(openingRoutes.length,42);
-  assert.equal(openingRouteVersions.length,63);
+  assert.equal(openingRoutes.length,8);
+  assert.equal(openingRouteVersions.length,8);
   for(const route of openingRouteVersions){
     const text=openingLessonText(route,route.choices[0]);
     assert.doesNotMatch(text,/接引人已经备好所需教具|请根据自己亲眼见到的事/,
@@ -111,13 +119,21 @@ test('全部初行路线抵达公会后延续当事人物，不再落入通用�
   assert.match(openingLessonText(openingRoutes.find(route=>route.code==='F01')!,openingRoutes.find(route=>route.code==='F01')!.choices.find(choice=>choice.code==='A')!),/黄金兔/);
 });
 
-test('抵达公会后的剧情使用继续按钮，不再显示完成交接',()=>{
+test('抵达公会后使用进入公会按钮，不再显示完成交接',()=>{
   const {openingFormat}=load('src/game/opening-message.ts',{alemonjs:{Format},'./narrative-voice':{firstPersonNarrative}});
   const format=openingFormat({route:'S03',branch:'A',title:'云巢新生',text:'幼鸟在桌边自己选择了同行。',state:'lesson',page:1,pages:1,revision:12,choices:[]});
   const buttons=converter.createButtonsData(format.value.find((value:any)=>value.type==='BT.group').value).rows.flatMap((row:any)=>row.buttons);
-  assert.deepEqual(buttons.map((button:any)=>button.render_data.label),['继续','任务']);
+  assert.deepEqual(buttons.map((button:any)=>button.render_data.label),['进入公会','任务']);
   assert.deepEqual(buttons.map((button:any)=>button.action.data),['/初行选择 12 lesson','/任务']);
   assert.doesNotMatch(JSON.stringify(format.value),/完成交接/);
+});
+
+test('三人冒险团分支末页进入真实史莱姆战斗',()=>{
+  const {openingFormat}=load('src/game/opening-message.ts',{alemonjs:{Format},'./narrative-voice':{firstPersonNarrative}});
+  const format=openingFormat({route:'F03',branch:'A',title:'并肩入林',text:'森林史莱姆堵住了去路。',state:'branch',page:1,pages:1,revision:12,choices:[]});
+  const buttons=converter.createButtonsData(format.value.find((value:any)=>value.type==='BT.group').value).rows.flatMap((row:any)=>row.buttons);
+  assert.deepEqual(buttons.map((button:any)=>button.render_data.label),['迎战史莱姆','任务']);
+  assert.deepEqual(buttons.map((button:any)=>button.action.data),['/初行选择 12 next','/任务']);
 });
 
 const visibleTalents=talentDefinitions.filter(t=>t.group!=='？？？');
@@ -220,7 +236,7 @@ test('世界树前台沿用百纳镇业务分组，登记和闲聊均留在维�
 });
 
 
-test('六地大厅统一五行九键，第四行后勤与休息，服务归入对应区域',async()=>{
+test('四地大厅统一五行九键，第四行后勤与休息，服务归入对应区域',async()=>{
   const source=ts.createSourceFile('adventure.ts',readFileSync('src/response/adventure.ts','utf8'),ts.ScriptTarget.Latest,true);
   const statement=source.statements.find(s=>ts.isVariableStatement(s)&&s.declarationList.declarations.some(d=>d.name.getText(source)==='guildInteriorFormat'))!;
   const code=ts.transpileModule(statement.getText(source),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
@@ -258,7 +274,7 @@ test('公会交接逐段引用场景与对白，结算提示独立显示',()=>{
   assert.match(rendered,/\n已领取本次练习用品。/);assert.doesNotMatch(rendered,/> 已领取本次练习用品。/);
 });
 
-test('旧建筑按键进入和离开六地公会使用同一状态，区域入口仍可抵达各服务',async()=>{
+test('旧建筑按键进入和离开四地公会使用同一状态，区域入口仍可抵达各服务',async()=>{
   let code='guild_counter',area='休息区';const visits:any[]=[],panels:any[]=[],sent:any[]=[],services:string[]=[];
   const {buildingHandler}=load('src/response/adventure.ts',{
     alemonjs:{Format,useEvent:()=>[{current:{UserId:'u'}}],useRoute:()=>[{param:(key:string)=>key==='code'?code:area}]},

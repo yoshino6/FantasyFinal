@@ -1,5 +1,5 @@
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
-import { openingRouteByCode } from './opening-content';
+import { openingRouteByCode, openingRoutes } from './opening-content';
 import { openingHubs, openingSpawnRegions } from './opening-world.config';
 import { chooseWeighted, drawOpeningRoute } from './opening-route-draw';
 export { chooseWeighted } from './opening-route-draw';
@@ -36,13 +36,13 @@ export const chooseOpeningSpawn = async (connection: PoolConnection, random = Ma
   const candidates = rows.flatMap(region => {
     const configuration = openingSpawnRegions[String(region.code) as keyof typeof openingSpawnRegions];
     if (!configuration) return [];
-    const routes = [1,2,3].map(i => openingRouteByCode(`${configuration.prefix}0${i}`));
-    if (routes.some(route => !route) || !enabled.size) return [];
-    try { return [{region,configuration,point:validWorldSitePoint(areas,Number(region.id),{x:Number(region.min_x),y:Number(region.min_y),z:Number(region.min_z)})}]; } catch { return []; }
+    const routes = openingRoutes.filter(route=>route.region===region.code&&enabled.has(route.destination));
+    if (!routes.length) return [];
+    try { return [{region,configuration,routes,point:validWorldSitePoint(areas,Number(region.id),{x:Number(region.min_x),y:Number(region.min_y),z:Number(region.min_z)})}]; } catch { return []; }
   });
   if (!candidates.length) throw new Error('暂时没有已开放且可安全降临的地图，请稍后重新选择恩赐。');
-  const routeCode = await drawOpeningRoute(connection,candidates.flatMap(c => [1,2,3].map(i => ({
-    code:`${c.configuration.prefix}0${i}`,regionCode:String(c.region.code),tier:c.configuration.tier
+  const routeCode = await drawOpeningRoute(connection,candidates.flatMap(c => c.routes.map(route => ({
+    code:route.code,regionCode:String(c.region.code),tier:c.configuration.tier
   }))),random);
   const route = openingRouteByCode(routeCode)!;
   const candidate = candidates.find(c => c.region.code === route.region)!;

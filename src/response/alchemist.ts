@@ -13,7 +13,7 @@ import { npcChatDialogue } from '../game/npc-dialogue.service';
 
 const shopCode = 'alchemy_sweetshop';
 const requireAlchemist = (qqUserId: string) => requireNpcAtCurrentPosition(qqUserId, shopCode);
-const barrierActive = async (qqUserId: string) => ['【主线·寻访晴儿】', '【主线·追寻天空粉尘】', '【主线·归还天空粉尘】', '【主线·窥探世间】'].includes((await currentMainQuest(qqUserId)).title);
+const barrierActive = async (qqUserId: string) => ['【主线·无形的禁锢】', '【主线·寻访晴儿】', '【主线·追寻天空粉尘】', '【主线·归还天空粉尘】', '【主线·窥探世间】'].includes((await currentMainQuest(qqUserId)).title);
 const proficiencyBar = (current: number, required: number) => {
   const ratio = required > 0 ? Math.max(0, Math.min(1, current / required)) : 1;
   const filled = Math.round(ratio * 10);
@@ -111,7 +111,7 @@ export const alchemistBarrierHandler = async () => {
   try {
     await requireAlchemist(event.current.UserId);
     const { advanceRealmBarrier } = await import('../game/main-quest.service'); const progress = await advanceRealmBarrier(event.current.UserId, 'alchemist');
-    if (progress.stage === 2 && progress.previous === 1) { await message.send({ format: barrierAdviceFormat() }); return; }
+    if (progress.stage === 2 && (progress.previous === 0 || progress.previous === 1)) { await message.send({ format: barrierAdviceFormat() }); return; }
     if (progress.stage === 4 && progress.previous === 2) { await message.send({ format: skyDustAdviceFormat() }); return; }
     if (progress.stage === 2) { await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('关于 无形的禁锢').addNewline().addNewline().addBlockquote('晴儿抬眼看向你：“天空粉尘还没有着落。去幽暗密林寻找幽影狼王吧；只有亲手取得那份尘埃，你才能开始感悟。”')) }); return; }
     if (progress.stage === 4) { await message.send({ format: skyDustAdviceFormat() }); return; }

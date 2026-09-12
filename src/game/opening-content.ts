@@ -3,6 +3,7 @@ import { generatedSevenOpeningRoutes } from './opening-seven.generated';
 import { finalOpeningRewrites } from './opening-rewrites-final.config';
 import { openingExpandedLesson, openingNarrativeExpansions } from './opening-narrative-expanded.config';
 import { applyOpeningRewardPolicy } from './opening-reward-policy';
+import { retainOpeningRoute } from './opening-retained.config';
 import type { OpeningChoice, OpeningRoute } from './opening.types';
 export { talentDefinitions } from './talent.config';
 
@@ -92,29 +93,6 @@ export const openingLessonText = (route: OpeningRoute, choice: OpeningChoice) =>
   ?? routeLessonTexts[`${route.code}${choice.code}`]
   ?? routeLessonTexts[route.code]
   ?? '你已抵达安全区。请根据自己亲眼见到的事，完成这一次交接。');
-const forestFarewells:Record<string,string>={
-  F01A:'黄金兔把鼻尖贴在你空下来的口粮袋上。契兽员笑着递来一小把饲料，这一次，你们都不必饿着肚子赶路了。',
-  F01B:'鉴物员合上记录册，把开箱所得交还给你。门外有人谈起林间的一点金光，你握住自己的行装，没有接话。',
-  F02A:'你把猩红色的残片收进衣内。城门已经很远，少女回头时的眼神却没有跟着消失。有些相遇，还会在以后找到你。',
-  F02B:'梨子喵把公会门扶住：“快进来喵，汤还热着。”你摸到衣袋里完好的火漆。瑟芙菈已经离开，但她认真说过的名字，你还记得。',
-  F03A:'莱昂检查了一遍你的灯扣，伊芙在旁边催他别把灯当盾修。希娅向你道别：“认清自己的路以后，也记得给别人留一点光。”',
-  F03B:'希娅把药袋系好，特意让每张标签都露在外面。莱昂承诺下次少带一点伤回来，伊芙看了他一眼：“这句话，我替你记着。”'
-};
-const laterFarewells:Record<string,string>={
-  M01:'菈芮检查完最后一张航务表，推开迎风的窗。花桥上有人朝下界的旅人挥手，这一次，那条云路已经有了能回来的一端。',
-  M02:'艾蕾诺将袖口最后一颗松动的珍珠缝好，抬起头来：“等下次再见，我会有自己的地址。写信的时候，不必经过谁的许可。”',
-  M03:'奥文郑重合上法术笔记，椅子却在身后轻轻散了架。他坐在地板上沉默了一息：“这一条，也应该记进失败报告。”',
-  A02:'值守将核验过的证词另夹成一册。远处有人又在高喊勇者的名号，这一次，你先看清了他的脸，再决定要不要听下去。',
-  C01:'霜芙端着热汤，庄严地宣布这碗不必计入宫廷礼仪。檐角的冰滴落进雪里，她听了一会儿，悄悄又伸手续了半碗。',
-  C02:'格琳达在账本旁添了一行“旅客已安置”，又用尾尖把椅子挪远了一点：“夜里想要热水就敲门。别敲鳞片，会响得太大。”',
-  C03:'卡洛将旧旗晾到炉边，孩子们已经学会避开枪杆。他数清屋里的人，终于解下肩带：“都在。今晚可以把门关好了。”',
-  T01:'七号把修好的手抬到与人相近的高度，慢慢挥了挥。伊赛没急着检查读数，也向它挥手，等它自己把这个动作做完。',
-  T02:'逆鸣将最后一份撤离记录交进柜台，空荡的领口朝灯下微微一低。守桥的命令终于结束，往后他可以为自己选择方向。',
-  T03:'滴算给账簿压上镇纸，薄利在一旁宣布今日的“免费看海”仍然免费。鲸背缓缓起伏，你终于能分清海浪和旅市里细碎的笑声。',
-  E01:'烛十七收好作废的任职表，磐签郑重盖上“不欠加班”四个字。门外的阳光落下来，你第一次觉得离开一张椅子，也能算件值得纪念的事。',
-  E02:'梅尔文收起棋子，赫棋在门边试着转了转肩：“下次，我想坐在棋盘这一边。”老法师给他留了位子，没有替他选颜色。',
-  E03:'余炉在封好的剑匣旁留下一盏小灯。止声的剑匣里传来很轻的回应：“下次再见，希望没有人需要跪着。”'
-};
 const applyOpeningRewrite=(route:OpeningRoute):OpeningRoute=>{
   const rewrite=finalOpeningRewrites[route.code];
   if(!rewrite)return route;
@@ -128,13 +106,14 @@ const applyOpeningNarrativeExpansion=(route:OpeningRoute):OpeningRoute=>{
   if(!expansion)return route;
   return{...route,...expansion,choices:route.choices.map(choice=>({...choice,...expansion.choices[choice.code]}))};
 };
-export const openingRouteVersions: OpeningRoute[] = [...generatedSevenOpeningRoutes, ...generatedOpeningRoutes, ...forestRoutes].map(applyOpeningRewrite).map(applyOpeningNarrativeExpansion).map(applyOpeningRewardPolicy).map(route => ({ ...route,
+const retainedRouteVersions: OpeningRoute[] = [...generatedSevenOpeningRoutes, ...generatedOpeningRoutes, ...forestRoutes].map(applyOpeningRewrite).map(applyOpeningNarrativeExpansion).map(applyOpeningRewardPolicy).map(retainOpeningRoute).filter((route):route is OpeningRoute=>Boolean(route)).map(route => ({ ...route,
   person: Object.prototype.hasOwnProperty.call(finalOpeningRewrites[route.code]??{},'person')?finalOpeningRewrites[route.code].person:route.person,
   arrival: route.arrival.length ? route.arrival : [{ title: '灯火已经在前方', text: escorts[route.code] }],
   choices: route.choices.map(choice => ({ ...choice, rewardCode: choice.rewardCode || `opening_${route.code.toLowerCase()}_${choice.code.toLowerCase()}`,
-    farewell: choice.farewell || (route.code === 'A01' ? '接引记录与你的名字重新对上。你将凭据收好，眼前这一次，是能够继续走下去的路。' : forestFarewells[route.code+choice.code]??laterFarewells[route.code]??'') }))
+    farewell: choice.farewell }))
 }));
-export const openingRoutes: OpeningRoute[] = openingRouteVersions.filter((route,index,all)=>all.findIndex(r=>r.code===route.code)===index);
+export const openingRouteVersions: OpeningRoute[] = retainedRouteVersions.filter((route,index,all)=>all.findIndex(r=>r.code===route.code)===index);
+export const openingRoutes: OpeningRoute[] = [...openingRouteVersions];
 export const openingRouteByCode = (code: string, version?: number) => openingRouteVersions.find(route => route.code === code && (version === undefined || route.version === version));
 /** 初到安全区时，主角尚未认识接应人员；姓名留到实际交谈中的自我介绍。 */
 export const openingNewcomerText=(text:string)=>text
@@ -173,6 +152,7 @@ const firstMeetingCompanionAliases: Record<string,Record<string,string>> = {
   W02:{ 小苇:'药师的学徒' },Y03:{ 萨芙:'第一位魔族客人' }
 };
 const firstMeetingIntroductions: Record<string,string> = {
+  F03:'',
   S01:'对方把扳手在围裙上抹了一下，先朝我抬抬下巴：“桥务站的贝娅。先别让那把剑再松一寸，剩下的事我边修边说。”',
   S02:'女子用沾湿的手指在沙上写下“弥莎”，又画了个歪歪的音符。她指着自己发不出声的喉咙，认真朝我一鞠躬。',
   S03:'',
