@@ -5,7 +5,7 @@ import { getAdminWebConfig } from '../config/admin-web';
 import pearAdminCover from '../assets/game/story/pear-admin-cover.png';
 import { adminCoverPath, adminPage, loginPage } from './page';
 import { createWebAdminAccount, loginAdminWeb, logoutAdminWeb, sessionForAdminWeb, setWebAdminEnabled, webAdminAccounts, type WebSession } from '../game/admin-web.service';
-import { adminDashboard, adminGameOperations, adminMails, adminPatrolEntities, adminPlayerDetail, adminPlayers, adminWebJournals, adminWorldEvents, adminWorldOverview, changeGlobalMultiplierFromWeb, runWebPlayerAudit, sendWebMail } from '../game/admin-web-data.service';
+import { adminDashboard, adminGameOperations, adminMails, adminPatrolEntities, adminPlayerDetail, adminPlayers, adminSearchSuggestions, adminWebJournals, adminWorldEvents, adminWorldOverview, changeGlobalMultiplierFromWeb, runWebPlayerAudit, sendWebMail } from '../game/admin-web-data.service';
 import { monitorSnapshot } from '../game/monitor.service';
 import { adminPortraitPreview, adminPortraitReviews, decidePortraitReview } from '../game/automaton-portrait-admin.service';
 
@@ -118,6 +118,7 @@ export const registerAdminWebRoutes = (router: koaRouter) => {
     catch { apiError(ctx, 404, '待审图片不存在或已处理。'); }
   });
   router.get('/api/admin/players', ctx => api(ctx, async () => adminPlayers(ctx.query)));
+  router.get('/api/admin/suggestions', ctx => { ctx.set('Cache-Control', 'no-store'); return api(ctx, async () => adminSearchSuggestions(ctx.query.kind, ctx.query.keyword, ctx.query.offset)); });
   router.get('/api/admin/players/:id', ctx => api(ctx, async () => adminPlayerDetail(Math.max(1, Number(ctx.params.id)))));
   router.post('/api/admin/players/:id/audit', ctx => api(ctx, async (session, body) => runWebPlayerAudit(session, Math.max(1, Number(ctx.params.id)), body.kind, body.reason), true));
   router.get('/api/admin/world', ctx => api(ctx, async () => adminWorldOverview()));

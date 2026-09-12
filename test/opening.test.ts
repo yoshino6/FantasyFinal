@@ -8,6 +8,7 @@ import { openingHubs, openingSpawnRegions } from '../src/game/opening-world.conf
 import { goldenChestTable, rollChest } from '../src/game/opening-chest.config';
 import { companionChance } from '../src/game/companion.service';
 import { keepsakeDefinitions } from '../src/game/opening-keepsakes.config';
+import { forestArrivalGuildScenes, forestArrivalTownScenes } from '../src/game/forest-arrival-content';
 
 test('运行时只保留八条路线、五张出生地图与二十个分支',()=>{
   assert.deepEqual(openingRoutes.map(route=>route.code).sort(),['A01','C02','F01','F02','F03','M01','M02','S03']);
@@ -32,25 +33,40 @@ test('黄金兔救助明确使用三类初始补给并由梨子喵带出森林',
   const route=openingRouteByCode('F01')!,aid=route.choices.find(choice=>choice.code==='A')!;
   assert.equal(route.entryMergedIntoFirstPage,true,'黄金兔触发引子应合并进正式场景，不能额外占一页');
   assert.match(JSON.stringify([route.pages,aid.pages,aid.arrival]),/三只面包.*三瓶矿泉水.*三份草药/);
-  assert.match(JSON.stringify([aid.pages,aid.arrival]),/梨子.*百纳镇.*冒险者公会/);
+  assert.match(JSON.stringify([aid.pages,aid.arrival]),/梨子.*百纳镇.*公会/);
   assert.equal(aid.rewardName,'黄金兔');
 });
 test('云巢路线写明被当作食物、猎魔人救援、破壳认亲与双结局',()=>{
   const route=openingRouteByCode('S03')!;
   assert.equal(route.title,'云巢雏鸟');assert.equal(route.choices.length,2);
-  assert.match(JSON.stringify(route.pages),/储备粮.*烬川.*破壳.*当成娘/);
+  assert.match(JSON.stringify(route.pages),/储备粮.*烬川.*裂.*认成娘/);
   assert.match(JSON.stringify(route.choices[0]),/随从名册|跟随/);
   assert.equal(route.choices[1].rewardCopper,2000);assert.match(route.choices[1].label,/2000铜币/);
 });
 test('三人冒险团沿用旧相遇并在真实史莱姆战斗胜利后回城',()=>{
   const route=openingRouteByCode('F03')!;
   const narrative=JSON.stringify([route.moveEntry,route.huntEntry,route.pages,route.choices,route.arrival]);
-  assert.equal(route.title,'火星、盾牌与白绷带');assert.equal(route.pages.length,2);assert.equal(route.pages[0].title,'火星、盾牌与白绷带');assert.equal(route.entryMergedIntoFirstPage,true);
-  assert.match(narrative,/兵刃碰撞.*莱昂.*伊芙.*希娅.*森林史莱姆.*一同来到.*冒险者公会/);
+  assert.equal(route.title,'火星、盾牌与白绷带');assert.equal(route.pages.length,3);assert.equal(route.pages[0].title,'火星、盾牌与白绷带');assert.equal(route.entryMergedIntoFirstPage,true);
+  assert.match(narrative,/兵刃碰撞.*莱昂.*伊芙.*希娅.*森林史莱姆/);
+  assert.equal(Object.keys(forestArrivalTownScenes).length,6);
+  assert.equal(Object.keys(forestArrivalGuildScenes).length,3);
+  assert.match(JSON.stringify([forestArrivalTownScenes,forestArrivalGuildScenes]),/史莱姆.*梨子喵.*转生者.*铁匠铺.*阿克谢尔·梨子.*卖水和面包.*冒险者公会/);
   assert.equal(openingFirstMeetingText(route,route.pages[0].text,0),route.pages[0].text,'不能在三人正式自我介绍前自动拼接姓名');
   const openingSource=readFileSync('src/game/opening.service.ts','utf8'),adventureSource=readFileSync('src/game/adventure.service.ts','utf8');
   assert.match(openingSource,/forestBattlePending/);assert.match(openingSource,/completeOpeningForestBattleStart/);
-  assert.match(adventureSource,/route_code='F03'[\s\S]*status='completed'[\s\S]*directGuild:true/);
+  assert.match(adventureSource,/arrival_story/);
+  assert.match(adventureSource,/code='guild_counter'/);
+  assert.doesNotMatch(adventureSource,/directGuild:true/);
+});
+test('幽暗密林每条回城分支都由梨子喵结识并遇见三人冒险团',()=>{
+  for(const code of ['F01','F02'])for(const choice of openingRouteByCode(code)!.choices){
+    const arrival=(choice.arrival??[]).map(page=>page.text).join('\n');
+    for(const name of ['梨子','莱昂','伊芙','希娅','公会'])assert.ok(arrival.includes(name),`${code}-${choice.code}: ${name}`);
+    assert.match(arrival,/亲眼|看见|见证/,`${code}-${choice.code}`);
+    assert.doesNotMatch(arrival,/猫族少女/,`${code}-${choice.code}`);
+  }
+  assert.match(forestArrivalTownScenes[2],/长着猫耳和尾巴/);
+  assert.match(forestArrivalGuildScenes[1],/母亲是猫族/);
 });
 test('抵达段由路线人物带路或给出明确方向，进入公会后不再追加交接剧情',()=>{
   for(const route of openingRoutes){
@@ -81,6 +97,7 @@ test('刚出生的armed状态可读取，不会访问尚未选择的分支',()=>
     const row={route_code:route.code,story_version:route.version,state:'reading',branch_code:null,page_index:lastPageIndex,revision:4,entry_kind:'move',flags_json:{},reward_claimed:0,destination_code:route.destination};
     const expected=openingFirstMeetingText(route,route.pages.at(-1)!.text,route.pages.length-1);
     const last=view(row);assert.equal(last.state,'choice',route.code);assert.equal(last.text,expected,route.code);assert.equal(last.choices.length,route.choices.length);
+    const oldChoice=view({...row,state:'choice',page_index:0});assert.equal(oldChoice.text,expected,`${route.code}: 旧存档选项应显示新版最后一段`);
     if(lastPageIndex>0){const previous=view({...row,page_index:lastPageIndex-1});assert.equal(previous.state,'reading');assert.equal(previous.choices.length,0);}
     const first=view({...row,page_index:entryOffset}),introduction=openingFirstMeetingIntroduction(route);
     if(introduction)assert.ok(first.text.includes(introduction),route.code);

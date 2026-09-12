@@ -2,6 +2,7 @@ import {readFileSync,writeFileSync} from 'node:fs';
 import {openingFirstMeetingText,openingNarrativeText,openingNewcomerText,openingRoutes} from '../src/game/opening-content';
 import {openingHubs} from '../src/game/opening-world.config';
 import {firstPersonNarrative} from '../src/game/narrative-voice';
+import {forestArrivalGuildScenes,forestArrivalTownScenes} from '../src/game/forest-arrival-content';
 
 const target='docs/开局路线分段与分支总汇（当前生效）.md';
 const mapNames:Record<string,string>={dark_forest:'幽暗密林',worldtree_meadow:'世界树草原环带',gravelwind_shore:'砾风石滩',fallenstar_swamp:'坠星沼泽',frostcrown_plateau:'霜冠高原'};
@@ -22,7 +23,12 @@ for(const route of openingRoutes){
     option.pages.forEach(scene=>{output+=`#### ${scene.title}\n\n${render(scene.text)}\n\n`;});
     if(route.code==='F03')output+='**随后进入真实剧情战斗：玩家与莱昂、伊芙、希娅组成临时队伍，共同迎战虚弱的森林史莱姆。击败后才会播放回城段落。**\n\n';
     output+=`**路线结果：${option.rewardName}**\n\n`;
-    for(const arrival of option.arrival??route.arrival)output+=`#### ${arrival.title}\n\n${render(openingNewcomerText(arrival.text))}\n\n`;
+    if(route.code!=='F03')for(const arrival of option.arrival??route.arrival)output+=`#### ${arrival.title}\n\n${render(openingNewcomerText(arrival.text))}\n\n`;
+  }
+  if(route.code==='F03'){
+    output+='### 史莱姆战胜后的入城剧情\n\n';
+    for(const [stage,text] of Object.entries(forestArrivalTownScenes))output+=`#### ${stage==='1'?'城门':'百纳镇'}（${stage}/6）\n\n${render(text)}\n\n`;
+    for(const [stage,text] of Object.entries(forestArrivalGuildScenes))output+=`#### 梨子带路（${stage}/3）\n\n${render(text)}\n\n`;
   }
   output+='**抵达后：直接进入当地冒险者公会建筑面板，本路线不再追加教学、交接或私人委托。**\n\n';
 }

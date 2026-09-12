@@ -268,11 +268,11 @@ const forestGuideChapterTexts: Record<number, string> = {
 const townArrivalFormat = async (stage: number, text: string, completed = false, guildStory = false) => {
   if (completed) return null;
   const hasInlinePearImage = guildStory && stage === 1 && isPublicImageUrl(gameAssetUrls.pearGuideImageUrl);
-  const markdown = Format.createMarkdown().addTitle(guildStory ? `初临·百纳镇·冒险者工会（${stage}/3）` : `初临·百纳镇（${stage}/6）`).addNewline().addNewline();
+  const markdown = Format.createMarkdown().addTitle(guildStory ? `初临·梨子带路（${stage}/3）` : stage===1?'初临·城门（1/6）':`初临·百纳镇（${stage}/6）`).addNewline().addNewline();
   // 只有 Markdown 内嵌的公开图片，才能与正文和按钮作为同一条 QQ 消息发送。
   if (hasInlinePearImage) markdown.addImage(gameAssetUrls.pearGuideImageUrl, { width: 320, height: 213 }).addNewline().addNewline();
   markdown.addText(text);
-  const label = guildStory ? '继续' : stage === 4 ? '你说什么？勇者是什么意思？' : stage === 6 ? '挥手告别' : '继续';
+  const label = guildStory ? '继续' : stage === 6 ? '挥手告别' : '继续';
   if (hasInlinePearImage) {
     markdown.addNewline().addNewline().addButton(`[${label}]`, { data: '/继续剧情', autoEnter: false });
     return Format.create().addMarkdown(markdown);
@@ -1018,12 +1018,6 @@ export const continueStoryHandler = async () => {
       return;
     }
     const story = await continueForestArrival(event.current.UserId);
-    if(story.directGuild){
-      await message.send({format:Format.create().addMarkdown(Format.createMarkdown().addTitle('初章·一同回城').addNewline().addNewline().addText(story.text))});
-      await(await import('../game/opening-guild.service')).enterOpeningGuild(event.current.UserId,true);
-      await message.send({format:await(await import('./opening-guild')).openingGuildFormat(event.current.UserId)});
-      return;
-    }
     const storyFormat = await townArrivalFormat(story.stage, story.text, story.completed, story.chapter === 'guild');
     if (storyFormat) {
       if (story.chapter === 'guild' && story.stage === 1 && !isPublicImageUrl(gameAssetUrls.pearGuideImageUrl)) {
@@ -1032,7 +1026,11 @@ export const continueStoryHandler = async () => {
       }
       await message.send({ format: storyFormat }); return;
     }
-    if (story.arrivalBuilding) { await message.send({ format: buildingEncounterFormat('冒险者公会', story.arrivalBuilding, '你移动至百纳镇·猫拉瑞亚(-2, -161)') }); return; }
+    if (story.arrivalBuilding) {
+      await(await import('../game/opening-guild.service')).enterOpeningGuild(event.current.UserId,true);
+      await message.send({format:await(await import('./opening-guild')).openingGuildFormat(event.current.UserId)});
+      return;
+    }
     const panel = await movementPanel(event.current.UserId, story.text);
     const nearby = await nearbyPoints(event.current.UserId);
     await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) });

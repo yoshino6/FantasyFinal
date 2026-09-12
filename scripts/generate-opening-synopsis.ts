@@ -2,6 +2,7 @@
 import {readFileSync,writeFileSync} from 'node:fs';
 import {openingHubs,openingSpawnRegions} from '../src/game/opening-world.config';
 import {openingRoutes} from '../src/game/opening-content';
+import {forestArrivalGuildScenes,forestArrivalTownScenes} from '../src/game/forest-arrival-content';
 
 const target='docs/地图初始路线剧情简介.md';
 const mapNames:Record<string,string>={
@@ -30,7 +31,12 @@ for(const region of mapOrder){
     output+=`${person}**开端：**${(route.entryMergedIntoFirstPage?route.pages[0]?.text:route.moveEntry)?.trim()??''}\n\n`;
     output+=`**核心抉择：**${choices}。\n\n`;
     if(route.code==='F03')output+='**剧情战斗：**选择后与三人冒险团组成临时队伍，进入真实的森林史莱姆战斗；胜利后才返回百纳镇。\n\n';
-    output+=`**抵达方式：**${route.arrival[0]?.text.trim()??'沿安全道路抵达附近公会。'}\n\n`;
+    if(route.code==='F03')output+=`**抵达方式：**${forestArrivalTownScenes[1]}\n\n${forestArrivalTownScenes[4]}\n\n${forestArrivalTownScenes[6]}\n\n${forestArrivalGuildScenes[1]}\n\n${forestArrivalGuildScenes[2]}\n\n${forestArrivalGuildScenes[3]}\n\n`;
+    else{
+    const arrivals=route.choices.map(choice=>({code:choice.code,text:(choice.arrival??route.arrival).map(scene=>scene.text.trim()).join('\n\n')}));
+    if(new Set(arrivals.map(arrival=>arrival.text)).size===1)output+=`**抵达方式：**${arrivals[0]?.text??'沿安全道路抵达附近公会。'}\n\n`;
+    else for(const arrival of arrivals)output+=`**${arrival.code} 分支抵达：**${arrival.text}\n\n`;
+    }
     output+=`**安全落点与分支收束：**${hub.name}·${hub.guildName}；《${quests}》。\n\n`;
     output+=`**分支结果：**${rewards}。\n\n`;
   }

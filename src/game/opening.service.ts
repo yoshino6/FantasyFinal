@@ -57,11 +57,11 @@ const scenePages=(row:StoryRow):OpeningPage[]=>{
   return[{title:choice?.quest??route.title,text:openingNewcomerText(choice?.farewell||'这段经历已经妥善记下。眼前的旅途，可以继续了。')}];
 };
 const view=(row:StoryRow):OpeningView=>{
-  const route=openingRouteByCode(row.route_code,row.story_version)!;const ps=scenePages(row);const page=ps[Math.min(Number(row.page_index),ps.length-1)];const choice=selectedChoice(row);const flags=json(row.flags_json);
+  const route=openingRouteByCode(row.route_code,row.story_version)!;const ps=scenePages(row);const pageIndex=row.state==='choice'?ps.length-1:Math.min(Number(row.page_index),ps.length-1);const page=ps[pageIndex];const choice=selectedChoice(row);const flags=json(row.flags_json);
   const state:OpeningState=row.state==='reading'&&Number(row.page_index)>=ps.length-1?'choice':row.state;
   let choices=route.choices.map(c=>({code:c.code,label:c.label}));
   if(row.route_code==='A01'&&flags.eris)choices=[{code:'A',label:'接受厄里斯的安全返还'},{code:'B',label:'带事故函去地上的女神办事桌'},{code:'C',label:'留下厄里斯的个人受理印'}];
-  return{route:row.route_code,title:page.title,state,revision:Number(row.revision),text:openingNarrativeText(page.text),page:Number(row.page_index)+1,pages:ps.length,branch:row.branch_code,
+  return{route:row.route_code,title:page.title,state,revision:Number(row.revision),text:openingNarrativeText(page.text),page:pageIndex+1,pages:ps.length,branch:row.branch_code,
     choices:state==='choice'?choices:[],action:row.state==='lesson'?choice!.task:undefined,reward:row.reward_claimed?String(flags.rewardName??choice?.rewardName):undefined,destination:row.reward_claimed?openingHubs[row.destination_code].name:undefined,
     forestBattleChoice:row.route_code==='F03'&&flags.forestBattlePending?(flags.forestBattlePending==='join'?'join':'depart'):undefined};
 };
