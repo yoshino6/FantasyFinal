@@ -110,6 +110,7 @@ export const openingKeepsakes=async(user:string)=>{
 export const openingTransport=async(user:string,destination:string)=>withTransaction(async c=>{
   const character=await openingCharacter(c,user,true);const context=await requireGuildService(c,Number(character.id));const target=openingHubs[destination as OpeningHubCode];
   if(context.code==='floating_leaf_town')await(await import('./floating-leaf.service')).assertFloatingTourFreeAction(c,Number(character.id));
+  if(context.code==='world_tree')await(await import('./worldtree-witness.service')).assertWorldtreeTourFreeAction(c,Number(character.id));
   const special=['floating_leaf_town','frost_dragon_inn'];
   if(!target||!(special.includes(context.code)&&destination==='world_tree'||context.code==='world_tree'&&special.includes(destination)))throw new Error('这条接驳线路不由当前柜台办理。');
   const world=await openingWorldFor(c);if(destination==='floating_leaf_town'&&!world.leaf_route_open)throw new Error('云上的公共航路尚未完成首次航务登记。');

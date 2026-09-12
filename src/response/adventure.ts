@@ -1054,6 +1054,7 @@ export const buildingHandler = (action: 'enter' | 'ignore' | 'leave' | 'area') =
   try {
     const code = String(route.param('code'));
     const building = await requireNpcAtCurrentPosition(event.current.UserId, code);
+    if(code==='eternal_arena_gate'&&action==='enter'){await(await import('./worldtree-witness')).enterEternalArenaHandler();return;}
     if(Object.values((await import('../game/opening-world.config')).openingHubs).some(hub=>hub.guild===code)){
       const guild=await import('../game/opening-guild.service');
       if(action==='enter'||action==='leave'||action==='ignore')await guild.enterOpeningGuild(event.current.UserId,action==='enter');

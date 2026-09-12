@@ -558,6 +558,13 @@ const schemaStatements = [
     character_id BIGINT UNSIGNED NOT NULL, quest_code VARCHAR(64) NOT NULL, stage TINYINT UNSIGNED NOT NULL DEFAULT 0, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (character_id,quest_code), CONSTRAINT fk_main_quest_progress_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_worldtree_duels (
+    session_id CHAR(36) NOT NULL, owner_character_id BIGINT UNSIGNED NOT NULL,
+    participants_json JSON NOT NULL, state ENUM('active','victory','defeat','escaped','timeout') NOT NULL DEFAULT 'active',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, finished_at DATETIME NULL,
+    PRIMARY KEY (session_id), KEY idx_worldtree_duel_owner (owner_character_id,state),
+    CONSTRAINT fk_worldtree_duel_owner FOREIGN KEY (owner_character_id) REFERENCES characters(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_evolution_profiles (
     character_id BIGINT UNSIGNED NOT NULL, unlocked_level TINYINT UNSIGNED NOT NULL DEFAULT 20, injection_count TINYINT UNSIGNED NOT NULL DEFAULT 0,
     evolution_scale TINYINT UNSIGNED NOT NULL DEFAULT 0, adaptation_pressure TINYINT UNSIGNED NOT NULL DEFAULT 0, stability TINYINT UNSIGNED NOT NULL DEFAULT 50,
@@ -1729,6 +1736,9 @@ export const initializeSchema = async (pool: Pool) => {
   await pool.execute(`INSERT INTO map_regions (code,name,description,min_x,max_x,min_y,max_y,min_z,max_z,is_spawn_enabled,danger_level,is_owner_only)
     VALUES ('boss_test_arena','首领测试场','仅供主人发起的首领强度测试使用；首领只会对测试队伍可见。',-400,-381,380,400,0,0,0,1000,1)
     ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),min_x=VALUES(min_x),max_x=VALUES(max_x),min_y=VALUES(min_y),max_y=VALUES(max_y),min_z=VALUES(min_z),max_z=VALUES(max_z),is_spawn_enabled=VALUES(is_spawn_enabled),danger_level=VALUES(danger_level),is_owner_only=VALUES(is_owner_only)`);
+  await pool.execute(`INSERT INTO map_regions (code,name,description,min_x,max_x,min_y,max_y,min_z,max_z,is_spawn_enabled,danger_level,is_owner_only,is_enabled)
+    VALUES ('eternal_arena','永恒竞技场','世界树根桥后的封闭演武场。狂拳艾森在此等待约战；任务对手只属于发起者。',410,429,-10,9,0,0,0,0,1,1)
+    ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),is_spawn_enabled=0,is_owner_only=1,is_enabled=1`);
   // 边界通过 INSERT ... SELECT 关联区域 ID；全新数据库必须先创建地表区域，不能依赖后续内容种子。
   await seedWorldSurfaceRegions(pool);
   const releaseManagedCodes = ['dark_forest_deep', ...worldSurfaceRegions.map(region => region.code)];
@@ -1757,6 +1767,7 @@ export const initializeSchema = async (pool: Pool) => {
     ['world_tree', -10, 9, -10, 9, 0, 0],
     ['baina_town', -25, 24, -205, -156, 0, 0],
     ['boss_test_arena', -400, -381, 380, 400, 0, 0],
+    ['eternal_arena', 410, 429, -10, 9, 0, 0],
     ['dark_forest_dungeon', 0, 9999, 0, 24, -30, -10]
   ];
   const areaRegionCodes = [...new Set(worldRegionAreas.map(([code]) => code))];
@@ -2634,6 +2645,7 @@ export const initializeSchema = async (pool: Pool) => {
     ((SELECT id FROM map_regions WHERE code='world_tree'), 'world_tree_gate', '世界树界门', '由巨根与叶脉光纹共同构成的归途界门，门内隐约映着百纳镇的灯火。', 'building', 2, -2, 0),
     ((SELECT id FROM map_regions WHERE code='world_tree'), 'canopy_exchange', '万叶联市', '世界树下没有城墙的交易所。商人循着叶脉光流交换来自各地的契约与奇物。', 'building', 4, 2, 0),
     ((SELECT id FROM map_regions WHERE code='world_tree'), 'world_library', '世界图书馆', '依附在世界树枝冠间的宏伟图书馆。大厅、阅览室、资料室与无尽回廊收藏着漫长岁月的知识。', 'building', -4, 5, 0),
+    ((SELECT id FROM map_regions WHERE code='world_tree'), 'eternal_arena_gate', '永恒竞技场', '巨根间开着一道通向白砂演武场的拱门，门旁刻着“胜负之后，仍要好好说话”。', 'building', 6, -4, 0),
     ((SELECT id FROM map_regions WHERE code='world_tree'), 'evolution_lab', '演化研究室', '覆着银蓝叶脉的枝干卷成一扇深蓝色小门。门牌上只有一行细字：进入前，请确认你愿意承担观察结果。', 'building', -6, 7, 0),
     ((SELECT id FROM map_regions WHERE code='dark_forest'), 'hunter_lodge', '猎户小屋', '林间有一座覆着苔藓的木屋。门边挂着风干兽皮与一张旧弓，屋内偶尔传出磨箭的细响。', 'building', 18, -105, 0)
     ON DUPLICATE KEY UPDATE name=VALUES(name), description=VALUES(description), interaction_kind=VALUES(interaction_kind), pos_x=VALUES(pos_x), pos_y=VALUES(pos_y), pos_z=VALUES(pos_z)`);
@@ -2772,6 +2784,28 @@ export const initializeSchema = async (pool: Pool) => {
     WHEN 'necromancer_rebirth' THEN 285 WHEN 'necromancer_purging_mist' THEN 204 ELSE mana_cost END
     WHERE category='utility'`);
   // 王庭双体 Boss 使用独立的怪物技能数值，不进入玩家技能的冷却档位归一化。
+  // 艾森的拳术只供永恒竞技场剧情战使用；无技能书、怪物领悟或玩家升级入口。
+  await pool.query(`INSERT INTO effect_definitions (code,name,effect_type,default_value,default_duration,max_level,max_stacks,stackable,description) VALUES
+    ('attack_down','力竭','stat_modifier',40,3,1,1,0,'物攻下降。'),
+    ('magic_down','气脉紊乱','stat_modifier',40,3,1,1,0,'魔攻下降。'),
+    ('accuracy_down','失准','stat_modifier',80,3,1,1,0,'命中下降。'),
+    ('evasion_down','缠足','stat_modifier',80,3,1,1,0,'闪避下降。'),
+    ('defense','铁拳防势','stat_modifier',100,3,1,1,0,'物防提高。'),
+    ('magic_defense','铁拳御势','stat_modifier',100,3,1,1,0,'魔防提高。'),
+    ('alchemy_stun','眩晕','control',100,2,1,1,0,'暂时无法行动。'),
+    ('alchemy_antiheal','封疗','stat_modifier',30,3,1,1,0,'受到的治疗降低。')
+    ON DUPLICATE KEY UPDATE code=VALUES(code)`);
+  await pool.query(`INSERT INTO skill_definitions (code,name,category,damage_type,skill_kind,element,range_type,mana_cost,cooldown_turns,power,learn_cost,upgrade_cost,max_level,power_per_level,description,target_scope) VALUES
+    ('aeson_inspire','激扬','utility','无','强化','无','自身',0,0,0,99,99,1,0,'物攻与命中提高60%，持续3回合。','自身'),
+    ('aeson_earthbreak','崩拳·裂地','physical','打击','打击','无','近战',0,0,106,99,99,1,0,'拳劲沿地面扩散，击中全队。','全体'),
+    ('aeson_softbreak','柔拳·肠断','physical','打击','打击','无','近战',0,0,112,99,99,1,0,'单体重击，令目标双攻降低40%。','单体'),
+    ('aeson_shortfist','崩拳·寸劲','physical','打击','打击','无','近战',0,0,120,99,99,1,0,'单体眩晕2回合；目标生命低于25%时斩杀。','单体'),
+    ('aeson_ironwill','铁拳·意志','utility','无','强化','无','自身',0,0,0,99,99,1,0,'生命低于60%时一次性提升双防与暴免100%，持续3回合。','自身'),
+    ('aeson_snakebind','柔拳·蛇缠','physical','打击','打击','无','近战',0,0,72,99,99,1,0,'压制两名目标，命中与闪避降低80%，持续3回合。','双体'),
+    ('aeson_ultimate','崩拳·极意','physical','打击','打击','无','近战',0,0,100,99,99,1,0,'全队受到拳劲，三回合减疗30%；生命低于25%时斩杀。','全体'),
+    ('aeson_berserk','铁拳·狂暴','utility','无','强化','无','自身',0,0,0,99,99,1,0,'生命低于30%时一次性提高物攻、暴击与暴伤30%，持续3回合。','自身'),
+    ('aeson_destruction','狂拳·毁灭','physical','打击','打击','无','近战',0,0,210,99,99,1,0,'生命低于10%时只使用的单体必中必暴重击。','单体')
+    ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),target_scope=VALUES(target_scope),power=VALUES(power),mana_cost=0,cooldown_turns=0`);
   await pool.query(`INSERT INTO skill_definitions (code,name,category,damage_type,skill_kind,element,range_type,mana_cost,cooldown_turns,power,learn_cost,upgrade_cost,max_level,power_per_level,description) VALUES
     ('goblin_royal_shield_rush','盾墙冲击','physical','打击','打击','无','近战',48,2,120,99,99,1,0,'王庭盾卫以厚盾撞向仇恨最高的目标。'),
     ('goblin_royal_intercept','王庭拦截','utility','无','强化','无','全体',64,4,0,99,99,1,0,'盾卫替王座核心挡下下一次单体重击。'),
@@ -3373,6 +3407,11 @@ export const initializeSchema = async (pool: Pool) => {
     WHERE code IN ('wolfking_trample','death_knight_cleave','habadragon_royal_stomp','habadragon_royal_tail_sweep','habadragon_royal_cataclysm_trample','habadragon_crushing_stomp')`);
   await pool.query(`UPDATE skill_definitions SET target_scope='全体',range_type='远程'
     WHERE code IN ('black_slime_wave','black_slime_bind','skeleton_quake','death_knight_prison','necromancer_storm','necromancer_grave_bind','goblin_colonel_crushing_wave','goblin_colonel_toxic_barrage','goblin_royal_static_net','goblin_king_stormchain','goblin_rockfall','goblin_player_rockfall')`);
+  await pool.query(`UPDATE skill_definitions SET target_scope=CASE
+    WHEN code IN ('aeson_earthbreak','aeson_ultimate') THEN '全体'
+    WHEN code='aeson_snakebind' THEN '双体'
+    WHEN code IN ('aeson_inspire','aeson_ironwill','aeson_berserk') THEN '自身'
+    ELSE '单体' END WHERE code LIKE 'aeson_%'`);
   await pool.query(`INSERT INTO monster_skill_learn_rules (monster_template_id,source_skill_code,skill_id,chance)
     SELECT t.id,r.source_skill_code,s.id,0.70000 FROM monster_templates t
     JOIN (SELECT 'basic_slash' AS skill_code,'scratch' AS source_skill_code UNION ALL SELECT 'basic_thrust','charge' UNION ALL SELECT 'basic_strike','hop' UNION ALL SELECT 'basic_fireball','goblin_fire' UNION ALL SELECT 'basic_iceball','frost_bind' UNION ALL SELECT 'basic_wind_blade','wind_blade' UNION ALL SELECT 'basic_thunder_orb','thunder_lance' UNION ALL SELECT 'basic_wood_bolt','vine_hex' UNION ALL SELECT 'basic_light_bolt','sanctified_bolt' UNION ALL SELECT 'basic_shadow_bolt','moonbolt') r

@@ -40,6 +40,7 @@ import { skillSpecialization, manaTransferCost, specializationUpgradeCost, speci
 import { canDispelCombatEffect, isHardControlEffect, nativeCleanseLimit } from './combat-dispel-policy';
 import { canSpecializePassive, passiveSpecializationFactor, specializedPassiveValue } from './passive-specialization';
 import { finishNpcSparring } from './npc-sparring.service';
+import { aesonNextSkill } from './aeson-combat';
 import { createCombatRules } from './combat-rule-adapter';
 import { maskRuleBattleLog, readRuleState, ruleManaCost, ruleStatusSummary, displayedRuleName, visibleResidentBuff, type CombatRules } from './combat-rule-registry';
 import { residentSkillByCode } from './resident-skill.config';
@@ -135,7 +136,7 @@ const lowMonsterTraits: MonsterTrait[] = [
   { code: 'arcane', name: '魔蕴的', magicAttackPct: 10 }, { code: 'hardhide', name: '硬皮的', physicalDefensePct: 10 }
 ];
 // 切磋标记没有展示前缀，但其中的人物真名、属性与携带技能必须保留。
-const traitList = (value: unknown) => jsonArray(value).map(item => jsonObject(item) as unknown as MonsterTrait).filter(trait => trait.code && (trait.name || trait.code === 'npc_sparring'));
+const traitList = (value: unknown) => jsonArray(value).map(item => jsonObject(item) as unknown as MonsterTrait).filter(trait => trait.code && (trait.name || ['npc_sparring', 'aeson_duel'].includes(trait.code)));
 const isSummonedMonster = (monster: { traits_json?: unknown }) => traitList(monster.traits_json).some(trait => trait.code === 'summoned');
 const bossComponentTrait = (monster: { traits_json?: unknown }) => jsonArray(monster.traits_json).map(jsonObject).find(trait => trait.code === 'boss_component') as unknown as BossComponentTrait | undefined;
 const isBossComponent = (monster: { traits_json?: unknown }) => Boolean(bossComponentTrait(monster));
@@ -184,7 +185,8 @@ export const monsterCombatStats = (monster: MonsterAttributes & { level: number;
   const spar = jsonObject(jsonObject(traitList(monster.traits_json).find(trait => trait.code === 'npc_sparring')).profile);
   if (spar.stats) {
     const stats = jsonObject(spar.stats); const value = (key: string) => Math.max(0, Math.floor(Number(stats[key] ?? 0)));
-    return { hpMax: value('hpMax'), mpMax: value('mpMax'), physicalAttack: value('physicalAttack'), magicAttack: value('magicAttack'), physicalDefense: value('physicalDefense'), magicDefense: value('magicDefense'), accuracy: value('accuracy'), evasion: value('evasion'), crit: value('critRateBp'), critResist: value('critResistBp'), critDamage: value('critDamageBp'), critReduction: value('critDamageReductionBp'), tenacity: value('tenacity'), tenacityPierce: value('tenacityPierce'), speed: value('speed'), perception: Number(jsonObject(spar.trainedAttributes).perception ?? 0) };
+    const will=Number(jsonObject((monster as CombatTargetRow).cooldowns).aeson_will_remaining??0)>0;
+    return { hpMax: value('hpMax'), mpMax: value('mpMax'), physicalAttack: value('physicalAttack'), magicAttack: value('magicAttack'), physicalDefense: value('physicalDefense'), magicDefense: value('magicDefense'), accuracy: value('accuracy'), evasion: value('evasion'), crit: value('critRateBp'), critResist: value('critResistBp')*(will?2:1), critDamage: value('critDamageBp'), critReduction: value('critDamageReductionBp'), tenacity: value('tenacity'), tenacityPierce: value('tenacityPierce'), speed: value('speed'), perception: Number(jsonObject(spar.trainedAttributes).perception ?? 0) };
   }
   const component = bossComponentTrait(monster);
   if (component) {
@@ -288,7 +290,7 @@ const materializeMonster = <T extends SpawnRow>(monster: T, revealTraits = false
   const traits = traitList(monster.traits_json);
   // 编队属于遭遇形态而非鉴识信息，始终露出前缀，避免队伍在地图与战斗选择中看起来像单只怪物。
   // “域民”是地图感知分类，不是战斗中的称号前缀；战斗与鉴识名称保持人物本名。
-  const displayTraits = traits.filter(trait => !['npc_sparring', 'domain_resident', 'advanced_profession_trial', 'advanced_mentor_build', 'advanced_mentor_equipment', 'advanced_mentor_evolution'].includes(trait.code) && !(isBossComponent(monster) && trait.code === 'summoned'));
+  const displayTraits = traits.filter(trait => !['npc_sparring', 'aeson_duel', 'domain_resident', 'advanced_profession_trial', 'advanced_mentor_build', 'advanced_mentor_equipment', 'advanced_mentor_evolution'].includes(trait.code) && !(isBossComponent(monster) && trait.code === 'summoned'));
   const visibleTraits = displayTraits.filter(trait => revealTraits || trait.code === 'goblin_formation');
   const prefix = visibleTraits.map(trait => trait.name).join(''); const allTraitPrefix = displayTraits.map(trait => trait.name).join('');
   let baseName = String(jsonObject(jsonObject(traits.find(trait => trait.code === 'npc_sparring')).profile).name ?? monster.name);
@@ -645,6 +647,7 @@ const ensureForestGuideFreeAction = async (connection: Pool | PoolConnection, ch
   const status = await forestGuideStatusFor(connection, characterId);
   if (status && status !== 'completed') throw new Error('你正在推进「初章·包容之镇」，请先完成当前剧情。');
   await (await import('./floating-leaf.service')).assertFloatingTourFreeAction(connection, characterId);
+  await (await import('./worldtree-witness.service')).assertWorldtreeTourFreeAction(connection, characterId);
 };
 
 const ensureActionAvailable = (character: CharacterRow) => {
@@ -2752,7 +2755,7 @@ export const battleStatus = async (qqUserId: string) => {
     members: members.map(member => { const resource = resourceFor(Number(member.id)); return { statusText: ruleStatusSummary(readRuleState(jsonObject(member.cooldowns).__rules), Number(session.turn_no)), id: Number(member.id), name: member.name, companion: Boolean(member.npc_code), hp: Number(member.current_hp), hpMax: Number(member.hp_max), mp: Number(member.current_mp), mpMax: Number(member.mp_max), resource: hiddenResourceView(jsonObject(member.cooldowns)) ?? (resource ? { professionCode: resource.profession_code, code: resource.resource_code, name: resource.resource_name, current: Number(resource.current_value), max: Number(resource.max_value) } : null), defeated: Boolean(member.is_defeated), pending: Boolean(member.pending_action), chanting: readRuleState(jsonObject(member.cooldowns).__rules).cast?.code ? residentSkillByCode(readRuleState(jsonObject(member.cooldowns).__rules).cast!.code)?.name ?? '技能' : null, extraAction: Boolean(jsonObject(member.cooldowns).__bonusAction) }; }),
     spirits: spirits.map(spirit => ({ ownerCharacterId: Number(spirit.owner_character_id), code: spirit.spirit_code, name: spirit.spirit_name, hp: Number(spirit.current_hp), hpMax: Number(spirit.hp_max), remainingTurns: Number(spirit.remaining_turns) })),
     targets: targets.map(target => {
-      const observer = appraisalForTarget(appraisal, Number(target.level)); const hidden = readRuleState(jsonObject(target.cooldowns).__rules).statuses.some(effect => effect.code === 'nightmare' && effect.until >= Number(session.turn_no)); const identified = !hidden && (session.mode === 'spar' || Boolean(observer));
+      const observer = appraisalForTarget(appraisal, Number(target.level)); const hidden = readRuleState(jsonObject(target.cooldowns).__rules).statuses.some(effect => effect.code === 'nightmare' && effect.until >= Number(session.turn_no)); const aesonDuel = traitList(target.traits_json).some(trait => trait.code === 'aeson_duel'); const identified = !hidden && (session.mode === 'spar' || aesonDuel || Boolean(observer));
       const definition = bossComponentDefinition(target); const body = definition ? targets.find(candidate => Number(candidate.id) === componentBodyId(target)) : undefined;
       return {
         statusText: identified ? ruleStatusSummary(readRuleState(jsonObject(target.cooldowns).__rules), Number(session.turn_no), false) : '信息被雾遮蔽', id: Number(target.id), name: identified ? (Number(observer?.informationLevel ?? 4) >= 2 ? materializeMonster(target, true).name : target.name) : '???', level: identified ? Number(target.level) : null, hp: identified ? Number(target.current_hp) : '???', hpMax: identified ? Number(target.hp_max) : '???', mp: identified ? Number(target.current_mp) : '???', mpMax: identified ? monsterCombatStats(target).mpMax : '???', defeated: Boolean(target.is_defeated), identified,
@@ -3954,7 +3957,7 @@ const combatActionInTransaction = async (connection: PoolConnection, qqUserId: s
   if (!aliveMembers.every(member => member.pending_action)) return { ended: false, waiting: true, log: `\n\n[${character.name}]已确认行动，等待队友（${aliveMembers.filter(member => member.pending_action).length}/${aliveMembers.length}）。` };
 
   const appraisal = await appraisalProfileFor(connection, members.map(member => Number(member.id)));
-  const targets = await combatTargets(connection, session.combat_id, false); const targetName = (target: CombatTargetRow) => { const observer = appraisalForTarget(appraisal, Number(target.level)); if (readRuleState(jsonObject(target.cooldowns).__rules).statuses.some(effect => effect.code === 'nightmare' && effect.until >= Number(session.turn_no))) return '信息被雾遮蔽'; if (session.mode === 'spar') return materializeMonster(target, true).name; return observer ? (observer.informationLevel >= 2 ? materializeMonster(target, true).name : target.name) : '???'; }; const log: string[] = [session.mode === 'spar' ? `切磋＜${session.turn_no}＞回合` : `战斗<${session.turn_no}>回合`]; let effects = await activeCombatEffects(connection, session.combat_id);
+  const targets = await combatTargets(connection, session.combat_id, false); const targetName = (target: CombatTargetRow) => { const observer = appraisalForTarget(appraisal, Number(target.level)); if (readRuleState(jsonObject(target.cooldowns).__rules).statuses.some(effect => effect.code === 'nightmare' && effect.until >= Number(session.turn_no))) return '信息被雾遮蔽'; if (session.mode === 'spar' || traitList(target.traits_json).some(trait => trait.code === 'aeson_duel')) return materializeMonster(target, true).name; return observer ? (observer.informationLevel >= 2 ? materializeMonster(target, true).name : target.name) : '???'; }; const log: string[] = [session.mode === 'spar' ? `切磋＜${session.turn_no}＞回合` : `战斗<${session.turn_no}>回合`]; let effects = await activeCombatEffects(connection, session.combat_id);
   const [activeDeviceRows] = await connection.execute<(RowDataPacket & { character_id: number; code: string })[]>(`SELECT ad.character_id,i.code FROM player_active_devices ad
     JOIN player_item_instances ii ON ii.id=ad.instance_id JOIN item_definitions i ON i.id=ii.item_id
     WHERE ad.character_id IN (${members.map(() => '?').join(',')}) AND i.item_type='device'`, members.map(member => Number(member.id)));
@@ -5129,7 +5132,7 @@ const combatActionInTransaction = async (connection: PoolConnection, qqUserId: s
     } else {
       const monsterTarget = targets.find(item => Number(item.id) === turn.id)!; if (monsterTarget.is_defeated) continue;
       const sparProfile = jsonObject(jsonObject(traitList(monsterTarget.traits_json).find(trait => trait.code === 'npc_sparring')).profile);
-      if (sparProfile.code) {
+      if (sparProfile.code && !traitList(monsterTarget.traits_json).some(trait => trait.code === 'aeson_duel')) {
         if (controlled || monsterTarget.is_defeated) continue;
         if (controlled) continue;
         const unit = ruleUnit('target', Number(monsterTarget.id)); const enemies = rules.enemies(unit); const victim = enemies[0]; if (!victim) continue;
@@ -5166,6 +5169,7 @@ const combatActionInTransaction = async (connection: PoolConnection, qqUserId: s
         if (tauntSource) { victim = tauntSource; log.push(`$盾墙嘲讽$【${targetName(monsterTarget)}】被迫锁定${combatUnitLabel(victim)}。`); }
       }
       const [templateRows] = await connection.execute<(RowDataPacket & { code: string })[]>('SELECT code FROM monster_templates WHERE id=?', [Number(monsterTarget.template_id)]); const templateCode = templateRows[0]?.code ?? ''; const isWolfKing = templateCode === 'shadow_wolf_king'; const isScholarGa = templateCode === 'scholar_ga'; const isDungeonBoss = ['black_slime', 'skeleton_general', 'death_knight', 'necromancer_uz'].includes(templateCode); const isGoblinColonel = templateCode === 'goblin_colonel'; const isBoss = monsterTarget.monster_class === 'boss'; const isKingbeast = isKingbeastCore(monsterTarget); const fusedKingbeast = isKingbeast && kingbeastFused();
+      const isAeson = traitList(monsterTarget.traits_json).some(trait => trait.code === 'aeson_duel');
       if (isBossComponent(monsterTarget)) {
         const definition = bossComponentDefinition(monsterTarget); const body = targets.find(target => Number(target.id) === componentBodyId(monsterTarget));
         if (!definition || !body || body.is_defeated) continue;
@@ -5220,6 +5224,16 @@ const combatActionInTransaction = async (connection: PoolConnection, qqUserId: s
         const readySkills = offCooldownSkills.filter(candidate => Number(monsterTarget.current_mp) >= Number(candidate.mana_cost));
         const needsManaCharge = Boolean(manaCharge && offCooldownSkills.length && !readySkills.length);
         skill = needsManaCharge ? manaCharge : (readySkills.length ? readySkills[random(0, readySkills.length - 1)] : undefined);
+        if (isAeson) {
+          const choose = (code: string) => readySkills.find(candidate => candidate.code === code);
+          const lowest = [...members].filter(member => !member.is_defeated).sort((a,b) => Number(a.current_hp)/Math.max(1,Number(a.hp_max))-Number(b.current_hp)/Math.max(1,Number(b.hp_max)))[0];
+          const decision=aesonNextSkill({hpRatio:Number(monsterTarget.current_hp)/Math.max(1,Number(monsterTarget.hp_max)),inspired:Boolean(cooldowns.regional_aeson_inspired),willUsed:Boolean(cooldowns.regional_aeson_will_used),berserkUsed:Boolean(cooldowns.regional_aeson_berserk_used),combo:Number(cooldowns.regional_aeson_combo??0),roll:Math.random()});
+          skill=choose(decision.code)??skill;cooldowns.regional_aeson_combo=decision.combo;
+          if(decision.code==='aeson_inspire')cooldowns.regional_aeson_inspired=1;
+          if(decision.code==='aeson_ironwill')cooldowns.regional_aeson_will_used=1;
+          if(decision.code==='aeson_berserk')cooldowns.regional_aeson_berserk_used=1;
+          if (lowest && ['aeson_shortfist','aeson_destruction'].includes(skill?.code??'')) victim=lowest;
+        }
         const mentorBuild = advancedMentorBuildFor(monsterTarget);
         if (!needsManaCharge && mentorBuild) {
           const rotation = jsonArray(mentorBuild.rotation).map(String);
@@ -5473,6 +5487,28 @@ const combatActionInTransaction = async (connection: PoolConnection, qqUserId: s
         log.push(`　$魔力充能$恢复 ${monsterTarget.current_mp - oldMp} MP(${oldMp}→${monsterTarget.current_mp})`);
         continue;
       }
+      if (isAeson && ['aeson_inspire','aeson_ironwill','aeson_berserk'].includes(skill?.code??'')) {
+        const until=Number(session.turn_no)+2;const oldHp=Number(monsterTarget.current_hp);
+        if(skill?.code==='aeson_inspire')cooldowns.regional_aeson_inspire_until=until;
+        if(skill?.code==='aeson_ironwill'){
+          cooldowns.regional_aeson_will_until=until;
+          cooldowns.aeson_will_remaining=3;
+          const aesonUnit=ruleUnit('target',Number(monsterTarget.id));
+          rules.add(aesonUnit,'defense',100,3,aesonUnit,false);
+          rules.add(aesonUnit,'magic_defense',100,3,aesonUnit,false);
+          aesonUnit.critResist*=2;
+          monsterTarget.current_hp=Math.min(Number(monsterTarget.hp_max),oldHp+Math.floor(Number(monsterTarget.hp_max)*.10));
+          await grantLifeShield(connection,session.combat_id,'target',Number(monsterTarget.id),Number(monsterTarget.hp_max),Math.floor(Number(monsterTarget.hp_max)*.15),3);
+        }
+        if(skill?.code==='aeson_berserk'){
+          cooldowns.regional_aeson_berserk_until=until;
+          monsterTarget.current_hp=Math.min(Number(monsterTarget.hp_max),oldHp+Math.floor(Number(monsterTarget.hp_max)*.08));
+        }
+        monsterTarget.cooldowns=cooldowns;
+        log.push(`➤【${targetName(monsterTarget)}】释放技能「${skill?.name}」`);
+        log.push(skill?.code==='aeson_inspire'?'　$激扬$物攻与命中提高60%(3)。':skill?.code==='aeson_ironwill'?`　$铁拳意志$双防、暴免提高100%(3)，获得护盾并恢复${Number(monsterTarget.current_hp)-oldHp}HP。`:`　$铁拳狂暴$物攻、暴击与暴伤提高30%(3)，恢复${Number(monsterTarget.current_hp)-oldHp}HP。`);
+        continue;
+      }
       if (skill?.code === 'wolfking_summon_shadow_wolf') {
         monsterTarget.current_mp -= Number(skill.mana_cost); cooldowns[skill.code] = Number(skill.cooldown_turns) + 1; monsterTarget.cooldowns = cooldowns;
         const count = await summonShadowWolves(connection, session.combat_id, monsterTarget, members); log.push(`➤【${targetName(monsterTarget)}】释放技能「${skill.name}」`); log.push(`　➥影幕翻涌，${count}只影狼加入了战斗。`); continue;
@@ -5594,7 +5630,7 @@ const combatActionInTransaction = async (connection: PoolConnection, qqUserId: s
       }
       const multiplier = Number(skill?.power ?? 100) / 100 * (skill?.code === 'skeleton_execution' && Number(victim.current_hp) / Math.max(1, Number(victim.hp_max)) < .35 ? 1.45 : 1); const monster = monsterCombatStats(monsterTarget); const bite = skill?.code === 'bite';
       const mentorPassive = jsonObject(jsonObject(mentorBuild?.passive).effect); const mentorProfession = String(mentorBuild?.professionCode ?? ''); const mentorInheritance = jsonObject(mentorBuild?.inheritance); const mentorInheritanceValue = Number(jsonArray(mentorInheritance.values)[0] ?? 0);
-      const royalRegal = Number(cooldowns.royal_regal ?? 0) > 0; const royalEnrage = Number(cooldowns.royal_beast_enrage ?? 0) > 0; const mentorHuntBonus = ['nightblade', 'trickster_ranger'].includes(mentorProfession) ? effectValue('member', Number(victim.id), 'advanced_hunt') : 0; const mentorDamageBonus = Number(mentorPassive.damageBonusPct ?? 0) + (skill?.category === 'magic' ? Number(mentorPassive.magicDamagePct ?? 0) : 0) + (skill?.element === '光' ? Number(mentorPassive.lightSkillBonusPct ?? 0) : 0) + mentorHuntBonus + (mentorProfession === 'nightblade' && Number(victim.current_hp) / Math.max(1, Number(victim.hp_max)) <= .35 ? mentorInheritanceValue : 0); const monsterAttack = (skill?.category === 'magic' ? monster.magicAttack * (royalRegal ? 1.35 : 1) : monster.physicalAttack) * (1 + mentorDamageBonus / 100); const victimModifiers = await modifiersFor(connection, Number(victim.id));
+      const royalRegal = Number(cooldowns.royal_regal ?? 0) > 0; const royalEnrage = Number(cooldowns.royal_beast_enrage ?? 0) > 0; const mentorHuntBonus = ['nightblade', 'trickster_ranger'].includes(mentorProfession) ? effectValue('member', Number(victim.id), 'advanced_hunt') : 0; const mentorDamageBonus = Number(mentorPassive.damageBonusPct ?? 0) + (skill?.category === 'magic' ? Number(mentorPassive.magicDamagePct ?? 0) : 0) + (skill?.element === '光' ? Number(mentorPassive.lightSkillBonusPct ?? 0) : 0) + mentorHuntBonus + (mentorProfession === 'nightblade' && Number(victim.current_hp) / Math.max(1, Number(victim.hp_max)) <= .35 ? mentorInheritanceValue : 0); const aesonInspired=isAeson&&Number(cooldowns.regional_aeson_inspire_until??0)>=Number(session.turn_no);const aesonBerserk=isAeson&&Number(cooldowns.regional_aeson_berserk_until??0)>=Number(session.turn_no);const monsterAttack = (skill?.category === 'magic' ? monster.magicAttack * (royalRegal ? 1.35 : 1) : monster.physicalAttack) * (1 + mentorDamageBonus / 100) * (aesonInspired?1.6:1) * (aesonBerserk?1.3:1); const victimModifiers = await modifiersFor(connection, Number(victim.id));
       const curse = effectValue('target', Number(monsterTarget.id), 'shadow_curse'); const battleCry = effectValue('target', Number(monsterTarget.id), 'battle_cry'); const mistVeil = effectValue('target', Number(monsterTarget.id), 'mist_veil'); const shadowPierce = effectValue('target', Number(monsterTarget.id), 'shadow_pierce'); const nextActionEffects = effects.filter(effect => effect.target_kind === 'target' && Number(effect.target_id) === Number(monsterTarget.id) && (effect.code === 'mist_veil' || effect.code === 'shadow_pierce')); const fang = skill?.code === 'wolfking_fang_devour'; const pounce = skill?.code === 'wolfking_rending_pounce';
       const regionalComboMultiplier = (defender: CombatMemberRow) => {
         const defenderCooldowns = jsonObject(defender.cooldowns); const marked = (code: string) => Number(defenderCooldowns[code] ?? 0) >= Number(session.turn_no);
@@ -5626,7 +5662,7 @@ const combatActionInTransaction = async (connection: PoolConnection, qqUserId: s
         const inheritanceCrit = mentorProfession === 'ironbreaker' && (physicalDefenseReduction > 0 || effectValue('member', Number(defender.id), 'exposed') > 0) ? mentorInheritanceValue : mentorProfession === 'venomancer' && (effectValue('member', Number(defender.id), 'poison') > 0 || physicalDefenseReduction > 0 || effectValue('member', Number(defender.id), 'exposed') > 0) ? mentorInheritanceValue : 0;
         const actualHit = Number(mentorPassive.actualHitRatePct ?? 0);
         const setup = await rules.attackSetup(ruleUnit('target', Number(monsterTarget.id)), ruleUnit('member', Number(defender.id)), skill?.category === 'magic', Boolean(skill));
-        return resolveStrike(monsterAttack * multiplier * regionalComboMultiplier(defender) * (1 + curse / 400) * (1 + battleCry / 100) * (1 + mistVeil / 100), defenderDefense * (1 + ownRuleValue('member', Number(defender.id), skill?.category === 'magic' ? 'magic_defense' : 'defense') / 100) * (1 - curse / 400) * (1 + defenderGuardTonic / 100), pressuredMonster.accuracy * (1 + curse / 100 + battleCry / 100) * (royalRegal ? 1.2 : 1) * (Number(cooldowns.royal_signal ?? 0) > 0 ? 1.15 : 1) * (royalEnrage ? 3 : 1), Number(defender.evasion) * (1 + defenderEvasionTonic / 100) * (1 - defenderImbalance / 100) * (1 - defenderBind / 100), (pressuredMonster.crit + inheritanceCrit * 100) * (royalEnrage ? 3 : 1), Number(defender.crit_resist_bp), pressuredMonster.critDamage * (royalEnrage ? 3 : 1), Number(defender.crit_damage_reduction_bp), false, fang || shadowPierce > 0, 0, actualHit + setup.hitBonus * 100, setup.hitFactor, strikeCorrections(ruleUnit('target', Number(monsterTarget.id)),ruleUnit('member', Number(defender.id))));
+        return resolveStrike(monsterAttack * multiplier * regionalComboMultiplier(defender) * (1 + curse / 400) * (1 + battleCry / 100) * (1 + mistVeil / 100), defenderDefense * (1 + ownRuleValue('member', Number(defender.id), skill?.category === 'magic' ? 'magic_defense' : 'defense') / 100) * (1 - curse / 400) * (1 + defenderGuardTonic / 100), pressuredMonster.accuracy * (1 + curse / 100 + battleCry / 100) * (royalRegal ? 1.2 : 1) * (Number(cooldowns.royal_signal ?? 0) > 0 ? 1.15 : 1) * (royalEnrage ? 3 : 1) * (aesonInspired?1.6:1), Number(defender.evasion) * (1 + defenderEvasionTonic / 100) * (1 - defenderImbalance / 100) * (1 - defenderBind / 100), (pressuredMonster.crit + inheritanceCrit * 100) * (royalEnrage ? 3 : 1) * (aesonBerserk?1.3:1), Number(defender.crit_resist_bp), pressuredMonster.critDamage * (royalEnrage ? 3 : 1) * (aesonBerserk?1.3:1), Number(defender.crit_damage_reduction_bp), isAeson&&skill?.code==='aeson_destruction', fang || shadowPierce > 0 || isAeson&&skill?.code==='aeson_destruction', 0, actualHit + setup.hitBonus * 100, setup.hitFactor, strikeCorrections(ruleUnit('target', Number(monsterTarget.id)),ruleUnit('member', Number(defender.id))));
       };
       const shieldCounterDamage = async (defender: CombatMemberRow, rawDamage: number) => {
         const damageReductionPct = Math.min(60, effectValue('member', Number(defender.id), 'shield_counter'));
@@ -5690,7 +5726,7 @@ const combatActionInTransaction = async (connection: PoolConnection, qqUserId: s
           recipient.cooldowns = cooldowns;
         }
       };
-      const identifiedMonster = Boolean(appraisalForTarget(appraisal, Number(monsterTarget.level)));
+      const identifiedMonster = isAeson || Boolean(appraisalForTarget(appraisal, Number(monsterTarget.level)));
       log.push(`➤【${targetName(monsterTarget)}】${skill ? `释放技能「${identifiedMonster ? skill.name : '???'}」` : '普通攻击'}`);
       if (nextActionEffects.length) await connection.execute(`DELETE FROM combat_status_effects WHERE id IN (${nextActionEffects.map(() => '?').join(',')})`, nextActionEffects.map(effect => effect.id));
       const [spiritTargets] = await connection.execute<CombatSpiritRow[]>('SELECT owner_character_id,spirit_code,spirit_name,current_hp,hp_max,stats_json,remaining_turns FROM combat_spirits WHERE session_id=? AND current_hp>0 FOR UPDATE', [session.combat_id]);
@@ -5698,7 +5734,7 @@ const combatActionInTransaction = async (connection: PoolConnection, qqUserId: s
       const [humanThreat] = await connection.execute<RowDataPacket[]>('SELECT COALESCE(SUM(threat),0) total FROM combat_threat WHERE session_id=? AND spawn_id=?', [session.combat_id, monsterTarget.id]);
       const petThreat = livingAutomatons.reduce((sum, pet) => sum + Math.max(1, pet.battle.threat[`target:${monsterTarget.id}`] ?? 1), 0);
       const areaAttack = skill?.target_scope === '全体';
-      const choosePet = !areaAttack && livingAutomatons.length > 0 && Math.random() < petThreat / Math.max(1, petThreat + Math.max(members.filter(m=>!m.is_defeated).length,Number(humanThreat[0]?.total ?? 0)));
+      const choosePet = !isAeson && !areaAttack && livingAutomatons.length > 0 && Math.random() < petThreat / Math.max(1, petThreat + Math.max(members.filter(m=>!m.is_defeated).length,Number(humanThreat[0]?.total ?? 0)));
       let petRoll=Math.random()*petThreat;const chosenPet=livingAutomatons.find(p=>{petRoll-=Math.max(1,p.battle.threat[`target:${monsterTarget.id}`]??1);return petRoll<0;});
       const petVictims = areaAttack ? livingAutomatons : choosePet&&chosenPet ? [chosenPet] : [];
       for (const pet of petVictims) {
@@ -5707,7 +5743,7 @@ const combatActionInTransaction = async (connection: PoolConnection, qqUserId: s
         if (skill?.category !== 'utility')for(let hit=0;hit<(pounce?3:1)&&pet.unit.hp>0;hit++){const landed=await rules.strike(attacker, pet.unit, multiplier * 100, String(skill?.element ?? '无'), skill?.category === 'magic', false, false, 1, { skill: Boolean(skill), single: !areaAttack });if(landed&&skill)await applyEnemySkillToAutomaton(connection,rules,attacker,pet.unit,Number(skill.id),'on_hit',choosePet);}
       }
       if (choosePet) continue;
-      const spiritVictim = !spiritTargets.length || skill?.target_scope === '全体' || Math.random() >= .28 ? undefined : spiritTargets[random(0, spiritTargets.length - 1)];
+      const spiritVictim = isAeson || !spiritTargets.length || skill?.target_scope === '全体' || Math.random() >= .28 ? undefined : spiritTargets[random(0, spiritTargets.length - 1)];
       if (spiritVictim) {
         const spiritStats = storedSpiritStats(spiritVictim); const pressuredMonster = monsterCombatStatsForPlayer(monsterTarget, lowestAliveMemberLevel);
         const spiritDefense = skill?.category === 'magic' ? spiritStats.magicDefense : spiritStats.physicalDefense;
@@ -5749,7 +5785,7 @@ const combatActionInTransaction = async (connection: PoolConnection, qqUserId: s
         }
         continue;
       }
-      const affected = skill?.target_scope === '全体' ? members.filter(member => !member.is_defeated) : [victim];
+      const affected = skill?.target_scope === '全体' ? members.filter(member => !member.is_defeated) : isAeson&&skill?.code==='aeson_snakebind' ? [victim,...members.filter(member=>!member.is_defeated&&Number(member.id)!==Number(victim.id)).sort((a,b)=>Number(a.current_hp)/Math.max(1,Number(a.hp_max))-Number(b.current_hp)/Math.max(1,Number(b.hp_max))).slice(0,1)] : [victim];
       await consumePrecisionAim(victim);
       const strike = await resolveMonsterStrike(victim);
       if (!strike.hit && affected.length === 1) { const cooldowns = jsonObject(victim.cooldowns); if (cooldowns.advanced_phase_guard) { delete cooldowns.advanced_phase_guard; victim.cooldowns = cooldowns; await gainResource(victim, 30, '相位格挡成功闪避'); } log.push(`　➥${combatUnitLabel(victim)}闪避了攻击`); continue; }
@@ -5775,6 +5811,15 @@ const combatActionInTransaction = async (connection: PoolConnection, qqUserId: s
         await triggerSummonerShelter(affectedVictim);
         if (skill) await triggerEpicIncomingSkill(affectedVictim);
         if (skill) await applySkillEffects(connection, session.combat_id, Number(skill.id), monsterTarget, 'target', affectedVictim, 'member', 'on_hit', log, 0, 1, rules);
+        if(isAeson&&skill){
+          const id=Number(affectedVictim.id);
+          const aesonUnit=ruleUnit('target',Number(monsterTarget.id)),hurtUnit=ruleUnit('member',id);
+          if(skill.code==='aeson_softbreak'){rules.add(hurtUnit,'attack_down',40,3,aesonUnit,true);rules.add(hurtUnit,'magic_down',40,3,aesonUnit,true);log.push(`　$柔拳$${combatUnitLabel(affectedVictim)}双攻降低40%(3)。`);}
+          if(skill.code==='aeson_shortfist'){rules.add(hurtUnit,'alchemy_stun',100,2,aesonUnit,true);log.push(`　$寸劲$${combatUnitLabel(affectedVictim)}眩晕2回合。`);}
+          if(skill.code==='aeson_snakebind'){rules.add(hurtUnit,'accuracy_down',80,3,aesonUnit,true);rules.add(hurtUnit,'evasion_down',80,3,aesonUnit,true);log.push(`　$蛇缠$${combatUnitLabel(affectedVictim)}命中、闪避降低80%(3)。`);}
+          if(skill.code==='aeson_ultimate'){rules.add(hurtUnit,'alchemy_antiheal',30,3,aesonUnit,true);log.push(`　$极意$${combatUnitLabel(affectedVictim)}受到的治疗降低30%(3)。`);}
+          if(['aeson_shortfist','aeson_ultimate'].includes(skill.code)&&oldHp/Math.max(1,Number(affectedVictim.hp_max))<.25&&!affectedVictim.is_defeated){affectedVictim.current_hp=0;affectedVictim.is_defeated=1;log.push(`　$斩杀$${combatUnitLabel(affectedVictim)}在低于25%生命时倒下。`);}
+        }
         if (skill && level32BossCodes.has(templateCode)) {
           const targetCooldowns = jsonObject(affectedVictim.cooldowns); const until = Number(session.turn_no) + 2;
           if (skill.code === 'gruen_fault_sunder') {
@@ -5930,7 +5975,7 @@ const combatActionInTransaction = async (connection: PoolConnection, qqUserId: s
     await connection.execute('UPDATE monster_spawns SET current_hp=?,defeated_at=IF(?,NOW(),defeated_at) WHERE id=?', [target.current_hp, target.is_defeated ? 1 : 0, target.id]);
     await connection.execute('UPDATE combat_targets SET current_mp=?,cooldowns=?,is_defeated=? WHERE session_id=? AND spawn_id=?', [target.current_mp, JSON.stringify(cooldowns), target.is_defeated ? 1 : 0, session.combat_id, target.id]);
   }
-  for (const target of targets) if (session.mode !== 'spar' && !canAppraiseTarget(appraisal, Number(target.level))) for (let index = 0; index < log.length; index += 1) {
+  for (const target of targets) if (session.mode !== 'spar' && !traitList(target.traits_json).some(trait=>trait.code==='aeson_duel') && !canAppraiseTarget(appraisal, Number(target.level))) for (let index = 0; index < log.length; index += 1) {
     if (!log[index].includes(target.name)) continue;
     log[index] = log[index].replaceAll(target.name, '???').replace(/(损失|恢复) \d+ HP\(\d+→\d+\)/g, '$1 ??? HP(???→???)');
   }

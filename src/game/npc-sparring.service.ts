@@ -75,6 +75,8 @@ export const startNpcSparring = async (userId: string, code: string) => withTran
 });
 
 export const finishNpcSparring = async (connection: PoolConnection, sessionId: string, result: 'victory' | 'defeat' | 'escaped' | 'timeout') => {
+  const worldtree=await(await import('./worldtree-witness.service')).finishAesonDuel(connection,sessionId,result);
+  if(worldtree)return worldtree;
   const lamplight=await(await import('./lamplight-battle.service')).finishLamplightBattle(connection,sessionId,result);
   if(lamplight)return lamplight;
   const [rows] = await connection.execute<RowDataPacket[]>('SELECT * FROM player_npc_spar_attempts WHERE session_id=? FOR UPDATE', [sessionId]);

@@ -124,6 +124,8 @@ export const currentMainQuest = async (qqUserId: string, _skipLamplight = false)
   }
   const floatingQuest = await floatingStoryMainQuest(qqUserId);
   if (floatingQuest) return floatingQuest;
+  const worldtreeQuest = await (await import('./worldtree-witness.service')).worldtreeWitnessMainQuest(qqUserId);
+  if (worldtreeQuest) return worldtreeQuest;
   if (Number(character.realm_stage) === 1 && (level < 10 || experience < experienceRequiredForLevel(10))) return {
     title: '【主线·初入异界】',
     description: level < 10

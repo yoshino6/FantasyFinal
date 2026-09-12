@@ -63,8 +63,8 @@ test('当前开放的四条初行路线每页正文都保留自然段分隔',()=
   }
   const coffin = openingRouteByCode('M01')!;
   const coffinText = JSON.stringify([coffin.pages, ...coffin.choices.map(choice => [choice.pages, choice.arrival])]);
-  assert.doesNotMatch(coffinText, /死亡证明|预约复苏|待复苏长老|死亡登记/);
-  assert.match(coffinText, /古木长老遗物|收件人|航务凭证/);
+  assert.doesNotMatch(coffinText, /死亡证明|预约复苏|待复苏长老|死亡登记|长老遗物/);
+  assert.match(coffinText, /地面巡游|长老回程|接回古木长老/);
 });
 test('三人冒险团沿用旧相遇并在真实史莱姆战斗胜利后回城',()=>{
   const route=openingRouteByCode('F03')!;
@@ -90,6 +90,16 @@ test('幽暗密林每条回城分支都由梨子喵结识并遇见三人冒险�
   }
   assert.match(forestArrivalTownScenes[2],/长着猫耳和尾巴/);
   assert.match(forestArrivalGuildScenes[1],/母亲是猫族/);
+});
+test('幽暗密林三条开局在十一级后汇入梨子喵失踪主线',()=>{
+  for(const code of ['F01','F02','F03'])assert.ok(openingRouteByCode(code),code);
+  const openingSource=readFileSync('src/game/opening.service.ts','utf8');
+  const questSource=readFileSync('src/game/main-quest.service.ts','utf8');
+  assert.match(openingSource,/INSERT INTO player_story_progress \(character_id,story_code,status,stage\) VALUES \(\?,'forest_guide','completed',0\)/);
+  assert.match(questSource,/title: '【主线·失踪的少女】'[\s\S]*梨子喵进森林打猎后也迟迟未归/);
+  const start=questSource.slice(questSource.indexOf('export const startGoblinKingQuest'),questSource.indexOf('export const consultVivianForJudicator'));
+  assert.match(start,/character\.level\) < 11/);
+  assert.doesNotMatch(start,/route_code|F01|F02|F03/,'接取失踪少女不应按幽暗密林开局分流');
 });
 test('抵达段由路线人物带路或给出明确方向，进入公会后不再追加交接剧情',()=>{
   for(const route of openingRoutes){

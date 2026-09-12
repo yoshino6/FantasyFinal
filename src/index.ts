@@ -44,11 +44,16 @@ const appGroup = router.group({ // 精准规则匹配，复杂度 O1，稳定 �
     stripPrefix: true, // 匹配时去掉前缀 
     allowBare: true  // 允许不使用前缀 
   }
-}, () => import('./middleware/opening'), () => import('./middleware/floating-leaf-tour'), () => import('./middleware/pvp-defeat-protection'))
+}, () => import('./middleware/opening'), () => import('./middleware/floating-leaf-tour'), () => import('./middleware/worldtree-witness'), () => import('./middleware/pvp-defeat-protection'))
 
 registerSecondaryShopRoutes(appGroup);
 registerOpeningRoutes(appGroup);
 appGroup.use('浮叶游览', () => import('./response/floating-leaf').then(module => ({ default: module.floatingTourHandler })));
+appGroup.use({path:'世界树见证',schema:{usage:'/世界树见证 <游览|邀约|赴约> [进度]',args:[{name:'action',rules:[{required:true,type:'enum',enum:['游览','邀约','赴约','继续']}]},{name:'page',rules:[{type:'number',min:1}]}]}},()=>import('./response/worldtree-witness').then(module=>({default:module.worldtreeWitnessHandler})));
+appGroup.use('永恒竞技场',()=>import('./response/worldtree-witness').then(module=>({default:module.eternalArenaHandler})));
+appGroup.use('竞技场入场',()=>import('./response/worldtree-witness').then(module=>({default:module.enterEternalArenaHandler})));
+appGroup.use('竞技场离开',()=>import('./response/worldtree-witness').then(module=>({default:module.leaveEternalArenaHandler})));
+appGroup.use('艾森决斗',()=>import('./response/worldtree-witness').then(module=>({default:module.aesonDuelHandler})));
 appGroup.use({ path: '浮叶瓶颈', schema: { usage: '/浮叶瓶颈 <guild|observatory>', args: [{ name: 'source', rules: [{ required: true, type: 'enum', enum: ['guild', 'observatory'] }] }] } }, () => import('./response/floating-leaf').then(module => ({ default: module.floatingBarrierHandler })));
 appGroup.use('浮叶公馆', () => import('./response/floating-leaf').then(module => ({ default: module.floatingManorHandler })));
 appGroup.use('浮叶委托', () => import('./response/floating-leaf').then(module => ({ default: module.floatingRescueStartHandler })));
