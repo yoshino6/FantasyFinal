@@ -32,7 +32,7 @@ export const startAdminWebServer = async () => {
   app.use(router.routes());
   app.use(router.allowedMethods());
 
-  const server = app.listen(config.port, '127.0.0.1');
+  const server = app.listen(config.port, config.listenHost);
   await new Promise<void>((resolve, reject) => {
     const onListening = () => {
       server.off('error', onError);
@@ -47,5 +47,7 @@ export const startAdminWebServer = async () => {
   });
 
   (globalThis as AdminWebGlobal).__fantasyFinalAdminWebServer = server;
-  logger.info(`管理后台已启动：http://127.0.0.1:${config.port}/admin`);
+  const address = config.publicBaseUrl ?? `http://${config.listenHost}:${config.port}`;
+  if (config.allowInsecurePublicHttp) logger.warn(`管理后台正以不安全 HTTP 公开：${address}/admin。账号、密码和会话可能被截获。`);
+  else logger.info(`管理后台已启动：${address}/admin`);
 };

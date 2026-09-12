@@ -6,7 +6,6 @@ import { openingSafeHubs, openingWorldFor, type OpeningConnection } from './open
 import { grantInventory, consumeInventory } from './inventory-binding';
 import type { OpeningBranch, OpeningEntry, OpeningPage, OpeningState, OpeningView } from './opening.types';
 import { grantOpeningExperience } from './opening-progress.service';
-import { openingSpecialArrival } from './opening-special-arrivals';
 
 type StoryRow = RowDataPacket & { character_id:number;route_code:string;story_version:number;state:OpeningState;branch_code:OpeningBranch|null;page_index:number;revision:number;entry_kind:OpeningEntry;started_epoch:number;flags_json:unknown;reward_claimed:number;destination_code:OpeningHubCode };
 const json = (value:unknown): Record<string,any> => typeof value === 'string' ? JSON.parse(value) : value as Record<string,any> ?? {};
@@ -41,7 +40,7 @@ const scenePages=(row:StoryRow):OpeningPage[]=>{
       return[{title:route.title,text:entry},{title:'一次过于热情的欢迎',text:accident},...erisPages];
     }
     const pages=route.pages.map((page,index)=>({...page,text:openingFirstMeetingText(route,page.text,index)}));
-    return[{title:route.title,text:entry},...pages];
+    return route.entryMergedIntoFirstPage?pages:[{title:route.title,text:entry},...pages];
   }
   if(row.state==='branch'){
     if(row.route_code==='A01'&&flags.eris){
@@ -51,26 +50,20 @@ const scenePages=(row:StoryRow):OpeningPage[]=>{
     return choice!.pages;
   }
   if(row.state==='arrival'){
-    if(row.destination_code!==route.destination)return[{title:'接应改道',text:`引灯人先一步收到停航的消息，立刻请沿路值守改接安全通道。你没有被留在原地等待；${row.route_code==='F02'&&row.branch_code==='B'?'瑟芙菈收起王印，将你一路送到新的接引灯下，才把邀请函交回你手中。':''}\n\n${openingHubs[row.destination_code].description}\n\n原定的${openingHubs[route.destination as OpeningHubCode].name}暂不接待，接引记录与奖励一同转到${openingHubs[row.destination_code].name}。`}];
-    if(row.route_code==='F02'&&row.branch_code==='B')return[
-      {title:'微光与王印',text:'微光在伤口旁收拢。少女试着活动肩膀，忽然说：“瑟芙菈。我的名字。”\n\n她将一枚金币与火漆完好的信放进你的掌心。“药钱，还有谢礼。将来走到魔界门前，至少有人愿意听你说完。”\n\n她点亮银饰上的半枚王印，红光贴着地面延向林外。“跟着我。你连路都不认识，留在这里，明天恐怕轮到我替你敷药。”'},
-      {title:'城门前的找零',text:'百纳镇城门前，摊主把一枚银币推回猫族少女手中。\n\n“多给了一枚。”\n\n“我知道喵！我是……先让它在你这里待一会儿。”她赶紧接过钱，耳尖已经红了。\n\n瑟芙菈停在门外：“这里够安全。后面自己走。信别弄丢。”梨子喵抱着纸袋迎来：“第一次来喵？我叫梨子，公会就在里面，这次我真的记得路。”'},
-      {title:'刚刚归来的三人',text:'铁靴踏过碎石，莱昂的盾缘还挂着史莱姆黏液。伊芙用火星烘袖口，希娅将绷带收回药袋。\n\n“史莱姆收拾完了。”莱昂看向你，“新来的？别跟她在摊位研究找零，先去公会。”\n\n“我没有研究找零喵！”\n\n梨子喵拉住你的衣袖，快步入城。背后传来伊芙的笑，希娅温声提醒小心台阶。'}];
-    if(row.route_code==='F01'&&row.branch_code==='A')return[{title:'金鼻尖认得的灯',text:'黄金兔嗅着风跑向林间一点微光，又回头等你。它认得附近引灯人的气味，却不敢独自穿过幽深树影。\n\n引灯人俯身看看兔子，再看看你空下来的口粮袋，没多问，抬灯走在前面。兔子一路反复回头，等你跟上才继续蹦跳。城门灯火终于亮起。'}];
-    const specialArrival=openingSpecialArrival(row.route_code,row.branch_code);
-    if(specialArrival)return specialArrival;
-    return route.arrival.map(page=>({...page,text:openingNewcomerText(page.text)}));
+    if(row.destination_code!==route.destination)return[{title:'安全改道',text:`原定通往${openingHubs[route.destination as OpeningHubCode].name}的道路临时关闭。初行保护在最近的安全节点开启了单向传送门，将我直接送到${openingHubs[row.destination_code].name}公会门前。\n\n${openingHubs[row.destination_code].description}\n\n路线奖励仍按我亲历的选择结算，没有因改道增加额外剧情。`}];
+    return (choice?.arrival??route.arrival).map(page=>({...page,text:openingNewcomerText(page.text)}));
   }
   if(row.state==='lesson')return[{title:choice!.quest,text:openingLessonText(route,choice!)}];
   return[{title:choice?.quest??route.title,text:openingNewcomerText(choice?.farewell||'这段经历已经妥善记下。眼前的旅途，可以继续了。')}];
 };
 const view=(row:StoryRow):OpeningView=>{
-  const route=openingRouteByCode(row.route_code,row.story_version)!;const ps=scenePages(row);const page=ps[Math.min(Number(row.page_index),ps.length-1)];const choice=selectedChoice(row);const flags=json(row.flags_json);
+  const route=openingRouteByCode(row.route_code,row.story_version)!;const ps=scenePages(row);const pageIndex=row.state==='choice'?ps.length-1:Math.min(Number(row.page_index),ps.length-1);const page=ps[pageIndex];const choice=selectedChoice(row);const flags=json(row.flags_json);
   const state:OpeningState=row.state==='reading'&&Number(row.page_index)>=ps.length-1?'choice':row.state;
   let choices=route.choices.map(c=>({code:c.code,label:c.label}));
   if(row.route_code==='A01'&&flags.eris)choices=[{code:'A',label:'接受厄里斯的安全返还'},{code:'B',label:'带事故函去地上的女神办事桌'},{code:'C',label:'留下厄里斯的个人受理印'}];
-  return{route:row.route_code,title:page.title,state,revision:Number(row.revision),text:openingNarrativeText(page.text),page:Number(row.page_index)+1,pages:ps.length,branch:row.branch_code,
-    choices:state==='choice'?choices:[],action:row.state==='lesson'?choice!.task:undefined,reward:row.reward_claimed?String(flags.rewardName??choice?.rewardName):undefined,destination:row.reward_claimed?openingHubs[row.destination_code].name:undefined};
+  return{route:row.route_code,title:page.title,state,revision:Number(row.revision),text:openingNarrativeText(page.text),page:pageIndex+1,pages:ps.length,branch:row.branch_code,
+    choices:state==='choice'?choices:[],action:row.state==='lesson'?choice!.task:undefined,reward:row.reward_claimed?String(flags.rewardName??choice?.rewardName):undefined,destination:row.reward_claimed?openingHubs[row.destination_code].name:undefined,
+    forestBattleChoice:row.route_code==='F03'&&flags.forestBattlePending?(flags.forestBattlePending==='join'?'join':'depart'):undefined};
 };
 export const openingStatus=async(user:string):Promise<OpeningView|null>=>{
   const pool=await getPool();const [chars]=await pool.execute<RowDataPacket[]>('SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=?',[user]);
@@ -114,9 +107,9 @@ const settleArrival=async(connection:PoolConnection,row:StoryRow)=>{
   if(row.route_code==='S03'&&row.branch_code==='A'){
     const companion=await(await import('./companion.service')).grantWindbirdChick(connection,Number(row.character_id));
     name=`旅程变化：${companion}破壳后选择与你同行`;
-  }else if(row.route_code==='I02'&&['A','B'].includes(String(row.branch_code))){
-    const automaton=await(await import('./automaton.service')).grantOpeningAutomaton(connection,Number(row.character_id));
-    name=`旅程变化：${automaton.state.name} #${automaton.id} 主动认主，以“${automaton.state.personality.coreName}”人格开始随行`;
+  }else if(row.route_code==='S03'&&row.branch_code==='B'){
+    await connection.execute('UPDATE characters SET copper_coins=copper_coins+2000 WHERE id=?',[row.character_id]);
+    code='opening_s03_rescue_reward';name='2000铜币';
   }else if(choice.rewardKind){
     name=await(await import('./opening-rewards.service')).grantOpeningRouteReward(connection,Number(row.character_id),openingRouteByCode(row.route_code,row.story_version)!,choice);
   }else if(row.route_code==='F01'&&row.branch_code==='A'){
@@ -142,17 +135,31 @@ const settleArrival=async(connection:PoolConnection,row:StoryRow)=>{
   await connection.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=?,pos_z=?,current_hp=hp_max,current_mp=mp_max,stamina=120,stamina_updated_at=NOW(),activity_status=\'active\' WHERE id=?',[destination.id,destination.pos_x,destination.pos_y,destination.pos_z,row.character_id]);
   await grantOpeningExperience(connection,Number(row.character_id),'arrival');
   await connection.execute('UPDATE characters SET current_hp=hp_max,current_mp=mp_max WHERE id=?',[row.character_id]);
-  await grantOpeningItem(connection,Number(row.character_id),`map_${row.destination_code}`);
+  if(row.route_code!=='M01'||row.destination_code!=='floating_leaf_town')await grantOpeningItem(connection,Number(row.character_id),`map_${row.destination_code}`);
   flags.rewardName=name;flags.rewardCode=code;
   await connection.execute("UPDATE player_opening_stories SET state='arrival',page_index=0,reward_claimed=1,flags_json=? WHERE character_id=?",[JSON.stringify(flags),row.character_id]);
   return true;
 };
 
+const completeOpening=async(connection:PoolConnection,row:StoryRow)=>{
+  if(row.route_code==='M01'&&row.destination_code==='floating_leaf_town'){
+    const world=await openingWorldFor(connection,true);
+    if(!world.leaf_route_open){
+      await connection.execute('UPDATE opening_world SET leaf_route_open=1,leaf_discoverer_id=?,revision=revision+1 WHERE id=1',[row.character_id]);
+      await connection.execute("INSERT INTO opening_world_events (code,character_id,text) VALUES ('floating_leaf_route',?,'第一位下界旅人完成了浮叶镇航务登记。世界树与浮叶镇之间的公共航路正式开放。')",[row.character_id]);
+    }
+  }
+  await connection.execute("INSERT INTO player_story_progress (character_id,story_code,status,stage) VALUES (?,'forest_guide','completed',0) ON DUPLICATE KEY UPDATE status='completed'",[row.character_id]);
+  await connection.execute("UPDATE player_opening_stories SET state='completed',page_index=0 WHERE character_id=?",[row.character_id]);
+};
+
 export const advanceOpening=async(user:string,revision:number,action:string):Promise<OpeningView>=>withTransaction(async connection=>{
   if(!Number.isSafeInteger(revision)||revision<0||!['next','lesson','A','B','C','treat'].includes(action))throw new Error('剧情操作无效，请重新打开当前剧情。');
   const character=await openingCharacter(connection,user,true);const row=await loadStory(connection,Number(character.id),true);if(!row)throw new Error('没有进行中的初行剧情。');
-  const [prior]=await connection.execute<RowDataPacket[]>('SELECT action_key,result_json FROM player_opening_actions WHERE character_id=? AND revision=?',[character.id,revision]);
-  if(prior[0])return prior[0].action_key===action ? json(prior[0].result_json) as OpeningView : view(row);
+  if(row.state==='completed')return view(row);
+  const [prior]=await connection.execute<RowDataPacket[]>('SELECT action_key FROM player_opening_actions WHERE character_id=? AND revision=?',[character.id,revision]);
+  // 历史 action 只用于阻止重复结算；重发时按当前配置重建页面，避免旧缓存继续显示已删除的抵达文案。
+  if(prior[0])return view(row);
   if(Number(row.revision)!==revision)return view(row);
   // 兼容更新前已停在最后阅读页的记录：直接接收选择；旧“继续”只补显选项。
   if(row.state==='reading'&&Number(row.page_index)>=scenePages(row).length-1){
@@ -170,32 +177,16 @@ export const advanceOpening=async(user:string,revision:number,action:string):Pro
     if(row.route_code==='A01'&&!flags.eris&&world.current_goddess==='eris'){
       flags.eris=true;flags.handoff=true;await connection.execute("UPDATE player_opening_stories SET state='choice',flags_json=?,page_index=0 WHERE character_id=?",[JSON.stringify(flags),character.id]);
     }else{
-      if(row.route_code==='F01'&&action==='A')await consumeCode(connection,Number(character.id),'opening_last_ration');
+      if(row.route_code==='F01'&&action==='A'){
+        await consumeCode(connection,Number(character.id),'opening_last_ration');
+        await consumeCode(connection,Number(character.id),'opening_mineral_water');
+        await consumeCode(connection,Number(character.id),'healing_herb');
+      }
       await connection.execute("UPDATE player_opening_stories SET state='branch',branch_code=?,page_index=0 WHERE character_id=?",[action,character.id]);
     }
   }else if(row.state==='lesson'){
     if(action!=='lesson')throw new Error('请先读完当前的公会剧情。');
-    if(row.route_code==='F01'&&row.branch_code==='B'){
-      const [opened]=await connection.execute<RowDataPacket[]>("SELECT 1 FROM opening_chest_requests WHERE character_id=? AND chest_code='opening_golden_chest' AND state='complete' LIMIT 1",[character.id]);
-      if(!opened.length)throw new Error('请先打开黄金宝箱，再进行装备教学。');
-    }
-    if(row.route_code==='F01'&&row.branch_code==='A')await (await import('./companion.service')).openingFeedRabbit(connection,Number(character.id));
-    // 抵达剧情只把旅人自然带进公会；冒险者身份与卡片仍由前台亲自办理，不能因完成路线自动跳过。
-    await grantOpeningExperience(connection,Number(character.id),'register');
-    if(route.code==='F01'||route.code==='F02'&&row.branch_code==='A'||selectedChoice(row)?.pack||selectedChoice(row)?.rewardKind)await grantOpeningExperience(connection,Number(character.id),'lesson');
-    await connection.execute('UPDATE characters SET current_hp=hp_max,current_mp=mp_max WHERE id=?',[character.id]);
-    await grantOpeningItem(connection,Number(character.id),'healing_herb',2);
-    await connection.execute("INSERT IGNORE INTO player_opening_services (character_id,code,uses) VALUES (?,'arrival_recovery',1)",[character.id]);
-    await connection.execute("INSERT INTO player_opening_services (character_id,code,uses) VALUES (?,'meal',3),(?,'repair',1) ON DUPLICATE KEY UPDATE uses=uses+VALUES(uses)",[character.id,character.id]);
-    if(row.route_code==='M01'&&row.destination_code==='floating_leaf_town'){
-      const world=await openingWorldFor(connection,true);
-      if(!world.leaf_route_open){
-        await connection.execute('UPDATE opening_world SET leaf_route_open=1,leaf_discoverer_id=?,revision=revision+1 WHERE id=1',[row.character_id]);
-        await connection.execute("INSERT INTO opening_world_events (code,character_id,text) VALUES ('floating_leaf_route',?,'第一位下界旅人完成了浮叶镇航务登记。世界树与浮叶镇之间的公共航路正式开放。')",[row.character_id]);
-      }
-    }
-    await connection.execute("INSERT INTO player_story_progress (character_id,story_code,status,stage) VALUES (?,'forest_guide','completed',0) ON DUPLICATE KEY UPDATE status='completed'",[character.id]);
-    await connection.execute("UPDATE player_opening_stories SET state='completed',page_index=0 WHERE character_id=?",[character.id]);
+    await completeOpening(connection,row);
   }else if(['reading','branch','arrival'].includes(row.state)){
     const ps=scenePages(row);
     if(row.state==='branch'&&row.route_code==='F02'&&row.branch_code==='B'&&Number(row.page_index)===ps.length-1){
@@ -204,8 +195,15 @@ export const advanceOpening=async(user:string,revision:number,action:string):Pro
     if(row.state==='reading'&&Number(row.page_index)+1>=ps.length-1)await connection.execute("UPDATE player_opening_stories SET state='choice',page_index=? WHERE character_id=?",[ps.length-1,character.id]);
     else if(Number(row.page_index)<ps.length-1)await connection.execute('UPDATE player_opening_stories SET page_index=page_index+1 WHERE character_id=?',[character.id]);
     else if(row.state==='reading')await connection.execute("UPDATE player_opening_stories SET state='choice' WHERE character_id=?",[character.id]);
-    else if(row.state==='branch')await settleArrival(connection,row);
-    else await connection.execute("UPDATE player_opening_stories SET state='lesson',page_index=0 WHERE character_id=?",[character.id]);
+    else if(row.state==='branch'){
+      if(row.route_code==='F03'){
+        const flags=json(row.flags_json);flags.forestBattlePending=row.branch_code==='A'?'join':'depart';
+        await connection.execute(`INSERT INTO player_story_progress (character_id,story_code,status,stage) VALUES (?,'forest_guide','met',5)
+          ON DUPLICATE KEY UPDATE status='met',stage=5`,[character.id]);
+        await connection.execute('UPDATE player_opening_stories SET flags_json=? WHERE character_id=?',[JSON.stringify(flags),character.id]);
+      }else await settleArrival(connection,row);
+    }
+    else await completeOpening(connection,row);
   }else throw new Error('当前剧情已经结束，或尚未开始。');
   await connection.execute('UPDATE player_opening_stories SET revision=revision+1 WHERE character_id=?',[character.id]);
   const updated=(await loadStory(connection,Number(character.id)))!;const result=view(updated);
@@ -214,8 +212,29 @@ export const advanceOpening=async(user:string,revision:number,action:string):Pro
   return result;
 });
 
+/** 剧情战斗已经建立后再结束初行锁，并只结算一次该分支的开局补给。 */
+export const completeOpeningForestBattleStart=async(user:string)=>withTransaction(async connection=>{
+  const character=await openingCharacter(connection,user,true);const row=await loadStory(connection,Number(character.id),true);
+  if(!row||row.route_code!=='F03')throw new Error('当前没有待开始的三人冒险团战斗。');
+  const flags=json(row.flags_json);const choice=selectedChoice(row);
+  if(row.state==='completed')return String(flags.rewardName??choice?.rewardName??'');
+  if(row.state!=='branch'||!choice||!flags.forestBattlePending)throw new Error('三人冒险团尚未准备好迎战。');
+  if(!row.reward_claimed){
+    if(choice.pack){
+      await grantOpeningItem(connection,Number(row.character_id),'healing_herb',choice.pack==='R医'?3:1);
+      if(choice.pack==='R契')await grantOpeningItem(connection,Number(row.character_id),'opening_companion_feed',3);
+      await (await import('./opening-pack.service')).grantOpeningPackExtras(connection,Number(row.character_id),choice.pack);
+    }
+    flags.rewardName=choice.rewardName;flags.rewardCode=choice.rewardCode;
+  }
+  delete flags.forestBattlePending;flags.forestBattleStarted=true;
+  await connection.execute("UPDATE player_opening_stories SET state='completed',page_index=0,reward_claimed=1,flags_json=?,revision=revision+1 WHERE character_id=?",[JSON.stringify(flags),row.character_id]);
+  return choice.rewardName;
+});
+
 export const openingMainQuest=async(user:string)=>{
   const status=await openingStatus(user);if(!status)return null;
-  if(status.state==='completed')return(await import('./opening-progress.service')).openingFollowupQuest(user);
+  // 初行故事抵达冒险者公会即告结束；后续由通用的注册、选职与等级主线接管。
+  if(status.state==='completed')return null;
   return{title:`【主线·${status.title}】`,description:status.state==='armed'?'先观察眼前的动静。首次移动或寻怪会开始你的初行故事。':status.state==='lesson'?status.action!:'眼前的相遇还没有结束，继续故事并作出你的选择。',action:{label:'[继续剧情]',command:'/继续剧情'}};
 };

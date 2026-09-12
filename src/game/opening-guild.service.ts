@@ -109,11 +109,13 @@ export const openingKeepsakes=async(user:string)=>{
 };
 export const openingTransport=async(user:string,destination:string)=>withTransaction(async c=>{
   const character=await openingCharacter(c,user,true);const context=await requireGuildService(c,Number(character.id));const target=openingHubs[destination as OpeningHubCode];
-  const special=['floating_leaf_town','snowlamp_hollow','frost_dragon_inn','sleepwhale_market'];
+  if(context.code==='floating_leaf_town')await(await import('./floating-leaf.service')).assertFloatingTourFreeAction(c,Number(character.id));
+  if(context.code==='world_tree')await(await import('./worldtree-witness.service')).assertWorldtreeTourFreeAction(c,Number(character.id));
+  const special=['floating_leaf_town','frost_dragon_inn'];
   if(!target||!(special.includes(context.code)&&destination==='world_tree'||context.code==='world_tree'&&special.includes(destination)))throw new Error('这条接驳线路不由当前柜台办理。');
   const world=await openingWorldFor(c);if(destination==='floating_leaf_town'&&!world.leaf_route_open)throw new Error('云上的公共航路尚未完成首次航务登记。');
   const[places]=await c.execute<RowDataPacket[]>('SELECT r.id,n.pos_x,n.pos_y,n.pos_z FROM map_regions r JOIN map_npcs n ON n.region_id=r.id WHERE r.code=? AND n.code=? AND r.is_enabled=1 AND r.is_owner_only=0',[destination,target.guild]);
   if(!places[0])throw new Error('目的地暂时停航，请留在当前安全城镇。');
   const point=places[0];await c.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=?,pos_z=? WHERE id=?',[point.id,point.pos_x,point.pos_y,point.pos_z,character.id]);await c.execute('DELETE FROM player_opening_visits WHERE character_id=?',[character.id]);
-  return `你在值守的引导下走进有护栏的接驳舱。行李安放妥当，途中无需穿过野怪领地。\n\n舱门再次打开时，${target.name}的接待员已经在等候。你已抵达${target.guildName}入口。`;
+  return `公会工作人员打开有护栏的接驳舱，确认行李安放妥当后启动线路。途中无需穿过野怪领地。\n\n舱门再次打开时，${target.name}的公会入口已经在眼前。`;
 });

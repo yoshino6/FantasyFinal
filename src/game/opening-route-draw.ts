@@ -15,6 +15,7 @@ export const chooseWeighted = <T>(entries: readonly { value: T; weight: number }
 };
 
 export type OpeningRouteCandidate = {code: string; regionCode: string; tier: number};
+export const openingGoddessChance = 1/120;
 /** 展开旧的“档位权重→同档地图均分→图内三路线均分”，权重不因本轮已抽数量而重算。 */
 export const openingRouteWeights = (candidates: readonly OpeningRouteCandidate[]) => {
   const tiers = [...new Set(candidates.map(c => c.tier))];
@@ -33,8 +34,8 @@ export const drawOpeningRoute = async (connection: OpeningConnection, candidates
     throw new Error('初行路线抽取配置无效，请稍后重试。');
   }
   const goddess = weighted.find(c => c.value === 'A01');
-  // A01 的原始边际概率始终取完整开放池，与普通轮次、剩余数量无关。
-  if (goddess && random() < goddess.weight / weighted.reduce((sum,c) => sum+c.weight,0)) return goddess.value;
+  // 女神下界路线沿用完整旧池的 1/120 概率，独立于普通路线的不放回轮次。
+  if (goddess && random() < openingGoddessChance) return goddess.value;
   const ordinary = weighted.filter(c => c.value !== 'A01');
   if (!ordinary.length) throw new Error('暂时没有可抽取的普通初行路线。');
   await connection.execute("INSERT INTO opening_route_draw_state (id,used_routes_json) VALUES (1,'[]') ON DUPLICATE KEY UPDATE id=id");

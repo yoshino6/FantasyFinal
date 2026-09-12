@@ -43,6 +43,7 @@ export const secondaryFinishedPrice = (shop:string,item:RetailItem,makerLevel:nu
     return Math.ceil(doubledRetail*cost.expectedCost/cost.materialCost);
   }
   if(shop==='alchemy_sweetshop'){
+    if(item.code==='demon_breaker_teleporter') return 200;
     const loss=synthesisLossMultiplier(basicAlchemySupplySuccess(makerLevel));
     if(item.code==='alchemy_skill_reset_elixir'){
       // 魔力粉尘和草木萃取液也来自概率炼制，先累计前置萃取损耗，再算洗练露本体。

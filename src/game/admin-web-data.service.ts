@@ -27,7 +27,7 @@ export const adminPlayers = async (filters: PlayerFilters = {}) => {
   const page = pageOf(filters.page); const keyword = asText(filters.keyword); const region = asText(filters.region, 64); const activity = asText(filters.activity, 32); const status = asText(filters.status, 32);
   const where = ['c.npc_code IS NULL']; const values: Array<string | number> = [];
   if (keyword) { where.push('(c.name LIKE ? OR p.qq_user_id LIKE ? OR p.qq_nickname LIKE ?)'); values.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`); }
-  if (region) { where.push('r.code=?'); values.push(region); }
+  if (region) { where.push('(r.code=? OR INSTR(r.name,?)>0)'); values.push(region, region); }
   if (activity) { where.push('c.activity_status=?'); values.push(activity); }
   if (status) { where.push('p.status=?'); values.push(status); }
   const clause = `WHERE ${where.join(' AND ')}`; const pool = await getPool();
@@ -37,6 +37,83 @@ export const adminPlayers = async (filters: PlayerFilters = {}) => {
     FROM characters c JOIN players p ON p.id=c.player_id JOIN map_regions r ON r.id=c.current_region_id ${clause}
     ORDER BY c.updated_at DESC,c.id DESC LIMIT 30 OFFSET ?`, [...values, (safePage - 1) * 30]);
   return { page: safePage, total, totalPages, entries: rows.map(row => ({ characterId: Number(row.character_id), playerId: Number(row.player_id), qqUserId: row.qq_user_id, nickname: row.qq_nickname, status: row.player_status, name: row.name, level: Number(row.level), realmStage: Number(row.realm_stage), copper: Number(row.copper_coins), activity: row.activity_status, region: { code: row.region_code, name: row.region_name }, updatedAt: row.updated_at })) };
+};
+
+/** 后台输入提示只返回已存在的数据；发邮件时使用编号，避免同名角色或物品误选。 */
+export const adminSearchSuggestions = async (kind: unknown, keyword: unknown, offsetValue: unknown = 0) => {
+  const type = asText(kind, 24);
+  const term = asText(keyword, 64);
+  const offset = Number(offsetValue);
+  const empty = { entries: [], hasMore: false };
+  if (!term || !Number.isSafeInteger(offset) || offset < 0 || offset > 1_000_000) return empty;
+  const pool = await getPool();
+  type SuggestionRow = RowDataPacket & { label: string; value: string; detail: string };
+  const page = (rows: SuggestionRow[]) => ({ entries: rows.slice(0, 10), hasMore: rows.length > 10 });
+  if (type === 'player' || type === 'recipient') {
+    const [rows] = await pool.execute<SuggestionRow[]>(`SELECT c.name AS label,${type === 'recipient' ? 'CAST(c.id AS CHAR)' : 'c.name'} AS value,
+      CONCAT('角色 #',c.id,' · QQ ',p.qq_user_id,IF(p.qq_nickname IS NULL OR p.qq_nickname='', '', CONCAT(' · ',p.qq_nickname))) AS detail
+      FROM characters c JOIN players p ON p.id=c.player_id WHERE c.npc_code IS NULL
+      AND (INSTR(c.name,?)>0 OR INSTR(p.qq_user_id,?)>0 OR INSTR(COALESCE(p.qq_nickname,''),?)>0)
+      ORDER BY CASE WHEN c.name=? THEN 0 WHEN c.name LIKE CONCAT(?,'%') THEN 1 ELSE 2 END,c.id LIMIT 11 OFFSET ?`, [term, term, term, term, term, offset]);
+    return page(rows);
+  }
+  if (type === 'region') {
+    const [rows] = await pool.execute<SuggestionRow[]>(`SELECT name AS label,code AS value,CONCAT('区域代号：',code) AS detail
+      FROM map_regions WHERE INSTR(name,?)>0 OR INSTR(code,?)>0 ORDER BY CASE WHEN name=? THEN 0 ELSE 1 END,name,code LIMIT 11 OFFSET ?`, [term, term, term, offset]);
+    return page(rows);
+  }
+  if (type === 'item') {
+    const [rows] = await pool.execute<SuggestionRow[]>(`SELECT name AS label,CAST(id AS CHAR) AS value,
+      CONCAT('物品 #',id,' · ',code,IF(codex_id IS NULL OR codex_id='', '', CONCAT(' · 图鉴 ',codex_id))) AS detail
+      FROM item_definitions WHERE INSTR(name,?)>0 OR INSTR(code,?)>0 OR INSTR(COALESCE(codex_id,''),?)>0 OR INSTR(CAST(id AS CHAR),?)>0
+      ORDER BY CASE WHEN name=? THEN 0 ELSE 1 END,name,id LIMIT 11 OFFSET ?`, [term, term, term, term, term, offset]);
+    return page(rows);
+  }
+  if (type === 'mail') {
+    const [rows] = await pool.execute<SuggestionRow[]>(`SELECT m.title AS label,m.title AS value,CONCAT('邮件标题 · ',c.name) AS detail
+      FROM player_mails m JOIN characters c ON c.id=m.character_id JOIN players p ON p.id=c.player_id
+      WHERE INSTR(m.title,?)>0 OR INSTR(c.name,?)>0 OR INSTR(p.qq_user_id,?)>0
+      GROUP BY m.title,c.name ORDER BY MAX(m.received_at) DESC,m.title,c.name LIMIT 11 OFFSET ?`, [term, term, term, offset]);
+    return page(rows);
+  }
+  if (type === 'event') {
+    const [rows] = await pool.execute<SuggestionRow[]>(`SELECT x.title AS label,x.title AS value,CONCAT(x.kind,' · ',x.region_name) AS detail FROM (
+      SELECT COALESCE(t.title,'未命名公共奇遇') AS title,r.name AS region_name,c.name AS actor_name,s.template_code,s.opened_at AS seen_at,'公共奇遇' AS kind
+      FROM world_scene_instances s LEFT JOIN dynamic_encounter_templates t ON t.code=s.template_code JOIN map_regions r ON r.id=s.region_id JOIN characters c ON c.id=s.discoverer_character_id
+      UNION ALL
+      SELECT COALESCE(t.title,JSON_UNQUOTE(JSON_EXTRACT(e.context_json,'$.titleSnapshot')),'未命名个人奇遇') AS title,r.name AS region_name,c.name AS actor_name,e.template_code,e.opened_at AS seen_at,'旅人奇遇' AS kind
+      FROM player_encounter_instances e LEFT JOIN dynamic_encounter_templates t ON t.code=e.template_code JOIN map_regions r ON r.id=e.region_id JOIN characters c ON c.id=e.character_id
+      ) x WHERE INSTR(x.title,?)>0 OR INSTR(x.region_name,?)>0 OR INSTR(x.actor_name,?)>0 OR INSTR(x.template_code,?)>0
+      GROUP BY x.title,x.kind,x.region_name ORDER BY MAX(x.seen_at) DESC,x.title,x.kind,x.region_name LIMIT 11 OFFSET ?`, [term, term, term, term, offset]);
+    return page(rows);
+  }
+  if (type === 'patrol') {
+    const [rows] = await pool.execute<SuggestionRow[]>(`SELECT d.name AS label,d.name AS value,CONCAT('巡游实体 · ',r.name,' · ',d.code) AS detail
+      FROM world_dynamic_npc_states d JOIN map_regions r ON r.id=d.region_id
+      WHERE INSTR(d.name,?)>0 OR INSTR(d.code,?)>0 OR INSTR(r.name,?)>0 ORDER BY d.name,d.code LIMIT 11 OFFSET ?`, [term, term, term, offset]);
+    return page(rows);
+  }
+  if (type === 'operation') {
+    const [rows] = await pool.execute<SuggestionRow[]>(`SELECT action_text AS label,action_text AS value,CONCAT('游戏内管理操作 · ',operator_qq_user_id) AS detail
+      FROM admin_operation_logs WHERE INSTR(action_text,?)>0 OR INSTR(operator_qq_user_id,?)>0
+      ORDER BY created_at DESC,id DESC LIMIT 11 OFFSET ?`, [term, term, offset]);
+    return page(rows);
+  }
+  if (type === 'journal') {
+    const [rows] = await pool.execute<SuggestionRow[]>(`SELECT reason AS label,reason AS value,CONCAT('审计原因 · ',actor_ref) AS detail
+      FROM operation_journals WHERE reason<>'' AND (INSTR(reason,?)>0 OR INSTR(actor_ref,?)>0)
+      ORDER BY created_at DESC,id DESC LIMIT 11 OFFSET ?`, [term, term, offset]);
+    return page(rows);
+  }
+  if (type === 'portrait') {
+    const [rows] = await pool.execute<SuggestionRow[]>(`SELECT JSON_UNQUOTE(JSON_EXTRACT(a.state_json,'$.name')) AS label,
+      JSON_UNQUOTE(JSON_EXTRACT(a.state_json,'$.name')) AS value,CONCAT('机巧形象 · ',c.name) AS detail
+      FROM automaton_portrait_reviews r JOIN characters c ON c.id=r.character_id JOIN players p ON p.id=c.player_id JOIN player_automatons a ON a.id=r.automaton_id
+      WHERE INSTR(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(a.state_json,'$.name')),''),?)>0 OR INSTR(c.name,?)>0 OR INSTR(p.qq_user_id,?)>0
+      GROUP BY label,value,c.name ORDER BY MAX(r.created_at) DESC,label,c.name LIMIT 11 OFFSET ?`, [term, term, term, offset]);
+    return page(rows);
+  }
+  return empty;
 };
 
 export const adminPlayerDetail = async (characterId: number) => {

@@ -44,10 +44,22 @@ const appGroup = router.group({ // 精准规则匹配，复杂度 O1，稳定 �
     stripPrefix: true, // 匹配时去掉前缀 
     allowBare: true  // 允许不使用前缀 
   }
-}, () => import('./middleware/opening'), () => import('./middleware/pvp-defeat-protection'))
+}, () => import('./middleware/opening'), () => import('./middleware/floating-leaf-tour'), () => import('./middleware/worldtree-witness'), () => import('./middleware/pvp-defeat-protection'))
 
 registerSecondaryShopRoutes(appGroup);
 registerOpeningRoutes(appGroup);
+appGroup.use('浮叶游览', () => import('./response/floating-leaf').then(module => ({ default: module.floatingTourHandler })));
+appGroup.use({path:'世界树见证',schema:{usage:'/世界树见证 <游览|邀约|赴约> [进度]',args:[{name:'action',rules:[{required:true,type:'enum',enum:['游览','邀约','赴约','继续']}]},{name:'page',rules:[{type:'number',min:1}]}]}},()=>import('./response/worldtree-witness').then(module=>({default:module.worldtreeWitnessHandler})));
+appGroup.use('永恒竞技场',()=>import('./response/worldtree-witness').then(module=>({default:module.eternalArenaHandler})));
+appGroup.use('竞技场入场',()=>import('./response/worldtree-witness').then(module=>({default:module.enterEternalArenaHandler})));
+appGroup.use('竞技场离开',()=>import('./response/worldtree-witness').then(module=>({default:module.leaveEternalArenaHandler})));
+appGroup.use('艾森决斗',()=>import('./response/worldtree-witness').then(module=>({default:module.aesonDuelHandler})));
+appGroup.use({ path: '浮叶瓶颈', schema: { usage: '/浮叶瓶颈 <guild|observatory>', args: [{ name: 'source', rules: [{ required: true, type: 'enum', enum: ['guild', 'observatory'] }] }] } }, () => import('./response/floating-leaf').then(module => ({ default: module.floatingBarrierHandler })));
+appGroup.use('浮叶公馆', () => import('./response/floating-leaf').then(module => ({ default: module.floatingManorHandler })));
+appGroup.use('浮叶委托', () => import('./response/floating-leaf').then(module => ({ default: module.floatingRescueStartHandler })));
+appGroup.use('浮叶返程', () => import('./response/floating-leaf').then(module => ({ default: module.floatingRescueReturnHandler })));
+appGroup.use('浮叶复命', () => import('./response/floating-leaf').then(module => ({ default: module.floatingRescueReportHandler })));
+appGroup.use({ path: '浮叶致谢', schema: { usage: '/浮叶致谢 <开始|继续>', args: [{ name: 'action', rules: [{ required: true, type: 'enum', enum: ['开始', '继续'] }] }] } }, () => import('./response/floating-leaf').then(module => ({ default: module.floatingThanksHandler })));
 appGroup.use('新世界', () => import('./response/new-world'));
 appGroup.use({ path: '新世界领取', schema: { usage: '/新世界领取 <等级>', args: [{ name: 'level', rules: [{ required: true, type: 'number', min: 1, max: 30 }] }] } },
   () => import('./response/new-world').then(module => ({ default: module.claimNewWorldHandler })));
@@ -58,12 +70,6 @@ appGroup.use({path:'打开奇珍道具匣',schema:{usage:'/打开奇珍道具匣
 appGroup.use({path:'打开珍藏道具匣',schema:{usage:'/打开珍藏道具匣 [凭据] [数量]',args:[{name:'token'},{name:'quantity',rules:[{type:'number',min:1,max:100}]}]}},()=>import('./response/achievement').then(module=>({default:module.openCollectorAchievementBoxHandler})));
 appGroup.use('成就奖励',()=>import('./response/achievement').then(module=>({default:module.achievementRewardsHandler})));
 appGroup.use({path:'成就详情',schema:{usage:'/成就详情 <编号>',args:[{name:'id',rules:[{required:true}]}]}},()=>import('./response/achievement').then(module=>({default:module.achievementDetailHandler})));
-appGroup.use('灯火主线', () => import('./response/lamplight').then(module => ({ default: module.lamplightHandler })));
-appGroup.use('灯火成长', () => import('./response/lamplight').then(module => ({ default: module.lamplightGrowthHandler })));
-appGroup.use('灯火人物', () => import('./response/lamplight').then(module => ({ default: module.lamplightPersonHandler })));
-appGroup.use({ path: '灯火回忆', schema: { usage: '/灯火回忆 [页码]', args: [{ name: 'page', rules: [{ type: 'number', min: 1 }] }] } }, () => import('./response/lamplight').then(module => ({ default: module.lamplightHistoryHandler })));
-appGroup.use('灯火旧程', () => import('./response/lamplight').then(module => ({ default: module.lamplightLegacyHandler })));
-appGroup.use({ path: '灯火行动', schema: { usage: '/灯火行动 <版本> <操作>', args: [{ name: 'revision', rules: [{ required: true, type: 'number', min: 0 }] }, { name: 'action', rules: [{ required: true }] }] } }, () => import('./response/lamplight').then(module => ({ default: module.lamplightActionHandler })));
 appGroup.use({ path: '初行人物', schema: { usage: '/初行人物 <路线>', args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/opening').then(module => ({ default: module.openingPersonHandler })));
 appGroup.use({ path: '初行选择', schema: { usage: '/初行选择 <页码> <选项>', args: [{ name: 'revision', rules: [{ required: true, type: 'number', min: 0 }] }, { name: 'action', rules: [{ required: true }] }] } }, () => import('./response/opening').then(module => ({ default: module.openingChoiceHandler })));
 

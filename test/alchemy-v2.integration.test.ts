@@ -111,6 +111,9 @@ test('炼金V2真实SQL与事务回归',{skip:!database&&'设置 ALCHEMY_TEST_DA
       const listing=await shops.secondaryFinishedCatalog('alchemy_test_2','alchemy_sweetshop',1,'归悟洗练露');assert.equal(listing.items[0].price,838);
       const purchase=await shops.buySecondaryFinished('alchemy_test_2','alchemy_sweetshop',ids.get('alchemy_skill_reset_elixir'),1);assert.equal(purchase.quantity,1);assert.equal(purchase.price,listing.items[0].price);
       const [moneyAfter]=await pool.query<any[]>('SELECT copper_coins FROM characters WHERE id=2');assert.equal(Number(moneyBefore[0].copper_coins)-Number(moneyAfter[0].copper_coins),838);
+      const teleporter=await addItem('demon_breaker_teleporter','破魔传送器','consumable','特殊',{dungeonGatePass:true});
+      const teleporters=await shops.secondaryFinishedCatalog('alchemy_test_2','alchemy_sweetshop',1,'破魔传送器','特殊');assert.equal(teleporters.items.length,1);assert.equal(teleporters.items[0].price,200);
+      const teleporterPurchase=await shops.buySecondaryFinished('alchemy_test_2','alchemy_sweetshop',teleporter,1);assert.equal(teleporterPurchase.price,200);
       await assert.rejects(shops.buySecondaryFinished('alchemy_test_2','alchemy_sweetshop',ids.get('beast_core'),1),/不在/);await assert.rejects(shops.buySecondaryFinished('alchemy_test_2','alchemy_sweetshop',ids.get('alchemy_skill_reset_elixir'),30),/库存/);
       const[kit]=await pool.query<any[]>("SELECT id FROM item_definitions WHERE code='forge_repair_kit'");await shops.buySecondaryFinished('alchemy_test_2','blacksmith',Number(kit[0].id),1);
       const equipment=await addItem('shop_repair_test','测试装备','equipment','武器');const[created]=await pool.execute<any>('INSERT INTO player_item_instances (character_id,item_id,durability,durability_max) VALUES (2,?,1,100)',[equipment]);

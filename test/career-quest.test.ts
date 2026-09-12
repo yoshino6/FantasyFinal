@@ -23,6 +23,7 @@ const setup = (overrides: Record<string, unknown> = {}) => {
     guild: { region_id: 1, pos_x: -2, pos_y: -161, pos_z: 0 },
     active: null as null | { profession_code: string; stage: number; story_kills: number; proof_kills: number },
     completed: null as null | { profession_code: string },
+    goblinQuest: null as null | { stage: number; goblin_kills: number; region_id: number | null; pos_x: number | null; pos_y: number | null; pos_z: number | null; encounter_id: string | null; boss_spawn_id: number | null },
     cores: 0
   };
   const pool = { execute: async (sql: string) => {
@@ -34,19 +35,20 @@ const setup = (overrides: Record<string, unknown> = {}) => {
       return [state.active ? [state.active] : []];
     }
     if (sql.includes('FROM player_advanced_professions')) return [state.completed ? [state.completed] : []];
+    if (sql.includes('FROM player_goblin_king_quest')) return [state.goblinQuest ? [state.goblinQuest] : []];
     if (sql.includes('FROM player_inventory')) return [[{ quantity: state.cores }]];
     throw new Error(`意外查询：${sql}`);
   } };
   const career = loadDeclarations('../src/game/career-quest.service.ts', ['careerCharacterFor', 'guildCareerQuestFor', 'guildCareerMainQuest', 'advancedProfessionMainQuest'], { getPool: async () => pool, advancedProfessionByCode, worldTreeAdvancedProfessions, openingHubs });
   const main = loadDeclarations('../src/game/main-quest.service.ts', ['currentMainQuest'], {
     getPool: async () => pool, guildCareerMainQuest: career.guildCareerMainQuest,
-    require: (path: string) => {
-      assert.equal(path, './lamplight.service');
-      return { lamplightMainQuest: async () => null };
-    },
     openingMainQuest: async () => null,
+    floatingStoryMainQuest: async () => null,
     girlGratitudeMainQuest: async () => ({ description: '世界树的叶影已记下这次同行。' }),
-    experienceRequiredForLevel: (level: number) => level * 100
+    experienceRequiredForLevel: (level: number) => level * 100,
+    barrierStage: (value: unknown) => Math.min(4, Math.max(0, Number(value) || 0)),
+    goblinQuestFor: async () => state.goblinQuest,
+    relativeDirection: () => '附近'
   });
   return { state, ...career, ...main };
 };
@@ -58,13 +60,55 @@ test('森林战斗后直到梨子喵带路完成，指引先继续剧情', async
   }
 });
 
-test('主线依次为公会注册、主职业选择、地图准备，并跳过已完成步骤', async () => {
-  const service = setup({ level: 5, adventurer_registered: 0, profession_code: null, owns_forest_map: 0 });
+test('初行结束后主线依次为公会注册、主职业选择和升至十一级', async () => {
+  const service = setup({ level: 3, adventurer_registered: 0, profession_code: null, owns_forest_map: 0, realm_stage: 1, experience: 0 });
   assert.equal((await service.currentMainQuest('player')).title, '【主线·成为冒险者】');
   service.state.character.adventurer_registered = 1;
   assert.equal((await service.currentMainQuest('player')).title, '【主线·选择主职业】');
   service.state.character.profession_code = 'mage';
-  assert.equal((await service.currentMainQuest('player')).title, '【主线·探索的准备】');
+  const growth = await service.currentMainQuest('player');
+  assert.equal(growth.title, '【主线·初入异界】');
+  assert.match(growth.description, /Lv\.3\/11/);
+  assert.doesNotMatch(growth.description, /幽暗密林.*地图/);
+});
+
+test('十级经验圆满后无形的禁锢直接指向糖水屋老板', async () => {
+  const service = setup({ level: 10, experience: 999, realm_stage: 1, barrier_stage: 0, adventurer_registered: 1, profession_code: 'mage', owns_forest_map: 0 });
+  const accumulating = await service.currentMainQuest('player');
+  assert.equal(accumulating.title, '【主线·初入异界】');
+  assert.match(accumulating.description, /经验达到满值/);
+  service.state.character.experience = 1000;
+  const barrier = await service.currentMainQuest('player');
+  assert.equal(barrier.title, '【主线·无形的禁锢】');
+  assert.equal(barrier.action.command, '/前往 -12 -196');
+  assert.match(barrier.description, /糖水屋.*老板/);
+});
+
+test('第一次向糖水屋老板请教即可开始天空粉尘调查', async () => {
+  const state = { barrier_stage: 0, owns_sky_dust: 0 };
+  const writes: unknown[][] = [];
+  const connection = { execute: async (sql: string, values: unknown[]) => {
+    if (sql.trim().startsWith('SELECT')) return [[{ id: 7, level: 10, experience: 1000, realm_stage: 1, ...state }]];
+    writes.push(values);
+    return [{ affectedRows: 1 }];
+  } };
+  const service = loadDeclarations('../src/game/main-quest.service.ts', ['barrierQuestCode', 'barrierStage', 'advanceRealmBarrier'], {
+    withTransaction: async (work: (connection: unknown) => unknown) => work(connection),
+    experienceRequiredForLevel: (level: number) => level * 100
+  });
+  const progress = await service.advanceRealmBarrier('player', 'alchemist');
+  assert.deepEqual(progress, { previous: 0, stage: 2 });
+  assert.equal(writes[0][2], 2);
+});
+
+test('突破后升至十一级，再接回梨子喵失踪与哥布林国王主线', async () => {
+  const service = setup({ level: 10, experience: 0, realm_stage: 2, adventurer_registered: 1, profession_code: 'mage' });
+  assert.equal((await service.currentMainQuest('player')).title, '【主线·更进一步】');
+  service.state.character.level = 11;
+  const quest = await service.currentMainQuest('player');
+  assert.equal(quest.title, '【主线·失踪的少女】');
+  assert.match(quest.description, /梨子喵.*森林/s);
+  assert.equal(quest.action.command, '/前往 -2 -181');
 });
 
 test('主线不再要求花技能点学习女神赠送的鉴识', async () => {

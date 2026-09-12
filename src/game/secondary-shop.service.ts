@@ -15,14 +15,15 @@ export type SecondaryShop = keyof typeof secondaryShopNames;
 export const secondaryShopBasicLevel = { blacksmith:3,alchemy_sweetshop:3,oddworkshop:3 };
 export const secondaryShopCategories = {
   blacksmith:['全部','武器','防具','维修包','长剑','法杖','法书','法球','匕首','拳刃','盾牌','头肩','上装','腰部','下装','脚部'],
-  alchemy_sweetshop:['全部','回复','增益','净化','投掷物','符咒','秘药'],
+  alchemy_sweetshop:['全部','回复','增益','净化','投掷物','符咒','秘药','特殊'],
   oddworkshop:['全部','主动异械','被动异械']
 };
 const alchemyCodes = new Set(alchemyOutputDefinitions.filter(item=>item.code.startsWith('alchemy_base_')&&!/_q[12]$/.test(item.code)).map(item=>item.code));
 const noviceAlchemyCodes = new Set(['glimmer_potion','novice_hp_potion_small','novice_mp_potion_small']);
+const sweetshopSpecialCodes = new Set(['demon_breaker_teleporter']);
 const deviceCodes = new Set(constructionRecipes.filter(item=>item.outputType!=='material'&&item.recommendedSecondaryLevel<=secondaryShopBasicLevel.oddworkshop).map(item=>item.code));
 type ShopItem = {code:string;item_type:string;item_category:string;required_level?:number;rarity?:string;weapon_type?:string|null;effect_json?:unknown};
-export const isSecondaryFinishedProduct = (shop:string,item:ShopItem) => shop==='alchemy_sweetshop'?item.item_type==='consumable'&&(alchemyCodes.has(item.code)||noviceAlchemyCodes.has(item.code)||item.code==='alchemy_skill_reset_elixir'&&secondaryShopBasicLevel.alchemy_sweetshop>=3):shop==='oddworkshop'?['device','consumable'].includes(item.item_type)&&deviceCodes.has(item.code):shop==='blacksmith'?(item.code==='forge_repair_kit' || item.item_type==='equipment'&&item.code.startsWith('shop_')&&Number(item.required_level??Infinity)<=secondaryShopBasicLevel.blacksmith*5&&item.rarity==='普通'&&item.item_category!=='异械'):false;
+export const isSecondaryFinishedProduct = (shop:string,item:ShopItem) => shop==='alchemy_sweetshop'?item.item_type==='consumable'&&(alchemyCodes.has(item.code)||noviceAlchemyCodes.has(item.code)||sweetshopSpecialCodes.has(item.code)||item.code==='alchemy_skill_reset_elixir'&&secondaryShopBasicLevel.alchemy_sweetshop>=3):shop==='oddworkshop'?['device','consumable'].includes(item.item_type)&&deviceCodes.has(item.code):shop==='blacksmith'?(item.code==='forge_repair_kit' || item.item_type==='equipment'&&item.code.startsWith('shop_')&&Number(item.required_level??Infinity)<=secondaryShopBasicLevel.blacksmith*5&&item.rarity==='普通'&&item.item_category!=='异械'):false;
 export const matchesSecondaryShopCategory = (item:ShopItem,category:string) => {
   const effect:Record<string,any>=typeof item.effect_json==='string'?JSON.parse(item.effect_json):item.effect_json??{};
   if(category==='全部')return true;
@@ -85,6 +86,7 @@ const buyFinishedFor = async (connection:PoolConnection,user:string,shop:Seconda
   if(item.item_type==='device'||item.item_type==='equipment') for(let count=0;count<quantity;count++) await connection.execute("INSERT INTO player_item_instances (character_id,item_id,bound_kind,bound_at,bound_reason) VALUES (?,?,'trade',NOW(),'npc_purchase')",[id,itemId]);
   else await grantInventory(connection,id,itemId,{personal:quote.credit||quote.discount?quantity:0,trade:quote.credit||quote.discount?0:quantity,unbound:0});
   await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)',[id,itemId]);
+  if(item.code==='demon_breaker_teleporter') await (await import('./dungeon-quest.service')).completeDungeonSecretPurchase(connection,id);
   recordAchievement(connection,id,[{metric:'ACH_K01'},{metric:'ACH_K08',value:price,life:true}]);
   await achievementItem(connection,id,itemId);
   return { name:String(item.name),quantity,price };

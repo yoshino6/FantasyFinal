@@ -183,8 +183,10 @@ export const fuseWeapon = async (qqUserId: string, instanceId: number, materialI
   const caps = forgeEquipmentCapsFor(weapon.item_category, weapon.weapon_type, level, weapon.rarity, primaryKeys);
   const hasRemainingCap = (key: string) => isFusionPercentKey(key) || Number(current[key] ?? 0) < Number(caps[key] ?? 0);
   const preferredKeys = usableMaterialKeys(profile, weapon.item_category, weapon.weapon_type, primaryKeys, level, weapon.rarity).filter(hasRemainingCap);
+  // 特殊材料是一整组独立的百分比属性：不能再沿用普通材料的武器类型过滤，
+  // 否则全战斗属性会漏掉与当前武器主属性相反的一项，后续写入和显示也随之不完整。
   const usableKeys = profile.kind
-    ? preferredKeys
+    ? profileKeys(profile)
     : selectOrdinaryFusionKey(preferredKeys, weapon.item_category, weapon.weapon_type, level, weapon.rarity, current, caps);
   if (!usableKeys.length) throw new Error(`熔铸材料【${material.name}】不能用于${weapon.item_category}。`);
   const success = Math.min(100, 70 + profession.bonus);

@@ -46,6 +46,16 @@ export const worldTreeGateReturnHandler = async () => {
 };
 export const worldExchangeFormat = async () => {
   const [event] = useEvent(); const [message] = useMessage();
+  if (await (await import('../game/floating-leaf.service')).floatingLeafOrigin(event.current.UserId)) {
+    const { floatingStoryMainQuest } = await import('../game/floating-leaf.service');
+    const quest = await floatingStoryMainQuest(event.current.UserId);
+    if (quest?.title === '【主线·菲萝缇的假】') {
+      await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('万叶联市').addNewline().addNewline().addText('菲萝缇正兴致勃勃地在摊位间挑选小东西，偶尔回头确认我有没有跟上。“今天不赶航班，想看多久都行。”')).addButtonGroup(Format.createButtonGroup().addRow().addButton('继续同行', '/浮叶致谢 继续', { type: 'command', autoEnter: true, style: 'blue' }).addButton('离开', '/建筑离开 canopy_exchange', { type: 'command', autoEnter: true })) });
+      return;
+    }
+    const { marketHomeFormat } = await import('./market');
+    await message.send({ format: await marketHomeFormat(event.current.UserId) }); return;
+  }
   const stage = await girlGratitudeStage(event.current.UserId);
   if (stage === 4) {
     await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('万叶联市').addNewline().addNewline().addText('光叶垂成半透明的穹顶，来自各地的商人把货契、矿石与异乡的香料摆在根须间。梨子喵已经在一处树灵摊位前等着你，双手背在身后，显得格外紧张。')).addButtonGroup(Format.createButtonGroup().addRow().addButton('收下 礼物', '/收下梨子喵的礼物', { type: 'command', autoEnter: true, style: 'blue' }).addButton('离开', '/建筑离开 canopy_exchange', { type: 'command', autoEnter: true })) });

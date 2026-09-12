@@ -4,154 +4,118 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { talentCode } from '../src/game/talent.config';
 import { openingFirstMeetingIntroduction, openingFirstMeetingText, openingLessonText, openingNarrativeText, openingNewcomerText, openingRoutes, openingRouteVersions, openingRouteByCode, talentDefinitions } from '../src/game/opening-content';
-import { openingHubs, openingSpawnRegions } from '../src/game/opening-world.config';
+import { openingHubs, openingSpawnRegions, openingStartRouteCodes } from '../src/game/opening-world.config';
 import { goldenChestTable, rollChest } from '../src/game/opening-chest.config';
 import { companionChance } from '../src/game/companion.service';
 import { keepsakeDefinitions } from '../src/game/opening-keepsakes.config';
+import { forestArrivalGuildScenes, forestArrivalTownScenes } from '../src/game/forest-arrival-content';
 
-test('14张出生地图均有三条完整路线，版本唯一，所有分支都有相遇、后果和安全落脚',()=>{
-  assert.equal(openingRoutes.length,42);assert.equal(Object.keys(openingSpawnRegions).length,14);
-  const identities=new Set<string>();let branches=0;
-  for(const[region,config]of Object.entries(openingSpawnRegions)){
-    const routes=openingRoutes.filter(r=>r.region===region);assert.equal(routes.length,3,region);
-    for(const route of routes){
-      assert.match(route.code,new RegExp(`^${config.prefix}0[123]$`));assert.ok(!identities.has(route.code));identities.add(route.code);
-      assert.ok(route.moveEntry.length>=20&&route.huntEntry.length>=20,route.code);assert.ok(route.pages.length&&route.arrival.length,route.code);
-      assert.ok(route.destination in openingHubs,route.code);assert.ok(route.choices.length>=2&&route.choices.length<=3,route.code);
-      for(const p of [...route.pages,...route.arrival])assert.ok(p.text.trim().length>=20,route.code);
-      for(const choice of route.choices){branches++;assert.ok(choice.pages.length,route.code+choice.code);assert.ok(choice.pages.every(p=>p.text.trim().length>=20));assert.ok(choice.quest&&choice.task&&choice.rewardCode&&choice.farewell,route.code+choice.code);}
-    }
-  }
-  assert.equal(branches,113);
-});
-test('采用逃婚新版与保留奇遇，旧版编号不能偷偷换稿',()=>{
-  const bride=openingRouteByCode('M02')!;assert.equal(bride.version,3);assert.match(JSON.stringify(bride),/逃婚|婚礼|婚纱/);
-  for(const code of ['C01','C02','T02','T03','E01','E03'])assert.equal(openingRouteByCode(code)?.version,3);
-  assert.equal(openingRouteByCode('M02',2),undefined);assert.equal(talentDefinitions.length,100);
-  assert.equal(talentDefinitions.filter(s=>s.code.startsWith('divine_')).length,0);assert.ok(talentDefinitions.every(s=>s.code===talentCode(s.number)));
-});
-test('十一条重写路线只读取全新脚本，不回退旧人物或旧事件',()=>{
-  const titles:Record<string,string>={R01:'雾河信标',R02:'丝雨木箱',R03:'断桥哨笛',S03:'云巢来客',D03:'树洞战鼓',H01:'倒悬矿灯',H03:'石像的口令',I02:'无主机偶',I03:'熔渣信箱',W03:'雾中石门',A03:'落星坑底'};
-  for(const [code,title] of Object.entries(titles)){
-    const route=openingRouteByCode(code)!;
-    assert.equal(route.title,title,code);
-    assert.doesNotMatch(JSON.stringify(route),/八婶|匣伯|露涅|泊叔|白汀|佩洛|浴缸|旅馆/,code);
-  }
-});
-test('被删除路线的旧专属服务不会残留，现有三份线索使用新人物办理',()=>{
-  const rewritten=new Set(['R01','R02','R03','S03','D03','H01','H03','I02','I03','W03','A03']);
-  const active=keepsakeDefinitions.filter(item=>rewritten.has(item.branch.slice(0,3)));
-  assert.deepEqual(active.map(item=>item.branch),['R02-B','R03-C','A03-B']);
-  assert.deepEqual(active.map(item=>item.npc),['季白','桐羽','星岚']);
-  assert.doesNotMatch(JSON.stringify(active),/八婶|匣伯|露涅|布隆|旅馆|怀表|空坟/);
-});
-test('云巢与无主机偶以真实羁绊收束，不再把伙伴写成纪念品',()=>{
-  const cloud=openingRouteByCode('S03')!,automaton=openingRouteByCode('I02')!;
-  const cloudChoice=cloud.choices.find(choice=>choice.code==='A')!;
-  assert.match(JSON.stringify(cloudChoice),/破壳|风羽幼鸟选择同行/);
-  assert.doesNotMatch(JSON.stringify(cloudChoice),/暂不具备孵化|保温匣|opening_windbird_egg/);
-  for(const code of ['A','B']){
-    const choice=automaton.choices.find(item=>item.code===code)!;
-    assert.equal(choice.rewardName,'无主机偶主动认主');
-    assert.match(`${choice.rewardUse}${choice.farewell}`,/永久进入机巧名册|同行对象|同行位置/);
-  }
-  assert.match(automaton.choices.find(choice=>choice.code==='C')!.pages[0]!.text,/不等于接受下一次归属/);
-});
-test('每条初行路线最多保留一件实体线索，其余结果使用现有资源或伙伴系统',()=>{
-  const direct=new Set(['F01-A','F01-B','F02-A','S03-A','I02-A','I02-B']);
-  for(const route of openingRouteVersions){
-    const clues=route.choices.filter(choice=>!choice.pack&&!choice.rewardKind&&!direct.has(`${route.code}-${choice.code}`));
-    assert.ok(clues.length<=1,`${route.code} v${route.version} 实体线索超过一件：${clues.map(choice=>choice.rewardName).join('、')}`);
-  }
-  assert.match(openingRouteByCode('T01')!.choices.find(choice=>choice.code==='A')!.rewardName,/辅助瞄准镜/);
-  assert.equal(openingRouteByCode('T01')!.choices.find(choice=>choice.code==='A')!.rewardEquipment,'auxiliary_aiming_scope');
-  assert.equal(openingRouteByCode('M03')!.choices.find(choice=>choice.code==='C')!.rewardEquipment,'random_weapon');
-  assert.equal(openingRouteByCode('T02')!.choices.find(choice=>choice.code==='A')!.rewardEquipment,'random_armor');
-  assert.deepEqual(openingRouteByCode('A03')!.choices.find(choice=>choice.code==='A')!.rewardItems,[{code:'meteor_iron',quantity:1}]);
-  assert.deepEqual(openingRouteByCode('E02')!.choices.find(choice=>choice.code==='C')!.rewardItems,[{code:'moon_silver',quantity:1}]);
-});
-test('新旅人先听见符合人物性格的自我介绍，再得知路线人物的姓名',()=>{
-  const deferred=new Set(['A01','B01','D01','D03','F01','F02','F03','H01','H03','I02','I03','W03','A03','R01','R02','R03','S03']);
+test('保留八条剧情供旧存档续读，新玩家只开放四条路线与两张出生地图',()=>{
+  assert.deepEqual(openingRoutes.map(route=>route.code).sort(),['A01','C02','F01','F02','F03','M01','M02','S03']);
+  assert.equal(openingRouteVersions.length,8);
+  assert.deepEqual([...openingStartRouteCodes],['F01','F02','F03','M01']);
+  assert.deepEqual(Object.keys(openingSpawnRegions),['dark_forest','worldtree_meadow']);
+  assert.equal(openingRoutes.reduce((sum,route)=>sum+route.choices.length,0),20);
   for(const route of openingRoutes){
-    const introduction=openingFirstMeetingIntroduction(route);
-    if(deferred.has(route.code)){assert.equal(introduction,'',route.code);continue;}
-    assert.ok(introduction.length>=24,route.code);
-    assert.doesNotMatch(introduction,/我还在判断该不该靠近/,route.code);
-    const text=openingFirstMeetingText(route,route.pages[0].text);
-    const introductionIndex=text.indexOf(introduction);
-    assert.ok(text.includes(introduction),route.code);assert.ok(!text.startsWith(introduction),route.code);
-    assert.doesNotMatch(text.slice(0,introductionIndex),new RegExp(route.person?.name??'(?!)'),route.code);
-  }
-  assert.match(openingRouteByCode('S01')!.pages[0].text,/贝娅/);
-  assert.match(openingRouteByCode('F03')!.pages[0].text,/我叫莱昂/);
-  assert.match(openingRouteByCode('A01')!.pages[0].text,/我叫阿库娅/);
-});
-test('首次自我介绍的句式随人物身份变化，不使用统一报姓名模板',()=>{
-  const current=openingRouteVersions.filter(route=>route.version>=3&&openingFirstMeetingIntroduction(route));
-  const openings=new Set(current.map(route=>openingFirstMeetingIntroduction(route).match(/^[^：:]*[：:]/)?.[0]??''));
-  assert.ok(openings.size>=12,'自我介绍需要保留不同的开场节奏');
-  assert.match(openingFirstMeetingIntroduction(openingRouteByCode('W02')!),/药师露缇/);
-  assert.match(openingFirstMeetingIntroduction(openingRouteByCode('M02')!),/我叫艾蕾诺/);
-});
-test('四条重写人物路线先发生事件，再按各自身份自然报出名字',()=>{
-  const expected:Record<string,RegExp>={R01:/叫我岚溪，河上的灯归我管/,R02:/季白，上游驿站的见习生/,R03:/我在河务所画图，桐羽/,S03:/叫我烬川——等活着下去/};
-  for(const [code,pattern] of Object.entries(expected)){
-    const route=openingRouteByCode(code)!;
-    assert.equal(openingFirstMeetingIntroduction(route),'',code);
-    const story=[route.moveEntry,...route.pages.map(page=>page.text)].join('\n\n');
-    const name=route.person!.name,index=story.indexOf(name);
-    assert.ok(index>40,`${code} 不能在事件发生前泄露姓名`);
-    assert.match(story,pattern,code);
+    if(openingStartRouteCodes.has(route.code))assert.ok(route.region in openingSpawnRegions,route.code);
+    assert.ok(route.destination in openingHubs,route.code);
+    assert.ok(route.pages.length&&route.arrival.length,route.code);assert.ok(route.choices.length>=2&&route.choices.length<=3,route.code);
+    for(const choice of route.choices)assert.ok(choice.pages.length&&choice.quest&&choice.rewardCode,`${route.code}-${choice.code}`);
   }
 });
-test('十一条重写路线沿用黄金兔与受伤魔女的分支结构，选择后才显示独立结果',()=>{
-  const codes=['R01','R02','R03','S03','D03','H01','H03','I02','I03','W03','A03'];
-  for(const code of codes){
-    const route=openingRouteByCode(code)!;
-    const segments=[route.moveEntry,route.huntEntry,...route.pages.map(page=>page.text),...route.arrival.map(page=>page.text)];
-    for(const choice of route.choices)segments.push(...choice.pages.map(page=>page.text),choice.farewell,openingLessonText(route,choice));
-    for(const text of segments)assert.ok([...text.trim()].length>=50,`${code} 存在不足50字的独立剧情段`);
-    assert.ok(route.choices.length>=2&&route.choices.length<=3,`${code} 应提供2至3个选项`);
-    assert.equal(new Set(route.choices.map(choice=>choice.label)).size,route.choices.length,`${code} 选项不可重复`);
-    for(const choice of route.choices){
-      assert.ok(choice.pages.length>0,`${code}-${choice.code} 必须在选择后显示结果`);
-      assert.doesNotMatch(openingLessonText(route,choice),/本次交接|完成交接|请完成这一份|强制委托/,`${code}-${choice.code}`);
+test('被删除路线及两个专用地点不再进入运行时目录',()=>{
+  for(const code of ['R01','D03','H01','I02','W03','T03','E01','B01','Y01'])assert.equal(openingRouteByCode(code),undefined,code);
+  assert.equal('snowlamp_hollow' in openingHubs,false);assert.equal('sleepwhale_market' in openingHubs,false);
+  assert.ok(keepsakeDefinitions.every(item=>openingRoutes.some(route=>route.code===item.branch.slice(0,3))));
+});
+test('保留逃婚、精灵棺箱、女神返还、霜龙与两条森林故事',()=>{
+  for(const [code,pattern] of Object.entries({M01:/棺箱|菲萝缇/,M02:/逃婚|艾蕾诺/,A01:/阿库娅|厄里斯/,C02:/霜龙|龙蛋/,F02:/瑟芙菈|魔界邀请函/,F03:/莱昂|伊芙|希娅/}))assert.match(JSON.stringify(openingRouteByCode(code)),pattern,code);
+  assert.equal(talentDefinitions.length,100);assert.equal(talentDefinitions.filter(s=>s.code.startsWith('divine_')).length,0);assert.ok(talentDefinitions.every(s=>s.code===talentCode(s.number)));
+});
+test('黄金兔救助明确使用三类初始补给并由梨子喵带出森林',()=>{
+  const route=openingRouteByCode('F01')!,aid=route.choices.find(choice=>choice.code==='A')!;
+  assert.equal(route.entryMergedIntoFirstPage,true,'黄金兔触发引子应合并进正式场景，不能额外占一页');
+  assert.match(JSON.stringify([route.pages,aid.pages,aid.arrival]),/三只面包.*三瓶矿泉水.*三份草药/);
+  assert.match(JSON.stringify([aid.pages,aid.arrival]),/梨子.*百纳镇.*公会/);
+  assert.equal(aid.rewardName,'黄金兔');
+});
+test('云巢路线写明被当作食物、猎魔人救援、破壳认亲与双结局',()=>{
+  const route=openingRouteByCode('S03')!;
+  assert.equal(route.title,'云巢雏鸟');assert.equal(route.choices.length,2);
+  assert.match(JSON.stringify(route.pages),/储备粮.*烬川.*裂.*认成娘/);
+  assert.match(JSON.stringify(route.choices[0]),/随从名册|跟随/);
+  assert.equal(route.choices[1].rewardCopper,2000);assert.match(route.choices[1].label,/2000铜币/);
+});
+
+test('当前开放的四条初行路线每页正文都保留自然段分隔',()=>{
+  const active = new Set(['F01','F02','F03','M01']);
+  for (const route of openingRoutes.filter(item => active.has(item.code))) {
+    const pages = [
+      ...route.pages,
+      ...route.choices.flatMap(choice => choice.pages),
+      ...route.choices.flatMap(choice => choice.arrival ?? []),
+      ...route.arrival
+    ];
+    assert.ok(pages.length > 0, route.code);
+    for (const page of pages) {
+      assert.match(page.text, /\r?\n\s*\r?\n/, `${route.code}·${page.title} 应分成至少两段`);
     }
   }
-  assert.match(openingLessonText(openingRouteByCode('S03')!,openingRouteByCode('S03')!.choices[0]),/幼鸟|自己决定/);
-  assert.match(openingLessonText(openingRouteByCode('I02')!,openingRouteByCode('I02')!.choices[0]),/主动|自己选择|伙伴关系/);
+  const coffin = openingRouteByCode('M01')!;
+  const coffinText = JSON.stringify([coffin.pages, ...coffin.choices.map(choice => [choice.pages, choice.arrival])]);
+  assert.doesNotMatch(coffinText, /死亡证明|预约复苏|待复苏长老|死亡登记|长老遗物/);
+  assert.match(coffinText, /地面巡游|长老回程|接回古木长老/);
 });
-test('同场角色的专名也只在介绍对白之后出现',()=>{
-  const companions:Record<string,string[]>={D02:['乌禾'],W02:['小苇'],Y03:['萨芙']};
-  for(const [code,names] of Object.entries(companions)){
-    const route=openingRouteByCode(code)!;
-    const introduction=openingFirstMeetingIntroduction(route),text=openingFirstMeetingText(route,route.pages[0].text);
-    const before=text.slice(0,text.indexOf(introduction));
-    for(const name of names)assert.doesNotMatch(before,new RegExp(name),`${code} ${name}`);
-    for(const name of names)assert.match(introduction,new RegExp(name),`${code} ${name}`);
-  }
+test('三人冒险团沿用旧相遇并在真实史莱姆战斗胜利后回城',()=>{
+  const route=openingRouteByCode('F03')!;
+  const narrative=JSON.stringify([route.moveEntry,route.huntEntry,route.pages,route.choices,route.arrival]);
+  assert.equal(route.title,'火星、盾牌与白绷带');assert.equal(route.pages.length,3);assert.equal(route.pages[0].title,'火星、盾牌与白绷带');assert.equal(route.entryMergedIntoFirstPage,true);
+  assert.match(narrative,/兵刃碰撞.*莱昂.*伊芙.*希娅.*森林史莱姆/);
+  assert.equal(Object.keys(forestArrivalTownScenes).length,6);
+  assert.equal(Object.keys(forestArrivalGuildScenes).length,3);
+  assert.match(JSON.stringify([forestArrivalTownScenes,forestArrivalGuildScenes]),/史莱姆.*梨子喵.*转生者.*铁匠铺.*阿克谢尔·梨子.*卖水和面包.*冒险者公会/);
+  assert.equal(openingFirstMeetingText(route,route.pages[0].text,0),route.pages[0].text,'不能在三人正式自我介绍前自动拼接姓名');
+  const openingSource=readFileSync('src/game/opening.service.ts','utf8'),adventureSource=readFileSync('src/game/adventure.service.ts','utf8');
+  assert.match(openingSource,/forestBattlePending/);assert.match(openingSource,/completeOpeningForestBattleStart/);
+  assert.match(adventureSource,/arrival_story/);
+  assert.match(adventureSource,/code='guild_counter'/);
+  assert.doesNotMatch(adventureSource,/directGuild:true/);
 });
-test('抵达安全区前不以姓名提前称呼接应人员，姓名留待实际交谈',()=>{
-  for(const route of openingRouteVersions)for(const text of [...route.arrival.map(page=>page.text),openingLessonText(route,route.choices[0]),route.choices[0].farewell]){
-    assert.doesNotMatch(openingNewcomerText(text),/岑渡|维萝|莫妮卡|菈芮|温棠|澄叶/,route.code);
+test('幽暗密林每条回城分支都由梨子喵结识并遇见三人冒险团',()=>{
+  for(const code of ['F01','F02'])for(const choice of openingRouteByCode(code)!.choices){
+    const arrival=(choice.arrival??[]).map(page=>page.text).join('\n');
+    for(const name of ['梨子','莱昂','伊芙','希娅','公会'])assert.ok(arrival.includes(name),`${code}-${choice.code}: ${name}`);
+    assert.match(arrival,/亲眼|看见|见证/,`${code}-${choice.code}`);
+    assert.doesNotMatch(arrival,/猫族少女/,`${code}-${choice.code}`);
   }
+  assert.match(forestArrivalTownScenes[2],/长着猫耳和尾巴/);
+  assert.match(forestArrivalGuildScenes[1],/母亲是猫族/);
 });
-test('七图新路线以同行角色、固定交通或专用法术抵达安全区，不以野外巡守兜底',()=>{
-  const current=openingRouteVersions.filter(route=>route.version===4);
-  assert.equal(current.length,21);
-  for(const route of current){
-    const arrival=route.arrival.map(page=>page.text).join('\n');
-    assert.doesNotMatch(arrival,/巡路队|巡路车|巡护|巡卫|护林员|值守|救援队/,route.code);
-  }
-  assert.match(openingRouteByCode('D03')!.arrival[0].text,/根道|固定药阵/);
-  assert.match(openingRouteByCode('D02')!.arrival[0].text,/灵车/);
-  assert.match(openingRouteByCode('W02')!.arrival[0].text,/固定传送阵/);
-  assert.match(openingRouteByCode('W03')!.arrival[0].text,/维护艇|采样艇|传送阵/);
+test('幽暗密林三条开局在十一级后汇入梨子喵失踪主线',()=>{
+  for(const code of ['F01','F02','F03'])assert.ok(openingRouteByCode(code),code);
+  const openingSource=readFileSync('src/game/opening.service.ts','utf8');
+  const questSource=readFileSync('src/game/main-quest.service.ts','utf8');
+  assert.match(openingSource,/INSERT INTO player_story_progress \(character_id,story_code,status,stage\) VALUES \(\?,'forest_guide','completed',0\)/);
+  assert.match(questSource,/title: '【主线·失踪的少女】'[\s\S]*梨子喵进森林打猎后也迟迟未归/);
+  const start=questSource.slice(questSource.indexOf('export const startGoblinKingQuest'),questSource.indexOf('export const consultVivianForJudicator'));
+  assert.match(start,/character\.level\) < 11/);
+  assert.doesNotMatch(start,/route_code|F01|F02|F03/,'接取失踪少女不应按幽暗密林开局分流');
 });
-test('初行不使用封存记录和值守等内部简称，而是写出可见的人与动作',()=>{
-  for(const route of openingRouteVersions)for(const text of [route.moveEntry,route.huntEntry,...route.pages.map(page=>page.text),...route.arrival.map(page=>page.text),...route.choices.flatMap(choice=>[...choice.pages.map(page=>page.text),choice.farewell,openingLessonText(route,choice)])]){
-    assert.doesNotMatch(openingNarrativeText(text),/封存记录|值守/,route.code);
+test('抵达段由路线人物带路或给出明确方向，进入公会后不再追加交接剧情',()=>{
+  for(const route of openingRoutes){
+    const arrival=[...route.arrival,...route.choices.flatMap(choice=>choice.arrival??[])].map(page=>page.text).join('\n');
+    assert.match(arrival,/公会|会馆|驻点/,route.code);
+    assert.doesNotMatch(arrival,/接引人|巡路队|值守|完成交接|入门教学/,route.code);
+    assert.ok(route.choices.every(choice=>choice.task==='进入当地冒险者公会'&&!choice.farewell),route.code);
   }
+  const databaseSource=readFileSync('src/database/opening.ts','utf8');
+  assert.match(databaseSource,/SELECT character_id,'forest_guide','completed',0 FROM player_opening_stories WHERE state='lesson'/);
+  assert.match(databaseSource,/UPDATE player_opening_stories SET state='completed'.*WHERE state='lesson'/);
+});
+test('黄金兔三项消耗与云巢两千铜币在结算服务中真实落账',()=>{
+  const source=readFileSync('src/game/opening.service.ts','utf8');
+  assert.match(source,/row\.route_code==='F01'&&action==='A'[\s\S]*opening_last_ration[\s\S]*opening_mineral_water[\s\S]*healing_herb/);
+  assert.match(source,/row\.route_code==='S03'&&row\.branch_code==='B'[\s\S]*copper_coins=copper_coins\+2000/);
 });
 test('刚出生的armed状态可读取，不会访问尚未选择的分支',()=>{
   const source=ts.createSourceFile('opening.service.ts',readFileSync('src/game/opening.service.ts','utf8'),ts.ScriptTarget.Latest,true);
@@ -161,12 +125,21 @@ test('刚出生的armed状态可读取，不会访问尚未选择的分支',()=>
   const view=new Function('openingRouteByCode','openingFirstMeetingText','openingNewcomerText','openingNarrativeText','openingHubs','erisPages',`${code}\nreturn view;`)(openingRouteByCode,openingFirstMeetingText,openingNewcomerText,openingNarrativeText,openingHubs,[]);
   for(const route of openingRoutes){const result=view({route_code:route.code,story_version:route.version,state:'armed',branch_code:null,page_index:0,revision:0,entry_kind:'continue',flags_json:{},reward_claimed:0,destination_code:route.destination});assert.equal(result.state,'armed');assert.equal(result.choices.length,0);assert.ok(result.text.length>=20);}
   for(const route of openingRouteVersions){
-    const row={route_code:route.code,story_version:route.version,state:'reading',branch_code:null,page_index:route.pages.length,revision:4,entry_kind:'move',flags_json:{},reward_claimed:0,destination_code:route.destination};
+    const entryOffset=route.entryMergedIntoFirstPage?0:1;
+    const lastPageIndex=entryOffset+route.pages.length-1;
+    const row={route_code:route.code,story_version:route.version,state:'reading',branch_code:null,page_index:lastPageIndex,revision:4,entry_kind:'move',flags_json:{},reward_claimed:0,destination_code:route.destination};
     const expected=openingFirstMeetingText(route,route.pages.at(-1)!.text,route.pages.length-1);
     const last=view(row);assert.equal(last.state,'choice',route.code);assert.equal(last.text,expected,route.code);assert.equal(last.choices.length,route.choices.length);
-    const previous=view({...row,page_index:row.page_index-1});assert.equal(previous.state,'reading');assert.equal(previous.choices.length,0);
-    const first=view({...row,page_index:1}),introduction=openingFirstMeetingIntroduction(route);
+    const oldChoice=view({...row,state:'choice',page_index:0});assert.equal(oldChoice.text,expected,`${route.code}: 旧存档选项应显示新版最后一段`);
+    if(lastPageIndex>0){const previous=view({...row,page_index:lastPageIndex-1});assert.equal(previous.state,'reading');assert.equal(previous.choices.length,0);}
+    const first=view({...row,page_index:entryOffset}),introduction=openingFirstMeetingIntroduction(route);
     if(introduction)assert.ok(first.text.includes(introduction),route.code);
+    for(const choice of route.choices){
+      const arrival=view({...row,state:'arrival',branch_code:choice.code,page_index:0,reward_claimed:1,flags_json:{rewardName:choice.rewardName}});
+      const expectedArrival=(choice.arrival??route.arrival)[0];
+      assert.equal(arrival.title,expectedArrival.title,`${route.code}-${choice.code}`);
+      assert.equal(arrival.text,openingNarrativeText(openingNewcomerText(expectedArrival.text)),`${route.code}-${choice.code}`);
+    }
   }
 });
 
@@ -174,7 +147,7 @@ test('降临事务直接赠送Lv.1鉴识及基础专精，不占神技名额或�
   const source=ts.createSourceFile('character.service.ts',readFileSync('src/game/character.service.ts','utf8'),ts.ScriptTarget.Latest,true);
   const declaration=source.statements.find(s=>ts.isVariableStatement(s)&&s.declarationList.declarations.some(d=>d.name.getText(source)==='chooseGift'))!;
   const code=ts.transpileModule(declaration.getText(source).replace(/^export\s+/,'').replace("await import('./hidden-attributes.service')",'hiddenAttributes'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
-  const writes:{sql:string;args:unknown[]}[]=[];const ledger:unknown[][]=[];let registrationPending=true;
+  const writes:{sql:string;args:unknown[]}[]=[];const ledger:unknown[][]=[];const openingItems:unknown[][]=[];let registrationPending=true;
   const connection={execute:async(sql:string,args:unknown[]=[])=>{
     if(sql.startsWith('SELECT hp_max AS hpMax'))return[[{hpMax:100,mpMax:100,element_mastery_json:{},element_resistance_json:{}}]];
     if(sql==='SELECT id FROM characters WHERE player_id=?')return[[{id:7}]];
@@ -188,7 +161,7 @@ test('降临事务直接赠送Lv.1鉴识及基础专精，不占神技名额或�
     randomInRange:()=>100,distribute:()=>({}),attributes:[],calculateDerivedStats:()=>({hpMax:100,mpMax:100}),
     randomBalancedElements:()=>({}),chooseOpeningSpawn:async()=>({region:{id:1,name:'幽暗密林'},route:openingRouteByCode('F01'),x:0,y:0,z:0}),
     hiddenAttributes:{hiddenAttributesFor:async()=>({})},recordSkillPointChange:async(...args:unknown[])=>{ledger.push(args);},
-    grantOpeningItem:async()=>{},openingWorldFor:async()=>({reception_epoch:1}),recalculateCharacterStats:async()=>{},
+    grantOpeningItem:async(...args:unknown[])=>{openingItems.push(args);},openingWorldFor:async()=>({reception_epoch:1}),recalculateCharacterStats:async()=>{},
     updateAchievementState:async()=>{},recordAchievement:()=>{},flushAchievements:async()=>{},takeAchievementEvents:()=>[],achievementStatBonus:async()=>({})
   };
   const chooseGift=new Function(...Object.keys(dependencies),`${code}\nreturn chooseGift;`)(...Object.values(dependencies));
@@ -204,6 +177,8 @@ test('降临事务直接赠送Lv.1鉴识及基础专精，不占神技名额或�
   assert.deepEqual(ledger.map(row=>[row[2],row[3]]),[[1,'initial_grant']]);
   assert.ok(!writes.some(w=>/skill_points\s*=\s*skill_points\s*-/.test(w.sql)));
   assert.deepEqual(writes.find(w=>w.sql.startsWith('INSERT INTO player_blessings'))?.args,[7,'talent_physique_01']);
+  assert.ok(writes.some(w=>w.sql.includes("code='healing_herb'")&&w.sql.includes('SELECT ?, id, 3')));
+  assert.deepEqual(openingItems.map(args=>args.slice(1)),[[7,'opening_last_ration',3],[7,'opening_mineral_water',3]]);
   assert.equal(character.giftName,talentDefinitions.find(t=>t.number==='G01')!.name);
   assert.deepEqual(writes.filter(w=>w.sql.startsWith('INSERT INTO player_equipment')).map(w=>w.args),[[7,'weapon',10,90],[7,'upper',11,90]]);
   registrationPending=false;

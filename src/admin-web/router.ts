@@ -5,7 +5,7 @@ import { getAdminWebConfig } from '../config/admin-web';
 import pearAdminCover from '../assets/game/story/pear-admin-cover.png';
 import { adminCoverPath, adminPage, loginPage } from './page';
 import { createWebAdminAccount, loginAdminWeb, logoutAdminWeb, sessionForAdminWeb, setWebAdminEnabled, webAdminAccounts, type WebSession } from '../game/admin-web.service';
-import { adminDashboard, adminGameOperations, adminMails, adminPatrolEntities, adminPlayerDetail, adminPlayers, adminWebJournals, adminWorldEvents, adminWorldOverview, changeGlobalMultiplierFromWeb, runWebPlayerAudit, sendWebMail } from '../game/admin-web-data.service';
+import { adminDashboard, adminGameOperations, adminMails, adminPatrolEntities, adminPlayerDetail, adminPlayers, adminSearchSuggestions, adminWebJournals, adminWorldEvents, adminWorldOverview, changeGlobalMultiplierFromWeb, runWebPlayerAudit, sendWebMail } from '../game/admin-web-data.service';
 import { monitorSnapshot } from '../game/monitor.service';
 import { adminPortraitPreview, adminPortraitReviews, decidePortraitReview } from '../game/automaton-portrait-admin.service';
 
@@ -18,12 +18,14 @@ const loopback = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const remoteAddress = (ctx: Context) => String(ctx.req?.socket?.remoteAddress ?? '');
 const configFor = () => getAdminWebConfig();
 const expectedHost = (config: ReturnType<typeof configFor>) => config.publicBaseUrl ? new URL(config.publicBaseUrl).host.toLowerCase() : null;
+const secureCookie = (config: ReturnType<typeof configFor>) => config.publicBaseUrl?.startsWith('https://') ?? false;
 
 const secureAdminRequest = (ctx: Context) => {
   const config = configFor(); if (!config.enabled) return false;
   const remote = remoteAddress(ctx); const trustedProxy = config.trustedProxyIps.includes(remote);
   const host = String(ctx.get('host') ?? '').toLowerCase(); const expected = expectedHost(config);
   if (expected) {
+    if (config.allowInsecurePublicHttp) return host === expected;
     const forwardedProto = trustedProxy ? String(ctx.get('x-forwarded-proto')).split(',')[0].trim().toLowerCase() : '';
     return trustedProxy && forwardedProto === 'https' && host === expected;
   }
@@ -94,16 +96,16 @@ export const registerAdminWebRoutes = (router: koaRouter) => {
     try {
       if (!secureAdminRequest(ctx)) { apiError(ctx, 404, '未找到接口。'); return; }
       const body = await parseBody(ctx); const login = await loginAdminWeb({ username: body.username, password: body.password, ip: clientIp(ctx) });
-      const config = configFor(); ctx.cookies.set(cookieName, login.token, { httpOnly: true, sameSite: 'strict', secure: Boolean(config.publicBaseUrl), maxAge: config.sessionAbsoluteMinutes * 60_000, overwrite: true });
-      ctx.cookies.set(csrfCookieName, login.csrfToken, { httpOnly: false, sameSite: 'strict', secure: Boolean(config.publicBaseUrl), maxAge: config.sessionAbsoluteMinutes * 60_000, overwrite: true });
+      const config = configFor(); ctx.cookies.set(cookieName, login.token, { httpOnly: true, sameSite: 'strict', secure: secureCookie(config), maxAge: config.sessionAbsoluteMinutes * 60_000, overwrite: true });
+      ctx.cookies.set(csrfCookieName, login.csrfToken, { httpOnly: false, sameSite: 'strict', secure: secureCookie(config), maxAge: config.sessionAbsoluteMinutes * 60_000, overwrite: true });
       ctx.type = 'application/json'; ctx.body = { username: login.session.username, role: login.session.role };
     } catch (error) { apiError(ctx, 400, error instanceof Error ? error.message : '登录失败。'); }
   });
 
   router.delete('/api/admin/session', async (ctx: Context) => {
     const session = await auth(ctx, true); if (!session) return;
-    await logoutAdminWeb(sessionToken(ctx)); ctx.cookies.set(cookieName, '', { httpOnly: true, sameSite: 'strict', secure: Boolean(configFor().publicBaseUrl), maxAge: 0, overwrite: true });
-    ctx.cookies.set(csrfCookieName, '', { httpOnly: false, sameSite: 'strict', secure: Boolean(configFor().publicBaseUrl), maxAge: 0, overwrite: true });
+    await logoutAdminWeb(sessionToken(ctx)); ctx.cookies.set(cookieName, '', { httpOnly: true, sameSite: 'strict', secure: secureCookie(configFor()), maxAge: 0, overwrite: true });
+    ctx.cookies.set(csrfCookieName, '', { httpOnly: false, sameSite: 'strict', secure: secureCookie(configFor()), maxAge: 0, overwrite: true });
     ctx.type = 'application/json'; ctx.body = { ok: true };
   });
   router.get('/api/admin/dashboard', ctx => api(ctx, async () => adminDashboard()));
@@ -116,6 +118,7 @@ export const registerAdminWebRoutes = (router: koaRouter) => {
     catch { apiError(ctx, 404, '待审图片不存在或已处理。'); }
   });
   router.get('/api/admin/players', ctx => api(ctx, async () => adminPlayers(ctx.query)));
+  router.get('/api/admin/suggestions', ctx => { ctx.set('Cache-Control', 'no-store'); return api(ctx, async () => adminSearchSuggestions(ctx.query.kind, ctx.query.keyword, ctx.query.offset)); });
   router.get('/api/admin/players/:id', ctx => api(ctx, async () => adminPlayerDetail(Math.max(1, Number(ctx.params.id)))));
   router.post('/api/admin/players/:id/audit', ctx => api(ctx, async (session, body) => runWebPlayerAudit(session, Math.max(1, Number(ctx.params.id)), body.kind, body.reason), true));
   router.get('/api/admin/world', ctx => api(ctx, async () => adminWorldOverview()));

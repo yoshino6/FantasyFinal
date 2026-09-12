@@ -368,7 +368,8 @@ export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: 
   await connection.execute('INSERT INTO player_appraisal_progress (character_id,range_level,information_level) VALUES (?,1,1)', [characterId]);
   await connection.execute('INSERT INTO player_blessings (character_id,code) VALUES (?,?)', [characterId, giftCode]);
   await connection.execute(`INSERT INTO player_skills (character_id,skill_id) SELECT ?,id FROM skill_definitions WHERE code=? AND category='bound'`, [characterId, giftCode]);
-  await grantOpeningItem(connection, Number(characterId), 'opening_last_ration');
+  await grantOpeningItem(connection, Number(characterId), 'opening_last_ration', 3);
+  await grantOpeningItem(connection, Number(characterId), 'opening_mineral_water', 3);
   for (const [itemCode, slot] of [['opening_staff','weapon'],['opening_clothes','upper']]) {
     const [definitions] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM item_definitions WHERE code=?', [itemCode]);
     if (!definitions[0]) throw new Error('初行装备尚未备齐，请稍后重新选择恩赐。');

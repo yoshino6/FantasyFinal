@@ -181,8 +181,9 @@ const ambushStartFormat = (battle: Awaited<ReturnType<typeof battleStatus>>) => 
     .addBlockquote('（首回合直击伤害+50%）').addNewline().addNewline();
   return Format.create().addMarkdown(appendBattleState(markdown, battle)).addButtonGroup(battleButtons(battle));
 };
-export const battleStartFormat = (text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => {
+export const battleStartFormat = (text: string, battle: Awaited<ReturnType<typeof battleStatus>>, reward?:string) => {
   const markdown = Format.createMarkdown().addTitle(battle.mode === 'spar' ? battleRoundTitle(battle.mode, battle.turn) : '战斗开始').addNewline().addNewline().addBlockquote(text).addNewline().addNewline();
+  if(reward)markdown.addBold(`已获得：${reward}`).addNewline().addNewline();
   return Format.create().addMarkdown(appendBattleState(markdown, battle)).addButtonGroup(battleButtons(battle));
 };
 const negotiationFailureFormat = (text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => {
@@ -236,8 +237,8 @@ const realmBarrierFormat = () => Format.create()
     .addText('你感觉到身体能量已趋于饱和，无法再吸收更多。').addNewline().addNewline()
     .addText('主线变更【无形的禁锢】').addNewline()
     .addText('你决定去找专业的人来请教这件事情。').addNewline()
-    .addText('先去冒险者公会里面问问吧。'))
-  .addButtonGroup(Format.createButtonGroup().addRow().addButton('任务', '/任务', { type: 'command', autoEnter: true, style: 'blue' }));
+    .addText('去百纳镇的糖水屋，向老板请教这种异常。'))
+  .addButtonGroup(Format.createButtonGroup().addRow().addButton('前往 糖水屋', '/前往 -12 -196', { type: 'command', autoEnter: true, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true, style: 'blue' }));
 const evolutionBarrierFormat = () => Format.create()
   .addMarkdown(Format.createMarkdown().addTitle('未知的枷锁').addNewline().addNewline()
     .addText('一股精纯的能量冲入你的体壳，却没有像往常一样化作成长的养分。它在体内盘桓片刻，最终悄无声息地散去。').addNewline().addNewline()
@@ -267,11 +268,11 @@ const forestGuideChapterTexts: Record<number, string> = {
 const townArrivalFormat = async (stage: number, text: string, completed = false, guildStory = false) => {
   if (completed) return null;
   const hasInlinePearImage = guildStory && stage === 1 && isPublicImageUrl(gameAssetUrls.pearGuideImageUrl);
-  const markdown = Format.createMarkdown().addTitle(guildStory ? `初临·百纳镇·冒险者工会（${stage}/3）` : `初临·百纳镇（${stage}/6）`).addNewline().addNewline();
+  const markdown = Format.createMarkdown().addTitle(guildStory ? `初临·梨子带路（${stage}/3）` : stage===1?'初临·城门（1/6）':`初临·百纳镇（${stage}/6）`).addNewline().addNewline();
   // 只有 Markdown 内嵌的公开图片，才能与正文和按钮作为同一条 QQ 消息发送。
   if (hasInlinePearImage) markdown.addImage(gameAssetUrls.pearGuideImageUrl, { width: 320, height: 213 }).addNewline().addNewline();
   markdown.addText(text);
-  const label = guildStory ? '继续' : stage === 4 ? '你说什么？勇者是什么意思？' : stage === 6 ? '挥手告别' : '继续';
+  const label = guildStory ? '继续' : stage === 6 ? '挥手告别' : '继续';
   if (hasInlinePearImage) {
     markdown.addNewline().addNewline().addButton(`[${label}]`, { data: '/继续剧情', autoEnter: false });
     return Format.create().addMarkdown(markdown);
@@ -438,11 +439,17 @@ const sendCombatResult = async (message: any, qqUserId: string, result: Awaited<
       if (mainQuest.title === '【主线·未知的枷锁】') await message.send({ format: evolutionBarrierFormat() });
     }
     if (victory && settlement.goblinKingCompleted) {
+      if (await (await import('../game/floating-leaf.service')).floatingLeafOrigin(qqUserId)) {
+        const { floatingRescueTexts } = await import('../game/floating-leaf-content');
+        await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('主线·木笼获救').addNewline().addNewline().addText(floatingRescueTexts.victory).addNewline().addNewline().addText('**【获得地图·百纳镇】**'))
+          .addButtonGroup(Format.createButtonGroup().addRow().addButton('护送返镇', '/浮叶返程', { type: 'command', autoEnter: true, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
+      } else {
       const story = Format.createMarkdown().addTitle('主线·少女获救').addNewline().addNewline()
         .addText('哥布林国王倒下后，原本凶悍的大军像忽然失去了脊梁，嘶叫着退入密林。浅红色幼龙拖着伤躯远去，只留下被踩碎的旗帜与尚未散尽的雷鸣。梨子喵扶着短刃站起身，发间缺失的鱼骨头发卡终于被她从泥里拾回。').addNewline().addNewline()
         .addText('她把发卡别回耳边，沉默了好一会儿，才轻声开口。\n\n“那天我本来只是进森林打猎喵。可我在一处废营地里看见了少女留下的布片和脚印，旁边还有哥布林拖拽过的痕迹……我就一路跟了上来。”\n\n她望向哥布林逃散的方向，握着短刃的手仍微微发颤。\n\n“我在部落里看见了那些木笼，才知道失踪的少女都被关在里面。守卫少的时候，我本来想把人带走；可我杀了几个拦路的哥布林，警报就响了。它们把我当成入侵者，越聚越多，我一个人根本撑不住，最后只能藏进断木后面。要不是你赶来，我可能还会被困在这里喵。”').addNewline().addNewline()
         .addText('梨子喵忽然抬起头，指向逃兵消失的方向。\n\n“它们把人藏在部落里面！国王一倒，守卫也散了。跟我来喵！”\n\n她带着我穿过被遗弃的营火与歪斜木栅，来到部落深处的几间木笼前。笼门被一一劈开，失踪的少女们终于重见天光；有人相拥而泣，有人仍攥着同伴的手，却都还活着。\n\n直到最后一人走出阴影，我才真正松开握紧的武器。\n\n我与梨子喵领着她们踏上归路。远处的百纳镇灯火微明，终于有人能等到失而复得的家人。');
       await message.send({ format: Format.create().addMarkdown(story).addButtonGroup(Format.createButtonGroup().addRow().addButton('前往 梨子喵', '/前往 -22 -196', { type: 'command', autoEnter: true, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
+      }
     }
     if (victory && settlement.evolutionCompleted) {
       const story = Format.createMarkdown().addTitle('大学者·噶').addNewline().addNewline()
@@ -732,13 +739,15 @@ const timeGreeting = (morning: string, afternoon: string, evening: string) => {
 export const guildFrontDeskFormat = async (qqUserId: string, text?: string, continuingChat = false) => {
   const context=await (await import('../game/guild-context')).requireCurrentGuild(qqUserId);
   if(context.code!=='baina_town'){
-    const [profile,nearby]=await Promise.all([adventurerProfile(qqUserId),nearbyPoints(qqUserId)]);
+    const [profile,nearby,mainQuest]=await Promise.all([adventurerProfile(qqUserId),nearbyPoints(qqUserId),currentMainQuest(qqUserId)]);
     const markdown=npcInteractionMarkdown('冒险者公会·前台',context.hub.host,text?.replaceAll('莫妮卡',context.hub.host)??context.hub.description,
       context.code==='world_tree'?'root_guild_clerk':undefined,nearby.npcDetailsUnlocked);
     const buttons=Format.createButtonGroup();
     if(!continuingChat){
       buttons.addRow().addButton(profile.adventurer_registered?'冒险者 晋升':'冒险者 注册','/公会注册',{type:'command',autoEnter:true,style:'blue'})
         .addButton('职业选择','/职业选择',{type:'command',autoEnter:true,style:profile.adventurer_registered?'blue':undefined});
+      if(context.code==='floating_leaf_town'&&mainQuest.title==='【主线·无形的禁锢】')buttons.addRow().addButton('询问等级停滞','/浮叶瓶颈 guild',{type:'command',autoEnter:true,style:'blue'});
+      if(context.code==='floating_leaf_town'&&mainQuest.title==='【主线·失踪的孩子】')buttons.addRow().addButton('前往公馆','/前往 15 0',{type:'command',autoEnter:true,style:'blue'});
     }
     buttons.addRow().addButton(continuingChat?'继续闲聊':`闲聊 ${context.hub.host}`,context.code==='world_tree'?'/前台闲聊':'/初行公会 人物',{type:'command',autoEnter:true,style:'blue'})
       .addButton('返回公会大厅','/初行公会',{type:'command',autoEnter:true});
@@ -761,7 +770,6 @@ export const guildFrontDeskFormat = async (qqUserId: string, text?: string, cont
   const buttons = Format.createButtonGroup().addRow().addButton(profile.adventurer_registered ? '冒险者 晋升' : '冒险者 注册', '/公会注册', { type: 'command', autoEnter: true, style: 'blue' });
   buttons.addButton('职业选择', '/职业选择', { type: 'command', autoEnter: true, style: profile.adventurer_registered ? 'blue' : undefined });
   buttons.addRow().addButton('切磋 莫妮卡', '/切磋 guild_counter', { type: 'command', autoEnter: true, style: 'blue' }).addButton('闲聊 莫妮卡', '/前台闲聊', { type: 'command', autoEnter: true, style: 'blue' });
-  if (mainQuest.title === '【主线·无形的禁锢】') buttons.addRow().addButton('关于 无形的禁锢', '/关于无形的禁锢', { type: 'command', autoEnter: true, style: 'blue' });
   if (mainQuest.title === '【主线·未知的枷锁】') buttons.addRow().addButton('询问 等级停滞', '/询问等级停滞', { type: 'command', autoEnter: true, style: 'blue' });
   if (mainQuest.title === '【主线·失踪的少女】' && mainQuest.description.startsWith('最近哥布林')) buttons.addRow().addButton('了解 少女失踪事件', '/关于深处的阴谋', { type: 'command', autoEnter: true, style: 'blue' });
   if (dungeonSecret.stage === 1) buttons.addRow().addButton('关于 地下的秘密', '/询问地下的秘密', { type: 'command', autoEnter: true, style: 'blue' });
@@ -885,12 +893,17 @@ const showMoveResult = async (message: any, qqUserId: string, result: any) => {
     return;
   }
   if (result.kind === 'main_quest_story') {
-    const markdown = Format.createMarkdown().addTitle(`主线·失踪的少女（${result.questChapter}/7）`).addNewline().addNewline().addText(result.text);
+    const leaf = await (await import('../game/floating-leaf.service')).floatingLeafOrigin(qqUserId);
+    const markdown = Format.createMarkdown().addTitle(leaf ? `主线·密林救援（${result.questChapter}/4）` : `主线·失踪的少女（${result.questChapter}/7）`).addNewline().addNewline().addText(result.text);
     const buttons = Format.createButtonGroup().addRow();
     if (result.questClue) buttons.addButton('查看线索', '/任务', { type: 'command', autoEnter: true, style: 'blue' });
     else buttons.addButton('继续前进', '/继续深处阴谋', { type: 'command', autoEnter: true, style: 'blue' });
     buttons.addButton('任务', '/任务', { type: 'command', autoEnter: true });
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) });
+    return;
+  }
+  if (result.character?.region_name === '浮叶镇' && Number(result.character.pos_x) === 13 && Number(result.character.pos_y) === 2 && (await currentMainQuest(qqUserId)).title === '【主线·观风台】') {
+    await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('浮叶镇·观风台').addNewline().addNewline().addText(result.text).addNewline().addNewline().addText('木叶风车正在风向刻纹上缓缓旋转。菈芮请我到这里辨认无形的边界。')).addButtonGroup(Format.createButtonGroup().addRow().addButton('观察刻纹', '/浮叶瓶颈 observatory', { type: 'command', autoEnter: true, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
     return;
   }
   if (result.kind === 'npc') {
@@ -1026,7 +1039,11 @@ export const continueStoryHandler = async () => {
       }
       await message.send({ format: storyFormat }); return;
     }
-    if (story.arrivalBuilding) { await message.send({ format: buildingEncounterFormat('冒险者公会', story.arrivalBuilding, '你移动至百纳镇·猫拉瑞亚(-2, -161)') }); return; }
+    if (story.arrivalBuilding) {
+      await(await import('../game/opening-guild.service')).enterOpeningGuild(event.current.UserId,true);
+      await message.send({format:await(await import('./opening-guild')).openingGuildFormat(event.current.UserId)});
+      return;
+    }
     const panel = await movementPanel(event.current.UserId, story.text);
     const nearby = await nearbyPoints(event.current.UserId);
     await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) });
@@ -1037,6 +1054,7 @@ export const buildingHandler = (action: 'enter' | 'ignore' | 'leave' | 'area') =
   try {
     const code = String(route.param('code'));
     const building = await requireNpcAtCurrentPosition(event.current.UserId, code);
+    if(code==='eternal_arena_gate'&&action==='enter'){await(await import('./worldtree-witness')).enterEternalArenaHandler();return;}
     if(Object.values((await import('../game/opening-world.config')).openingHubs).some(hub=>hub.guild===code)){
       const guild=await import('../game/opening-guild.service');
       if(action==='enter'||action==='leave'||action==='ignore')await guild.enterOpeningGuild(event.current.UserId,action==='enter');
@@ -1094,6 +1112,12 @@ export const buildingHandler = (action: 'enter' | 'ignore' | 'leave' | 'area') =
     if (code === 'world_gate') {
       if (action === 'enter') { const { worldGateFormat } = await import('./girl-gratitude'); await worldGateFormat(); return; }
       const panel = await movementPanel(event.current.UserId, action === 'leave' ? '你离开界门驿站，银蓝色光纹在身后渐渐暗下。' : '界门驿站的值守人安静地等着你的决定。');
+      const nearby = await nearbyPoints(event.current.UserId);
+      await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return;
+    }
+    if (code === 'leaf_manor') {
+      if (action === 'enter') { await (await import('./floating-leaf')).floatingManorHandler(); return; }
+      const panel = await movementPanel(event.current.UserId, '你暂时离开公馆，身后的返程航班记录仍在轻轻翻动。');
       const nearby = await nearbyPoints(event.current.UserId);
       await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return;
     }
@@ -1345,6 +1369,19 @@ export const ambushHandler = async () => { const [event] = useEvent(); const [ro
 export const queueAmbushHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const spawnId = Number(route.param('id')); const channelId = String(event.current.ChannelId ?? ''); const delivery = { scope: !event.current.IsPrivate && channelId ? 'group' as const : 'c2c' as const, targetId: !event.current.IsPrivate && channelId ? channelId : String(event.current.UserId), botId: String(event.current.BotId ?? '') || undefined }; const result = await queueAmbush(event.current.UserId, spawnId, delivery); if (result.ready) { await chooseTarget(event.current.UserId, result.spawnId ?? spawnId); const battle = await battleStatus(event.current.UserId); await message.send({ format: battleStartFormat(result.residualParty ? '前一支队伍击败了目标，但伤势未愈。你抓住破绽，伏击其残余队伍！' : '前一场战斗已经结束，你趁目标尚未恢复时切入战场。', battle) }); await startAutoBattle(message, event.current.UserId); return; } await message.send({ format: messageFormat('伏击等待', '你已埋伏在战场边缘。当前战斗结束后，机器人会在你发送伏击的会话中通知并自动接管后续战斗。') }); } catch (error) { await fail(message, error, '无法伏击'); } };
 export const leaveOccupiedBattleHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await leaveOccupiedBattle(event.current.UserId); const panel = await movementPanel(event.current.UserId, '你避开了正在进行的战斗，可以继续移动。'); const nearby = await nearbyPoints(event.current.UserId); await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); } catch (error) { await fail(message, error, '无法离开战场'); } };
 export const forestGuideHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const progress = await forestGuideAdvance(event.current.UserId, String(route.param('action'))); if (!progress.battleChoice) { await message.send({ format: chapterFormat(progress.stage, progress.text) }); return; } await message.send({ format: chapterFormat(5, progress.text) }); const result = await forestGuideChoice(event.current.UserId, progress.battleChoice); await chooseTarget(event.current.UserId, result.spawnId); const battle = await battleStatus(event.current.UserId); await message.send({ format: battleStartFormat(`${result.text}\n本场剧情战斗将暂时关闭自动战斗。`, battle) }); } catch (error) { await fail(message, error, '初章推进失败'); } };
+
+/** F03 初行路线复用原有的三人冒险团、虚弱森林史莱姆与真实战斗系统。 */
+export const startOpeningForestBattle=async(qqUserId:string,choice:'join'|'depart',message:{send:(params:any)=>Promise<any>})=>{
+  let intro='莱昂举起盾牌，伊芙与希娅在两侧站定，三人把我护在能够彼此照应的位置。';
+  let battle:Awaited<ReturnType<typeof battleStatus>>;
+  try{battle=await battleStatus(qqUserId);}
+  catch{
+    const prepared=await forestGuideChoice(qqUserId,choice);intro=prepared.text;
+    await chooseTarget(qqUserId,prepared.spawnId);battle=await battleStatus(qqUserId);
+  }
+  const reward=await(await import('../game/opening.service')).completeOpeningForestBattleStart(qqUserId);
+  await message.send({format:battleStartFormat(`${intro}\n本场剧情战斗将暂时关闭自动战斗。`,battle,reward)});
+};
 export const switchTargetHandler = async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
   try {

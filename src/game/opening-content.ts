@@ -3,6 +3,8 @@ import { generatedSevenOpeningRoutes } from './opening-seven.generated';
 import { finalOpeningRewrites } from './opening-rewrites-final.config';
 import { openingExpandedLesson, openingNarrativeExpansions } from './opening-narrative-expanded.config';
 import { applyOpeningRewardPolicy } from './opening-reward-policy';
+import { retainOpeningRoute } from './opening-retained.config';
+import { polishRetainedOpening } from './opening-prose-polish.config';
 import type { OpeningChoice, OpeningRoute } from './opening.types';
 export { talentDefinitions } from './talent.config';
 
@@ -44,7 +46,7 @@ const escorts: Record<string, string> = {
   E02: '梅尔文收回影子，打开来时留下的返程门。赫棋自行走出棋盘，与你们抵达世界树图书馆外，决定先去登记客居。',
   E03: '余炉打开连接世界树遗物台的维修通道，带上已经站起来的囚像。止声得到妥善安置，你也终于能放下紧绷的手。',
   F01: '引灯人接过照明灯，领你沿有巡逻标记的林道走向百纳镇。城门的灯逐渐清楚，他一直等你跟上才继续走。',
-  F02: '引灯沿林道指向百纳镇。城门前，一名猫族少女抱着纸袋停住脚步：“第一次来喵？我叫梨子，公会就在里面，我可以带路。”',
+  F02: '引灯沿林道指向百纳镇。城门前，一名抱着纸袋、长着猫耳和尾巴的少女停住脚步：“第一次来喵？我叫梨子，公会就在里面，我可以带路。”',
   F03: '莱昂在前面举盾开路，伊芙收起火星，希娅与你并肩。百纳镇灯火渐近，梨子喵朝三人挥手，听说你刚到，立刻带你去公会。'
 };
 /**
@@ -52,7 +54,7 @@ const escorts: Record<string, string> = {
  * 七图新版已有各自的 lessonText；其余路线在这里补足，避免落入同一段“接引人备好教具”的通用文案。
  */
 const routeLessonTexts: Record<string, string> = {
-  M01: '花桥尽头，菲萝缇抱着改了又改的航务表跑进风枝会馆。她把“复苏”那一栏郑重划掉，换成“活着抵达”，又请你亲眼核对自己的名字。“这回由你自己确认，”她说，“我不替你填。”',
+  M01: '花桥尽头，菲萝缇抱着改了又改的航务表跑进风枝会馆。她把我名字旁的“古木长老回程”划掉，另起一行写上“降临旅人，临时搭乘”，又请我亲眼核对。“这回由你自己确认，”她说，“我不替你填。”',
   M02: '根桥尽头，艾蕾诺先把歪掉的花冠收进怀里，才走进前台。维萝没有替她开口，只将两张空白陈述单分别推给你们。艾蕾诺把那份没有自己签名的婚约压在桌上，抬眼问你：“刚才我说的话，你愿意如实写下来吗？”',
   M03: '奥文抱着小狗从补给车尾跳下来，帽徽上的黑市仓号还没擦掉。他这次先用最短的话讲清阵脚、货单和退货口，把摊主的货架一并归位。“传奇称号可以晚点说，”他把教具放到桌上，“先把不会坑人的部分弄明白。”',
   A01: '世界树的女神办事桌前留着一张补救单。负责送你落地的人把事故经过写在最上方，没再替你解释；岑渡则把干毛巾放到一边，等你自己确认是否平安。桌上的接引印仍亮着，提醒所有人这一次要先把安全写清楚。',
@@ -92,29 +94,6 @@ export const openingLessonText = (route: OpeningRoute, choice: OpeningChoice) =>
   ?? routeLessonTexts[`${route.code}${choice.code}`]
   ?? routeLessonTexts[route.code]
   ?? '你已抵达安全区。请根据自己亲眼见到的事，完成这一次交接。');
-const forestFarewells:Record<string,string>={
-  F01A:'黄金兔把鼻尖贴在你空下来的口粮袋上。契兽员笑着递来一小把饲料，这一次，你们都不必饿着肚子赶路了。',
-  F01B:'鉴物员合上记录册，把开箱所得交还给你。门外有人谈起林间的一点金光，你握住自己的行装，没有接话。',
-  F02A:'你把猩红色的残片收进衣内。城门已经很远，少女回头时的眼神却没有跟着消失。有些相遇，还会在以后找到你。',
-  F02B:'梨子喵把公会门扶住：“快进来喵，汤还热着。”你摸到衣袋里完好的火漆。瑟芙菈已经离开，但她认真说过的名字，你还记得。',
-  F03A:'莱昂检查了一遍你的灯扣，伊芙在旁边催他别把灯当盾修。希娅向你道别：“认清自己的路以后，也记得给别人留一点光。”',
-  F03B:'希娅把药袋系好，特意让每张标签都露在外面。莱昂承诺下次少带一点伤回来，伊芙看了他一眼：“这句话，我替你记着。”'
-};
-const laterFarewells:Record<string,string>={
-  M01:'菈芮检查完最后一张航务表，推开迎风的窗。花桥上有人朝下界的旅人挥手，这一次，那条云路已经有了能回来的一端。',
-  M02:'艾蕾诺将袖口最后一颗松动的珍珠缝好，抬起头来：“等下次再见，我会有自己的地址。写信的时候，不必经过谁的许可。”',
-  M03:'奥文郑重合上法术笔记，椅子却在身后轻轻散了架。他坐在地板上沉默了一息：“这一条，也应该记进失败报告。”',
-  A02:'值守将核验过的证词另夹成一册。远处有人又在高喊勇者的名号，这一次，你先看清了他的脸，再决定要不要听下去。',
-  C01:'霜芙端着热汤，庄严地宣布这碗不必计入宫廷礼仪。檐角的冰滴落进雪里，她听了一会儿，悄悄又伸手续了半碗。',
-  C02:'格琳达在账本旁添了一行“旅客已安置”，又用尾尖把椅子挪远了一点：“夜里想要热水就敲门。别敲鳞片，会响得太大。”',
-  C03:'卡洛将旧旗晾到炉边，孩子们已经学会避开枪杆。他数清屋里的人，终于解下肩带：“都在。今晚可以把门关好了。”',
-  T01:'七号把修好的手抬到与人相近的高度，慢慢挥了挥。伊赛没急着检查读数，也向它挥手，等它自己把这个动作做完。',
-  T02:'逆鸣将最后一份撤离记录交进柜台，空荡的领口朝灯下微微一低。守桥的命令终于结束，往后他可以为自己选择方向。',
-  T03:'滴算给账簿压上镇纸，薄利在一旁宣布今日的“免费看海”仍然免费。鲸背缓缓起伏，你终于能分清海浪和旅市里细碎的笑声。',
-  E01:'烛十七收好作废的任职表，磐签郑重盖上“不欠加班”四个字。门外的阳光落下来，你第一次觉得离开一张椅子，也能算件值得纪念的事。',
-  E02:'梅尔文收起棋子，赫棋在门边试着转了转肩：“下次，我想坐在棋盘这一边。”老法师给他留了位子，没有替他选颜色。',
-  E03:'余炉在封好的剑匣旁留下一盏小灯。止声的剑匣里传来很轻的回应：“下次再见，希望没有人需要跪着。”'
-};
 const applyOpeningRewrite=(route:OpeningRoute):OpeningRoute=>{
   const rewrite=finalOpeningRewrites[route.code];
   if(!rewrite)return route;
@@ -128,13 +107,14 @@ const applyOpeningNarrativeExpansion=(route:OpeningRoute):OpeningRoute=>{
   if(!expansion)return route;
   return{...route,...expansion,choices:route.choices.map(choice=>({...choice,...expansion.choices[choice.code]}))};
 };
-export const openingRouteVersions: OpeningRoute[] = [...generatedSevenOpeningRoutes, ...generatedOpeningRoutes, ...forestRoutes].map(applyOpeningRewrite).map(applyOpeningNarrativeExpansion).map(applyOpeningRewardPolicy).map(route => ({ ...route,
+const retainedRouteVersions: OpeningRoute[] = [...generatedSevenOpeningRoutes, ...generatedOpeningRoutes, ...forestRoutes].map(applyOpeningRewrite).map(applyOpeningNarrativeExpansion).map(applyOpeningRewardPolicy).map(retainOpeningRoute).filter((route):route is OpeningRoute=>Boolean(route)).map(polishRetainedOpening).map(route => ({ ...route,
   person: Object.prototype.hasOwnProperty.call(finalOpeningRewrites[route.code]??{},'person')?finalOpeningRewrites[route.code].person:route.person,
   arrival: route.arrival.length ? route.arrival : [{ title: '灯火已经在前方', text: escorts[route.code] }],
   choices: route.choices.map(choice => ({ ...choice, rewardCode: choice.rewardCode || `opening_${route.code.toLowerCase()}_${choice.code.toLowerCase()}`,
-    farewell: choice.farewell || (route.code === 'A01' ? '接引记录与你的名字重新对上。你将凭据收好，眼前这一次，是能够继续走下去的路。' : forestFarewells[route.code+choice.code]??laterFarewells[route.code]??'') }))
+    farewell: choice.farewell }))
 }));
-export const openingRoutes: OpeningRoute[] = openingRouteVersions.filter((route,index,all)=>all.findIndex(r=>r.code===route.code)===index);
+export const openingRouteVersions: OpeningRoute[] = retainedRouteVersions.filter((route,index,all)=>all.findIndex(r=>r.code===route.code)===index);
+export const openingRoutes: OpeningRoute[] = [...openingRouteVersions];
 export const openingRouteByCode = (code: string, version?: number) => openingRouteVersions.find(route => route.code === code && (version === undefined || route.version === version));
 /** 初到安全区时，主角尚未认识接应人员；姓名留到实际交谈中的自我介绍。 */
 export const openingNewcomerText=(text:string)=>text
@@ -173,6 +153,9 @@ const firstMeetingCompanionAliases: Record<string,Record<string,string>> = {
   W02:{ 小苇:'药师的学徒' },Y03:{ 萨芙:'第一位魔族客人' }
 };
 const firstMeetingIntroductions: Record<string,string> = {
+  F01:'',
+  F02:'',
+  F03:'',
   S01:'对方把扳手在围裙上抹了一下，先朝我抬抬下巴：“桥务站的贝娅。先别让那把剑再松一寸，剩下的事我边修边说。”',
   S02:'女子用沾湿的手指在沙上写下“弥莎”，又画了个歪歪的音符。她指着自己发不出声的喉咙，认真朝我一鞠躬。',
   S03:'',
@@ -194,8 +177,8 @@ const firstMeetingIntroductions: Record<string,string> = {
   Y01:'半精灵借还员把单据翻到背面，耳尖微红：“借还员蓝穗。刚才那句不该问，机器把你认成书了；我先让它停下。”',
   Y02:'抱着工具袋的人按住会滑动的盆栽，向我无奈挥手：“叫我木芽，管门窗和这些倔家具的。门想看夕阳可以，先别把来访者堵在外面。”',
   Y03:'蜜獾厨娘用锅铲敲了敲烤盘边缘，干脆地说：“朵菈管这间厨房。递请柬的叫萨芙；饿的人先吃饭，想占便宜的等把手从甜点盘里拿开再谈。”',
-  M01:'尖耳少女把歪掉的记录板抱紧，急忙说：“我是菲萝缇，浮叶镇见习航务员。这个箱子认错人了，我会负责让它把我俩都放开。”',
-  M02:'少女割断藤蔓后把餐刀插回鞘中，挺直背脊：“我叫艾蕾诺。婚礼的新娘，或者说前新娘。车能修，决定不用替我修。”',
+  M01:'',
+  M02:'',
   M03:'倒挂的男人先伸手扶正漂浮的帽子，才尴尬一笑：“奥文，暂时别写传奇法师……先帮我拆掉这份黑市条款。”',
   R01:'',
   R02:'',
@@ -203,7 +186,7 @@ const firstMeetingIntroductions: Record<string,string> = {
   A02:'红斗篷男人把声音压低，拱手时仍想摆出英雄姿势：“莱斯，至少这是我的真名。画像上的勇者大半是假的，信匣是真的；追我们的人也不是什么巡卫。”',
   A03:'',
   C01:'银白长裙的女王慌忙接住皇冠，仍努力维持威严：“雪灯坳的霜芙向你致意，冬之女王。刚才的失态不记入礼仪；季节钟得先从雪里挖出来。”',
-  C02:'龙头从账本后探得更近，鼻息吹乱我的衣角：“格琳达，霜龙旅店掌柜。押金可以后谈，外面的猎龙人不能碰我的住客和那枚蛋。”',
+  C02:'',
   C03:'守旗人咬紧布条打好结，才抬头说：“救人的卡洛。车上都是孩子，银币的事可以查，先别让雪把他们埋住。”',
   T01:'精灵把装反的支架转了半圈，耳尖更低了：“伊赛，空港修理师。七号比我会记错，我负责让升降机和人都回到该走的方向。”',
   T02:'骑士腰间的头盔向我郑重一低，声音从甲胄里传来：“旧军守桥骑士逆鸣，请记下这个称呼。若我忽然把你当敌军，请先相信这不是你的错。”',

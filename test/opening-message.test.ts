@@ -5,7 +5,7 @@ import ts from 'typescript';
 import { Format } from '../node_modules/alemonjs/lib/application/format/message-format.js';
 import { talentGroups } from '../src/game/talent.config';
 import { openingLessonText, openingRoutes, openingRouteVersions, talentDefinitions } from '../src/game/opening-content';
-import { openingHubs } from '../src/game/opening-world.config';
+import { openingHubs, openingStartRouteCodes } from '../src/game/opening-world.config';
 import { rootGuildPeople, rootGuildScenes, guildLessons } from '../src/game/opening-guild.config';
 import { firstPersonNarrative } from '../src/game/narrative-voice';
 
@@ -30,6 +30,24 @@ const helpers=['MAX_BUTTON_ROWS','MAX_BUTTONS_PER_ROW','createButtonsData','mdFo
 const converter=new Function(source.statements.filter(s=>ts.isVariableStatement(s)&&s.declarationList.declarations.some(d=>helpers.includes(d.name.getText(source)))).map(s=>s.getText(source)).join('\n')+'\nreturn {createButtonsData,createMarkdownText};')();
 const catalog=load('src/game/divine-message.ts',{alemonjs:{Format},'./talent.config':{talentGroups},'./opening-content':{talentDefinitions}});
 
+test('隐藏选路面板仅显示四条开放路线，逐行提供不自动发送的蓝色选择链接',()=>{
+  const {openingRoadPanelFormat}=load('src/response/opening-road.ts',{alemonjs:{Format}},['openingRoadPanelFormat']);
+  const roads=openingRoutes.filter(route=>openingStartRouteCodes.has(route.code)).map(route=>({code:route.code,title:route.title,region:route.region,destination:route.destination}));
+  const format=openingRoadPanelFormat({revision:3,current:roads[0].code,roads});
+  const markdown=format.value.find((item:any)=>item.type==='Markdown');
+  const buttons=format.value.find((item:any)=>item.type==='BT.group');
+  const rendered=converter.createMarkdownText(markdown.value);
+  assert.match(rendered,/初行·选择道路/);
+  for(const [index,road] of roads.entries())assert.match(rendered,new RegExp(`${'①②③④'[index]}${road.title}`));
+  assert.equal((rendered.match(/qqbot-cmd-input/g)??[]).length,4);
+  assert.doesNotMatch(rendered,/qqbot-cmd-enter/);
+  const choices=markdown.value.filter((item:any)=>item.type==='MD.button'&&item.value==='[选择]');
+  assert.equal(choices.length,4);assert.ok(choices.every((item:any)=>item.options.autoEnter===false));
+  assert.equal(buttons.value.length,1);
+  const qq=converter.createButtonsData(buttons.value);
+  assert.equal(qq.rows.flatMap((row:any)=>row.buttons).length,1);
+});
+
 test('初行报酬仅在结算首页以加深提示显示，后续剧情与交接不重复',()=>{
   const {openingFormat}=load('src/game/opening-message.ts',{alemonjs:{Format},'./narrative-voice':{firstPersonNarrative}});
   const states=[['arrival',1],['arrival',2],['lesson',1],['completed',1]] as const;
@@ -43,6 +61,14 @@ test('初行报酬仅在结算首页以加深提示显示，后续剧情与交�
       assert.equal(converter.createMarkdownText(openingFormat(story).value.find((v:any)=>v.type==='Markdown').value),rendered,'断线重发保留结算消息');
     }else assert.doesNotMatch(rendered,/已获得：/);
   }
+});
+
+test('初行结束页只引导进入公会，不再展开路线后续',()=>{
+  const {openingFormat}=load('src/game/opening-message.ts',{alemonjs:{Format},'./narrative-voice':{firstPersonNarrative}});
+  const format=openingFormat({route:'F01',branch:'A',title:'草窝里的金光',text:'我推开公会大门。',state:'completed',page:1,pages:1,revision:12,choices:[]});
+  const buttons=converter.createButtonsData(format.value.find((value:any)=>value.type==='BT.group').value).rows.flatMap((row:any)=>row.buttons);
+  assert.deepEqual(buttons.map((button:any)=>button.action.data),['/初行公会','/任务']);
+  assert.ok(!buttons.some((button:any)=>button.action.data==='/初行见闻'));
 });
 
 test('伙伴认主与破壳使用旅程变化提示，不伪装成物品报酬',()=>{
@@ -100,8 +126,8 @@ test('初行叙事以第一人称呈现，NPC对白仍以对主角说话的口�
 });
 
 test('全部初行路线抵达公会后延续当事人物，不再落入通用接引文案',()=>{
-  assert.equal(openingRoutes.length,42);
-  assert.equal(openingRouteVersions.length,63);
+  assert.equal(openingRoutes.length,8);
+  assert.equal(openingRouteVersions.length,8);
   for(const route of openingRouteVersions){
     const text=openingLessonText(route,route.choices[0]);
     assert.doesNotMatch(text,/接引人已经备好所需教具|请根据自己亲眼见到的事/,
@@ -111,13 +137,21 @@ test('全部初行路线抵达公会后延续当事人物，不再落入通用�
   assert.match(openingLessonText(openingRoutes.find(route=>route.code==='F01')!,openingRoutes.find(route=>route.code==='F01')!.choices.find(choice=>choice.code==='A')!),/黄金兔/);
 });
 
-test('抵达公会后的剧情使用继续按钮，不再显示完成交接',()=>{
+test('抵达公会后使用进入公会按钮，不再显示完成交接',()=>{
   const {openingFormat}=load('src/game/opening-message.ts',{alemonjs:{Format},'./narrative-voice':{firstPersonNarrative}});
   const format=openingFormat({route:'S03',branch:'A',title:'云巢新生',text:'幼鸟在桌边自己选择了同行。',state:'lesson',page:1,pages:1,revision:12,choices:[]});
   const buttons=converter.createButtonsData(format.value.find((value:any)=>value.type==='BT.group').value).rows.flatMap((row:any)=>row.buttons);
-  assert.deepEqual(buttons.map((button:any)=>button.render_data.label),['继续','任务']);
+  assert.deepEqual(buttons.map((button:any)=>button.render_data.label),['进入公会','任务']);
   assert.deepEqual(buttons.map((button:any)=>button.action.data),['/初行选择 12 lesson','/任务']);
   assert.doesNotMatch(JSON.stringify(format.value),/完成交接/);
+});
+
+test('三人冒险团分支末页进入真实史莱姆战斗',()=>{
+  const {openingFormat}=load('src/game/opening-message.ts',{alemonjs:{Format},'./narrative-voice':{firstPersonNarrative}});
+  const format=openingFormat({route:'F03',branch:'A',title:'并肩入林',text:'森林史莱姆堵住了去路。',state:'branch',page:1,pages:1,revision:12,choices:[]});
+  const buttons=converter.createButtonsData(format.value.find((value:any)=>value.type==='BT.group').value).rows.flatMap((row:any)=>row.buttons);
+  assert.deepEqual(buttons.map((button:any)=>button.render_data.label),['迎战史莱姆','任务']);
+  assert.deepEqual(buttons.map((button:any)=>button.action.data),['/初行选择 12 next','/任务']);
 });
 
 const visibleTalents=talentDefinitions.filter(t=>t.group!=='？？？');
@@ -220,7 +254,7 @@ test('世界树前台沿用百纳镇业务分组，登记和闲聊均留在维�
 });
 
 
-test('六地大厅统一五行九键，第四行后勤与休息，服务归入对应区域',async()=>{
+test('四地大厅统一五行九键，第四行后勤与休息，服务归入对应区域',async()=>{
   const source=ts.createSourceFile('adventure.ts',readFileSync('src/response/adventure.ts','utf8'),ts.ScriptTarget.Latest,true);
   const statement=source.statements.find(s=>ts.isVariableStatement(s)&&s.declarationList.declarations.some(d=>d.name.getText(source)==='guildInteriorFormat'))!;
   const code=ts.transpileModule(statement.getText(source),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
@@ -258,7 +292,7 @@ test('公会交接逐段引用场景与对白，结算提示独立显示',()=>{
   assert.match(rendered,/\n已领取本次练习用品。/);assert.doesNotMatch(rendered,/> 已领取本次练习用品。/);
 });
 
-test('旧建筑按键进入和离开六地公会使用同一状态，区域入口仍可抵达各服务',async()=>{
+test('旧建筑按键进入和离开四地公会使用同一状态，区域入口仍可抵达各服务',async()=>{
   let code='guild_counter',area='休息区';const visits:any[]=[],panels:any[]=[],sent:any[]=[],services:string[]=[];
   const {buildingHandler}=load('src/response/adventure.ts',{
     alemonjs:{Format,useEvent:()=>[{current:{UserId:'u'}}],useRoute:()=>[{param:(key:string)=>key==='code'?code:area}]},

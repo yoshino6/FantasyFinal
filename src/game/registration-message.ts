@@ -24,12 +24,13 @@ export const completedRegistrationFormat = async (user: string) => {
   const story = await openingStatus(user);
   if (story && story.state !== 'armed') return openingFormat(story);
   const pool = await getPool();
-  const [rows] = await pool.execute<RowDataPacket[]>(`SELECT ev.payload FROM player_events ev
+  const [rows] = await pool.execute<RowDataPacket[]>(`SELECT ev.payload,r.name AS current_region_name FROM player_events ev
     JOIN players p ON p.id=ev.player_id JOIN characters c ON c.player_id=p.id
+    JOIN map_regions r ON r.id=c.current_region_id
     WHERE p.qq_user_id=? AND ev.event_type='character.created' ORDER BY ev.id DESC LIMIT 1`, [user]);
   const record = typeof rows[0]?.payload === 'string' ? JSON.parse(rows[0].payload) : rows[0]?.payload;
   const gift = talentDefinitions.find(s => s.code === record?.giftCode);
-  if (story && gift && record?.region) return giftSelectionFormat({ giftName: gift.name, regionName: record.region });
+  if (story && gift && rows[0]?.current_region_name) return giftSelectionFormat({ giftName: gift.name, regionName: String(rows[0].current_region_name) });
   return Format.create().addMarkdown(Format.createMarkdown().addTitle('旅者已归来').addText('\n\n你的角色和恩赐已经保存，可以继续当前旅程。'))
     .addButtonGroup(Format.createButtonGroup().addRow().addButton('当前任务', '/任务', { type: 'command', autoEnter: true, style: 'blue' })
       .addButton('角色', '/角色', { type: 'command', autoEnter: true }));
