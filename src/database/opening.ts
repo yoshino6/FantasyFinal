@@ -21,7 +21,7 @@ export const openingSchema = [
   `CREATE TABLE IF NOT EXISTS player_opening_visits (character_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,building_code VARCHAR(64) NOT NULL,area VARCHAR(32) NOT NULL DEFAULT '大厅',CONSTRAINT fk_opening_visit_character FOREIGN KEY(character_id) REFERENCES characters(id) ON DELETE CASCADE) ENGINE=InnoDB`
 ];
 
-/** 本轮首次开放四条初行路线的出生地图和安全终点；以后管理员关闭地图不会被重复重开。 */
+/** 开局地图只在对应版本首次上线时启用；以后管理员关闭地图不会被重复重开。 */
 export const releaseOpeningRouteMaps = async (pool: Pool | PoolConnection) => {
   const owned = 'getConnection' in pool;
   const connection = owned ? await pool.getConnection() : pool;
@@ -30,6 +30,12 @@ export const releaseOpeningRouteMaps = async (pool: Pool | PoolConnection) => {
     const [created] = await connection.execute<ResultSetHeader>("INSERT IGNORE INTO game_data_migrations (code) VALUES ('opening_four_route_regions_v1')");
     if (created.affectedRows) {
       const codes = [...new Set([...Object.keys(openingSpawnRegions), ...openingRouteVersions.filter(route => openingStartRouteCodes.has(route.code)).map(route => route.destination)])];
+      await connection.execute(`UPDATE map_regions SET is_enabled=1,is_owner_only=0 WHERE code IN (${codes.map(() => '?').join(',')})`, codes);
+    }
+    // 旧服已执行过 v1 时，只补开本次新增的两张出生地图；不碰管理员后来主动关闭的旧地图或安全区。
+    const [additional] = await connection.execute<ResultSetHeader>("INSERT IGNORE INTO game_data_migrations (code) VALUES ('opening_additional_three_route_regions_v1')");
+    if (additional.affectedRows) {
+      const codes = ['gravelwind_shore', 'fallenstar_swamp'];
       await connection.execute(`UPDATE map_regions SET is_enabled=1,is_owner_only=0 WHERE code IN (${codes.map(() => '?').join(',')})`, codes);
     }
     await connection.commit();
