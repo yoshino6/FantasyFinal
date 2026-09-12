@@ -41,10 +41,12 @@ const syncBountyBoard = async (connection: Connection) => {
   const usedSlots = new Set(slots.map(slot => Number(slot.slot_no)));
   const vacantSlots = Array.from({ length: 10 }, (_, index) => index + 1).filter(slot => !usedSlots.has(slot));
   if (!vacantSlots.length) return;
+  // 仅来自固定的 1～10 号公告栏位，直接写入常量限额以兼容不接受 LIMIT 绑定参数的 MySQL 预编译环境。
+  const candidateLimit = vacantSlots.length;
   const [candidates] = await connection.execute<(RowDataPacket & { id: number })[]>(`SELECT b.id FROM bounty_notices b
     JOIN monster_spawns s ON s.id=b.source_spawn_id JOIN monster_templates t ON t.id=b.target_template_id
     LEFT JOIN map_regions r ON r.id=s.region_id LEFT JOIN bounty_board_slots bs ON bs.bounty_id=b.id
-    WHERE bs.bounty_id IS NULL AND ${boardCandidate} ORDER BY RAND() LIMIT ?`, [vacantSlots.length]);
+    WHERE bs.bounty_id IS NULL AND ${boardCandidate} ORDER BY RAND() LIMIT ${candidateLimit}`);
   for (const [index, candidate] of candidates.entries()) {
     await connection.execute('INSERT IGNORE INTO bounty_board_slots (slot_no,bounty_id) VALUES (?,?)', [vacantSlots[index], candidate.id]);
   }
