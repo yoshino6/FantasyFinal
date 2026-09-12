@@ -5,10 +5,11 @@ import ts from 'typescript';
 import { Format } from '../node_modules/alemonjs/lib/application/format/message-format.js';
 import type { OpeningView } from '../src/game/opening.types';
 import { firstPersonNarrative } from '../src/game/narrative-voice';
+import { isPriorityCommand } from '../src/middleware/priority-commands';
 
 const load=(file:string,mocks:Record<string,unknown>)=>{
   const module={exports:{} as any};const code=ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-  new Function('require','module','exports',code)((name:string)=>mocks[name]??{},module,module.exports);return module.exports;
+  new Function('require','module','exports',code)((name:string)=>mocks[name]??(name==='./priority-commands'?{isPriorityCommand}:{}),module,module.exports);return module.exports;
 };
 const message=load('src/game/opening-message.ts',{alemonjs:{Format},'./narrative-voice':{firstPersonNarrative}});
 const armed:OpeningView={route:'F01',title:'金光尚未熄灭',state:'armed',revision:0,text:'路边传来微弱的动静。',page:1,pages:2,branch:null,choices:[]};
@@ -32,6 +33,17 @@ test('先点击其他功能只重发待开始页并引导打开面板；相似�
     await middleware.default({},async()=>{next++;});assert.equal(next,0);assert.equal(starts,0);
     const group=output.value.find((part:any)=>part.type==='BT.group');
     assert.ok(JSON.stringify(group.value).includes('/面板'));assert.ok(!JSON.stringify(group.value).includes('/初行选择 0 next'));
+  }
+});
+
+test('菜单、状态、注销与管理员指令优先于开局剧情状态',async()=>{
+  for(const key of ['菜单','状态','注销账户','确认注销 123456','确认注销账户 123456','管理','世界生态管理','管理员邮件 发送']){
+    let next=0,checked=0;
+    const middleware=load('src/middleware/opening.ts',{alemonjs:{useEvent:()=>[{current:{UserId:'u'}}],useRoute:()=>[{matched:true,key}]},
+      '../game/opening-message':message,'../game/use-game-message':{useGameMessage:()=>[{send:async()=>{throw Error('不应重发剧情');}}]},
+      '../game/opening.service':{openingStatus:async()=>{checked++;return armed;},beginOpening:async()=>{throw Error('不应启动故事');}}});
+    await middleware.default({},async()=>{next++;});
+    assert.equal(next,1,key);assert.equal(checked,0,key);
   }
 });
 
