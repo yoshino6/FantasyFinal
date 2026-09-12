@@ -9,6 +9,7 @@ export type OpeningRouteCandidate = {
     regionCode: string;
     tier: number;
 };
+export declare const openingGoddessChance: number;
 export declare const openingRouteWeights: (candidates: readonly OpeningRouteCandidate[]) => {
     value: string;
     weight: number;

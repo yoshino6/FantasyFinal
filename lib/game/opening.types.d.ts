@@ -25,6 +25,7 @@ export type OpeningChoice = {
     }[];
     rewardCopper?: number;
     rewardEquipment?: 'random_weapon' | 'random_armor' | 'auxiliary_aiming_scope';
+    arrival?: OpeningPage[];
 };
 export type OpeningRoute = {
     code: string;
@@ -34,6 +35,7 @@ export type OpeningRoute = {
     destination: string;
     moveEntry: string;
     huntEntry: string;
+    entryMergedIntoFirstPage?: boolean;
     pages: OpeningPage[];
     choices: OpeningChoice[];
     arrival: OpeningPage[];
@@ -61,6 +63,7 @@ export type OpeningView = {
     reward?: string;
     destination?: string;
     worldChanged?: boolean;
+    forestBattleChoice?: 'join' | 'depart';
     person?: {
         code: string;
         name: string;

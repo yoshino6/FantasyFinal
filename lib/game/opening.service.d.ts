@@ -6,6 +6,7 @@ export declare const grantOpeningItem: (connection: PoolConnection, id: number, 
 export declare const openingStatus: (user: string) => Promise<OpeningView | null>;
 export declare const beginOpening: (user: string, entry?: OpeningEntry) => Promise<OpeningView | null>;
 export declare const advanceOpening: (user: string, revision: number, action: string) => Promise<OpeningView>;
+export declare const completeOpeningForestBattleStart: (user: string) => Promise<string>;
 export declare const openingMainQuest: (user: string) => Promise<{
     title: string;
     description: string;

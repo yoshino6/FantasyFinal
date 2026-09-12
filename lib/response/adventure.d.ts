@@ -2,7 +2,7 @@ import { Format } from 'alemonjs';
 import { battleStatus } from '../game/adventure.service';
 export declare const appendBattleState: (markdown: ReturnType<typeof Format.createMarkdown>, battle: Awaited<ReturnType<typeof battleStatus>>) => import("alemonjs").FormatMarkDown;
 export declare const battleOperationFormat: (text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => Format;
-export declare const battleStartFormat: (text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => Format;
+export declare const battleStartFormat: (text: string, battle: Awaited<ReturnType<typeof battleStatus>>, reward?: string) => Format;
 export declare const scheduleTravelCompletion: (message: any, qqUserId: string, seconds: number) => void;
 export declare const guildFrontDeskFormat: (qqUserId: string, text?: string, continuingChat?: boolean) => Promise<Format>;
 export declare const exploreHandler: () => Promise<void>;
@@ -48,6 +48,9 @@ export declare const ambushHandler: () => Promise<void>;
 export declare const queueAmbushHandler: () => Promise<void>;
 export declare const leaveOccupiedBattleHandler: () => Promise<void>;
 export declare const forestGuideHandler: () => Promise<void>;
+export declare const startOpeningForestBattle: (qqUserId: string, choice: "join" | "depart", message: {
+    send: (params: any) => Promise<any>;
+}) => Promise<void>;
 export declare const switchTargetHandler: () => Promise<void>;
 export declare const attackHandler: () => Promise<void>;
 export declare const skillHandler: () => Promise<void>;

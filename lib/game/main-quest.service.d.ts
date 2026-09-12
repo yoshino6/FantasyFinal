@@ -12,7 +12,7 @@ export type MainQuest = {
     }[];
 };
 type BarrierStage = 0 | 1 | 2 | 3 | 4;
-export declare const currentMainQuest: (qqUserId: string, skipLamplight?: boolean) => Promise<MainQuest>;
+export declare const currentMainQuest: (qqUserId: string, _skipLamplight?: boolean) => Promise<MainQuest>;
 export declare const startGoblinKingQuest: (qqUserId: string) => Promise<string>;
 export declare const consultVivianForJudicator: (qqUserId: string) => Promise<string>;
 export declare const buyCelestialJudicator: (qqUserId: string) => Promise<{

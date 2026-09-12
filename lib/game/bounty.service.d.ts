@@ -21,7 +21,7 @@ export declare const bountyBoard: (qqUserId: string, _requestedPage?: number, ke
             z: number;
         } | undefined;
         progress: number;
-        status: "completed" | "claimed" | "accepted" | null;
+        status: "completed" | "accepted" | "claimed" | null;
     }[];
     activeCount: number;
     page: number;
@@ -43,7 +43,7 @@ export declare const playerBounties: (qqUserId: string) => Promise<{
         z: number;
     } | undefined;
     progress: number;
-    status: "completed" | "claimed" | "accepted" | "invalid";
+    status: "completed" | "accepted" | "claimed" | "invalid";
 }[]>;
 export declare const clearInvalidBounty: (qqUserId: string, bountyId: number) => Promise<void>;
 export declare const abandonBounty: (qqUserId: string, bountyId: number) => Promise<{

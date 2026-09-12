@@ -17,6 +17,7 @@ export declare const chooseOpeningSpawn: (connection: PoolConnection, random?: (
         region: string;
         moveEntry: string;
         huntEntry: string;
+        entryMergedIntoFirstPage?: boolean;
         pages: import("./opening.types").OpeningPage[];
         choices: import("./opening.types").OpeningChoice[];
         arrival: import("./opening.types").OpeningPage[];

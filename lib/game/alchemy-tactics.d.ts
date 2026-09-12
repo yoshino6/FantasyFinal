@@ -144,7 +144,7 @@ export declare const alchemyTactics: readonly [{
     readonly description: "2回合内将直伤的30%延后偿还，延迟池上限20%最大生命；到期偿伤，不可净化欠伤。";
 }];
 export type AlchemyTactic = typeof alchemyTactics[number]['code'];
-export declare const alchemyTacticByCode: Map<"quick_chant" | "defer" | "resistance" | "overflow" | "rescue" | "emergency" | "clean_shield" | "last_life" | "mana_spring" | "blood_mana" | "berserk" | "thorns" | "shed" | "lure" | "wind_charge" | "thunder_seed" | "oil" | "frost_crack" | "chain" | "antiheal" | "echo_damage" | "steal_light" | "reflect" | "chaos", {
+export declare const alchemyTacticByCode: Map<"quick_chant" | "defer" | "resistance" | "rescue" | "emergency" | "overflow" | "clean_shield" | "last_life" | "mana_spring" | "blood_mana" | "berserk" | "thorns" | "shed" | "lure" | "wind_charge" | "thunder_seed" | "oil" | "frost_crack" | "chain" | "antiheal" | "echo_damage" | "steal_light" | "reflect" | "chaos", {
     readonly code: "emergency";
     readonly name: "凝血救急剂";
     readonly tags: readonly ["生机", "凝胶"];

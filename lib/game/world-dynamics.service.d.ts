@@ -148,7 +148,7 @@ export declare const playerWorldSiteCommissions: (qqUserId: string) => Promise<{
     title: string;
     objectiveText: string;
     rewardCopper: number;
-    status: "completed" | "claimed" | "accepted";
+    status: "completed" | "accepted" | "claimed";
     targetName: string;
     location: {
         regionName: string;

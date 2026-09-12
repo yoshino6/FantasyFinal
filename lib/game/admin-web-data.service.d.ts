@@ -1,3 +1,4 @@
+import type { RowDataPacket } from 'mysql2/promise';
 import { type WebRole } from './operation-journal.service';
 export type PlayerFilters = {
     page?: unknown;
@@ -33,6 +34,14 @@ export declare const adminPlayers: (filters?: PlayerFilters) => Promise<{
         };
         updatedAt: Date;
     }[];
+}>;
+export declare const adminSearchSuggestions: (kind: unknown, keyword: unknown, offsetValue?: unknown) => Promise<{
+    entries: (RowDataPacket & {
+        label: string;
+        value: string;
+        detail: string;
+    })[];
+    hasMore: boolean;
 }>;
 export declare const adminPlayerDetail: (characterId: number) => Promise<{
     character: {
