@@ -19,12 +19,12 @@ import { talentCode } from './talent.config';
 import { applyTalentPanel } from './talent-data';
 import { chooseOpeningSpawn, openingWorldFor } from './opening-state';
 import { grantOpeningItem } from './opening.service';
-import { achievementStatBonus, flushAchievements } from './achievement.service';
+import { achievementStatBonus, flushAchievements, unlockAccountAchievement } from './achievement.service';
 import { recordAchievement, takeAchievementEvents } from './achievement-events';
 
 type RegistrationStage = 'story' | 'audience' | 'question' | 'destination' | 'heaven' | 'danger' | 'choice';
 type SessionRow = RowDataPacket & { id: string; player_id: number; stage: RegistrationStage; expires_at: Date };
-type PlayerRow = RowDataPacket & { id: number; status: string };
+type PlayerRow = RowDataPacket & { id: number; status: string; qq_nickname: string | null };
 export type CharacterView = Allocation & DerivedStats & { name: string; gender: string; professionName: string | null; regionName: string; x: number; y: number; z: number; level: number; experience: number; realmStage: number; adventurerRegistered: boolean; giftName: string | null; growth: Growth; currentHp: number; currentMp: number; stamina: number; staminaMax: number; staminaFullSeconds: number; activityStatus: 'active' | 'resting' | 'unconscious' | 'detained'; elementMastery: Record<string, number>; elementResistance: Record<string, number>; extraAttributes: Record<string, number>; activeBuffs: string[]; combatNotes: string[] };
 
 const elements = ['水', '火', '土', '木', '风', '冰', '雷', '光', '暗'] as const;
@@ -244,7 +244,7 @@ const getPlayer = async (connection: PoolConnection, qqUserId: string, nickname?
     'INSERT INTO players (qq_user_id, qq_nickname) VALUES (?, ?) ON DUPLICATE KEY UPDATE qq_nickname = COALESCE(VALUES(qq_nickname), qq_nickname)',
     [qqUserId, nickname ?? null]
   );
-  const [rows] = await connection.execute<PlayerRow[]>('SELECT id, status FROM players WHERE qq_user_id = ? FOR UPDATE', [qqUserId]);
+  const [rows] = await connection.execute<PlayerRow[]>('SELECT id, status, qq_nickname FROM players WHERE qq_user_id = ? FOR UPDATE', [qqUserId]);
   return rows[0];
 };
 
@@ -323,6 +323,23 @@ export const chooseDestination = async (qqUserId: string, destination: '天堂' 
   const next = destination === '天堂' ? 'heaven' : 'danger';
   if (next !== session.stage) await connection.execute('UPDATE registration_sessions SET stage=? WHERE id=?', [next, session.id]);
   return next;
+});
+
+/** 天堂结局不创建 characters；完成后删除本次接引会话，下一次注册从头开始。 */
+export const completeHeavenRebirth = async (qqUserId: string) => withTransaction(async connection => {
+  const player = await getPlayer(connection, qqUserId);
+  const [finished] = await connection.execute<RowDataPacket[]>('SELECT payload FROM player_events WHERE player_id=? AND event_type=\'registration.heaven_rebirth\' ORDER BY id DESC LIMIT 1', [player.id]);
+  if (finished[0]) return { replayed: true, achievementName: '宁静的彼岸' };
+  if (await completedRegistration(connection, player.id)) throw new Error('你已经完成异世界转生。');
+  const session = await getSession(connection, player.id, true);
+  if (!session || session.expires_at <= new Date()) throw new Error('注册会话已过期，请重新发送“注册”。');
+  if (session.stage !== 'heaven') throw new Error('请先在命运的岔路选择前往天堂。');
+  const achievement = await unlockAccountAchievement(connection, qqUserId, player.qq_nickname || '无名旅人', 'ACH_A26', `heaven_rebirth:${qqUserId}`);
+  await connection.execute('INSERT INTO player_events (player_id,event_type,payload) VALUES (?,\'registration.heaven_rebirth\',?)', [player.id, JSON.stringify({ achievementId: 'ACH_A26', at: Date.now() })]);
+  await connection.execute('DELETE FROM registration_scene_records WHERE session_id=?', [session.id]);
+  await connection.execute('DELETE FROM registration_sessions WHERE id=?', [session.id]);
+  await connection.execute("UPDATE players SET status='registering' WHERE id=?", [player.id]);
+  return { replayed: false, achievementName: achievement.definition.name };
 });
 
 const requireChoiceSession = async (connection: PoolConnection, qqUserId: string) => {

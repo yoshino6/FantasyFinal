@@ -61,10 +61,10 @@ export const destinationFormat = () => Format.create()
     .addButton('前往天堂', '/选择去向 天堂', { type: 'command', autoEnter: true })
     .addButton('转生异世界', '/选择去向 异世界', { type: 'command', autoEnter: true, style: 'blue' }));
 
-export const heavenText = '\n\n女神右手一挥，一扇散发暖光的门在你身后浮现。\n门后没有战斗，也没有遗憾，只有安静而漫长的时光。\n但在踏入之前，你仍可以回头，选择那条未知的异世界之路。';
+export const heavenText = '\n\n女神右手一挥，一扇散发暖光的门在你身后浮现。门后没有战斗，也没有遗憾，只有安静而漫长的时光。\n\n她没有催促你，只是把还未写入名字的转生名册合上：“踏进去以后，这次接引便会在这里结束。你不会取得恩赐，也不会降临异世界；若以后改了主意，再重新来找我就好。”\n\n暖光落在门槛上，等着你的决定。';
 export const heavenFormat = () => Format.create()
   .addMarkdown(Format.createMarkdown().addTitle('天堂的门扉').addText(heavenText))
-  .addButtonGroup(Format.createButtonGroup().addRow().addButton('还是转生异世界', '/选择去向 异世界', { type: 'command', autoEnter: true, style: 'blue' }));
+  .addButtonGroup(Format.createButtonGroup().addRow().addButton('踏入天堂', '/天堂 继续', { type: 'command', autoEnter: true, style: 'blue' }).addButton('还是转生异世界', '/选择去向 异世界', { type: 'command', autoEnter: true }));
 
 export const dangerText = '光门后的草叶轻轻晃动，远处忽然传来一声低吼。阿库娅合上册子，难得收起了笑。\n\n“那边可不会因为你刚来，就专挑弱小的魔物迎接你。荒野里有捕猎的魔物，遗迹中有看不见的陷阱。分不清危险的时候，先退回来，别急着拔剑。”\n\n她抬起手，一点微光落在你的眉心，化成细小的印记。\n\n“我赐予你一项神力——【鉴识】！有了它，对手藏着的底细可就没那么容易瞒过你了。怎么样，很可靠吧？毕竟是本女神亲自给的！不过，想看穿更厉害的家伙，之后可得自己努力。”\n\n你望向旁边空荡荡的台座。她顺着你的目光看过去，立刻把册子竖了起来。\n\n“别找了，所有神器早已散布世界各地。鉴识之外，你还可以挑一项天赋。想活得轻松一点，可不只有挥剑这一种办法。”';
 export const dangerFormat = () => Format.create()

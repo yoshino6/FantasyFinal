@@ -72,7 +72,7 @@ export const registrationScene=async(stage:string,user:string)=>{
   const buttons=Format.createButtonGroup().addRow();
   if(stage==='audience')buttons.addButton('这里是哪里？','/询问 这里是哪里',{type:'command',autoEnter:true,style:'blue'});
   else if(stage==='destination')buttons.addButton('前往天堂','/选择去向 天堂',{type:'command',autoEnter:true}).addButton('转生异世界','/选择去向 异世界',{type:'command',autoEnter:true,style:'blue'});
-  else if(stage==='heaven')buttons.addButton('还是转生异世界','/选择去向 异世界',{type:'command',autoEnter:true});
+  else if(stage==='heaven')buttons.addButton('踏入天堂','/天堂 继续',{type:'command',autoEnter:true,style:'blue'}).addButton('还是转生异世界','/选择去向 异世界',{type:'command',autoEnter:true});
   else buttons.addButton(stage==='danger'?'看看天赋':'继续',`/注册 继续 ${stage}`,{type:'command',autoEnter:true,style:'blue'});
   return Format.create().addMarkdown(Format.createMarkdown().addTitle(`序章·${labels[stage]??'接引'}`).addNewline().addNewline().addText(text)).addButtonGroup(buttons);
   }).then(result=>result??completedRegistrationFormat(user));

@@ -6,6 +6,7 @@ import { getPool, withTransaction } from '../database/pool';
 import { achievementCategories } from './achievement.config';
 import { achievementAttributeKeys, achievementById, achievementThreshold, completionPercent } from './achievement-rules';
 import { isCooperativeAchievement, type AchievementEvent } from './achievement-events';
+import { retiredAchievementIdSet } from './achievement-retired.config';
 
 const json = (v: unknown): any => typeof v === 'string' ? JSON.parse(v) : v;
 export const achievementStatBonus = async (db: Pool | PoolConnection, characterId: number): Promise<Record<string,number>> => {
@@ -77,6 +78,39 @@ export const flushAchievements = async (connection: PoolConnection, events: Achi
     await connection.execute('UPDATE achievement_counters SET completed_count=? WHERE achievement_id=?',[rank,id]);
   }
   return [...dirty].sort((a,b)=>a-b);
+};
+
+/** 角色尚未生成时使用的账号级成就授予入口；永久记录仍只按 QQ 身份保存。 */
+export const unlockAccountAchievement = async (connection: PoolConnection, identity: string, name: string, achievementId: string, eventKey: string) => {
+  const definition = achievementById.get(achievementId);
+  if (!definition || retiredAchievementIdSet.has(achievementId)) throw new Error('成就配置尚未完成。');
+  await connection.execute('INSERT IGNORE INTO achievement_profiles(identity_key) VALUES (?)', [identity]);
+  await connection.execute('SELECT identity_key FROM achievement_profiles WHERE identity_key=? FOR UPDATE', [identity]);
+  const [eventReceipt] = await connection.execute<any>('INSERT IGNORE INTO achievement_events(identity_key,event_key) VALUES (?,?)', [identity, eventKey]);
+  const [existing] = await connection.execute<RowDataPacket[]>('SELECT ordinal FROM achievement_completions WHERE identity_key=? AND achievement_id=?', [identity, achievementId]);
+  if (existing.length || !eventReceipt.affectedRows) return { definition, unlocked: false };
+
+  const [progressRows] = await connection.execute<RowDataPacket[]>('SELECT value_json FROM achievement_progress WHERE identity_key=? AND life_key=\'\' AND metric=? FOR UPDATE', [identity, achievementId]);
+  const state = json(progressRows[0]?.value_json) ?? { count: 0, seen: [] };
+  state.count = Math.max(Number(state.count ?? 0), achievementThreshold(achievementId));
+  await connection.execute('INSERT INTO achievement_progress(identity_key,life_key,metric,value_json) VALUES (?,\'\',?,?) ON DUPLICATE KEY UPDATE value_json=VALUES(value_json)', [identity, achievementId, JSON.stringify(state)]);
+
+  await connection.execute('INSERT IGNORE INTO achievement_counters(achievement_id) VALUES (?)', [achievementId]);
+  const [counters] = await connection.execute<RowDataPacket[]>('SELECT completed_count FROM achievement_counters WHERE achievement_id=? FOR UPDATE', [achievementId]);
+  const ordinal = Number(counters[0]?.completed_count ?? 0) + 1;
+  const [attribute, points] = definition.attribute.split('+');
+  await connection.execute('INSERT INTO achievement_completions(identity_key,achievement_id,ordinal,reward_attribute,reward_points,rarity,name_snapshot) VALUES (?,?,?,?,?,?,?)', [identity, achievementId, ordinal, achievementAttributeKeys[attribute], Number(points), definition.rarity, name]);
+  await connection.execute('UPDATE achievement_counters SET completed_count=? WHERE achievement_id=?', [ordinal, achievementId]);
+  const reward = achievementBoxRewardForRarity(definition.rarity);
+  const [rewardReceipt] = await connection.execute<any>('INSERT IGNORE INTO achievement_box_rewards(identity_key,achievement_id,reward_key,quantity) VALUES (?,?,?,?)', [identity, achievementId, reward.key, reward.quantity]);
+  if (rewardReceipt.affectedRows) await connection.execute('INSERT INTO achievement_rewards(identity_key,reward_key,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity)', [identity, reward.key, reward.quantity]);
+  if (ordinal === 1) {
+    await connection.execute("INSERT INTO achievement_rewards(identity_key,reward_key,quantity) VALUES (?,'rare_box',1) ON DUPLICATE KEY UPDATE quantity=quantity+1", [identity]);
+    await connection.execute('INSERT INTO achievement_first_members(achievement_id,identity_key,name_snapshot) VALUES (?,?,?)', [achievementId, identity, name]);
+    await connection.execute('INSERT INTO achievement_announcements(achievement_id,name_snapshot,rarity) VALUES (?,?,?)', [achievementId, name, definition.rarity]);
+    await connection.execute('INSERT IGNORE INTO achievement_deliveries(achievement_id,bot_id,group_id) SELECT ?,bot_id,group_openid FROM bot_group_channels', [achievementId]);
+  }
+  return { definition, unlocked: true, reward };
 };
 
 export type AchievementEntry = {id:string;name:string;category:string;description:string;rarity:string;attribute:string;rank:number;percentage:string;completedAt:string};
