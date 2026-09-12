@@ -10,11 +10,11 @@ import { companionChance } from '../src/game/companion.service';
 import { keepsakeDefinitions } from '../src/game/opening-keepsakes.config';
 import { forestArrivalGuildScenes, forestArrivalTownScenes } from '../src/game/forest-arrival-content';
 
-test('保留八条剧情供旧存档续读，新玩家只开放四条路线与两张出生地图',()=>{
+test('保留八条剧情供旧存档续读，新玩家开放七条路线与四张出生地图',()=>{
   assert.deepEqual(openingRoutes.map(route=>route.code).sort(),['A01','C02','F01','F02','F03','M01','M02','S03']);
   assert.equal(openingRouteVersions.length,8);
-  assert.deepEqual([...openingStartRouteCodes],['F01','F02','F03','M01']);
-  assert.deepEqual(Object.keys(openingSpawnRegions),['dark_forest','worldtree_meadow']);
+  assert.deepEqual([...openingStartRouteCodes],['F01','F02','F03','M01','M02','S03','A01']);
+  assert.deepEqual(Object.keys(openingSpawnRegions),['dark_forest','worldtree_meadow','gravelwind_shore','fallenstar_swamp']);
   assert.equal(openingRoutes.reduce((sum,route)=>sum+route.choices.length,0),20);
   for(const route of openingRoutes){
     if(openingStartRouteCodes.has(route.code))assert.ok(route.region in openingSpawnRegions,route.code);
@@ -47,8 +47,8 @@ test('云巢路线写明被当作食物、猎魔人救援、破壳认亲与双�
   assert.equal(route.choices[1].rewardCopper,2000);assert.match(route.choices[1].label,/2000铜币/);
 });
 
-test('当前开放的四条初行路线每页正文都保留自然段分隔',()=>{
-  const active = new Set(['F01','F02','F03','M01']);
+test('当前开放的七条初行路线每页正文都保留自然段分隔',()=>{
+  const active = new Set(['F01','F02','F03','M01','M02','S03','A01']);
   for (const route of openingRoutes.filter(item => active.has(item.code))) {
     const pages = [
       ...route.pages,

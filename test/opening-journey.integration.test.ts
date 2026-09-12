@@ -82,9 +82,9 @@ test('隔离MySQL：四条新路线与四条旧存档路线的二十个分支，
       await c.execute('UPDATE opening_world SET current_goddess=\'aqua\',aqua_character_id=NULL,aqua_stage=0 WHERE id=1');
       await c.execute('UPDATE map_regions SET newbie_spawn_enabled=0');
       await c.execute('UPDATE map_regions SET newbie_spawn_enabled=1,is_enabled=1,is_owner_only=0 WHERE code=?',[startRoute.region]);
-      // 旧路线只测试已有存档的续读；新角色随机抽取仍严格限定在四条开放路线。
+      // 只有 C02 测试已有存档续读；其余七条路线均可作为新角色的随机降临。
       await c.execute('DELETE FROM opening_route_draw_state');
-      random=()=>({F01:.05,F02:.25,F03:.4,M01:.75} as Record<string,number>)[startRoute.code];
+      random=()=>({F01:.05,F02:.5,F03:.9,M01:.2,M02:.8,S03:.5,A01:0} as Record<string,number>)[startRoute.code];
       const user=`audit_${++sequence}`;
       await registration.beginRegistration(user,'复核旅人');
       await registration.continueRegistration(user,'story');await registration.askWhereAmI(user);await registration.continueRegistration(user,'question');
@@ -117,7 +117,7 @@ test('隔离MySQL：四条新路线与四条旧存档路线的二十个分支，
       return view;
     };
     const endBranch=async(run:Awaited<ReturnType<typeof prepare>>,view:any)=>story.advanceOpening(run.user,view.revision,run.route.code==='F02'&&view.branch==='B'?'treat':'next');
-    await t.test('四条新路线及四条旧存档路线共二十分支：落在真实安全公会，奖励与下一步均可办理',async()=>{
+    await t.test('七条新路线及一条旧存档路线共二十分支：落在真实安全公会，奖励与下一步均可办理',async()=>{
       for(const route of content.openingRoutes)for(const branch of route.choices){
         const run=await prepare(route.code);let view=await toBranchEnd(run,branch.code);
         await assert.rejects(state.assertOpeningFree(c as any,run.id),/初行剧情/);
