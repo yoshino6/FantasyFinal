@@ -88,6 +88,7 @@ for(const path of ['天赋详情'])appGroup.use({ path,schema:{usage:'/天赋详
 appGroup.use({path:'注册 继续',schema:{usage:'/注册 继续 [页面]',args:[{name:'stage'}]}}, () => import('./response/game-continue'))
 appGroup.use('询问 这里是哪里', () => import('./response/ask-where'))
 appGroup.use({ path: '选择去向', schema: { usage: '/选择去向 <天堂|异世界>', args: [{ name: 'destination', rules: [{ required: true, type: 'enum', enum: ['天堂', '异世界'] }] }] } }, () => import('./response/destination-select'))
+appGroup.use('天堂 继续', () => import('./response/heaven-rebirth'))
 appGroup.use({ path: '恩赐列表', schema: { usage: '/恩赐列表 <神器|天赋>', args: [{ name: 'category', rules: [{ required: true, type: 'enum', enum: ['神器', '天赋'] }] }] } }, () => import('./response/gift-catalog'))
 appGroup.use({ path: '恩赐分页', schema: { usage: '/恩赐分页 <神器|天赋> <页码> [关键词]', args: [{ name: 'category', rules: [{ required: true, type: 'enum', enum: ['神器', '天赋'] }] }, { name: 'page', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'keyword', rules: [{ type: 'rest' }] }] } }, () => import('./response/gift-catalog').then(module => ({ default: module.giftPageHandler })))
 appGroup.use({ path: '恩赐搜索', schema: { usage: '/恩赐搜索 <神器|天赋> <关键词>', args: [{ name: 'category', rules: [{ required: true, type: 'enum', enum: ['神器', '天赋'] }] }, { name: 'keyword', rules: [{ required: true, type: 'rest' }] }] } }, () => import('./response/gift-catalog').then(module => ({ default: module.giftSearchHandler })))

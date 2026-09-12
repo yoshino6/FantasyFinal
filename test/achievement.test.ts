@@ -9,9 +9,10 @@ import { achievementListFormat, achievementDetailFormat, achievementAnnouncement
 import { achievementSchema } from '../src/database/achievements';
 import { bossAchievementDefinition, bossAchievementDifficulties } from '../src/game/achievement-boss';
 
-test('目录为223项非隐藏路线成就，史诗高于传说，条件仅服务端保留',()=>{
-  assert.equal(achievementDefinitions.length,223);assert.equal(new Set(achievementDefinitions.map(d=>d.id)).size,223);
+test('目录为224项非隐藏路线成就，史诗高于传说，条件仅服务端保留',()=>{
+  assert.equal(achievementDefinitions.length,224);assert.equal(new Set(achievementDefinitions.map(d=>d.id)).size,224);
   assert.ok(achievementDefinitions.every(d=>!d.id.includes('SECRET')&&d.condition&&d.description));
+  assert.deepEqual(achievementDefinitions.find(d=>d.id==='ACH_A26'),{id:'ACH_A26',name:'宁静的彼岸',description:'你没有踏上未知的土地，却认真地为自己选择了一段安稳的时光。',rarity:'普通',attribute:'感知+1',condition:'在神界选择前往天堂，并完成最后的告别。',scope:'累',dependency:'现',category:'初行'});
   assert.ok(achievementDefinitions.filter(d=>d.rarity==='传说').every(d=>d.attribute.endsWith('+8')));
   assert.equal(achievementThreshold('ACH_B05'),1000);assert.equal(achievementThreshold('ACH_H13'),20);
 });

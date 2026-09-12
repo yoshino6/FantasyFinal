@@ -282,6 +282,17 @@ const baseAchievementDefinitions = [
     "category": "初行"
   },
   {
+    "id": "ACH_A26",
+    "name": "宁静的彼岸",
+    "description": "你没有踏上未知的土地，却认真地为自己选择了一段安稳的时光。",
+    "rarity": "普通",
+    "attribute": "感知+1",
+    "condition": "在神界选择前往天堂，并完成最后的告别。",
+    "scope": "累",
+    "dependency": "现",
+    "category": "初行"
+  },
+  {
     "id": "ACH_B01",
     "name": "第一滴血",
     "description": "刃上的红，是命运第一次回答。",
