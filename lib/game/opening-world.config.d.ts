@@ -48,16 +48,8 @@ export declare const openingSpawnRegions: {
     readonly worldtree_meadow: {
         readonly tier: 1;
     };
-    readonly gravelwind_shore: {
-        readonly tier: 2;
-    };
-    readonly fallenstar_swamp: {
-        readonly tier: 3;
-    };
-    readonly frostcrown_plateau: {
-        readonly tier: 3;
-    };
 };
+export declare const openingStartRouteCodes: ReadonlySet<string>;
 export declare const openingTierWeights: readonly [10, 55, 25, 10];
 export declare const hubForRegion: (code: string) => {
     readonly name: "百纳镇";

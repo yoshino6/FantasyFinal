@@ -1,14 +1,14 @@
 export declare const girlGratitudeMainQuest: (qqUserId: string) => Promise<{
     title: string;
     description: string;
+    action?: undefined;
+} | {
+    title: string;
+    description: string;
     action: {
         label: string;
         command: string;
     };
-} | {
-    title: string;
-    description: string;
-    action?: undefined;
 } | null>;
 export declare const girlGratitudePending: (qqUserId: string) => Promise<boolean>;
 export declare const girlGratitudeStage: (qqUserId: string) => Promise<number>;

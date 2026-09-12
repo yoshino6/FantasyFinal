@@ -760,7 +760,7 @@ export declare const coordinateInteraction: (qqUserId: string, type: CoordinateI
         code: string;
         name: string;
         description: string;
-        interaction_kind: "building" | "npc";
+        interaction_kind: "npc" | "building";
     };
     text: string;
     entrance?: undefined;
