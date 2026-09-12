@@ -1,6 +1,6 @@
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { openingRouteByCode, openingRoutes } from './opening-content';
-import { openingHubs, openingSpawnRegions } from './opening-world.config';
+import { openingHubs, openingSpawnRegions, openingStartRouteCodes } from './opening-world.config';
 import { chooseWeighted, drawOpeningRoute } from './opening-route-draw';
 export { chooseWeighted } from './opening-route-draw';
 import { pointBelongsToRegion, validWorldSitePoint, type WorldArea } from './world-site-geometry';
@@ -27,7 +27,8 @@ export const openingSafeHubs = async (connection: OpeningConnection, lock = fals
   return rows.filter(row => openingHubs[String(row.code) as keyof typeof openingHubs]?.guild === row.guild_code
     && pointBelongsToRegion(areas, Number(row.id), { x: Number(row.pos_x), y: Number(row.pos_y), z: Number(row.pos_z) }));
 };
-export const chooseOpeningSpawn = async (connection: PoolConnection, random = Math.random) => {
+/** 面板选路与随机降临共用同一份开放地图、安全公会和真实地块校验。 */
+export const availableOpeningSpawns = async (connection: OpeningConnection) => {
   const [rows] = await connection.execute<RowDataPacket[]>('SELECT * FROM map_regions WHERE newbie_spawn_enabled=1 AND is_enabled=1 AND is_owner_only=0 ORDER BY id');
   const [areas] = await connection.execute<(RowDataPacket & WorldArea)[]>('SELECT a.*,r.danger_level FROM map_region_areas a JOIN map_regions r ON r.id=a.region_id');
   const hubs = await openingSafeHubs(connection);
@@ -36,22 +37,33 @@ export const chooseOpeningSpawn = async (connection: PoolConnection, random = Ma
   const candidates = rows.flatMap(region => {
     const configuration = openingSpawnRegions[String(region.code) as keyof typeof openingSpawnRegions];
     if (!configuration) return [];
-    const routes = openingRoutes.filter(route=>route.region===region.code&&enabled.has(route.destination));
+    const routes = openingRoutes.filter(route=>openingStartRouteCodes.has(route.code)&&route.region===region.code&&enabled.has(route.destination));
     if (!routes.length) return [];
     try { return [{region,configuration,routes,point:validWorldSitePoint(areas,Number(region.id),{x:Number(region.min_x),y:Number(region.min_y),z:Number(region.min_z)})}]; } catch { return []; }
   });
-  if (!candidates.length) throw new Error('暂时没有已开放且可安全降临的地图，请稍后重新选择恩赐。');
+  if (!candidates.length) throw new Error('暂时没有已开放且可安全降临的地图，请稍后重试。');
+  return { candidates, areas, enabled };
+};
+
+export const openingSpawnPoint = (candidate: Awaited<ReturnType<typeof availableOpeningSpawns>>['candidates'][number], areas: WorldArea[], random = Math.random) => {
+  let point = candidate.point;
+  const ownAreas = areas.filter(a => Number(a.region_id) === Number(candidate.region.id));
+  for (let attempt=0;attempt<64;attempt++) {
+    const area=chooseWeighted(ownAreas.map(a=>({value:a,weight:(a.max_x-a.min_x+1)*(a.max_y-a.min_y+1)})),random);
+    const trial={x:Number(area.min_x)+Math.floor(random()*(area.max_x-area.min_x+1)),y:Number(area.min_y)+Math.floor(random()*(area.max_y-area.min_y+1)),z:Number(area.min_z)};
+    if (pointBelongsToRegion(areas,Number(candidate.region.id),trial)) {point=trial;break;}
+  }
+  return point;
+};
+
+export const chooseOpeningSpawn = async (connection: PoolConnection, random = Math.random) => {
+  const { candidates, areas, enabled } = await availableOpeningSpawns(connection);
   const routeCode = await drawOpeningRoute(connection,candidates.flatMap(c => c.routes.map(route => ({
     code:route.code,regionCode:String(c.region.code),tier:c.configuration.tier
   }))),random);
   const route = openingRouteByCode(routeCode)!;
   const candidate = candidates.find(c => c.region.code === route.region)!;
-  const ownAreas = areas.filter(a => Number(a.region_id) === Number(candidate.region.id));
-  for (let attempt=0;attempt<64;attempt++) {
-    const area=chooseWeighted(ownAreas.map(a=>({value:a,weight:(a.max_x-a.min_x+1)*(a.max_y-a.min_y+1)})),random);
-    const point={x:Number(area.min_x)+Math.floor(random()*(area.max_x-area.min_x+1)),y:Number(area.min_y)+Math.floor(random()*(area.max_y-area.min_y+1)),z:Number(area.min_z)};
-    if (pointBelongsToRegion(areas,Number(candidate.region.id),point)) {candidate.point=point;break;}
-  }
+  const point = openingSpawnPoint(candidate, areas, random);
   const destination=enabled.has(route.destination)?route.destination:enabled.has('world_tree')?'world_tree':enabled.has('baina_town')?'baina_town':[...enabled][0];
-  return {region:candidate.region,route:{...route,destination},...candidate.point};
+  return {region:candidate.region,route:{...route,destination},...point};
 };

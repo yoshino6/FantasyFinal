@@ -439,11 +439,17 @@ const sendCombatResult = async (message: any, qqUserId: string, result: Awaited<
       if (mainQuest.title === '【主线·未知的枷锁】') await message.send({ format: evolutionBarrierFormat() });
     }
     if (victory && settlement.goblinKingCompleted) {
+      if (await (await import('../game/floating-leaf.service')).floatingLeafOrigin(qqUserId)) {
+        const { floatingRescueTexts } = await import('../game/floating-leaf-content');
+        await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('主线·木笼获救').addNewline().addNewline().addText(floatingRescueTexts.victory).addNewline().addNewline().addText('**【获得地图·百纳镇】**'))
+          .addButtonGroup(Format.createButtonGroup().addRow().addButton('护送返镇', '/浮叶返程', { type: 'command', autoEnter: true, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
+      } else {
       const story = Format.createMarkdown().addTitle('主线·少女获救').addNewline().addNewline()
         .addText('哥布林国王倒下后，原本凶悍的大军像忽然失去了脊梁，嘶叫着退入密林。浅红色幼龙拖着伤躯远去，只留下被踩碎的旗帜与尚未散尽的雷鸣。梨子喵扶着短刃站起身，发间缺失的鱼骨头发卡终于被她从泥里拾回。').addNewline().addNewline()
         .addText('她把发卡别回耳边，沉默了好一会儿，才轻声开口。\n\n“那天我本来只是进森林打猎喵。可我在一处废营地里看见了少女留下的布片和脚印，旁边还有哥布林拖拽过的痕迹……我就一路跟了上来。”\n\n她望向哥布林逃散的方向，握着短刃的手仍微微发颤。\n\n“我在部落里看见了那些木笼，才知道失踪的少女都被关在里面。守卫少的时候，我本来想把人带走；可我杀了几个拦路的哥布林，警报就响了。它们把我当成入侵者，越聚越多，我一个人根本撑不住，最后只能藏进断木后面。要不是你赶来，我可能还会被困在这里喵。”').addNewline().addNewline()
         .addText('梨子喵忽然抬起头，指向逃兵消失的方向。\n\n“它们把人藏在部落里面！国王一倒，守卫也散了。跟我来喵！”\n\n她带着我穿过被遗弃的营火与歪斜木栅，来到部落深处的几间木笼前。笼门被一一劈开，失踪的少女们终于重见天光；有人相拥而泣，有人仍攥着同伴的手，却都还活着。\n\n直到最后一人走出阴影，我才真正松开握紧的武器。\n\n我与梨子喵领着她们踏上归路。远处的百纳镇灯火微明，终于有人能等到失而复得的家人。');
       await message.send({ format: Format.create().addMarkdown(story).addButtonGroup(Format.createButtonGroup().addRow().addButton('前往 梨子喵', '/前往 -22 -196', { type: 'command', autoEnter: true, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
+      }
     }
     if (victory && settlement.evolutionCompleted) {
       const story = Format.createMarkdown().addTitle('大学者·噶').addNewline().addNewline()
@@ -733,13 +739,15 @@ const timeGreeting = (morning: string, afternoon: string, evening: string) => {
 export const guildFrontDeskFormat = async (qqUserId: string, text?: string, continuingChat = false) => {
   const context=await (await import('../game/guild-context')).requireCurrentGuild(qqUserId);
   if(context.code!=='baina_town'){
-    const [profile,nearby]=await Promise.all([adventurerProfile(qqUserId),nearbyPoints(qqUserId)]);
+    const [profile,nearby,mainQuest]=await Promise.all([adventurerProfile(qqUserId),nearbyPoints(qqUserId),currentMainQuest(qqUserId)]);
     const markdown=npcInteractionMarkdown('冒险者公会·前台',context.hub.host,text?.replaceAll('莫妮卡',context.hub.host)??context.hub.description,
       context.code==='world_tree'?'root_guild_clerk':undefined,nearby.npcDetailsUnlocked);
     const buttons=Format.createButtonGroup();
     if(!continuingChat){
       buttons.addRow().addButton(profile.adventurer_registered?'冒险者 晋升':'冒险者 注册','/公会注册',{type:'command',autoEnter:true,style:'blue'})
         .addButton('职业选择','/职业选择',{type:'command',autoEnter:true,style:profile.adventurer_registered?'blue':undefined});
+      if(context.code==='floating_leaf_town'&&mainQuest.title==='【主线·无形的禁锢】')buttons.addRow().addButton('询问等级停滞','/浮叶瓶颈 guild',{type:'command',autoEnter:true,style:'blue'});
+      if(context.code==='floating_leaf_town'&&mainQuest.title==='【主线·失踪的孩子】')buttons.addRow().addButton('前往公馆','/前往 15 0',{type:'command',autoEnter:true,style:'blue'});
     }
     buttons.addRow().addButton(continuingChat?'继续闲聊':`闲聊 ${context.hub.host}`,context.code==='world_tree'?'/前台闲聊':'/初行公会 人物',{type:'command',autoEnter:true,style:'blue'})
       .addButton('返回公会大厅','/初行公会',{type:'command',autoEnter:true});
@@ -885,12 +893,17 @@ const showMoveResult = async (message: any, qqUserId: string, result: any) => {
     return;
   }
   if (result.kind === 'main_quest_story') {
-    const markdown = Format.createMarkdown().addTitle(`主线·失踪的少女（${result.questChapter}/7）`).addNewline().addNewline().addText(result.text);
+    const leaf = await (await import('../game/floating-leaf.service')).floatingLeafOrigin(qqUserId);
+    const markdown = Format.createMarkdown().addTitle(leaf ? `主线·密林救援（${result.questChapter}/4）` : `主线·失踪的少女（${result.questChapter}/7）`).addNewline().addNewline().addText(result.text);
     const buttons = Format.createButtonGroup().addRow();
     if (result.questClue) buttons.addButton('查看线索', '/任务', { type: 'command', autoEnter: true, style: 'blue' });
     else buttons.addButton('继续前进', '/继续深处阴谋', { type: 'command', autoEnter: true, style: 'blue' });
     buttons.addButton('任务', '/任务', { type: 'command', autoEnter: true });
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) });
+    return;
+  }
+  if (result.character?.region_name === '浮叶镇' && Number(result.character.pos_x) === 13 && Number(result.character.pos_y) === 2 && (await currentMainQuest(qqUserId)).title === '【主线·观风台】') {
+    await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('浮叶镇·观风台').addNewline().addNewline().addText(result.text).addNewline().addNewline().addText('木叶风车正在风向刻纹上缓缓旋转。菈芮请我到这里辨认无形的边界。')).addButtonGroup(Format.createButtonGroup().addRow().addButton('观察刻纹', '/浮叶瓶颈 observatory', { type: 'command', autoEnter: true, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
     return;
   }
   if (result.kind === 'npc') {
@@ -1098,6 +1111,12 @@ export const buildingHandler = (action: 'enter' | 'ignore' | 'leave' | 'area') =
     if (code === 'world_gate') {
       if (action === 'enter') { const { worldGateFormat } = await import('./girl-gratitude'); await worldGateFormat(); return; }
       const panel = await movementPanel(event.current.UserId, action === 'leave' ? '你离开界门驿站，银蓝色光纹在身后渐渐暗下。' : '界门驿站的值守人安静地等着你的决定。');
+      const nearby = await nearbyPoints(event.current.UserId);
+      await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return;
+    }
+    if (code === 'leaf_manor') {
+      if (action === 'enter') { await (await import('./floating-leaf')).floatingManorHandler(); return; }
+      const panel = await movementPanel(event.current.UserId, '你暂时离开公馆，身后的返程航班记录仍在轻轻翻动。');
       const nearby = await nearbyPoints(event.current.UserId);
       await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return;
     }

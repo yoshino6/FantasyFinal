@@ -28,12 +28,12 @@ import { initializeOpeningChests } from '../src/database/opening-chests';
 
 // 使用实际 SQL 与部署库结构/静态配置的隔离副本；不复制玩家、故事或世界归属数据。
 // 完整数值重算和开化进度用固定替身，其余注册、故事、奖励、开箱、入会和凭物交接运行源码。
-test('隔离MySQL：八条路线二十个分支从注册到安全公会，关闭改道、保护与重试', {skip:process.env.FF_OPENING_DB_TEST!=='1'},async t=>{
+test('隔离MySQL：四条新路线与四条旧存档路线的二十个分支，关闭改道、保护与重试', {skip:process.env.FF_OPENING_DB_TEST!=='1'},async t=>{
   const {parse}=createRequire(import.meta.url)('yaml'),config=parse(readFileSync('alemon.config.yaml','utf8'));
   const db=config.FantasyFinal?.database??config.mysql,temporary=`ff_opening_journey_${randomUUID().replaceAll('-','')}`;
   const quoted=(s:string)=>'`'+s.replaceAll('`','``')+'`';
   const c=await createConnection({host:db.host,port:Number(db.port??3306),user:db.user,password:db.password,charset:'utf8mb4',connectTimeout:8000});let created=false;
-  const tables=['players','characters','registration_sessions','registration_scene_records','character_hidden_attributes','player_skill_point_ledger',
+  const tables=['players','characters','registration_sessions','registration_scene_records','character_hidden_attributes','player_skill_point_ledger','game_data_migrations',
     'map_regions','map_region_areas','map_npcs','map_monster_pools','monster_templates','item_definitions','skill_definitions','profession_definitions','player_inventory','player_quick_items','player_skills','player_appraisal_progress','player_blessings',
     'player_item_instances','player_equipment','player_item_codex','player_events','opening_world','opening_world_events','player_opening_stories','player_opening_actions','player_opening_service_actions',
     'player_opening_keepsakes','player_opening_services','player_opening_visits','player_opening_relations','player_divine_daily','player_story_progress','player_companions','opening_chest_requests','guild_shop_items',
@@ -77,19 +77,27 @@ test('隔离MySQL：八条路线二十个分支从注册到安全公会，关闭
     let sequence=0;
     const prepare=async(routeCode:string)=>{
       const route=content.openingRouteByCode(routeCode)!;
+      const open=world.openingStartRouteCodes.has(route.code);
+      const startRoute=open?route:content.openingRouteByCode('F01')!;
       await c.execute('UPDATE opening_world SET current_goddess=\'aqua\',aqua_character_id=NULL,aqua_stage=0 WHERE id=1');
       await c.execute('UPDATE map_regions SET newbie_spawn_enabled=0');
-      await c.execute('UPDATE map_regions SET newbie_spawn_enabled=1,is_enabled=1,is_owner_only=0 WHERE code=?',[route.region]);
-      // 此用例逐条覆盖指定剧情；每个独立样本从空轮次开始，抽取轮次另有并发/回滚测试。
+      await c.execute('UPDATE map_regions SET newbie_spawn_enabled=1,is_enabled=1,is_owner_only=0 WHERE code=?',[startRoute.region]);
+      // 旧路线只测试已有存档的续读；新角色随机抽取仍严格限定在四条开放路线。
       await c.execute('DELETE FROM opening_route_draw_state');
-      let rolls=0;
-      random=()=>route.code==='A01'?0:route.code.startsWith('A')?(rolls++===0?.99:route.code==='A02'?.25:.75):(Number(route.code.at(-1))-.5)/3;
+      random=()=>({F01:.05,F02:.25,F03:.4,M01:.75} as Record<string,number>)[startRoute.code];
       const user=`audit_${++sequence}`;
       await registration.beginRegistration(user,'复核旅人');
       await registration.continueRegistration(user,'story');await registration.askWhereAmI(user);await registration.continueRegistration(user,'question');
       await registration.chooseDestination(user,'异世界');await registration.continueRegistration(user,'danger');
       await registration.chooseGift(user,'A03');
       const character=await story.openingCharacter(c,user);
+      if(!open){
+        const [origins]=await c.execute<RowDataPacket[]>('SELECT r.id,a.min_x AS x,a.min_y AS y,a.min_z AS z FROM map_regions r JOIN map_region_areas a ON a.region_id=r.id WHERE r.code=? ORDER BY a.id LIMIT 1',[route.region]);
+        assert.ok(origins[0],`${route.code}: 旧路线出生地图仍须存在`);
+        await c.execute('UPDATE map_regions SET is_enabled=1,is_owner_only=0 WHERE id=?',[origins[0].id]);
+        await c.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=?,pos_z=? WHERE id=?',[origins[0].id,origins[0].x,origins[0].y,origins[0].z,character.id]);
+        await c.execute('UPDATE player_opening_stories SET route_code=?,story_version=?,destination_code=? WHERE character_id=?',[route.code,route.version,route.destination,character.id]);
+      }
       const opening=await story.openingStatus(user);assert.equal(opening.route,routeCode);assert.equal(opening.state,'armed');
       const [skills]=await c.execute<RowDataPacket[]>('SELECT s.code,p.level FROM player_skills p JOIN skill_definitions s ON s.id=p.skill_id WHERE p.character_id=?',[character.id]);
       assert.ok(skills.some(s=>s.code==='appraisal'&&s.level===1));assert.ok(skills.some(s=>s.code==='talent_combat_03'));assert.equal(character.skill_points,1);
@@ -109,7 +117,7 @@ test('隔离MySQL：八条路线二十个分支从注册到安全公会，关闭
       return view;
     };
     const endBranch=async(run:Awaited<ReturnType<typeof prepare>>,view:any)=>story.advanceOpening(run.user,view.revision,run.route.code==='F02'&&view.branch==='B'?'treat':'next');
-    await t.test('全部五地图八路线二十分支：落在真实安全公会，奖励与下一步均可办理',async()=>{
+    await t.test('四条新路线及四条旧存档路线共二十分支：落在真实安全公会，奖励与下一步均可办理',async()=>{
       for(const route of content.openingRoutes)for(const branch of route.choices){
         const run=await prepare(route.code);let view=await toBranchEnd(run,branch.code);
         await assert.rejects(state.assertOpeningFree(c as any,run.id),/初行剧情/);

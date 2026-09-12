@@ -1,7 +1,7 @@
 import { forgedPrimaryStats } from '../game/constants';
-import type { Pool, RowDataPacket } from 'mysql2/promise';
+import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { openingRouteVersions, talentDefinitions } from '../game/opening-content';
-import { openingHubs, openingSpawnRegions } from '../game/opening-world.config';
+import { openingHubs, openingSpawnRegions, openingStartRouteCodes } from '../game/opening-world.config';
 import { talentSchema } from '../game/talent-data';
 import { openingRouteDrawSchema } from '../game/opening-route-draw';
 
@@ -21,7 +21,27 @@ export const openingSchema = [
   `CREATE TABLE IF NOT EXISTS player_opening_visits (character_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,building_code VARCHAR(64) NOT NULL,area VARCHAR(32) NOT NULL DEFAULT '大厅',CONSTRAINT fk_opening_visit_character FOREIGN KEY(character_id) REFERENCES characters(id) ON DELETE CASCADE) ENGINE=InnoDB`
 ];
 
-/** Additive seeds; never arm old characters, reset world events or reopen an administrator-closed region. */
+/** 本轮首次开放四条初行路线的出生地图和安全终点；以后管理员关闭地图不会被重复重开。 */
+export const releaseOpeningRouteMaps = async (pool: Pool | PoolConnection) => {
+  const owned = 'getConnection' in pool;
+  const connection = owned ? await pool.getConnection() : pool;
+  try {
+    await connection.beginTransaction();
+    const [created] = await connection.execute<ResultSetHeader>("INSERT IGNORE INTO game_data_migrations (code) VALUES ('opening_four_route_regions_v1')");
+    if (created.affectedRows) {
+      const codes = [...new Set([...Object.keys(openingSpawnRegions), ...openingRouteVersions.filter(route => openingStartRouteCodes.has(route.code)).map(route => route.destination)])];
+      await connection.execute(`UPDATE map_regions SET is_enabled=1,is_owner_only=0 WHERE code IN (${codes.map(() => '?').join(',')})`, codes);
+    }
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    if (owned) connection.release();
+  }
+};
+
+/** Additive seeds; never arm old characters, reset world events or repeatedly reopen an administrator-closed region. */
 export const initializeOpening = async (pool: Pool) => {
   for (const sql of openingSchema) await pool.query(sql);
   await pool.execute('INSERT IGNORE INTO opening_world (id) VALUES (1)');
@@ -51,6 +71,7 @@ export const initializeOpening = async (pool: Pool) => {
   await item('opening_eris_return', '厄里斯核验的返还单', '厄里斯核验过的接引记录，不是普通战败的复活券。', '特殊', { openingKeepsake: 'opening_eris_return' });
   await item('opening_aqua_letter', '给地上女神的未读事故函', '交给世界树女神办事桌的事故材料。', '特殊', { openingKeepsake: 'opening_aqua_letter' });
   await item('opening_aqua_receipt', '地上女神的收件回执', '女神办事桌已收下材料，凭回执可以查询答复。', '特殊', { openingKeepsake: 'opening_aqua_receipt' });
+  await item('map_worldtree_meadow', '地图·世界树草原环带', '菲萝缇标出浮叶镇通往世界树草原环带的安全接驳与低危练级路口。', '地图', { map: 'worldtree_meadow' });
   for (const [code, hub] of Object.entries(openingHubs)) {
     if (!['world_tree','baina_town'].includes(code)) {
       await pool.execute(`INSERT INTO map_regions (code,name,description,min_x,max_x,min_y,max_y,min_z,max_z,is_spawn_enabled,danger_level) VALUES (?,?,?,?,?,?,?,?,?,0,0)
@@ -61,6 +82,19 @@ export const initializeOpening = async (pool: Pool) => {
       SELECT id,?,?,?,'building',?,?,? FROM map_regions WHERE code=? ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description)`, [hub.guild,hub.guildName,hub.description,hub.x,hub.y,hub.z,code]);
     await item(`map_${code}`, `地图·${hub.name}`, `记有${hub.name}公会与安全接驳处的地图。`, '地图', { map: code });
   }
+  await releaseOpeningRouteMaps(pool);
+  const leafLandmarks = [
+    ['leaf_flower_bridge','花桥','花桥两侧挂着三色绳结。青绳指向风枝会馆，黄绳通往集市，红绳标出维修中的桥段。',10,-2],
+    ['leaf_wind_market','风帆集市','彩色风帆下，半身人果酱摊和木匠的甜饼摊挨在一起。这里也是各地材料交换的消息站。',14,-1],
+    ['leaf_memorial','留名碑','白花围着刻有名字的石碑；镇民在这里讲述旧事，也记下那些一起重建花桥的人。',11,2],
+    ['leaf_observatory','观风台','木叶风车与风向刻纹帮助航务员辨认安全航线。十级瓶颈者也能在这里观察天空粉尘。',13,2]
+  ] as const;
+  for (const [code,name,description,x,y] of leafLandmarks) await pool.execute(`INSERT INTO map_special_objects (region_id,code,name,description,pos_x,pos_y,pos_z)
+    SELECT id,?,?,?,?,?,30 FROM map_regions WHERE code='floating_leaf_town'
+    ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description)`, [code,name,description,x,y]);
+  await pool.execute(`INSERT INTO map_npcs (region_id,code,name,description,interaction_kind,pos_x,pos_y,pos_z)
+    SELECT id,'leaf_manor','浮叶镇公馆','公馆兼作航务与救援联络处。菲萝缇把失踪孩子的画像和返程航班记录摆在一张长桌上。','building',15,0,30
+    FROM map_regions WHERE code='floating_leaf_town' ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description)`);
   // 已删除路线的专用安全区不再开放；普通练级地图仍保留给后续主线和探索。
   await pool.execute("UPDATE map_regions SET newbie_spawn_enabled=0,is_enabled=0 WHERE code IN ('snowlamp_hollow','sleepwhale_market')");
   const [forestPoints]=await pool.execute<RowDataPacket[]>(`SELECT r.id,a.min_x AS pos_x,a.min_y AS pos_y,a.min_z AS pos_z FROM map_regions r

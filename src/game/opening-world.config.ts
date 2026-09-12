@@ -6,9 +6,9 @@ export const openingHubs = {
 } as const;
 export type OpeningHubCode = keyof typeof openingHubs;
 export const openingSpawnRegions = {
-  dark_forest: { tier: 1 }, worldtree_meadow: { tier: 1 },
-  gravelwind_shore: { tier: 2 },
-  fallenstar_swamp: { tier: 3 }, frostcrown_plateau: { tier: 3 }
+  dark_forest: { tier: 1 }, worldtree_meadow: { tier: 1 }
 } as const;
+/** 其余已写完的路线保留供旧存档续读，新角色暂只抽取这四条。 */
+export const openingStartRouteCodes: ReadonlySet<string> = new Set(['F01', 'F02', 'F03', 'M01']);
 export const openingTierWeights = [10, 55, 25, 10] as const;
 export const hubForRegion = (code: string) => openingHubs[code as OpeningHubCode];

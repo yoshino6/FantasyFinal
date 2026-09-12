@@ -92,7 +92,7 @@ export const consultDungeonAtWorkshop = async (qqUserId: string) => withTransact
   const affinity = await affinityFor(connection, character.id, 'oddworkshop');
   await connection.execute('UPDATE player_dungeon_secret_progress SET stage=3 WHERE character_id=?', [character.id]);
   const familiar = affinity >= 200 ? '唯薇安一听见“结界”两个字，立刻从零件堆里钻了出来，像是早就等着你问。' : '唯薇安听完后眼睛一亮，踮脚从高处的货架上取下一只巴掌大的银黑色圆盘。';
-  return `${familiar}\n\n“这是破魔传送器！它能让携带者穿过那种老式封印，还能把你传回地下大门外——真遇到危险时，按下侧面的符文就能强制脱离。”\n\n她把装置在掌心转了一圈，忽然竖起一根手指：“不过制作很麻烦！这台是展示用的样件，基础货架不出售。你可以请掌握图纸的解构师制作；如果自己就是解构师，可以从个人副职业面板进入图纸研习，学会后自行构造，推荐解构师 Lv.6。要进去之前，至少带上一台。”`;
+  return `${familiar}\n\n“这是破魔传送器！它能让携带者穿过那种老式封印，还能把你传回地下大门外——真遇到危险时，按下侧面的符文就能强制脱离。”\n\n她把装置在掌心转了一圈，忽然竖起一根手指：“制作这东西很麻烦，平时我只留图纸给解构师研习。不过晴儿会替我在糖水屋备好应急成品，一台 200 铜币。要进去之前，至少带上一台。”`;
 });
 
 export const completeDungeonSecretPurchase = async (connection: PoolConnection, characterId: number) => {

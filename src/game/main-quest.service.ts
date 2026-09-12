@@ -8,6 +8,8 @@ import { girlGratitudeMainQuest } from './girl-gratitude.service';
 import { activateEvolutionProfile } from './evolution.service';
 import { guildCareerMainQuest } from './career-quest.service';
 import { openingMainQuest } from './opening.service';
+import { floatingStoryMainQuest } from './floating-leaf.service';
+import { floatingRescueTexts } from './floating-leaf-content';
 
 export type MainQuest = {
   title: string;
@@ -88,14 +90,14 @@ export const currentMainQuest = async (qqUserId: string, _skipLamplight = false)
   const opening = await openingMainQuest(qqUserId);
   if (opening) return opening;
   const pool = await getPool();
-  const [rows] = await pool.execute<(RowDataPacket & { id: number; level: number; experience: number; realm_stage: number; pos_x: number; pos_y: number; adventurer_registered: number; profession_code: string | null; forest_status: string | null; owns_sky_dust: number; barrier_stage: number; evolution_stage: number; evolution_cap: number | null })[]>(`
-    SELECT c.id,c.level,c.experience,c.realm_stage,c.pos_x,c.pos_y,c.adventurer_registered,c.profession_code,
+  const [rows] = await pool.execute<(RowDataPacket & { id: number; level: number; experience: number; realm_stage: number; pos_x: number; pos_y: number; region_code: string; adventurer_registered: number; profession_code: string | null; forest_status: string | null; owns_sky_dust: number; barrier_stage: number; evolution_stage: number; evolution_cap: number | null })[]>(`
+    SELECT c.id,c.level,c.experience,c.realm_stage,c.pos_x,c.pos_y,r.code AS region_code,c.adventurer_registered,c.profession_code,
       (SELECT sp.status FROM player_story_progress sp WHERE sp.character_id=c.id AND sp.story_code='forest_guide' LIMIT 1) AS forest_status,
       EXISTS(SELECT 1 FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=c.id AND i.code='sky_dust' AND pi.quantity>0) AS owns_sky_dust,
       COALESCE((SELECT qp.stage FROM player_main_quest_progress qp WHERE qp.character_id=c.id AND qp.quest_code='realm_barrier' LIMIT 1),0) AS barrier_stage,
       COALESCE((SELECT qp.stage FROM player_main_quest_progress qp WHERE qp.character_id=c.id AND qp.quest_code='evolution_barrier' LIMIT 1),0) AS evolution_stage,
       (SELECT ep.unlocked_level FROM player_evolution_profiles ep WHERE ep.character_id=c.id LIMIT 1) AS evolution_cap
-    FROM characters c JOIN players p ON p.id=c.player_id
+    FROM characters c JOIN players p ON p.id=c.player_id JOIN map_regions r ON r.id=c.current_region_id
     WHERE p.qq_user_id=? LIMIT 1`, [qqUserId]);
   const character = rows[0];
   if (!character) throw new Error('请先注册角色。');
@@ -120,11 +122,13 @@ export const currentMainQuest = async (qqUserId: string, _skipLamplight = false)
     const careerQuest = await guildCareerMainQuest(qqUserId);
     if (careerQuest) return careerQuest;
   }
+  const floatingQuest = await floatingStoryMainQuest(qqUserId);
+  if (floatingQuest) return floatingQuest;
   if (Number(character.realm_stage) === 1 && (level < 10 || experience < experienceRequiredForLevel(10))) return {
     title: '【主线·初入异界】',
     description: level < 10
-      ? `以冒险者的身份继续历练，提升至 Lv.10。\n当前等级：Lv.${level}/10`
-      : `你已经抵达 Lv.10。继续历练，让当前等级的经验达到满值。\n当前经验：${experience}/${experienceRequiredForLevel(10)}`
+      ? `以冒险者的身份继续历练，提升至 Lv.11。Lv.10 时经验满值将触发境界瓶颈。\n当前等级：Lv.${level}/11`
+      : `你已经抵达 Lv.10。继续历练，让当前等级的经验达到满值；突破无形的禁锢后，才能升至 Lv.11。\n当前经验：${experience}/${experienceRequiredForLevel(10)}`
   };
   if (Number(character.realm_stage) === 1 && level >= 10 && experience >= experienceRequiredForLevel(10)) {
     const stage = barrierStage(character.barrier_stage);
@@ -138,8 +142,8 @@ export const currentMainQuest = async (qqUserId: string, _skipLamplight = false)
   const gratitudeCompleted = gratitude?.description.startsWith('世界树的叶影') ?? false;
   if (gratitudeCompleted && Number(character.realm_stage) === 2 && level >= 20 && experience >= experienceRequiredForLevel(20)) {
     const evolutionStage = Number(character.evolution_stage);
-    if (evolutionStage === 0) return { title: '【主线·未知的枷锁】', description: '二十级的经验已然圆满，力量却像被一道从未见过的门槛拦住。去冒险者公会问问，或许莫妮卡能找到些线索。', action: { label: '[前往 冒险者公会]', command: '/前往 -2 -181' } };
-    if (evolutionStage === 1) return { title: '【主线·未知的枷锁】', description: '莫妮卡没有见过这种停滞。她只在一张陈旧借阅条上找到一点模糊线索：世界图书馆或许藏有答案。前往世界树，在图书馆里继续追查。', action: { label: '[前往 世界图书馆]', command: '/前往 -4 5' } };
+    if (evolutionStage === 0) return { title: '【主线·未知的枷锁】', description: gratitudeCompleted ? '二十级的经验已然圆满，力量却被新的门槛拦住。梨子喵送我的百纳镇地图还在包里；去那里的冒险者公会请教莫妮卡，或许能找到线索。' : '二十级的经验已然圆满，力量却像被一道从未见过的门槛拦住。去冒险者公会问问，或许莫妮卡能找到些线索。', action: gratitudeCompleted && character.region_code !== 'baina_town' ? { label: '[前往 百纳镇]', command: '/前往地图 map_baina_town' } : { label: '[前往 冒险者公会]', command: '/前往 -2 -181' } };
+    if (evolutionStage === 1) return { title: '【主线·未知的枷锁】', description: '莫妮卡没有见过这种停滞。她只在一张陈旧借阅条上找到一点模糊线索：世界图书馆或许藏有答案。前往世界树，在图书馆里继续追查。', action: character.region_code === 'world_tree' ? { label: '[前往 世界图书馆]', command: '/前往 -4 5' } : { label: '[前往 世界树]', command: '/前往地图 map_world_tree' } };
     if (evolutionStage < 5) return { title: '【主线·寻访大学者】', description: '世界图书馆的线索仍未拼全。依次探查大厅、阅览室、资料室与休息室，循着那封封存信件留下的脉络寻找【噶】。', action: { label: '[前往 世界图书馆]', command: '/前往 -4 5' } };
     if (evolutionStage === 5) return { title: '【主线·寻访大学者】', description: '所有线索都指向世界图书馆的无尽回廊。那里每一道门后都是不同的知识与岁月。前往无尽回廊，寻访【噶】的研究室。', action: { label: '[前往 世界图书馆]', command: '/前往 -4 5' } };
     if (evolutionStage === 6) return { title: '【主线·信念的试炼】', description: '大学者【噶】已压制力量，等待你以战斗证明自己的信念。战败后可再次挑战。', action: { label: '[前往 世界图书馆]', command: '/前往 -4 5' } };
@@ -232,17 +236,22 @@ export const buyCelestialJudicator = async (qqUserId: string) => withTransaction
 export const goblinKingArrival = async (connection: PoolConnection, characterId: number, regionId: number, regionCode: string, x: number, y: number, z: number) => {
   const quest = await goblinQuestFor(connection, characterId, true);
   if (!quest) return null;
+  const [origins] = await connection.execute<RowDataPacket[]>("SELECT 1 FROM player_opening_stories WHERE character_id=? AND route_code='M01' AND destination_code='floating_leaf_town' LIMIT 1", [characterId]);
+  const leaf = Boolean(origins[0]);
   if (Number(quest.stage) === 3 && regionCode === 'dark_forest_deep') {
     await connection.execute('UPDATE player_goblin_king_quest SET stage=4 WHERE character_id=?', [characterId]);
     const direction = relativeDirection(x, y, Number(quest.pos_x), Number(quest.pos_y));
+    if (leaf) return { clue: true, chapter: 1, text: `${floatingRescueTexts.trail}\n\n【线索】营地在${direction}，坐标（${quest.pos_x}，${quest.pos_y}）。` };
     return { clue: true, chapter: 4, text: `踏进幽暗密林深处的一刻，潮湿的风裹着血腥味迎面吹来。林间到处是被踩断的枝叶与凌乱的脚印，哥布林显然在这里来回奔走过许多次。\n\n我俯身辨认泥地上几道较新的爪印，忽然听见远处传来兵刃相撞的脆响。声音被古木遮断，又很快从风里漏出来。\n\n我屏住呼吸，侧耳倾听。那声音时断时续，先是短刃格开木矛的锐响，紧接着便是杂乱的怪叫与枝叶被撞开的闷响；每一次动静都像被更密的林影吞没。\n\n【线索】从${direction}传来打斗声。\n\n那不是野兽搏斗的动静。有人正在以寡敌众，而且已经被逼得不断后退。梨子喵若还活着，或许就在那边。` };
   }
   if (Number(quest.region_id) !== regionId || Number(quest.pos_x) !== x || Number(quest.pos_y) !== y || Number(quest.pos_z) !== z) return null;
   if (Number(quest.stage) === 4) {
     await connection.execute('UPDATE player_goblin_king_quest SET stage=5 WHERE character_id=?', [characterId]);
+    if (leaf) return { clue: false, chapter: 2, text: floatingRescueTexts.found };
     return { clue: false, chapter: 5, text: '我循着声音穿过一片被踩烂的蕨丛，终于在断木与乱石之间看见了梨子喵。\n\n她背靠着半截树根，手里短刃已卷了口，肩头沾着血和泥。那枚鱼骨头发卡不见了，只剩几缕凌乱的浅黄发贴在额前。\n\n“你怎么会在这里？”我冲上前挡开一支木矛。\n\n梨子喵先是一怔，随即咬牙挥刀。\n\n“别问了喵！这些家伙一直缠着我……小心左边！”\n\n哥布林从灌木间蜂拥而出。来不及解释，我与她背靠背站定，先把眼前的包围撕开。\n\n一波哥布林刚倒下，新的怪影又从林子里窜出。梨子喵的呼吸越来越急，却仍死死守着身后的断木。\n\n“我不是被它们追着跑进来的喵。”她趁着空隙低声说，“我一路跟到这里，发现那些失踪的少女被关在部落里，就想趁守卫少的时候把人救出来。”\n\n她咬紧牙关，短刃上的缺口在昏光里一闪。\n\n“我杀了不少拦路的哥布林，可警报一响，它们就全出来搜我了。现在它们把我当成闯进部落的侵略者，非要把我围死不可。”\n\n我抬手击落迎面飞来的石斧。\n\n“那就先让它们明白，谁才该滚出这里。”\n\n我们一前一后压上，刀光与法术在昏暗的林影间接连闪过。最后一只哥布林哀嚎着退开，周围终于空出一圈狼藉的泥地。' };
   }
   if (![5, 6, 7].includes(Number(quest.stage))) return null;
+  if (leaf) return { clue: false, chapter: Number(quest.stage) === 5 ? 2 : 3, text: Number(quest.stage) === 5 ? floatingRescueTexts.found : floatingRescueTexts.drums };
   const resumed = Number(quest.stage) === 5
     ? { chapter: 5, text: '梨子喵仍守在断木旁，林间的怪叫没有停下。哥布林随时会从阴影里再度扑来。\n\n我必须留在这里，继续援护她。' }
     : Number(quest.stage) === 6
@@ -257,9 +266,15 @@ export const continueGoblinKingArrival = async (qqUserId: string) => withTransac
   const quest = await goblinQuestFor(connection, Number(character.id), true);
   if (!quest || ![5, 6, 7].includes(Number(quest.stage))) throw new Error('当前没有可继续的讨伐剧情。');
   if (Number(quest.region_id) !== Number(character.current_region_id) || Number(quest.pos_x) !== Number(character.pos_x) || Number(quest.pos_y) !== Number(character.pos_y) || Number(quest.pos_z) !== Number(character.pos_z)) throw new Error('请回到讨伐坐标，再继续剧情。');
+  const [origins] = await connection.execute<RowDataPacket[]>("SELECT 1 FROM player_opening_stories WHERE character_id=? AND route_code='M01' AND destination_code='floating_leaf_town' LIMIT 1", [character.id]);
+  const leaf = Boolean(origins[0]);
   if (Number(quest.stage) === 5) {
     await connection.execute('UPDATE player_goblin_king_quest SET stage=6 WHERE character_id=?', [character.id]);
-    return { ready: false, chapter: 6, text: goblinKingArrivalText };
+    return { ready: false, chapter: leaf ? 3 : 6, text: leaf ? floatingRescueTexts.drums : goblinKingArrivalText };
+  }
+  if (leaf) {
+    const bossSpawnId = await createGoblinKingEncounter(connection, Number(character.id), quest);
+    return { ready: true, chapter: 4, bossSpawnId, text: floatingRescueTexts.battle };
   }
   const [devices] = await connection.execute<(RowDataPacket & { item_id: number; quantity: number })[]>('SELECT pi.item_id,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.code=? FOR UPDATE', [character.id, celestialJudicatorCode]);
   if (!devices[0]?.quantity) throw new Error('缺少天位制裁仪（仿品），无法压制哥布林国王。');
@@ -274,6 +289,11 @@ export const completeGoblinKingQuest = async (connection: PoolConnection, target
   }).find((item: any) => item?.code === 'main_quest_goblin_king');
   const ownerId = Number(trait?.owner_character_id ?? 0); if (!ownerId) return false;
   await connection.execute('UPDATE player_goblin_king_quest SET stage=11,completed_at=NOW() WHERE character_id=? AND stage=10', [ownerId]);
+  const [leaf] = await connection.execute<RowDataPacket[]>("SELECT 1 FROM player_opening_stories WHERE character_id=? AND route_code='M01' AND destination_code='floating_leaf_town' LIMIT 1", [ownerId]);
+  if (leaf[0]) {
+    const [owned] = await connection.execute<RowDataPacket[]>("SELECT 1 FROM player_inventory p JOIN item_definitions i ON i.id=p.item_id WHERE p.character_id=? AND i.code='map_baina_town' AND p.quantity>0", [ownerId]);
+    if (!owned.length) await (await import('./opening.service')).grantOpeningItem(connection, ownerId, 'map_baina_town');
+  }
   return true;
 };
 
@@ -286,8 +306,8 @@ const evolutionCharacterFor = async (connection: PoolConnection, qqUserId: strin
     FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1${lock ? ' FOR UPDATE' : ''}`, [qqUserId]);
   const character = rows[0];
   if (!character) throw new Error('请先注册角色。');
-  if (Number(character.goblin_quest_stage) < 11) throw new Error('先完成「失踪的少女」，再处理这道新的瓶颈。');
-  if (Number(character.gratitude_stage) < 6) throw new Error('先完成与梨子喵在世界树上的同行，再处理这道新的瓶颈。');
+  if (Number(character.goblin_quest_stage) < 11) throw new Error('先完成哥布林国王讨伐，再处理这道新的瓶颈。');
+  if (Number(character.gratitude_stage) < 6) throw new Error('先完成世界树的同行剧情，再处理这道新的瓶颈。');
   if (Number(character.realm_stage) !== 2 || Number(character.level) < 20 || Number(character.experience) < experienceRequiredForLevel(20)) throw new Error('你的积累尚未触及这道新的灵阶枷锁。');
   return character;
 };

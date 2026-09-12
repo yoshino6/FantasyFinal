@@ -5,7 +5,7 @@ import ts from 'typescript';
 import { Format } from '../node_modules/alemonjs/lib/application/format/message-format.js';
 import { talentGroups } from '../src/game/talent.config';
 import { openingLessonText, openingRoutes, openingRouteVersions, talentDefinitions } from '../src/game/opening-content';
-import { openingHubs } from '../src/game/opening-world.config';
+import { openingHubs, openingStartRouteCodes } from '../src/game/opening-world.config';
 import { rootGuildPeople, rootGuildScenes, guildLessons } from '../src/game/opening-guild.config';
 import { firstPersonNarrative } from '../src/game/narrative-voice';
 
@@ -29,6 +29,24 @@ const source=ts.createSourceFile('sends.js',readFileSync('node_modules/@alemonjs
 const helpers=['MAX_BUTTON_ROWS','MAX_BUTTONS_PER_ROW','createButtonsData','mdFormatters','createMarkdownText'];
 const converter=new Function(source.statements.filter(s=>ts.isVariableStatement(s)&&s.declarationList.declarations.some(d=>helpers.includes(d.name.getText(source)))).map(s=>s.getText(source)).join('\n')+'\nreturn {createButtonsData,createMarkdownText};')();
 const catalog=load('src/game/divine-message.ts',{alemonjs:{Format},'./talent.config':{talentGroups},'./opening-content':{talentDefinitions}});
+
+test('隐藏选路面板仅显示四条开放路线，逐行提供不自动发送的蓝色选择链接',()=>{
+  const {openingRoadPanelFormat}=load('src/response/opening-road.ts',{alemonjs:{Format}},['openingRoadPanelFormat']);
+  const roads=openingRoutes.filter(route=>openingStartRouteCodes.has(route.code)).map(route=>({code:route.code,title:route.title,region:route.region,destination:route.destination}));
+  const format=openingRoadPanelFormat({revision:3,current:roads[0].code,roads});
+  const markdown=format.value.find((item:any)=>item.type==='Markdown');
+  const buttons=format.value.find((item:any)=>item.type==='BT.group');
+  const rendered=converter.createMarkdownText(markdown.value);
+  assert.match(rendered,/初行·选择道路/);
+  for(const [index,road] of roads.entries())assert.match(rendered,new RegExp(`${'①②③④'[index]}${road.title}`));
+  assert.equal((rendered.match(/qqbot-cmd-input/g)??[]).length,4);
+  assert.doesNotMatch(rendered,/qqbot-cmd-enter/);
+  const choices=markdown.value.filter((item:any)=>item.type==='MD.button'&&item.value==='[选择]');
+  assert.equal(choices.length,4);assert.ok(choices.every((item:any)=>item.options.autoEnter===false));
+  assert.equal(buttons.value.length,1);
+  const qq=converter.createButtonsData(buttons.value);
+  assert.equal(qq.rows.flatMap((row:any)=>row.buttons).length,1);
+});
 
 test('初行报酬仅在结算首页以加深提示显示，后续剧情与交接不重复',()=>{
   const {openingFormat}=load('src/game/opening-message.ts',{alemonjs:{Format},'./narrative-voice':{firstPersonNarrative}});

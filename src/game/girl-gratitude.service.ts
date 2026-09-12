@@ -20,7 +20,8 @@ const stageFor = async (connection: PoolConnection, characterId: number, lock = 
 };
 const finishedGoblinQuest = async (connection: PoolConnection, characterId: number) => {
   const [rows] = await connection.execute<(RowDataPacket & { stage: number })[]>('SELECT stage FROM player_goblin_king_quest WHERE character_id=? LIMIT 1', [characterId]);
-  return Number(rows[0]?.stage ?? 0) >= 11;
+  const [leaf] = await connection.execute<RowDataPacket[]>("SELECT 1 FROM player_opening_stories WHERE character_id=? AND route_code='M01' AND destination_code='floating_leaf_town' LIMIT 1", [characterId]);
+  return Number(rows[0]?.stage ?? 0) >= (leaf[0] ? 12 : 11);
 };
 const requireAt = async (connection: PoolConnection, character: Character, code: string) => {
   const [rows] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM map_npcs WHERE code=? AND region_id=? AND pos_x=? AND pos_y=? AND pos_z=? LIMIT 1', [code, character.current_region_id, character.pos_x, character.pos_y, character.pos_z]);
@@ -32,6 +33,10 @@ export const girlGratitudeMainQuest = async (qqUserId: string) => withTransactio
   const character = await characterFor(connection, qqUserId);
   if (!await finishedGoblinQuest(connection, character.id)) return null;
   const stage = await stageFor(connection, character.id);
+  const [leaf] = await connection.execute<RowDataPacket[]>("SELECT 1 FROM player_opening_stories WHERE character_id=? AND route_code='M01' AND destination_code='floating_leaf_town' LIMIT 1", [character.id]);
+  if (leaf[0]) return stage >= 6
+    ? { title: '【主线·菲萝缇的假】', description: '世界树的叶影记下了这一天的同行。菲萝缇带我见过花桥之外的世界，也把一条愿意回来的路留在了地图上。' }
+    : { title: '【主线·菲萝缇的假】', description: '菲萝缇请了一天假，邀我一起游览世界树。', action: { label: '[继续同行]', command: '/浮叶致谢 开始' } };
   if (stage === 0) return { title: '【主线·少女的谢意】', description: '梨子喵似乎有些话想和我说。\n\n前往百纳镇，去见梨子喵。', action: { label: '[前往 梨子喵]', command: '/前往 -22 -196' } };
   if (stage === 1) return { title: '【主线·少女的谢意】', description: '梨子喵邀请我去世界树转转。她说有一处地方，只有亲眼见到才说得清楚。\n\n前往界门驿站，使用传送门。', action: { label: '[前往 界门驿站]', command: '/前往 14 -167' } };
   if (stage === 2 || stage === 3) return { title: '【主线·少女的谢意】', description: '世界树的枝叶正等待我们。梨子喵走在前面，像藏着许多没能说出口的话。\n\n继续与梨子喵同行。', action: { label: '[继续 同行]', command: '/少女谢意 继续' } };
@@ -42,6 +47,8 @@ export const girlGratitudeMainQuest = async (qqUserId: string) => withTransactio
 
 export const girlGratitudePending = async (qqUserId: string) => withTransaction(async connection => {
   const character = await characterFor(connection, qqUserId);
+  const [leaf] = await connection.execute<RowDataPacket[]>("SELECT 1 FROM player_opening_stories WHERE character_id=? AND route_code='M01' AND destination_code='floating_leaf_town' LIMIT 1", [character.id]);
+  if (leaf[0]) return false;
   return await finishedGoblinQuest(connection, character.id) && await stageFor(connection, character.id) === 0;
 });
 
@@ -52,6 +59,8 @@ export const girlGratitudeStage = async (qqUserId: string) => withTransaction(as
 
 export const startGirlGratitude = (qqUserId: string) => withTransaction(async connection => {
   const character = await characterFor(connection, qqUserId, true);
+  const [leaf] = await connection.execute<RowDataPacket[]>("SELECT 1 FROM player_opening_stories WHERE character_id=? AND route_code='M01' AND destination_code='floating_leaf_town' LIMIT 1", [character.id]);
+  if (leaf[0]) throw new Error('你的浮叶镇路线由菲萝缇陪同游历世界树，请回公馆与她会合。');
   if (!await finishedGoblinQuest(connection, character.id)) throw new Error('先解决密林深处的危机。');
   if (await stageFor(connection, character.id, true) !== 0) throw new Error('梨子喵已经在等你前往世界树。');
   await requireAt(connection, character, pearCode); await writeStage(connection, character.id, 1);
@@ -60,6 +69,8 @@ export const startGirlGratitude = (qqUserId: string) => withTransaction(async co
 
 export const teleportToWorldTree = (qqUserId: string) => withTransaction(async connection => {
   const character = await characterFor(connection, qqUserId, true);
+  const [leaf] = await connection.execute<RowDataPacket[]>("SELECT 1 FROM player_opening_stories WHERE character_id=? AND route_code='M01' AND destination_code='floating_leaf_town' LIMIT 1", [character.id]);
+  if (leaf[0]) throw new Error('这趟世界树同行由菲萝缇带领，请从浮叶镇公馆出发。');
   if (await stageFor(connection, character.id, true) !== 1) throw new Error('梨子喵还没有约你前往世界树。');
   await requireAt(connection, character, gateCode);
   const [regions] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM map_regions WHERE code=? LIMIT 1 FOR UPDATE', ['world_tree']);
@@ -82,6 +93,8 @@ export const returnToBainaTown = (qqUserId: string) => withTransaction(async con
 
 export const continueGirlGratitude = (qqUserId: string) => withTransaction(async connection => {
   const character = await characterFor(connection, qqUserId, true); const stage = await stageFor(connection, character.id, true);
+  const [leaf] = await connection.execute<RowDataPacket[]>("SELECT 1 FROM player_opening_stories WHERE character_id=? AND route_code='M01' AND destination_code='floating_leaf_town' LIMIT 1", [character.id]);
+  if (leaf[0]) throw new Error('请继续与菲萝缇同行。');
   const [regions] = await connection.execute<(RowDataPacket & { code: string })[]>('SELECT code FROM map_regions WHERE id=? LIMIT 1', [character.current_region_id]);
   if (regions[0]?.code !== 'world_tree') throw new Error('请先前往世界树。');
   if (stage === 2) { await writeStage(connection, character.id, 3); return { chapter: 3, exchange: false, text: '梨子喵领着我沿巨根间的木桥前行。她一路都在背诵什么，念错了就用力摇头，猫耳也跟着耷拉下来。\n\n“不是这句……啊，也不是！”她终于恼火地把纸条揉成一团，“我明明练了好多遍的喵。”\n\n我正想问，桥下的根河忽然发出闷响。几根被风蚀空的旧木条接连断裂，梨子喵脚下一空，连惊呼都来不及发出。\n\n我一把扣住她的手腕，将她拉回坚实的根须上。她撞进我怀里，过了好半天才抬头，眼圈红红的。\n\n“又被你救了一次喵……”她把那团皱纸攥得更紧，却没有再松开我的手。' }; }
@@ -92,6 +105,8 @@ export const continueGirlGratitude = (qqUserId: string) => withTransaction(async
 
 export const receiveGirlGratitudeGift = (qqUserId: string) => withTransaction(async connection => {
   const character = await characterFor(connection, qqUserId, true);
+  const [leaf] = await connection.execute<RowDataPacket[]>("SELECT 1 FROM player_opening_stories WHERE character_id=? AND route_code='M01' AND destination_code='floating_leaf_town' LIMIT 1", [character.id]);
+  if (leaf[0]) throw new Error('菲萝缇在市场等你，请继续本路线的同行。');
   if (await stageFor(connection, character.id, true) !== 4) throw new Error('梨子喵还没有带你来到这里。');
   await requireAt(connection, character, exchangeCode);
   await connection.execute(`INSERT INTO player_inventory (character_id,item_id,quantity) SELECT ?,id,1 FROM item_definitions WHERE code='worldtree_bud_charm' ON DUPLICATE KEY UPDATE quantity=GREATEST(quantity,1),acquired_at=NOW()`, [character.id]);

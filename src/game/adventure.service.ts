@@ -644,6 +644,7 @@ const ensureForestGuideFreeAction = async (connection: Pool | PoolConnection, ch
   await assertNoNegotiation(connection, characterId);
   const status = await forestGuideStatusFor(connection, characterId);
   if (status && status !== 'completed') throw new Error('你正在推进「初章·包容之镇」，请先完成当前剧情。');
+  await (await import('./floating-leaf.service')).assertFloatingTourFreeAction(connection, characterId);
 };
 
 const ensureActionAvailable = (character: CharacterRow) => {

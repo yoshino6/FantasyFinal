@@ -4,18 +4,21 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { talentCode } from '../src/game/talent.config';
 import { openingFirstMeetingIntroduction, openingFirstMeetingText, openingLessonText, openingNarrativeText, openingNewcomerText, openingRoutes, openingRouteVersions, openingRouteByCode, talentDefinitions } from '../src/game/opening-content';
-import { openingHubs, openingSpawnRegions } from '../src/game/opening-world.config';
+import { openingHubs, openingSpawnRegions, openingStartRouteCodes } from '../src/game/opening-world.config';
 import { goldenChestTable, rollChest } from '../src/game/opening-chest.config';
 import { companionChance } from '../src/game/companion.service';
 import { keepsakeDefinitions } from '../src/game/opening-keepsakes.config';
 import { forestArrivalGuildScenes, forestArrivalTownScenes } from '../src/game/forest-arrival-content';
 
-test('运行时只保留八条路线、五张出生地图与二十个分支',()=>{
+test('保留八条剧情供旧存档续读，新玩家只开放四条路线与两张出生地图',()=>{
   assert.deepEqual(openingRoutes.map(route=>route.code).sort(),['A01','C02','F01','F02','F03','M01','M02','S03']);
-  assert.equal(openingRouteVersions.length,8);assert.equal(Object.keys(openingSpawnRegions).length,5);
+  assert.equal(openingRouteVersions.length,8);
+  assert.deepEqual([...openingStartRouteCodes],['F01','F02','F03','M01']);
+  assert.deepEqual(Object.keys(openingSpawnRegions),['dark_forest','worldtree_meadow']);
   assert.equal(openingRoutes.reduce((sum,route)=>sum+route.choices.length,0),20);
   for(const route of openingRoutes){
-    assert.ok(route.region in openingSpawnRegions,route.code);assert.ok(route.destination in openingHubs,route.code);
+    if(openingStartRouteCodes.has(route.code))assert.ok(route.region in openingSpawnRegions,route.code);
+    assert.ok(route.destination in openingHubs,route.code);
     assert.ok(route.pages.length&&route.arrival.length,route.code);assert.ok(route.choices.length>=2&&route.choices.length<=3,route.code);
     for(const choice of route.choices)assert.ok(choice.pages.length&&choice.quest&&choice.rewardCode,`${route.code}-${choice.code}`);
   }
@@ -42,6 +45,26 @@ test('云巢路线写明被当作食物、猎魔人救援、破壳认亲与双�
   assert.match(JSON.stringify(route.pages),/储备粮.*烬川.*裂.*认成娘/);
   assert.match(JSON.stringify(route.choices[0]),/随从名册|跟随/);
   assert.equal(route.choices[1].rewardCopper,2000);assert.match(route.choices[1].label,/2000铜币/);
+});
+
+test('当前开放的四条初行路线每页正文都保留自然段分隔',()=>{
+  const active = new Set(['F01','F02','F03','M01']);
+  for (const route of openingRoutes.filter(item => active.has(item.code))) {
+    const pages = [
+      ...route.pages,
+      ...route.choices.flatMap(choice => choice.pages),
+      ...route.choices.flatMap(choice => choice.arrival ?? []),
+      ...route.arrival
+    ];
+    assert.ok(pages.length > 0, route.code);
+    for (const page of pages) {
+      assert.match(page.text, /\r?\n\s*\r?\n/, `${route.code}·${page.title} 应分成至少两段`);
+    }
+  }
+  const coffin = openingRouteByCode('M01')!;
+  const coffinText = JSON.stringify([coffin.pages, ...coffin.choices.map(choice => [choice.pages, choice.arrival])]);
+  assert.doesNotMatch(coffinText, /死亡证明|预约复苏|待复苏长老|死亡登记/);
+  assert.match(coffinText, /古木长老遗物|收件人|航务凭证/);
 });
 test('三人冒险团沿用旧相遇并在真实史莱姆战斗胜利后回城',()=>{
   const route=openingRouteByCode('F03')!;

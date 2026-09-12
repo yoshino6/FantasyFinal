@@ -44,10 +44,17 @@ const appGroup = router.group({ // 精准规则匹配，复杂度 O1，稳定 �
     stripPrefix: true, // 匹配时去掉前缀 
     allowBare: true  // 允许不使用前缀 
   }
-}, () => import('./middleware/opening'), () => import('./middleware/pvp-defeat-protection'))
+}, () => import('./middleware/opening'), () => import('./middleware/floating-leaf-tour'), () => import('./middleware/pvp-defeat-protection'))
 
 registerSecondaryShopRoutes(appGroup);
 registerOpeningRoutes(appGroup);
+appGroup.use('浮叶游览', () => import('./response/floating-leaf').then(module => ({ default: module.floatingTourHandler })));
+appGroup.use({ path: '浮叶瓶颈', schema: { usage: '/浮叶瓶颈 <guild|observatory>', args: [{ name: 'source', rules: [{ required: true, type: 'enum', enum: ['guild', 'observatory'] }] }] } }, () => import('./response/floating-leaf').then(module => ({ default: module.floatingBarrierHandler })));
+appGroup.use('浮叶公馆', () => import('./response/floating-leaf').then(module => ({ default: module.floatingManorHandler })));
+appGroup.use('浮叶委托', () => import('./response/floating-leaf').then(module => ({ default: module.floatingRescueStartHandler })));
+appGroup.use('浮叶返程', () => import('./response/floating-leaf').then(module => ({ default: module.floatingRescueReturnHandler })));
+appGroup.use('浮叶复命', () => import('./response/floating-leaf').then(module => ({ default: module.floatingRescueReportHandler })));
+appGroup.use({ path: '浮叶致谢', schema: { usage: '/浮叶致谢 <开始|继续>', args: [{ name: 'action', rules: [{ required: true, type: 'enum', enum: ['开始', '继续'] }] }] } }, () => import('./response/floating-leaf').then(module => ({ default: module.floatingThanksHandler })));
 appGroup.use('新世界', () => import('./response/new-world'));
 appGroup.use({ path: '新世界领取', schema: { usage: '/新世界领取 <等级>', args: [{ name: 'level', rules: [{ required: true, type: 'number', min: 1, max: 30 }] }] } },
   () => import('./response/new-world').then(module => ({ default: module.claimNewWorldHandler })));

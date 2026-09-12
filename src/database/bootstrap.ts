@@ -1989,7 +1989,7 @@ export const initializeSchema = async (pool: Pool) => {
     ,('map_world_tree', '地图·世界树', '以发光叶脉标出世界树根桥、祭坛与万叶联市的地图。', '少女的谢意', 'consumable', '地图', 0.01, 1, JSON_OBJECT('map','world_tree'))
     ,('map_dark_forest', '地图·幽暗密林', '记录幽暗密林外围道路与危险地带的探索地图。', '百纳镇冒险者公会商店', 'consumable', '地图', 0.01, 1, JSON_OBJECT('map','dark_forest'))
     ,('map_dark_forest_deep', '地图·幽暗密林深处', '标有幽暗密林深处的险路与古老遗迹的详尽地图。', '百纳镇冒险者公会商店', 'consumable', '地图', 0.01, 1, JSON_OBJECT('map','dark_forest_deep'))
-    ,('demon_breaker_teleporter', '破魔传送器', '唯薇安研制的便携式传送装置。持有时可穿过地下迷宫入口的封印，也能在迷宫中借它强制脱离，回到入口之外。', '百纳镇·异工坊', 'consumable', '特殊', 0.60, 1, JSON_OBJECT('dungeonGatePass',true))
+    ,('demon_breaker_teleporter', '破魔传送器', '唯薇安研制的便携式传送装置。持有时可穿过地下迷宫入口的封印，也能在迷宫中借它强制脱离，回到入口之外。', '百纳镇·糖水屋', 'consumable', '特殊', 0.60, 1, JSON_OBJECT('dungeonGatePass',true))
     ,('demon_breaker_teleporter_blueprint', '破魔传送器图纸', '记载破魔传送器完整回路的图纸；解构师持有后可稳定构造该装置。', '百纳镇·异工坊', 'consumable', '图纸', 0.01, 1, JSON_OBJECT('constructionBlueprint','demon_breaker_teleporter'))
     ,('heart_bouquet', '心意花束', '由修女亲手整理的花束，适合赠给并肩走过一段路的好友。', '圣恩教堂·祈福', 'consumable', '礼物', 0.05, 1, JSON_OBJECT('playerAffinity',25,'giftDailyLimit',3,'giftKind','heart_bouquet'))
     ,('resonance_fruit', '共鸣果实', '沾着星光的果实，入口后会留下温柔而清亮的回响。', '圣恩教堂·祈福', 'consumable', '礼物', 0.08, 1, JSON_OBJECT('playerAffinity',80,'giftDailyLimit',1,'giftKind','resonance_fruit'))

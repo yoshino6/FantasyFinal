@@ -135,7 +135,7 @@ const settleArrival=async(connection:PoolConnection,row:StoryRow)=>{
   await connection.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=?,pos_z=?,current_hp=hp_max,current_mp=mp_max,stamina=120,stamina_updated_at=NOW(),activity_status=\'active\' WHERE id=?',[destination.id,destination.pos_x,destination.pos_y,destination.pos_z,row.character_id]);
   await grantOpeningExperience(connection,Number(row.character_id),'arrival');
   await connection.execute('UPDATE characters SET current_hp=hp_max,current_mp=mp_max WHERE id=?',[row.character_id]);
-  await grantOpeningItem(connection,Number(row.character_id),`map_${row.destination_code}`);
+  if(row.route_code!=='M01'||row.destination_code!=='floating_leaf_town')await grantOpeningItem(connection,Number(row.character_id),`map_${row.destination_code}`);
   flags.rewardName=name;flags.rewardCode=code;
   await connection.execute("UPDATE player_opening_stories SET state='arrival',page_index=0,reward_claimed=1,flags_json=? WHERE character_id=?",[JSON.stringify(flags),row.character_id]);
   return true;

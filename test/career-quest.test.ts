@@ -43,6 +43,7 @@ const setup = (overrides: Record<string, unknown> = {}) => {
   const main = loadDeclarations('../src/game/main-quest.service.ts', ['currentMainQuest'], {
     getPool: async () => pool, guildCareerMainQuest: career.guildCareerMainQuest,
     openingMainQuest: async () => null,
+    floatingStoryMainQuest: async () => null,
     girlGratitudeMainQuest: async () => ({ description: '世界树的叶影已记下这次同行。' }),
     experienceRequiredForLevel: (level: number) => level * 100,
     barrierStage: (value: unknown) => Math.min(4, Math.max(0, Number(value) || 0)),
@@ -59,7 +60,7 @@ test('森林战斗后直到梨子喵带路完成，指引先继续剧情', async
   }
 });
 
-test('初行结束后主线依次为公会注册、主职业选择和升至十级', async () => {
+test('初行结束后主线依次为公会注册、主职业选择和升至十一级', async () => {
   const service = setup({ level: 3, adventurer_registered: 0, profession_code: null, owns_forest_map: 0, realm_stage: 1, experience: 0 });
   assert.equal((await service.currentMainQuest('player')).title, '【主线·成为冒险者】');
   service.state.character.adventurer_registered = 1;
@@ -67,7 +68,7 @@ test('初行结束后主线依次为公会注册、主职业选择和升至十�
   service.state.character.profession_code = 'mage';
   const growth = await service.currentMainQuest('player');
   assert.equal(growth.title, '【主线·初入异界】');
-  assert.match(growth.description, /Lv\.3\/10/);
+  assert.match(growth.description, /Lv\.3\/11/);
   assert.doesNotMatch(growth.description, /幽暗密林.*地图/);
 });
 
