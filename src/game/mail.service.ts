@@ -51,7 +51,7 @@ const mailRows = async (connection: Connection, characterId: number, keyword: st
   const term = `%${keyword.trim()}%`;
   const paging = limit === undefined ? '' : ' LIMIT ? OFFSET ?';
   const values: (string | number)[] = [characterId, term, term];
-  if (limit !== undefined && offset !== undefined) values.push(limit, offset);
+  if (limit !== undefined && offset !== undefined) values.push(String(limit), String(offset));
   const [rows] = await connection.execute<MailRow[]>(`SELECT m.id,m.title,m.content,m.received_at,m.claimed_at,
     GROUP_CONCAT(CONCAT('【',i.name,'】×',a.quantity) ORDER BY a.id SEPARATOR '、') AS attachment_summary,
     COUNT(a.id) AS attachment_count

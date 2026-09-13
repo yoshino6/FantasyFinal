@@ -14,18 +14,19 @@ const load = (mocks: Record<string, unknown>) => {
   return module.exports as { openingRoadPanel: (user: string) => Promise<any>; selectOpeningRoad: (user: string, revision: number, code: string) => Promise<any> };
 };
 
-test('首次开放两张开局地图和两个安全终点，后续启动尊重管理员关闭状态', async () => {
-  let migrated = false;
+test('首次开放四张开局地图，旧服只补开新增地图，后续启动尊重管理员关闭状态', async () => {
+  const migrations = new Set<string>();
   let releases = 0;
-  const maps = new Map([['dark_forest', false], ['worldtree_meadow', false], ['baina_town', false], ['floating_leaf_town', false]]);
+  const maps = new Map([['dark_forest', false], ['worldtree_meadow', false], ['gravelwind_shore', false], ['fallenstar_swamp', false], ['baina_town', false], ['world_tree', false], ['floating_leaf_town', false]]);
   const connection = {
     beginTransaction: async () => {}, commit: async () => {}, rollback: async () => {}, release: () => { releases++; },
     execute: async (sql: string, codes: string[] = []) => {
       if (sql.startsWith('INSERT IGNORE INTO game_data_migrations')) {
-        const first = !migrated; migrated = true; return [{ affectedRows: Number(first) }];
+        const code = /VALUES \('([^']+)'\)/.exec(sql)![1]; const first = !migrations.has(code); migrations.add(code); return [{ affectedRows: Number(first) }];
       }
       if (sql.startsWith('UPDATE map_regions SET is_enabled=1')) {
-        assert.deepEqual(new Set(codes), new Set(['dark_forest', 'worldtree_meadow', 'baina_town', 'floating_leaf_town']));
+        if (codes.length === 7) assert.deepEqual(new Set(codes), new Set(['dark_forest', 'worldtree_meadow', 'gravelwind_shore', 'fallenstar_swamp', 'baina_town', 'world_tree', 'floating_leaf_town']));
+        else assert.deepEqual(new Set(codes), new Set(['gravelwind_shore', 'fallenstar_swamp']));
         for (const code of codes) maps.set(code, true);
         return [{ affectedRows: codes.length }];
       }
@@ -34,7 +35,7 @@ test('首次开放两张开局地图和两个安全终点，后续启动尊重�
   };
   const pool = { getConnection: async () => connection };
   await releaseOpeningRouteMaps(pool as any);
-  assert.deepEqual([...maps.values()], [true, true, true, true]);
+  assert.deepEqual([...maps.values()], [true, true, true, true, true, true, true]);
   maps.set('floating_leaf_town', false);
   await releaseOpeningRouteMaps(pool as any);
   assert.equal(maps.get('floating_leaf_town'), false);

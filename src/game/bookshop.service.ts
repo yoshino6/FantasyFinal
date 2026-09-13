@@ -33,7 +33,7 @@ export const bookshopSellCatalog = async (qqUserId: string, page = 1, keyword = 
   const where = "pi.character_id=? AND pi.quantity>0 AND i.is_tradeable=1 AND i.trade_price>0 AND i.item_category IN ('书籍','卷宗','技能书') AND i.name LIKE ?";
   const [countRows] = await pool.execute<(RowDataPacket & { total: number })[]>(`SELECT COUNT(*) AS total FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE ${where}`, [character.id, term]);
   const info = paging(page, Number(countRows[0]?.total ?? 0));
-  const [rows] = await pool.execute<SellRow[]>(`SELECT i.id,i.name,i.item_category,pi.quantity,CEIL(i.trade_price*1.20) AS price FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE ${where} ORDER BY i.item_category,i.name LIMIT ? OFFSET ?`, [character.id, term, PAGE_SIZE, (info.page - 1) * PAGE_SIZE]);
+  const [rows] = await pool.execute<SellRow[]>(`SELECT i.id,i.name,i.item_category,pi.quantity,CEIL(i.trade_price*1.20) AS price FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE ${where} ORDER BY i.item_category,i.name LIMIT ? OFFSET ?`, [character.id, term, String(PAGE_SIZE), String((info.page - 1) * PAGE_SIZE)]);
   return { ...info, keyword: keyword.trim(), copper: Number(character.copper_coins), items: rows.map(row => ({ id: Number(row.id), name: row.name, category: row.item_category, quantity: Number(row.quantity), price: Number(row.price) })) };
 };
 

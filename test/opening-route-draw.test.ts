@@ -6,7 +6,7 @@ import {chooseOpeningSpawn} from '../src/game/opening-state';
 import {openingRoutes} from '../src/game/opening-content';
 
 const all:OpeningRouteCandidate[]=openingRoutes.filter(route=>openingStartRouteCodes.has(route.code)).map(route=>({code:route.code,regionCode:route.region,tier:openingSpawnRegions[route.region as keyof typeof openingSpawnRegions].tier}));
-const legacy=[...all,{code:'A01',regionCode:'fallenstar_swamp',tier:3}];
+const ordinary=all.filter(candidate=>candidate.code!=='A01');
 const memory=()=>{
   let state={cycle_no:1,used_routes_json:'[]'},writes=0;
   return {get state(){return structuredClone(state);},get writes(){return writes;},
@@ -16,26 +16,26 @@ const memory=()=>{
       return[{affectedRows:1}];
     }}} as any;
 };
-test('四条开放路线按地图均分与图内均分，旧女神概率逻辑仍可用于旧档',()=>{
-  for(const pool of [all,all.filter(c=>c.regionCode!=='worldtree_meadow'),legacy]){
+test('七条开放路线按地图均分与图内均分，女神下界独立于普通路线池',()=>{
+  for(const pool of [all,ordinary,all.filter(c=>c.regionCode!=='worldtree_meadow')]){
     const weights=openingRouteWeights(pool),tiers=[...new Set(pool.map(c=>c.tier))],total=tiers.reduce((sum,t)=>sum+openingTierWeights[t],0);
     assert.ok(Math.abs(weights.reduce((sum,w)=>sum+w.weight,0)-1)<1e-12);
     for(const tier of tiers){const sum=weights.filter(w=>pool.find(c=>c.code===w.value)!.tier===tier).reduce((sum,w)=>sum+w.weight,0);assert.ok(Math.abs(sum-openingTierWeights[tier]/total)<1e-12);}
   }
   assert.equal(openingGoddessChance,1/120);
 });
-test('四条开放路线一轮不重样，抽尽才换轮',async()=>{
+test('六条普通开放路线一轮不重样，抽尽才换轮',async()=>{
   const db=memory(),results=[];
-  for(let i=0;i<4;i++)results.push(await drawOpeningRoute(db.connection,all,()=>.99));
-  assert.deepEqual(new Set(results),new Set(['F01','F02','F03','M01']));assert.equal(db.state.cycle_no,1);
+  for(let i=0;i<6;i++)results.push(await drawOpeningRoute(db.connection,all,()=>.99));
+  assert.deepEqual(new Set(results),new Set(['F01','F02','F03','M01','M02','S03']));assert.equal(db.state.cycle_no,1);
   await drawOpeningRoute(db.connection,all,()=>.99);assert.equal(db.state.cycle_no,2);assert.equal(JSON.parse(db.state.used_routes_json).length,1);
 });
 test('旧女神概率不随普通剩余池变化；候选池变化不清空已抽记录',async()=>{
   const db=memory();
-  const first=await drawOpeningRoute(db.connection,legacy,()=>.5);assert.notEqual(first,'A01');
+  const first=await drawOpeningRoute(db.connection,all,()=>.5);assert.notEqual(first,'A01');
   const before=db.state;
-  assert.equal(await drawOpeningRoute(db.connection,legacy,()=>0),'A01');assert.deepEqual(db.state,before);
-  const next=await drawOpeningRoute(db.connection,all,()=>.5);assert.notEqual(next,first);assert.equal(db.state.cycle_no,1);
+  assert.equal(await drawOpeningRoute(db.connection,all,()=>0),'A01');assert.deepEqual(db.state,before);
+  const next=await drawOpeningRoute(db.connection,ordinary,()=>.5);assert.notEqual(next,first);assert.equal(db.state.cycle_no,1);
 });
 
 test('完整降临流程使用不放回路线对应的地图，并保留合法坐标和安全终点',async()=>{
@@ -52,8 +52,8 @@ test('完整降临流程使用不放回路线对应的地图，并保留合法�
   const drawn=[];
   for(let i=0;i<4;i++){
     const spawn=await chooseOpeningSpawn(connection,()=>.99);drawn.push(spawn.route.code);
-    assert.equal(spawn.region.code,spawn.route.region);assert.ok(['floating_leaf_town','baina_town'].includes(spawn.route.destination));
+    assert.equal(spawn.region.code,spawn.route.region);assert.ok(['floating_leaf_town','baina_town','world_tree'].includes(spawn.route.destination));
     assert.ok(spawn.x>=spawn.region.min_x&&spawn.x<=spawn.region.min_x+9);assert.ok(spawn.y>=0&&spawn.y<=9);assert.equal(spawn.z,0);
   }
-  assert.deepEqual(new Set(drawn),new Set(['F01','F02','F03','M01']));
+  assert.equal(new Set(drawn).size,4);assert.ok(drawn.every(code=>['F01','F02','F03','M01','M02','S03'].includes(code)));
 });
