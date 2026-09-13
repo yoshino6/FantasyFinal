@@ -47,7 +47,7 @@ export const sellCatalog = async (qqUserId: string, page = 1, keyword = '') => {
   const [rows] = await pool.execute<SellRow[]>(`SELECT i.id,i.name,i.item_category,pi.quantity,
     CASE WHEN i.code IN ('meteor_iron','star_copper','moon_silver','sun_gold') THEN FLOOR(i.trade_price*.5) ELSE i.trade_price END AS sell_price
     FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id
-    WHERE ${sellable} ORDER BY i.item_type,i.name LIMIT ? OFFSET ?`, [character.id, term, PAGE_SIZE, (paging.page - 1) * PAGE_SIZE]);
+    WHERE ${sellable} ORDER BY i.item_type,i.name LIMIT ? OFFSET ?`, [character.id, term, String(PAGE_SIZE), String((paging.page - 1) * PAGE_SIZE)]);
   return { items: rows.map(row => ({ id: Number(row.id), name: row.name, category: row.item_category, quantity: Number(row.quantity), price: Number(row.sell_price) })), ...paging, keyword: keyword.trim(), copper: Number(character.copper_coins) };
 };
 

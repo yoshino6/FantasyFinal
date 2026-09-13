@@ -44,7 +44,7 @@ import { aesonNextSkill } from './aeson-combat';
 import { createCombatRules } from './combat-rule-adapter';
 import { maskRuleBattleLog, readRuleState, ruleManaCost, ruleStatusSummary, displayedRuleName, visibleResidentBuff, type CombatRules } from './combat-rule-registry';
 import { residentSkillByCode } from './resident-skill.config';
-import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
+import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { sortMapMarkers } from './map-marker.service';
 import { calculateDerivedStats, experienceRequiredForLevel, forgedEquipmentBase, realmEnergyDissipationText, realmLevelCap, virtualEquipmentStats, type VirtualEquipmentTier } from './constants';
@@ -2464,9 +2464,27 @@ export const forestGuideChoice = async (qqUserId: string, choice: 'join' | 'depa
   await connection.execute('INSERT INTO parties (id,leader_character_id) VALUES (?,?)', [partyId, character.id]);
   await connection.execute('INSERT INTO party_members (party_id,character_id) VALUES (?,?)', [partyId, character.id]); recordAchievement(connection,Number(character.id),['ACH_G01']);
   for (const companion of companions) {
-    await recalculateCharacterStats(connection, Number(companion.id));
-    await connection.execute('INSERT INTO party_members (party_id,character_id) VALUES (?,?)', [partyId, companion.id]); recordAchievement(connection,Number(character.id),['ACH_G01']);
-    await connection.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=?,pos_z=?,current_hp=hp_max,current_mp=mp_max,activity_status=\'active\' WHERE id=?', [character.current_region_id, character.pos_x, character.pos_y, character.pos_z, companion.id]);
+    // 模板 NPC 全服共用；每位玩家的剧情战斗需要独立的队伍成员。
+    const [created] = await connection.execute<ResultSetHeader>(`INSERT INTO characters
+      (npc_code,name,gender,level,experience,skill_points,constitution,spirit,strength,intelligence,agility,perception,
+       constitution_growth,spirit_growth,strength_growth,intelligence_growth,agility_growth,perception_growth,adventurer_registered,
+       hp_max,mp_max,current_hp,current_mp,physical_attack,magic_attack,physical_defense,magic_defense,accuracy,evasion,
+       crit_rate_bp,crit_damage_bp,crit_resist_bp,crit_damage_reduction_bp,tenacity,tenacity_pierce,speed,
+       element_mastery_json,element_resistance_json,stat_formula_version,current_region_id,pos_x,pos_y,pos_z)
+      SELECT CONCAT(c.npc_code,'_',?),c.name,c.gender,c.level,c.experience,c.skill_points,c.constitution,c.spirit,c.strength,c.intelligence,c.agility,c.perception,
+       c.constitution_growth,c.spirit_growth,c.strength_growth,c.intelligence_growth,c.agility_growth,c.perception_growth,c.adventurer_registered,
+       c.hp_max,c.mp_max,c.hp_max,c.mp_max,c.physical_attack,c.magic_attack,c.physical_defense,c.magic_defense,c.accuracy,c.evasion,
+       c.crit_rate_bp,c.crit_damage_bp,c.crit_resist_bp,c.crit_damage_reduction_bp,c.tenacity,c.tenacity_pierce,c.speed,
+       c.element_mastery_json,c.element_resistance_json,c.stat_formula_version,?,?,?,?
+      FROM characters c WHERE c.id=?`, [character.id, character.current_region_id, character.pos_x, character.pos_y, character.pos_z, companion.id]);
+    const npcId = Number(created.insertId);
+    await connection.execute(`INSERT INTO player_skills (character_id,skill_id,level,quick_slot,passive_linked)
+      SELECT ?,skill_id,level,quick_slot,passive_linked FROM player_skills WHERE character_id=?`, [npcId, companion.id]);
+    await connection.execute(`INSERT INTO player_quick_items (character_id,quick_slot,item_id)
+      SELECT ?,quick_slot,item_id FROM player_quick_items WHERE character_id=?`, [npcId, companion.id]);
+    await recalculateCharacterStats(connection, npcId);
+    await connection.execute('INSERT INTO party_members (party_id,character_id) VALUES (?,?)', [partyId, npcId]); recordAchievement(connection,Number(character.id),['ACH_G01']);
+    await connection.execute('UPDATE characters SET current_hp=hp_max,current_mp=mp_max,activity_status=\'active\' WHERE id=?', [npcId]);
   }
   const [templateRows] = await connection.execute<SpawnRow[]>('SELECT t.id AS template_id,t.code AS growth_template_code,t.name,t.monster_class,t.level,t.constitution,t.spirit,t.strength,t.intelligence,t.agility,t.perception,t.constitution_growth,t.spirit_growth,t.strength_growth,t.intelligence_growth,t.agility_growth,t.perception_growth,t.skill_sequence FROM monster_templates t WHERE t.code=\'forest_slime\' FOR UPDATE');
   const template = templateRows[0]; if (!template) throw new Error('森林史莱姆的数据尚未准备好。');
@@ -3867,7 +3885,7 @@ const combatActionInTransaction = async (connection: PoolConnection, qqUserId: s
   // 剧情队友仍存活时，即便主角倒下也要允许系统代为推进他们的回合。
   // 不再依赖特定怪物，避免剧情队伍意外卷入其他战斗后永久卡死。
   const [npcAllyRows] = await connection.execute<RowDataPacket[]>(`SELECT 1 FROM combat_members cm JOIN characters c ON c.id=cm.character_id
-    WHERE cm.session_id=? AND cm.is_defeated=0 AND c.npc_code IN ('npc_forest_warrior','npc_forest_mage','npc_forest_priest') LIMIT 1 FOR UPDATE`, [session.combat_id]);
+    WHERE cm.session_id=? AND cm.is_defeated=0 AND c.npc_code REGEXP '^npc_forest_(warrior|mage|priest)(_[0-9]+)?$' LIMIT 1 FOR UPDATE`, [session.combat_id]);
   const continuingNpcPartyBattle = Boolean(actor?.is_defeated) && Boolean(npcAllyRows[0]);
   if (!actor || (actor.is_defeated && !continuingNpcPartyBattle)) throw new Error('你已失去行动能力。');
   if (!continuingNpcPartyBattle && actor.pending_action) throw new Error('本回合行动已确认，请等待队友。');
@@ -3937,14 +3955,15 @@ const combatActionInTransaction = async (connection: PoolConnection, qqUserId: s
     await connection.execute('UPDATE combat_members SET pending_action=? WHERE session_id=? AND character_id=?', [JSON.stringify(pending), session.combat_id, character.id]); actor.pending_action = JSON.stringify(pending);
   }
   await connection.execute("UPDATE combat_sessions SET last_action_at=NOW() WHERE id=? AND state='active'", [session.combat_id]);
-  const [npcRows] = await connection.execute<(RowDataPacket & { character_id: number; npc_code: string })[]>(`SELECT cm.character_id,c.npc_code FROM combat_members cm JOIN characters c ON c.id=cm.character_id WHERE cm.session_id=? AND cm.is_defeated=0 AND cm.pending_action IS NULL AND c.npc_code IN ('npc_forest_warrior','npc_forest_mage','npc_forest_priest') FOR UPDATE`, [session.combat_id]);
+  const [npcRows] = await connection.execute<(RowDataPacket & { character_id: number; npc_code: string })[]>(`SELECT cm.character_id,c.npc_code FROM combat_members cm JOIN characters c ON c.id=cm.character_id WHERE cm.session_id=? AND cm.is_defeated=0 AND cm.pending_action IS NULL AND c.npc_code REGEXP '^npc_forest_(warrior|mage|priest)(_[0-9]+)?$' FOR UPDATE`, [session.combat_id]);
   for (const npc of npcRows) {
     const turn = Number(session.turn_no);
-    const slot = npc.npc_code === 'npc_forest_warrior' ? (turn % 3 === 1 ? 1 : turn % 3 === 2 ? 2 : 3)
-      : npc.npc_code === 'npc_forest_mage' ? (turn % 2 === 1 ? 1 : 2)
+    const npcRole = npc.npc_code.replace(/_[0-9]+$/, '');
+    const slot = npcRole === 'npc_forest_warrior' ? (turn % 3 === 1 ? 1 : turn % 3 === 2 ? 2 : 3)
+      : npcRole === 'npc_forest_mage' ? (turn % 2 === 1 ? 1 : 2)
         : (turn % 4 === 1 ? 2 : turn % 4 === 2 ? 1 : turn % 4 === 3 ? 4 : 3);
-    const code = npc.npc_code === 'npc_forest_warrior' ? ['warrior_taunt', 'shield_counter', 'guard_break'][slot - 1]
-      : npc.npc_code === 'npc_forest_mage' ? ['arcane_shackle', 'ember_burst'][slot - 1]
+    const code = npcRole === 'npc_forest_warrior' ? ['warrior_taunt', 'shield_counter', 'guard_break'][slot - 1]
+      : npcRole === 'npc_forest_mage' ? ['arcane_shackle', 'ember_burst'][slot - 1]
         : ['healing_prayer', 'blessing_aegis', 'sanctified_bolt', 'mana_benediction'][slot - 1];
     const npcMember = members.find(item => Number(item.id) === Number(npc.character_id));
     const [skillRows] = await connection.execute<(RowDataPacket & { mana_cost: number })[]>('SELECT s.mana_cost FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND ps.quick_slot=?', [npc.character_id, slot]);

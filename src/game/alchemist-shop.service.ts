@@ -36,7 +36,7 @@ export const alchemistSellCatalog = async (qqUserId: string, page = 1, keyword =
   const paging = pageInfo(page, Number(counts[0]?.total ?? 0));
   const [rows] = await pool.execute<SellRow[]>(`SELECT i.id,i.name,i.item_category,pi.quantity,CEIL(i.trade_price*1.15) AS sell_price
     FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE ${alchemistSellable}
-    ORDER BY i.item_category,i.name LIMIT ? OFFSET ?`, [character.id, term, PAGE_SIZE, (paging.page - 1) * PAGE_SIZE]);
+    ORDER BY i.item_category,i.name LIMIT ? OFFSET ?`, [character.id, term, String(PAGE_SIZE), String((paging.page - 1) * PAGE_SIZE)]);
   return { items: rows.map(row => ({ id: Number(row.id), name: row.name, category: row.item_category, quantity: Number(row.quantity), price: Number(row.sell_price) })), ...paging, keyword: keyword.trim(), copper: Number(character.copper_coins) };
 };
 

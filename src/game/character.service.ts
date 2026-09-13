@@ -75,7 +75,7 @@ const withEquipmentStats = async (connection: Pool | PoolConnection, characterId
 
 const virtualNpcTier = (npcCode: string | null): VirtualEquipmentTier | null => {
   if (!npcCode) return null;
-  if (['npc_forest_warrior', 'npc_forest_mage', 'npc_forest_priest'].includes(npcCode)) return 'elite';
+  if (/^npc_forest_(warrior|mage|priest)(?:_[0-9]+)?$/.test(npcCode)) return 'elite';
   return 'large';
 };
 export const withVirtualNpcEquipment = (stats: DerivedStats, level: number, npcCode: string | null): DerivedStats => {
