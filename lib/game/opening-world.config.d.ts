@@ -48,6 +48,12 @@ export declare const openingSpawnRegions: {
     readonly worldtree_meadow: {
         readonly tier: 1;
     };
+    readonly gravelwind_shore: {
+        readonly tier: 1;
+    };
+    readonly fallenstar_swamp: {
+        readonly tier: 3;
+    };
 };
 export declare const openingStartRouteCodes: ReadonlySet<string>;
 export declare const openingTierWeights: readonly [10, 55, 25, 10];

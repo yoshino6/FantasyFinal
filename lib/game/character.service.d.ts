@@ -49,6 +49,10 @@ export declare const beginRegistration: (qqUserId: string, nickname?: string) =>
 export declare const continueRegistration: (qqUserId: string, expectedStage?: string) => Promise<"completed" | RegistrationStage>;
 export declare const askWhereAmI: (qqUserId: string) => Promise<"choice" | "completed" | "destination" | "story" | "question" | "heaven" | "danger">;
 export declare const chooseDestination: (qqUserId: string, destination: "\u5929\u5802" | "\u5F02\u4E16\u754C") => Promise<"choice" | "completed" | "story" | "audience" | "question" | "heaven" | "danger">;
+export declare const completeHeavenRebirth: (qqUserId: string) => Promise<{
+    replayed: boolean;
+    achievementName: string;
+}>;
 export declare const chooseGift: (qqUserId: string, giftCode: string, nickname?: string) => Promise<CharacterView | null>;
 export declare const getCharacter: (qqUserId: string) => Promise<CharacterView | null>;
 export declare const changeCharacterName: (qqUserId: string, input: string) => Promise<{

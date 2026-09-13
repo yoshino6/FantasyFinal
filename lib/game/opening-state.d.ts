@@ -12,6 +12,10 @@ export declare const availableOpeningSpawns: (connection: OpeningConnection) => 
             readonly tier: 1;
         } | {
             readonly tier: 1;
+        } | {
+            readonly tier: 1;
+        } | {
+            readonly tier: 3;
         };
         routes: import("./opening.types").OpeningRoute[];
         point: {

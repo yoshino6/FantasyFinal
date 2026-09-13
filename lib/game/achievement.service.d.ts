@@ -3,6 +3,38 @@ import { type AchievementBoxKey } from './achievement-rewards.config';
 import { type AchievementEvent } from './achievement-events';
 export declare const achievementStatBonus: (db: Pool | PoolConnection, characterId: number) => Promise<Record<string, number>>;
 export declare const flushAchievements: (connection: PoolConnection, events: AchievementEvent[]) => Promise<number[]>;
+export declare const unlockAccountAchievement: (connection: PoolConnection, identity: string, name: string, achievementId: string, eventKey: string) => Promise<{
+    definition: {
+        id: string;
+        name: string;
+        description: string;
+        rarity: string;
+        attribute: string;
+        condition: string;
+        scope: string;
+        dependency: string;
+        category: string;
+    };
+    unlocked: boolean;
+    reward?: undefined;
+} | {
+    definition: {
+        id: string;
+        name: string;
+        description: string;
+        rarity: string;
+        attribute: string;
+        condition: string;
+        scope: string;
+        dependency: string;
+        category: string;
+    };
+    unlocked: boolean;
+    reward: {
+        key: AchievementBoxKey;
+        quantity: number;
+    };
+}>;
 export type AchievementEntry = {
     id: string;
     name: string;
