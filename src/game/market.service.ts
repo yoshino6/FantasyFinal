@@ -165,7 +165,7 @@ export const marketCatalog = async (qqUserId: string, page = 1, type = '全部',
   const paging = pageInfo(page, number(countRows[0]?.total));
   const [rows] = await pool.execute<(ItemRow & { reference_price: number | null; lowest_sell: number | null; highest_buy: number | null })[]>(`SELECT i.id,i.name,i.item_category,i.description,i.trade_price,i.stack_limit,
     COALESCE(ms.reference_price,JSON_EXTRACT(i.effect_json,'$.referencePrice'),GREATEST(1,ROUND(i.trade_price*2))) AS reference_price,sell.lowest_sell,buy.highest_buy ${from}
-    ORDER BY COALESCE(sell.lowest_sell,999999999),i.name LIMIT ? OFFSET ?`, [...filter.params, term, MARKET_PAGE_SIZE, (paging.page - 1) * MARKET_PAGE_SIZE]);
+    ORDER BY COALESCE(sell.lowest_sell,999999999),i.name LIMIT ? OFFSET ?`, [...filter.params, term, String(MARKET_PAGE_SIZE), String((paging.page - 1) * MARKET_PAGE_SIZE)]);
   return { ...paging, type: MARKET_TYPES.includes(type as MarketType) ? type : '全部', keyword: keyword.trim(), copper: number(character.copper_coins), items: rows.map(row => ({ id: number(row.id), name: row.name, category: row.item_category, reference: number(row.reference_price), lowestSell: row.lowest_sell === null ? null : number(row.lowest_sell), highestBuy: row.highest_buy === null ? null : number(row.highest_buy) })) };
 };
 
@@ -175,7 +175,7 @@ export const marketSellable = async (qqUserId: string, page = 1, keyword = '') =
   const [countRows] = await pool.execute<(RowDataPacket & { total: number })[]>(`SELECT COUNT(*) AS total FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE ${where}`, [character.id, term]);
   const paging = pageInfo(page, number(countRows[0]?.total));
   const [rows] = await pool.execute<(ItemRow & { quantity: number; reference_price: number | null })[]>(`SELECT i.id,i.name,i.item_category,i.description,i.trade_price,i.stack_limit,(pi.quantity-pi.trade_bound_quantity-pi.personal_bound_quantity) AS quantity,ms.reference_price
-    FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id LEFT JOIN market_item_state ms ON ms.item_id=i.id WHERE ${where} ORDER BY i.item_category,i.name LIMIT ? OFFSET ?`, [character.id, term, MARKET_PAGE_SIZE, (paging.page - 1) * MARKET_PAGE_SIZE]);
+    FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id LEFT JOIN market_item_state ms ON ms.item_id=i.id WHERE ${where} ORDER BY i.item_category,i.name LIMIT ? OFFSET ?`, [character.id, term, String(MARKET_PAGE_SIZE), String((paging.page - 1) * MARKET_PAGE_SIZE)]);
   return { ...paging, keyword: keyword.trim(), items: rows.map(row => ({ id: number(row.id), name: row.name, category: row.item_category, quantity: number(row.quantity), reference: number(row.reference_price) || Math.max(1, Math.round(number(row.trade_price) * 2)) })) };
 };
 

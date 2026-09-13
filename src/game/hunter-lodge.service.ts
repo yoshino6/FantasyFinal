@@ -48,7 +48,7 @@ export const hunterCatalog = async (qqUserId: string, page = 1, keyword = '') =>
     LEFT JOIN hunter_lodge_daily_specials ds ON ds.special_date=CURDATE() AND ds.item_id=i.id
     LEFT JOIN guild_shop_items gs ON gs.item_id=i.id
     LEFT JOIN player_inventory pi ON pi.item_id=i.id AND pi.character_id=?
-    WHERE hs.is_active=1 AND i.name LIKE ? ORDER BY (ds.item_id IS NOT NULL) DESC,i.id LIMIT ? OFFSET ?`, [character.id, term, PAGE_SIZE, (paging.page - 1) * PAGE_SIZE]);
+    WHERE hs.is_active=1 AND i.name LIKE ? ORDER BY (ds.item_id IS NOT NULL) DESC,i.id LIMIT ? OFFSET ?`, [character.id, term, String(PAGE_SIZE), String((paging.page - 1) * PAGE_SIZE)]);
   return { items: rows.map(row => ({ id: Number(row.id), codexId: row.codex_id, name: row.name, category: row.item_category, description: row.description, price: Number(row.buy_price), stockQuantity: Number(row.stock_quantity), specialPrice: row.special_price === null ? null : Number(row.special_price), ownedQuantity: Number(row.owned_quantity) })), ...paging, keyword: keyword.trim(), copper: Number(character.copper_coins), special };
 };
 

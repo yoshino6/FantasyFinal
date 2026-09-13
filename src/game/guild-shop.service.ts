@@ -33,7 +33,7 @@ export const shopCatalog = async (qqUserId: string, page = 1, keyword = '') => {
   const [rows] = await pool.execute<(ShopRow & {item_type:string;trade_price:number;rarity:string})[]>(`SELECT i.id,i.codex_id,i.name,i.item_type,i.trade_price,i.rarity,i.item_category,i.description,si.buy_price,si.stock_quantity,COALESCE(pi.quantity,0) AS owned_quantity
     FROM guild_shop_items si JOIN item_definitions i ON i.id=si.item_id
     LEFT JOIN player_inventory pi ON pi.item_id=i.id AND pi.character_id=?
-    WHERE si.is_active=1 AND si.buy_price>0 AND i.name LIKE ? ORDER BY si.item_id LIMIT ? OFFSET ?`, [character.id, term, PAGE_SIZE, (paging.page - 1) * PAGE_SIZE]);
+    WHERE si.is_active=1 AND si.buy_price>0 AND i.name LIKE ? ORDER BY si.item_id LIMIT ? OFFSET ?`, [character.id, term, String(PAGE_SIZE), String((paging.page - 1) * PAGE_SIZE)]);
   const items=await Promise.all(rows.map(async row=>{const quote=await openingShopQuote(pool,Number(character.id),row,1);return {id:Number(row.id),codexId:row.codex_id,name:row.name,category:row.item_category,description:row.description,price:quote.price,basePrice:quote.base,stockQuantity:Number(row.stock_quantity),ownedQuantity:Number(row.owned_quantity)};}));
   return { items, ...paging, keyword: keyword.trim(), copper: Number(character.copper_coins) };
 };

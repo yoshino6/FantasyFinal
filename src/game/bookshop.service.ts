@@ -24,7 +24,7 @@ export const bookshopCatalog = async (qqUserId: string, page = 1, keyword = '') 
   const info = paging(page, Number(countRows[0]?.total ?? 0));
   const [rows] = await pool.execute<ShopRow[]>(`SELECT i.id,i.codex_id,i.name,i.item_category,i.description,bs.buy_price,bs.stock_quantity,COALESCE(pi.quantity,0) AS owned_quantity
     FROM bookshop_items bs JOIN item_definitions i ON i.id=bs.item_id LEFT JOIN player_inventory pi ON pi.character_id=? AND pi.item_id=i.id
-    WHERE bs.is_active=1 AND i.name LIKE ? ORDER BY i.id LIMIT ? OFFSET ?`, [character.id, term, PAGE_SIZE, (info.page - 1) * PAGE_SIZE]);
+    WHERE bs.is_active=1 AND i.name LIKE ? ORDER BY i.id LIMIT ? OFFSET ?`, [character.id, term, String(PAGE_SIZE), String((info.page - 1) * PAGE_SIZE)]);
   return { ...info, keyword: keyword.trim(), copper: Number(character.copper_coins), items: rows.map(row => ({ id: Number(row.id), codexId: row.codex_id, name: row.name, category: row.item_category, description: row.description, price: Number(row.buy_price), stockQuantity: Number(row.stock_quantity), ownedQuantity: Number(row.owned_quantity) })) };
 };
 

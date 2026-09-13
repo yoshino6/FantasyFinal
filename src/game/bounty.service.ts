@@ -117,7 +117,7 @@ export const bountyBoard = async (qqUserId: string, _requestedPage = 1, keyword 
   const [rows] = await pool.execute<BountyRow[]>(`SELECT b.id,bs.slot_no AS board_no,b.title,t.name AS target_name,b.required_count,b.copper_reward,b.source_spawn_id,r.name AS region_name,s.pos_x,s.pos_y,s.pos_z,pb.progress,pb.status
     FROM bounty_board_slots bs JOIN bounty_notices b ON b.id=bs.bounty_id JOIN monster_templates t ON t.id=b.target_template_id
     JOIN monster_spawns s ON s.id=b.source_spawn_id LEFT JOIN map_regions r ON r.id=s.region_id LEFT JOIN player_bounties pb ON pb.bounty_id=b.id AND pb.character_id=?
-    WHERE ${boardCandidate}${searchSql} ORDER BY bs.slot_no LIMIT ?`, [character.id, ...(search ? [search, search] : []), pageSize]);
+    WHERE ${boardCandidate}${searchSql} ORDER BY bs.slot_no LIMIT ?`, [character.id, ...(search ? [search, search] : []), String(pageSize)]);
   const [activeRows] = await pool.execute<(RowDataPacket & { total: number })[]>(`SELECT COUNT(*) AS total FROM player_bounties pb
     JOIN bounty_notices b ON b.id=pb.bounty_id LEFT JOIN monster_spawns s ON s.id=b.source_spawn_id
     WHERE pb.character_id=? AND ${occupiedBountySlot}`, [character.id]);

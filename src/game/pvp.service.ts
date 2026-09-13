@@ -144,7 +144,7 @@ export const pvpBattleHistory = async (qqUserId: string, page = 1, filter: 'å…¨é
   if (keyword.trim()) values.push(`%${keyword.trim()}%`, `%${keyword.trim()}%`, `%${keyword.trim()}%`, `%${keyword.trim()}%`);
   const [countRows] = await pool.execute<(RowDataPacket & { total: number })[]>(`SELECT COUNT(*) AS total FROM player_pvp_battle_logs WHERE ${where}${search}`, values);
   const total = Number(countRows[0]?.total ?? 0); const totalPages = Math.max(1, Math.ceil(total / 5)); const currentPage = Math.min(Math.max(1, page), totalPages);
-  const [rows] = await pool.execute<PvpBattleLog[]>(`SELECT * FROM player_pvp_battle_logs WHERE ${where}${search} ORDER BY started_at DESC,id DESC LIMIT 5 OFFSET ?`, [...values, (currentPage - 1) * 5]);
+  const [rows] = await pool.execute<PvpBattleLog[]>(`SELECT * FROM player_pvp_battle_logs WHERE ${where}${search} ORDER BY started_at DESC,id DESC LIMIT 5 OFFSET ?`, [...values, String((currentPage - 1) * 5)]);
   return { page: currentPage, totalPages, total, entries: rows.map(row => ({
     attacker: row.attacker_name, defender: row.defender_name, type: row.battle_type, outcome: row.outcome, winner: row.winner_name, loot: row.loot_text, startedAt: row.started_at, endedAt: row.ended_at
   })), filter, keyword: keyword.trim() };
