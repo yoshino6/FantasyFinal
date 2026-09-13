@@ -43,7 +43,7 @@ export const blacksmithShopCatalog = async (qqUserId: string, page = 1, category
     LEFT JOIN player_item_instances ii ON ii.item_id=i.id AND ii.character_id=?
     WHERE si.is_active=1 AND i.name LIKE ?${categoryFilter.filter}
     GROUP BY i.id,i.codex_id,i.name,i.item_category,i.weapon_type,i.required_level,i.description,si.buy_price,si.stock_quantity
-    ORDER BY i.required_level,i.item_category,i.id LIMIT ? OFFSET ?`, [character.id, ...values, PAGE_SIZE, (paging.page - 1) * PAGE_SIZE]);
+    ORDER BY i.required_level,i.item_category,i.id LIMIT ? OFFSET ?`, [character.id, ...values, String(PAGE_SIZE), String((paging.page - 1) * PAGE_SIZE)]);
   return { items: rows.map(row => ({ id: Number(row.id), codexId: row.codex_id, name: row.name, category: row.item_category, weaponType: row.weapon_type, level: Number(row.required_level), description: row.description, price: Number(row.buy_price), stockQuantity: Number(row.stock_quantity), ownedQuantity: Number(row.owned_quantity) })), ...paging, category: categoryFilter.selected, keyword: keyword.trim(), copper: Number(character.copper_coins) };
 };
 
@@ -63,7 +63,7 @@ export const blacksmithSellCatalog = async (qqUserId: string, page = 1, keyword 
   const source = `(${equipmentSql} UNION ALL ${materialSql}) AS sale_items`;
   const [countRows] = await pool.execute<(RowDataPacket & { total: number })[]>(`SELECT COUNT(*) AS total FROM ${source}`, [character.id, term, character.id, term]);
   const paging = pageInfo(page, Number(countRows[0]?.total ?? 0));
-  const [rows] = await pool.execute<SaleRow[]>(`SELECT * FROM ${source} ORDER BY acquired_at DESC,sale_id DESC LIMIT ? OFFSET ?`, [character.id, term, character.id, term, PAGE_SIZE, (paging.page - 1) * PAGE_SIZE]);
+  const [rows] = await pool.execute<SaleRow[]>(`SELECT * FROM ${source} ORDER BY acquired_at DESC,sale_id DESC LIMIT ? OFFSET ?`, [character.id, term, character.id, term, String(PAGE_SIZE), String((paging.page - 1) * PAGE_SIZE)]);
   return { items: rows.map(row => ({ kind: row.sale_kind, id: Number(row.sale_id), name: row.name, category: row.item_category, level: Number(row.required_level), quality: row.quality === null ? null : Number(row.quality), quantity: Number(row.quantity), price: Number(row.sell_price) })), ...paging, keyword: keyword.trim(), copper: Number(character.copper_coins) };
 };
 

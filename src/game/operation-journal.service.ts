@@ -49,7 +49,7 @@ export const webOperationJournal = async (page = 1, keyword = '') => {
   const [rows] = await pool.execute<(RowDataPacket & { id: string; correlation_id: string; actor_ref: string; action_type: string; status: string; risk_level: string; reason: string; created_at: Date; target_kind: string | null; target_id: string | null })[]>(
     `SELECT j.id,j.correlation_id,j.actor_ref,j.action_type,j.status,j.risk_level,j.reason,j.created_at,t.target_kind,t.target_id
      FROM operation_journals j LEFT JOIN operation_targets t ON t.operation_id=j.id ${where}
-     ORDER BY j.created_at DESC,j.id DESC LIMIT 30 OFFSET ?`, [...values, (safePage - 1) * 30]
+     ORDER BY j.created_at DESC,j.id DESC LIMIT 30 OFFSET ?`, [...values, String((safePage - 1) * 30)]
   );
   return { page: safePage, total, totalPages, entries: rows.map(row => ({ id: row.id, correlationId: row.correlation_id, actor: row.actor_ref, action: row.action_type, status: row.status, risk: row.risk_level, reason: row.reason, createdAt: row.created_at, target: row.target_kind ? { kind: row.target_kind, id: row.target_id } : null })) };
 };

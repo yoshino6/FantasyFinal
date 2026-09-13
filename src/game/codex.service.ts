@@ -46,7 +46,7 @@ export const codexList = async (qqUserId: string, kind: CodexKind, category = 'å
   if (keyword.trim()) { conditions.push(`${config.name} LIKE ?`); params.push(`%${keyword.trim()}%`); }
   const where = conditions.join(' AND '); const [countRows] = await pool.execute<(RowDataPacket & { total: number })[]>(`SELECT COUNT(*) AS total ${config.from} WHERE ${where}`, params);
   const total = Number(countRows[0]?.total ?? 0); const pageSize = 5; const totalPages = Math.max(1, Math.ceil(total / pageSize)); const currentPage = Math.min(Math.max(1, Math.floor(page)), totalPages);
-  const [rows] = await pool.execute<(RowDataPacket & CodexEntry)[]>(`SELECT ${config.id} AS id,${config.name} AS name,${expression} AS category,${config.detail} AS detailId ${config.from} WHERE ${where} ORDER BY ${config.id} LIMIT ? OFFSET ?`, [...params, pageSize, (currentPage - 1) * pageSize]);
+  const [rows] = await pool.execute<(RowDataPacket & CodexEntry)[]>(`SELECT ${config.id} AS id,${config.name} AS name,${expression} AS category,${config.detail} AS detailId ${config.from} WHERE ${where} ORDER BY ${config.id} LIMIT ? OFFSET ?`, [...params, String(pageSize), String((currentPage - 1) * pageSize)]);
   return { kind, category: categoryName, keyword: keyword.trim(), entries: rows.map(row => ({ id: Number(row.id), name: row.name, category: row.category, detailId: String(row.detailId) })), page: currentPage, totalPages };
 };
 

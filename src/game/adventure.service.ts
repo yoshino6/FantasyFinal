@@ -1108,7 +1108,7 @@ export const spawnMonsters = async ({ refreshBosses = true, trimExcess = true, r
       const [excessRows] = await pool.execute<(RowDataPacket & { id: number })[]>(`SELECT s.id FROM monster_spawns s JOIN monster_templates t ON t.id=s.template_id
         WHERE s.region_id=? AND s.defeated_at IS NULL AND t.monster_class<>'boss'
           AND NOT EXISTS (SELECT 1 FROM combat_targets ct JOIN combat_sessions cs ON cs.id=ct.session_id WHERE ct.spawn_id=s.id AND cs.state='active')
-        ORDER BY s.spawned_at ASC LIMIT ?`, [region.id, activeCount - spawnLimit]);
+        ORDER BY s.spawned_at ASC LIMIT ?`, [region.id, String(activeCount - spawnLimit)]);
       if (excessRows.length) {
         const ids = excessRows.map(row => Number(row.id));
         await pool.execute(`UPDATE monster_spawns SET current_hp=0,defeated_at=NOW() WHERE id IN (${ids.map(() => '?').join(',')})`, ids);
@@ -1149,7 +1149,7 @@ export const spawnMonsters = async ({ refreshBosses = true, trimExcess = true, r
       const [excessRows] = await pool.execute<(RowDataPacket & { id: number })[]>(`SELECT rs.id FROM resource_spawns rs
         WHERE rs.region_id=? AND rs.item_id=? AND rs.mined_at IS NULL
           AND NOT EXISTS (SELECT 1 FROM player_resource_mining prm WHERE prm.resource_id=rs.id)
-        ORDER BY rs.spawned_at ASC LIMIT ?`, [resource.region_id, resource.item_id, activeCount - target]);
+        ORDER BY rs.spawned_at ASC LIMIT ?`, [resource.region_id, resource.item_id, String(activeCount - target)]);
       if (excessRows.length) {
         const ids = excessRows.map(row => Number(row.id));
         await pool.execute(`UPDATE resource_spawns SET mined_at=NOW() WHERE id IN (${ids.map(() => '?').join(',')})`, ids);
