@@ -2,11 +2,15 @@ import { Format, logger, useEvent, useMessage } from 'alemonjs';
 import { portraitScope, reservePortraitUpload } from '../game/automaton-portrait.service';
 import { acceptPortraitImage } from '../game/automaton-portrait-upload';
 import { escapeAutomatonText } from '../game/automaton-dialogue';
+import { activeHeartQuestion } from '../game/heart-question.service';
+import { heartQuestionFormat } from '../response/heart-question';
 
 export default async(_event:unknown,next:()=>Promise<void>)=>{
   const [event]=useEvent(),current=event.current;
   const media='MessageMedia' in current?current.MessageMedia:undefined;
   if(!current.UserId||!media?.length||current.IsBot){await next();return;}
+  const pendingHeart=await activeHeartQuestion(current.UserId);
+  if(pendingHeart){const[message]=useMessage();await message.send({format:heartQuestionFormat(pendingHeart)});return;}
   const [message]=useMessage();let handled=false,passed=false,submitted=false;
   try{
     const upload=await reservePortraitUpload(current.UserId,portraitScope(current));

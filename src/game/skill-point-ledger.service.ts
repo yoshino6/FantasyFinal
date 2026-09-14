@@ -60,6 +60,8 @@ export const skillAllocationPlan = async (connection: PoolConnection, characterI
   if (!characters[0]) throw new Error('角色不存在。');
   const [skills] = await connection.execute<RowDataPacket[]>('SELECT ps.*,s.name,s.code,s.category,s.learn_cost FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? ORDER BY ps.skill_id FOR UPDATE', [characterId]);
   const [history] = await connection.execute<RowDataPacket[]>('SELECT * FROM player_skill_point_ledger WHERE character_id=? ORDER BY id FOR UPDATE', [characterId]);
+  const [libraryGrants] = await connection.execute<RowDataPacket[]>('SELECT skill_id FROM player_library_free_skills WHERE character_id=? FOR UPDATE', [characterId]);
+  const freeSkillIds = new Set(libraryGrants.map(row => Number(row.skill_id)));
   const entries=history.filter(row=>Number(row.amount)<0&&!row.refund_token);
   // 仅有管理员补录的旧可用余额，不代表存在历史收支明细。
   const mode=history.some(row=>row.change_kind!=='legacy_opening_balance')?'ledger' as const:'level' as const;
@@ -72,7 +74,7 @@ export const skillAllocationPlan = async (connection: PoolConnection, characterI
   const [professionGifts]=await connection.execute<RowDataPacket[]>(`SELECT s.id FROM characters c JOIN profession_definitions p ON p.code=c.profession_code JOIN skill_definitions s ON JSON_CONTAINS(p.skill_codes_json,JSON_QUOTE(s.code)) WHERE c.id=?`,[characterId]);
   for (const skill of skills) {
     const rows = entries.filter(row => Number(row.skill_id) === Number(skill.skill_id));
-    const paidLearning=rows.some(row=>row.change_kind==='learn_skill')||(Number(skill.learn_cost)>0&&Number(skill.learn_cost)<99);
+    const paidLearning=!freeSkillIds.has(Number(skill.skill_id))&&(rows.some(row=>row.change_kind==='learn_skill')||(Number(skill.learn_cost)>0&&Number(skill.learn_cost)<99));
     const remove=paidLearning&&skill.category!=='bound'&&!professionGifts.some(gift=>Number(gift.id)===Number(skill.skill_id));
     // 遗忘与退款分开：旧升级明细不齐也撤销付费学习，但只退已记录的投入。
     if(remove){

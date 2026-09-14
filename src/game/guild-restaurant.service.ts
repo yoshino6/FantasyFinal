@@ -1,4 +1,6 @@
 import { recordAchievement } from './achievement-events';
+import { randomUUID } from 'node:crypto';
+import { recordCharacterOperation } from './character-operation.service';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { recalculateCharacterStats } from './character.service';
@@ -86,5 +88,6 @@ export const enjoyRestaurantMeal = async (qqUserId: string, itemId: number) => w
   await connection.execute('UPDATE characters SET copper_coins=copper_coins-? WHERE id=?', [meal.processing_fee, character.id]);
   await recalculateCharacterStats(connection, character.id);
   recordAchievement(connection,Number(character.id),[{metric:'ACH_E22',distinct:String(meal.id)},{metric:'ACH_K19',distinct:String(meal.id)}]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'restaurant.meal_enjoyed',source:{system:'guild_restaurant_meal',id:randomUUID(),step:'settled'},outcome:'用餐',summary:`在公会餐厅享用${meal.name}`,detail:{itemId:Number(meal.id),mealName:meal.name,processingFee:Number(meal.processing_fee),ingredients:ingredients.map(item=>({code:item.code,quantity:item.quantity})),replaced:previous?.name??null}});
   return { name: meal.name, processingFee: Number(meal.processing_fee), ingredients, buff: Object.fromEntries(Object.entries(appliedBuff).filter(([key])=>!key.startsWith('__talent'))), durationMinutes: durationSeconds/60, replaced: previous?.name ?? null };
 });

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { CombatRules, emptyRuleState, ruleManaCost, maskRuleBattleLog, type RuleUnit } from '../src/game/combat-rule-registry';
-import { finishNpcSparring, sparBusinessDate } from '../src/game/npc-sparring.service';
+import { finishNpcSparring, sparBusinessDate, sparInsightChance } from '../src/game/npc-sparring.service';
 import { initializeResidentSkills } from '../src/database/resident-skills';
 import { residentSkills, residentSkillByCode } from '../src/game/resident-skill.config';
 import { buildNpcSparProfile, carriedSparSkills, sparRegionBands } from '../src/game/npc-sparring.config';
@@ -33,6 +33,41 @@ for (const skill of residentSkills.filter(s => s.category !== 'passive')) test(`
   await cast(f, skill.id, ['ally', 'allies', 'self'].includes(skill.scope) ? f.friend : f.target);
   for (const u of f.rules.units) { assert.ok(Number.isFinite(u.hp) && u.hp >= 0 && u.hp <= u.hpMax); assert.ok(Number.isFinite(u.mp) && u.mp >= 0 && u.mp <= u.mpMax); assert.ok(u.state.statuses.every(s => Number.isFinite(s.value))); }
   assert.ok(f.rules.log.some(line => line.includes(skill.name)));
+  assert.ok(f.rules.log.length > 1, `${skill.id} 不能只留下技能名称`);
+});
+
+for (const skill of residentSkills.filter(s => ['physical', 'magic'].includes(s.category))) test(`offensive executor ${skill.id} deals damage`, async () => {
+  const f = fixture();
+  await cast(f, skill.id);
+  assert.ok(f.target.hp < 6000 || f.other.hp < 6000, `${skill.name} 未造成伤害`);
+});
+
+test('补位口令解除软控并明确显示速度收益', async () => {
+  const f = fixture();
+  f.rules.add(f.friend, 'slow', 20, 3, f.target, true);
+  f.rules.add(f.friend, 'blind', 1, 3, f.target, true);
+  await cast(f, 'H04', f.friend);
+  assert.equal(f.rules.status(f.friend, 'slow'), undefined);
+  assert.equal(f.rules.status(f.friend, 'blind'), undefined);
+  assert.equal(f.rules.status(f.friend, 'speed')?.value, 18);
+  assert.match(f.rules.log.join('\n'), /member:2.*疾行.*18%.*2 回合/);
+});
+
+test('共鸣节拍显示增幅并在直接治疗和护盾时分别消耗', async () => {
+  const f = fixture();
+  const enemyHp = f.target.hp;
+  await cast(f, 'H05');
+  assert.equal(f.target.hp, enemyHp);
+  assert.equal(f.rules.status(f.source, 'beat')?.value, 20);
+  assert.equal(f.rules.status(f.friend, 'beat')?.value, 20);
+  assert.match(f.rules.log.join('\n'), /共鸣节拍.*下一次直接治疗或护盾 \+20%.*3 回合/);
+  const beforeHp = f.friend.hp;
+  await cast(f, 'K02', f.friend);
+  assert.equal(f.friend.hp - beforeHp, 1800);
+  assert.equal(f.rules.status(f.source, 'beat'), undefined);
+  await f.rules.cast(f.friend, f.friend, residentSkillByCode('F03')!, 0);
+  assert.ok(Math.abs(f.rules.shieldValue(f.friend) - 1680) < 1e-6);
+  assert.equal(f.rules.status(f.friend, 'beat'), undefined);
 });
 
 test('MP pricing uses overload, discounts, pain focus and caps consistently', () => {
@@ -106,6 +141,23 @@ test('insight pool is exactly this encounter loadout, never the role library or 
   assert.deepEqual(carriedSparSkills(snapshot), ['resident_a03', 'resident_d02']);
 });
 
+test('单人切磋携带共鸣节拍时必定紧接可触发的治疗或护盾技', () => {
+  let paired = 0;
+  for (let index = 0; index < 200; index++) {
+    const guard = buildNpcSparProfile({ code: `beat_guard_${index}`, name: '守卫', description: '', region_code: 'thundercliff' }, 45, 0);
+    const beat = guard.rotation.indexOf('resident_h05');
+    if (beat >= 0) {
+      paired++;
+      assert.ok(['resident_f03', 'resident_k02', 'resident_e05'].includes(guard.rotation[beat + 1]));
+      assert.ok(guard.rotation.length <= 4);
+      assert.deepEqual(guard.pool, carriedSparSkills(guard));
+    }
+    const courier = buildNpcSparProfile({ code: `beat_courier_${index}`, name: '信使', description: '', region_code: 'thundercliff' }, 45, 0);
+    assert.ok(!courier.rotation.includes('resident_h05'));
+  }
+  assert.ok(paired > 0);
+});
+
 test('legacy effects can be removed by ID even when the adapter returns fresh objects', async () => {
   const f = fixture(); const deleted: number[] = [];
   f.rules.hooks.legacyEffects = u => u === f.target && !deleted.includes(42) ? [{ legacyId: 42, code: 'poison', value: 2, stacks: 1, source: f.source.key, until: 3, debuff: true }] : [];
@@ -166,6 +218,15 @@ test('nightmare masks enemy skill/resource details but leaves the observer visib
 test('daily limit uses Shanghai midnight independent of host timezone', () => {
   assert.equal(sparBusinessDate(new Date('2026-09-04T15:59:59Z')), '2026-09-04');
   assert.equal(sparBusinessDate(new Date('2026-09-04T16:00:00Z')), '2026-09-05');
+});
+
+test('切磋基础领悟率为胜利25%、落败10%，逃离和超时不领悟', () => {
+  assert.equal(sparInsightChance('victory', 0, false, 0, false), .25);
+  assert.equal(sparInsightChance('defeat', 0, false, 0, false), .10);
+  assert.equal(sparInsightChance('escaped', 500, true, 4, false), 0);
+  assert.equal(sparInsightChance('timeout', 500, true, 4, false), 0);
+  assert.equal(sparInsightChance('victory', 500, true, 4, false), .30);
+  assert.equal(sparInsightChance('defeat', 500, true, 4, false), .15);
 });
 
 test('settlement SQL contract uses the encounter loadout once and restores only HP/MP', async () => {

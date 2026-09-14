@@ -1,4 +1,6 @@
 import { recordAchievement } from './achievement-events';
+import { randomUUID } from 'node:crypto';
+import { recordCharacterOperation } from './character-operation.service';
 import { hasTalent } from './talent-combat';
 import { standardPlayerAttribute } from './growth-rules';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
@@ -82,32 +84,35 @@ export const acceptCompanion=async(user:string,accept:boolean)=>withTransaction(
     await connection.execute('INSERT INTO player_companions (character_id,template_code,name,level,source_level,source_spawn_id) VALUES (?,?,?,?,?,?)',[character.id,invite[0].template_code,invite[0].name,Math.min(Number(character.level),Number(invite[0].source_level)),invite[0].source_level,invite[0].spawn_id]);
   }
   if(accept)recordAchievement(connection,Number(character.id),[{metric:'ACH_G20'},{metric:'ACH_G22',distinct:String(invite[0].template_code)}]);
-  await connection.execute('DELETE FROM companion_invitations WHERE character_id=?',[character.id]);return accept?'对方接受了你的邀请，在名册中有了自己的位置。':'你向对方道别。它回头望了一眼，走回熟悉的土地。';
+  await connection.execute('DELETE FROM companion_invitations WHERE character_id=?',[character.id]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:accept?'companion.accepted':'companion.declined',source:{system:'companion_invitation',id:Number(invite[0].spawn_id),step:accept?'accepted':'declined'},outcome:accept?'接纳':'婉拒',summary:`${accept?'接纳':'婉拒'}${invite[0].name}的同行邀请`,detail:{spawnId:Number(invite[0].spawn_id),templateCode:String(invite[0].template_code),name:String(invite[0].name)}});
+  return accept?'对方接受了你的邀请，在名册中有了自己的位置。':'你向对方道别。它回头望了一眼，走回熟悉的土地。';
 });
 export const companionAction=async(user:string,companionId:number,action:string,value='')=>withTransaction(async connection=>{
   const character=await owner(connection,user);await requireMutable(connection,Number(character.id));
   const[rows]=await connection.execute<RowDataPacket[]>('SELECT * FROM player_companions WHERE id=? AND character_id=? AND released_at IS NULL FOR UPDATE',[companionId,character.id]);const pet=rows[0];if(!pet)throw new Error('随从不在你的名册中。');
+  const track=async(kind:string,summary:string,detail:Record<string,unknown>={})=>recordCharacterOperation(connection,{characterId:Number(character.id),kind,source:{system:'companion_action',id:randomUUID(),step:action},outcome:action,summary,detail:{companionId,templateCode:String(pet.template_code),name:String(pet.name),...detail},scoreKey:`companion:${action}:${companionId}`});
   if(action==='out'){
     if(pet.injured||Number(pet.stability)<20)throw new Error('它需要先接受照料，暂时无法提供支援。');
     await connection.execute("UPDATE opening_world SET aqua_location='world_tree',revision=revision+1 WHERE id=1 AND aqua_character_id=? AND aqua_location='follow'",[character.id]);
-    await connection.execute('UPDATE player_companions SET is_out=0 WHERE character_id=?',[character.id]);await connection.execute('UPDATE player_companions SET is_out=1 WHERE id=?',[pet.id]);return `${pet.name}来到你的身边。`;
+    await connection.execute('UPDATE player_companions SET is_out=0 WHERE character_id=?',[character.id]);await connection.execute('UPDATE player_companions SET is_out=1 WHERE id=?',[pet.id]);if(!pet.is_out)await track('companion.deployed',`${pet.name}出行`);return `${pet.name}来到你的身边。`;
   }
-  if(action==='rest'){await connection.execute('UPDATE player_companions SET is_out=0 WHERE id=?',[pet.id]);return `${pet.name}回到休整处。`;}
-  if(action==='release'){if(value!==String(pet.name))throw new Error('放归后不能找回，请输入该随从当前名字再次确认。');await connection.execute('UPDATE player_companions SET released_at=NOW(),is_out=0 WHERE id=?',[pet.id]);return `你与${pet.name}正式道别。这段相遇仍留在记录里。`;}
-  if(action==='name'){if(Number(pet.intimacy)<25)throw new Error('亲密达到25后才能改名。');if(!value.trim()||[...value].length>12||/[\r\n<>]/.test(value))throw new Error('名字请使用1～12个普通字符。');await connection.execute('UPDATE player_companions SET name=? WHERE id=?',[value.trim(),pet.id]);return '它渐渐熟悉了你呼唤的新名字。';}
+  if(action==='rest'){await connection.execute('UPDATE player_companions SET is_out=0 WHERE id=?',[pet.id]);if(pet.is_out)await track('companion.recalled',`${pet.name}返回休整处`);return `${pet.name}回到休整处。`;}
+  if(action==='release'){if(value!==String(pet.name))throw new Error('放归后不能找回，请输入该随从当前名字再次确认。');await connection.execute('UPDATE player_companions SET released_at=NOW(),is_out=0 WHERE id=?',[pet.id]);await track('companion.released',`放归${pet.name}`);return `你与${pet.name}正式道别。这段相遇仍留在记录里。`;}
+  if(action==='name'){if(Number(pet.intimacy)<25)throw new Error('亲密达到25后才能改名。');if(!value.trim()||[...value].length>12||/[\r\n<>]/.test(value))throw new Error('名字请使用1～12个普通字符。');await connection.execute('UPDATE player_companions SET name=? WHERE id=?',[value.trim(),pet.id]);if(value.trim()!==String(pet.name))await track('companion.renamed',`将${pet.name}改名为${value.trim()}`,{newName:value.trim()});return '它渐渐熟悉了你呼唤的新名字。';}
   if(action==='feed'){
     await connection.execute('INSERT IGNORE INTO companion_daily (companion_id,day_key) VALUES (?,CURRENT_DATE())',[pet.id]);
     const[daily]=await connection.execute<RowDataPacket[]>('SELECT * FROM companion_daily WHERE companion_id=? AND day_key=CURRENT_DATE() FOR UPDATE',[pet.id]);if(Number(daily[0].feed_count)>=3)throw new Error('它今天已经吃过三份饲料，先让它休息。');
     const[food]=await connection.execute<RowDataPacket[]>("SELECT id FROM item_definitions WHERE code='opening_companion_feed'");await consumeInventory(connection,Number(character.id),Number(food[0]?.id),1);
     const intimacy=Number(daily[0].feed_count)===0?await talentIntimacy(connection,Number(character.id),Number(pet.id),2):0;
-    await connection.execute('UPDATE player_companions SET stability=LEAST(100,stability+10),injured=0,intimacy=LEAST(100,intimacy+?) WHERE id=?',[intimacy,pet.id]);await connection.execute('UPDATE companion_daily SET feed_count=feed_count+1 WHERE companion_id=? AND day_key=CURRENT_DATE()',[pet.id]);return `${pet.name}吃完饲料，安稳地靠近了些。`;
+    await connection.execute('UPDATE player_companions SET stability=LEAST(100,stability+10),injured=0,intimacy=LEAST(100,intimacy+?) WHERE id=?',[intimacy,pet.id]);await connection.execute('UPDATE companion_daily SET feed_count=feed_count+1 WHERE companion_id=? AND day_key=CURRENT_DATE()',[pet.id]);await track('companion.fed',`喂养${pet.name}`,{intimacyGained:intimacy});return `${pet.name}吃完饲料，安稳地靠近了些。`;
   }
-  if(action==='specialty'){if(Number(pet.intimacy)<50)throw new Error('亲密达到50后可以调整物种专长。');if(!companionSpecialties(String(pet.template_code)).includes(value))throw new Error('这项专长不适合它的物种，请查看随从详情。');await connection.execute('UPDATE player_companions SET specialty=? WHERE id=?',[value,pet.id]);return '已调整出行专长。';}
+  if(action==='specialty'){if(Number(pet.intimacy)<50)throw new Error('亲密达到50后可以调整物种专长。');if(!companionSpecialties(String(pet.template_code)).includes(value))throw new Error('这项专长不适合它的物种，请查看随从详情。');await connection.execute('UPDATE player_companions SET specialty=? WHERE id=?',[value,pet.id]);if(value!==String(pet.specialty))await track('companion.specialty_changed',`调整${pet.name}的出行专长`,{before:String(pet.specialty),after:value});return '已调整出行专长。';}
   if(action==='talk'&&pet.template_code==='golden_rabbit'&&Number(pet.intimacy)>=50){
     await(await import('./guild-context')).requireGuildService(connection,Number(character.id));
     await connection.execute('INSERT IGNORE INTO companion_daily (companion_id,day_key) VALUES (?,CURRENT_DATE())',[pet.id]);
     const[used]=await connection.execute<any>('UPDATE companion_daily SET bread_used=1 WHERE companion_id=? AND day_key=CURRENT_DATE() AND bread_used=0',[pet.id]);
-    if(used.affectedRows){await connection.execute('UPDATE characters SET stamina=LEAST(?,stamina+10) WHERE id=?',[(await import('./constants')).staminaMaxForRealm(Number((await connection.execute<RowDataPacket[]>('SELECT realm_stage FROM characters WHERE id=?',[character.id]))[0][0].realm_stage)),character.id]);return '黄金兔从爪边推来半块面包，又往你的手心拱了拱。这回，它先等你吃。\n\n分享面包，恢复 10 点体力（每日一次，不超过上限）。';}
+    if(used.affectedRows){await connection.execute('UPDATE characters SET stamina=LEAST(?,stamina+10) WHERE id=?',[(await import('./constants')).staminaMaxForRealm(Number((await connection.execute<RowDataPacket[]>('SELECT realm_stage FROM characters WHERE id=?',[character.id]))[0][0].realm_stage)),character.id]);await track('companion.bread_shared','与黄金兔分享面包');return '黄金兔从爪边推来半块面包，又往你的手心拱了拱。这回，它先等你吃。\n\n分享面包，恢复 10 点体力（每日一次，不超过上限）。';}
     return '黄金兔舔了舔空空的爪子，又靠着你的鞋坐下。今天的面包已经一起吃过了。';
   }
   if(action==='talk')return pet.template_code==='golden_rabbit'?(Number(pet.intimacy)>=80?'黄金兔把面包推到你手边。这回，它先等你吃。':Number(pet.intimacy)>=25?'黄金兔不再一听见树叶响就躲起来，不过仍悄悄挨着你的鞋。':'它把空口粮袋叼到你脚边，想了想，又推回来一点，像在问你有没有吃饱。'):`${pet.name}在你身边停留了一会儿。${Number(pet.intimacy)>=80?'它已经很熟悉与你同行的节奏。':'你们仍在慢慢熟悉彼此。'}`;

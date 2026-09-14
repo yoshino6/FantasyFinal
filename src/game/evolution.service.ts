@@ -1,9 +1,11 @@
 import { achievementLevel } from './achievement-hooks';
-import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
+import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { experienceRequiredForLevel } from './constants';
 import type { DerivedStats } from './types';
 import { recordSkillPointChange } from './skill-point-ledger.service';
+import { createHeartQuestionsForLevels } from './heart-question.service';
+import { recordCharacterOperation } from './character-operation.service';
 
 type EvolutionConnection = Pool | PoolConnection;
 export type BodyPart = 'eye' | 'nerve' | 'skin' | 'chest' | 'bone' | 'organ';
@@ -295,10 +297,13 @@ export const injectEvolution = async (qqUserId: string, code: InjectionCode, req
   ]);
   // 生长结消耗的正是当前等级已满的经验；注射解除结后，立刻按普通升级规则结算下一等级与技能点。
   await connection.execute('UPDATE characters SET level=?,experience=0,skill_points=skill_points+1 WHERE id=?', [nextLevel, character.id]);
+  await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'realm.level_up', source: { system: 'character_level', id: nextLevel, step: 'reached' }, actorRole: 'system', outcome: '升级', summary: `进化注射后升至 Lv${nextLevel}`, detail: { fromLevel: currentCap, toLevel: nextLevel, realmStage: Number(character.realm_stage), derived: true } });
+  await createHeartQuestionsForLevels(connection, Number(character.id), currentCap, nextLevel, Number(character.realm_stage));
   achievementLevel(connection,Number(character.id),nextLevel);
   await recordSkillPointChange(connection, Number(character.id), 1, 'level_up', null, `进化注射后升至 Lv.${nextLevel}`);
-  await connection.execute(`INSERT INTO player_events (player_id,event_type,payload)
+  const [injectionEvent]=await connection.execute<ResultSetHeader>(`INSERT INTO player_events (player_id,event_type,payload)
     SELECT player_id,'evolution.injected',? FROM characters WHERE id=?`, [JSON.stringify({ code, level: currentCap, mutation: mutation?.code ?? null, finalTraits: finalTraits.map(trait => trait.mutation_code), symbiosisTrait }), character.id]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'evolution.injected',existingEventId:Number(injectionEvent.insertId),source:{system:'evolution_injection',id:nextLevel,step:'injected'},outcome:'注射',summary:`注射${injectionNames[code]}并升至 Lv${nextLevel}`,detail:{code,fromLevel:currentCap,toLevel:nextLevel,mutationCode:mutation?.code??null,finalTraits:finalTraits.map(trait=>trait.mutation_code),symbiosisTrait}});
   return { characterId: Number(character.id), name: character.name, code, injectionName: injectionNames[code], fromLevel: currentCap, toLevel: nextLevel, gainedSkillPoints: 1, mutation, finalTraits: finalTraits.map(trait => trait.mutation_name), symbiosisTrait: symbiosisTrait ? symbiosisTraits[symbiosisTrait] : null, pressure: clamp(Number(profile.adaptation_pressure) + rule.pressure, 0, 8), stability: clamp(Number(profile.stability) + rule.stability, 0, 100) };
 });
 
@@ -343,9 +348,10 @@ export const acceptEvolutionObservation = async (qqUserId: string, type: Evoluti
   const [existingRows] = await connection.execute<ObservationRow[]>('SELECT * FROM player_evolution_observations WHERE character_id=? AND business_date=? AND observation_type=? LIMIT 1 FOR UPDATE', [character.id, key, type]);
   if (existingRows[0]) throw new Error('这份观察今天已经整理过了，请选择另一项。');
   const definition = observationDefinitions[type];
-  await connection.execute(`INSERT INTO player_evolution_observations
+  const [accepted]=await connection.execute<ResultSetHeader>(`INSERT INTO player_evolution_observations
     (character_id,business_date,observation_type,status,progress,target_count,objective_text,reward_json)
     VALUES (?,?,?,'accepted',0,?,?,?)`, [character.id, key, type, definition.target, definition.objective, JSON.stringify(definition.items)]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'evolution.observation_accepted',source:{system:'evolution_observation',id:Number(accepted.insertId),step:'accepted'},outcome:'接取',summary:`接取${definition.name}`,detail:{observationId:Number(accepted.insertId),type,objective:definition.objective,target:definition.target}});
   return { type, ...definition, rewards: observationRewardsText(definition.items) };
 });
 
@@ -355,6 +361,7 @@ const advanceActiveObservation = async (connection: PoolConnection, characterId:
   const delta = Math.max(0, Math.floor(advance(row))); if (!delta) return null;
   const target = Math.max(1, Number(row.target_count)); const progress = Math.min(target, Number(row.progress) + delta); const completed = progress >= target;
   await connection.execute(`UPDATE player_evolution_observations SET progress=?,status=?,completed_at=IF(?,NOW(),completed_at),updated_at=NOW() WHERE id=?`, [progress, completed ? 'completed' : 'accepted', completed ? 1 : 0, row.id]);
+  if(completed)await recordCharacterOperation(connection,{characterId,kind:'evolution.observation_completed',source:{system:'evolution_observation',id:Number(row.id),step:'completed'},actorRole:'system',outcome:'完成',summary:`完成${observationDefinitions[row.observation_type].name}`,detail:{observationId:Number(row.id),type:row.observation_type,progress,target}});
   return { type: row.observation_type, name: observationDefinitions[row.observation_type].name, progress, target, completed };
 };
 
@@ -381,6 +388,7 @@ export const claimEvolutionObservation = async (qqUserId: string) => withTransac
   for (const [code, quantity] of Object.entries(items)) await addItem(connection, Number(character.id), code, quantity);
   await connection.execute("UPDATE player_evolution_observations SET status='claimed',claimed_at=NOW(),updated_at=NOW() WHERE id=?", [row.id]);
   await connection.execute('UPDATE player_evolution_profiles SET daily_key=?,daily_claims=?,updated_at=NOW() WHERE character_id=?', [key, claimed + 1, character.id]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'evolution.observation_claimed',source:{system:'evolution_observation',id:Number(row.id),step:'claimed'},outcome:'领取',summary:`交付${observationDefinitions[row.observation_type].name}并领取报酬`,detail:{observationId:Number(row.id),type:row.observation_type,rewards:items}});
   return { name: observationDefinitions[row.observation_type].name, items, remaining: Math.max(0, 1 - claimed) };
 });
 
@@ -402,7 +410,9 @@ export const setMutationPaused = async (qqUserId: string, mutationId: number, pa
     if (mutation.mutation_state !== 'paused') throw new Error('这份变异目前无需恢复。');
     await connection.execute(`UPDATE player_mutations SET mutation_state='deviation',updated_at=NOW() WHERE id=?`, [mutation.id]);
   }
-  await connection.execute(`INSERT INTO player_events (player_id,event_type,payload) SELECT player_id,?,? FROM characters WHERE id=?`, [paused ? 'evolution.mutation_paused' : 'evolution.mutation_resumed', JSON.stringify({ mutationId, code: mutation.mutation_code }), character.id]);
+  const kind=paused?'evolution.mutation_paused':'evolution.mutation_resumed';
+  const [mutationEvent]=await connection.execute<ResultSetHeader>(`INSERT INTO player_events (player_id,event_type,payload) SELECT player_id,?,? FROM characters WHERE id=?`, [kind, JSON.stringify({ mutationId, code: mutation.mutation_code }), character.id]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind,existingEventId:Number(mutationEvent.insertId),source:{system:'player_events',id:Number(mutationEvent.insertId),step:paused?'paused':'resumed'},outcome:paused?'暂停':'恢复',summary:`${paused?'暂停':'恢复'}变异「${mutation.mutation_name}」`,detail:{mutationId,mutationCode:mutation.mutation_code,mutationName:mutation.mutation_name}});
   return { characterId: Number(character.id), name: mutation.mutation_name, paused };
 });
 
@@ -419,7 +429,8 @@ export const stabilizeMutation = async (qqUserId: string, mutationId: number) =>
   await connection.execute(`UPDATE player_mutations SET mutation_state='stable',effect_json=?,description=?,updated_at=NOW() WHERE id=?`, [JSON.stringify(stabilizedEffect), `经稳定介质校正后的${mutation.mutation_name}。它保留可利用的表型，不再携带偏差代价。`, mutation.id]);
   const pressure = clamp(Number(profile.adaptation_pressure) - 1, 0, 8); const stability = clamp(Number(profile.stability) + 10, 0, 100);
   await connection.execute(`UPDATE player_evolution_profiles SET adaptation_pressure=?,stability=?,updated_at=NOW() WHERE character_id=?`, [pressure, stability, character.id]);
-  await connection.execute(`INSERT INTO player_events (player_id,event_type,payload) SELECT player_id,'evolution.mutation_stabilized',? FROM characters WHERE id=?`, [JSON.stringify({ mutationId, code: mutation.mutation_code }), character.id]);
+  const [mutationEvent]=await connection.execute<ResultSetHeader>(`INSERT INTO player_events (player_id,event_type,payload) SELECT player_id,'evolution.mutation_stabilized',? FROM characters WHERE id=?`, [JSON.stringify({ mutationId, code: mutation.mutation_code }), character.id]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'evolution.mutation_stabilized',existingEventId:Number(mutationEvent.insertId),source:{system:'player_mutations',id:mutationId,step:'stabilized'},outcome:'稳定',summary:`稳定变异「${mutation.mutation_name}」`,detail:{mutationId,mutationCode:mutation.mutation_code,mutationName:mutation.mutation_name,spentStableMedium:2,pressure,stability}});
   return { characterId: Number(character.id), name: mutation.mutation_name, pressure, stability };
 });
 
@@ -430,7 +441,8 @@ export const archiveMutation = async (qqUserId: string, mutationId: number) => w
   const mutation = await mutationFor(connection, Number(character.id), mutationId, true);
   if (mutation.mutation_state === 'archived') throw new Error('这份记录已经封存。');
   await connection.execute(`UPDATE player_mutations SET mutation_state='archived',updated_at=NOW() WHERE id=?`, [mutation.id]);
-  await connection.execute(`INSERT INTO player_events (player_id,event_type,payload) SELECT player_id,'evolution.mutation_archived',? FROM characters WHERE id=?`, [JSON.stringify({ mutationId, code: mutation.mutation_code }), character.id]);
+  const [mutationEvent]=await connection.execute<ResultSetHeader>(`INSERT INTO player_events (player_id,event_type,payload) SELECT player_id,'evolution.mutation_archived',? FROM characters WHERE id=?`, [JSON.stringify({ mutationId, code: mutation.mutation_code }), character.id]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'evolution.mutation_archived',existingEventId:Number(mutationEvent.insertId),source:{system:'player_mutations',id:mutationId,step:'archived'},outcome:'封存',summary:`封存变异「${mutation.mutation_name}」`,detail:{mutationId,mutationCode:mutation.mutation_code,mutationName:mutation.mutation_name}});
   return { characterId: Number(character.id), name: mutation.mutation_name };
 });
 

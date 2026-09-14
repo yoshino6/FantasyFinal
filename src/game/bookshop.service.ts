@@ -1,4 +1,6 @@
 import { achievementBookSource } from './achievement-state';
+import { randomUUID } from 'node:crypto';
+import { recordCharacterOperation } from './character-operation.service';
 import { recordAchievement } from './achievement-events';
 import { grantInventory } from './inventory-binding';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
@@ -39,14 +41,21 @@ export const bookshopSellCatalog = async (qqUserId: string, page = 1, keyword = 
 
 export const buyBookshopItem = async (qqUserId: string, itemId: number, quantity = 1) => withTransaction(async connection => {
   const amount = amountOf(quantity); const character = await characterFor(connection, qqUserId, true);
-  const [rows] = await connection.execute<(RowDataPacket & { name: string; buy_price: number; stock_quantity: number })[]>('SELECT i.name,bs.buy_price,bs.stock_quantity FROM bookshop_items bs JOIN item_definitions i ON i.id=bs.item_id WHERE bs.item_id=? AND bs.is_active=1 FOR UPDATE', [itemId]);
+  const [rows] = await connection.execute<(RowDataPacket & { name: string; code: string; is_tradeable: number; skill_code: string | null; buy_price: number; stock_quantity: number })[]>("SELECT i.name,i.code,i.is_tradeable,JSON_UNQUOTE(JSON_EXTRACT(i.effect_json,'$.skillBook')) AS skill_code,bs.buy_price,bs.stock_quantity FROM bookshop_items bs JOIN item_definitions i ON i.id=bs.item_id WHERE bs.item_id=? AND bs.is_active=1 FOR UPDATE", [itemId]);
   const item = rows[0]; if (!item) throw new Error('这本书已下架。'); if (Number(item.stock_quantity) < amount) throw new Error(`库存不足，剩余 ${item.stock_quantity} 本。`);
+  if (item.code.startsWith('skill_book_resident_')) {
+    if (amount !== 1) throw new Error('技能书每次只能购买一本。');
+    const [known] = await connection.execute<RowDataPacket[]>(`SELECT 1 FROM skill_definitions s LEFT JOIN player_skills ps ON ps.skill_id=s.id AND ps.character_id=?
+      LEFT JOIN player_skill_discoveries d ON d.skill_id=s.id AND d.character_id=? WHERE s.code=? AND (ps.skill_id IS NOT NULL OR d.skill_id IS NOT NULL) LIMIT 1`, [character.id, character.id, item.skill_code]);
+    if (known[0]) throw new Error('你已经领悟这项技能，无需重复购买技能书。');
+  }
   const price = Number(item.buy_price) * amount; if (Number(character.copper_coins) < price) throw new Error(`铜币不足，需要 ${price} 铜币。`);
   await connection.execute('UPDATE characters SET copper_coins=copper_coins-? WHERE id=?', [price, character.id]);
   await connection.execute('UPDATE bookshop_items SET stock_quantity=stock_quantity-? WHERE item_id=?', [amount, itemId]);
-  await grantInventory(connection,Number(character.id),Number(itemId),{trade:amount,personal:0,unbound:0});
+  await grantInventory(connection,Number(character.id),Number(itemId),{trade:item.is_tradeable?amount:0,personal:item.is_tradeable?0:amount,unbound:0});
   await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [character.id, itemId]);
   recordAchievement(connection,Number(character.id),[{metric:'ACH_J16'},{metric:'ACH_K01'},{metric:'ACH_K08',value:price,life:true},{metric:'ACH_E23',distinct:String(itemId)}]);
+  await recordCharacterOperation(connection, { characterId:Number(character.id),kind:'bookshop.bought',source:{system:'bookshop_purchase',id:randomUUID(),step:'settled'},outcome:'购入',summary:`在书店购买${item.name} ×${amount}`,detail:{itemId,itemName:item.name,quantity:amount,paidCopper:price} });
   return { name: item.name, quantity: amount, price };
 });
 
@@ -56,6 +65,7 @@ export const sellBookshopItem = async (qqUserId: string, itemId: number, quantit
   const item = rows[0]; if (!item || !item.is_tradeable || !Number(item.trade_price) || !['书籍', '卷宗', '技能书'].includes(item.item_category)) throw new Error('店主只收购可交易的书籍、卷宗与技能书。'); if (Number(item.quantity) < amount) throw new Error(`背包数量不足，当前仅有 ${item.quantity} 本。`);
   const price = Number(item.price) * amount; await recordPvpLootSale(connection, Number(character.id), itemId, amount, price); await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [amount, character.id, itemId]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, itemId]); await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [price, character.id]);
   recordAchievement(connection,Number(character.id),[{metric:'ACH_K09',value:price,life:true}]);
+  await recordCharacterOperation(connection, { characterId:Number(character.id),kind:'bookshop.sold',source:{system:'bookshop_sale',id:randomUUID(),step:'settled'},outcome:'售出',summary:`向书店出售${item.name} ×${amount}`,detail:{itemId,itemName:item.name,quantity:amount,receivedCopper:price} });
   return { name: item.name, quantity: amount, price };
 });
 
@@ -67,5 +77,6 @@ export const readSkillBook = async (qqUserId: string, itemId: number) => withTra
   const [discovered] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_skill_discoveries WHERE character_id=? AND skill_id=? FOR UPDATE', [character.id, skill.id]); const [learned] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_skills WHERE character_id=? AND skill_id=? FOR UPDATE', [character.id, skill.id]); if (discovered[0] || learned[0]) throw new Error(`你已经领悟技能「${skill.name}」。`);
   await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=?', [character.id, itemId]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, itemId]); await connection.execute('INSERT INTO player_skill_discoveries (character_id,skill_id) VALUES (?,?)', [character.id, skill.id]);
   await achievementBookSource(connection,Number(character.id),Number(skill.id),itemId);
+  await recordCharacterOperation(connection, { characterId:Number(character.id),kind:'bookshop.skill_book_read',source:{system:'skill_book',id:`${character.id}:${skill.id}`,step:'read'},outcome:'领悟',summary:`研读${item.name}并领悟${skill.name}`,detail:{itemId,bookName:item.name,skillId:Number(skill.id),skillName:skill.name} });
   return { book: item.name, skill: skill.name };
 });

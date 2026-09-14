@@ -3,6 +3,7 @@ import { talentProficiency } from './talent-rewards';
 import { currentSecondaryShop, shopProgressFor } from './secondary-shop-context';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
+import { recordCharacterOperation } from './character-operation.service';
 import { materialValueMultiplierForLevel } from './monster-crafting-material.service';
 import { secondaryProfessionBonus, secondaryProfessionMaxLevel, secondaryProfessionProficiencyRequired } from './secondary-profession';
 
@@ -34,6 +35,7 @@ export const acceptOmniscientQuest = async (qqUserId: string) => withTransaction
   if (character.secondary_profession_code === 'omniscient') return;
   await connection.execute("INSERT INTO player_side_quests (character_id,quest_code) VALUES (?,?) ON DUPLICATE KEY UPDATE status='accepted',completed_at=NULL,claimed_at=NULL", [character.id, questCode]);
   await connection.execute('INSERT INTO player_omniscient_quest_progress (character_id) VALUES (?) ON DUPLICATE KEY UPDATE slime_observed=0,wolf_king_observed=0', [character.id]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'quest.omniscient_accepted',source:{system:'omniscient_quest',id:character.id,step:'accepted'},outcome:'接取',summary:'接取全知者观察委托',detail:{questCode}});
 });
 
 export const recordOmniscientObservation = async (connection: PoolConnection, characterId: number, targetCodes: string[]) => {
@@ -44,7 +46,7 @@ export const recordOmniscientObservation = async (connection: PoolConnection, ch
   await connection.execute(`INSERT INTO player_omniscient_quest_progress (character_id,slime_observed,wolf_king_observed) VALUES (?,?,?)
     ON DUPLICATE KEY UPDATE slime_observed=GREATEST(slime_observed,VALUES(slime_observed)),wolf_king_observed=GREATEST(wolf_king_observed,VALUES(wolf_king_observed))`, [characterId, sawSlime ? 1 : 0, sawWolfKing ? 1 : 0]);
   const [progress] = await connection.execute<(RowDataPacket & { slime_observed: number; wolf_king_observed: number })[]>('SELECT slime_observed,wolf_king_observed FROM player_omniscient_quest_progress WHERE character_id=? FOR UPDATE', [characterId]);
-  if (Number(progress[0]?.slime_observed) && Number(progress[0]?.wolf_king_observed)) await connection.execute("UPDATE player_side_quests SET status='completed',completed_at=NOW() WHERE character_id=? AND quest_code=? AND status='accepted'", [characterId, questCode]);
+  if (Number(progress[0]?.slime_observed) && Number(progress[0]?.wolf_king_observed)) {const[completed]=await connection.execute<any>("UPDATE player_side_quests SET status='completed',completed_at=NOW() WHERE character_id=? AND quest_code=? AND status='accepted'", [characterId, questCode]);if(Number(completed.affectedRows)>0)await recordCharacterOperation(connection,{characterId,kind:'quest.omniscient_completed',source:{system:'omniscient_quest',id:characterId,step:'completed'},actorRole:'system',outcome:'完成',summary:'完成全知者观察委托',detail:{questCode,observed:['forest_slime','shadow_wolf_king']}});}
 };
 
 export const claimOmniscientQuest = async (qqUserId: string) => withTransaction(async connection => {
@@ -58,6 +60,7 @@ export const claimOmniscientQuest = async (qqUserId: string) => withTransaction(
   await connection.execute("INSERT IGNORE INTO player_secondary_professions (character_id,profession_code,level,proficiency) VALUES (?,'omniscient',1,0)", [character.id]);
   await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,1) ON DUPLICATE KEY UPDATE quantity=quantity+1', [character.id, gifts[0].id]);
   await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [character.id, gifts[0].id]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'quest.omniscient_claimed',source:{system:'omniscient_quest',id:character.id,step:'claimed'},outcome:'领取',summary:'领取全知者资格与洛文的赠礼',detail:{questCode,secondaryProfessionCode:'omniscient',giftItemId:Number(gifts[0].id),giftName:gifts[0].name}});
   return { name: '全知者', characterName: character.name, giftName: gifts[0].name };
 });
 

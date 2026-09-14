@@ -19,6 +19,26 @@ const award=async(c:PoolConnection,actor:Record<string,any>,data:TalentData,amou
   Object.assign(data,await readTalentData(c,Number(actor.id)));
 };
 export const talentActivityActions=['勘察','调查','完成调查','取消调查','购买种子','种植','采收','委托','立约委托','交付委托','放弃委托','引荐','人物索引'];
+/** 仅展示并开放会被当前天赋实际强化的生活操作。 */
+const activityTalentNumbers: Record<string, readonly string[]> = {
+  勘察: ['B02','B04','B07'],
+  调查机关: ['B06','B08','B09'],
+  购买种子: ['E10'],
+  种植: ['E10'],
+  赠礼: ['D03','D08'],
+  共餐: ['D05'],
+  委托: ['D04','D09'],
+  立约委托: ['D04']
+};
+const retiredActivityCommands = new Set(['调查废墟']);
+export const talentActivityCommands = (number: string) => Object.entries(activityTalentNumbers)
+  .filter(([, numbers]) => numbers.includes(number))
+  .map(([command]) => command);
+export const canUseTalentActivity = (number: string, action: string, arg = '') => {
+  const command = action === '调查' ? `调查${arg}` : action;
+  const required = activityTalentNumbers[command];
+  return !retiredActivityCommands.has(command) && (!required || required.includes(number));
+};
 export const talentActivity=async(c:PoolConnection,actor:Record<string,any>,talent:TalentDefinition,data:TalentData,action:string,arg:string,value:string)=>{
   const id=Number(actor.id),day=talentDay();
   if(action==='取消调查'){
@@ -36,16 +56,17 @@ export const talentActivity=async(c:PoolConnection,actor:Record<string,any>,tale
     return `开始勘察，${duration}秒后用“完成调查”领取记录。${talent.number==='B02'?'\n'+resources.map(r=>`${r.name}｜${r.item_category}｜方向(${Number(r.pos_x)-Number(actor.pos_x)},${Number(r.pos_y)-Number(actor.pos_y)},${r.pos_z})`).join('\n'):''}`;
   }
   if(action==='调查'){
+    if(arg!=='机关')throw new Error('废墟搜寻已由拾荒王冠的探索与战斗触发取代。');
     const [objects]=await c.execute<RowDataPacket[]>('SELECT o.*,r.danger_level FROM map_special_objects o JOIN map_regions r ON r.id=o.region_id WHERE o.region_id=? AND o.pos_x=? AND o.pos_y=? AND o.pos_z=?',[actor.current_region_id,actor.pos_x,actor.pos_y,actor.pos_z]);
     // The mist monument is the public numerical-progress investigation. Other landmarks keep their story semantics.
     const site=objects.find(o=>o.code==='mist_stone');if(!site)throw new Error('请前往幽暗密林的雾石调查点。');
-    const mode=arg==='机关'?'mechanism':'ruins',key=`site:${day}:${site.id}:${mode}`;
+    const mode='mechanism',key=`site:${day}:${site.id}:${mode}`;
     if(data.flags[key])throw new Error('今日这处调查已完成，需等下一次公开补充。');
     if(data.jobs.some(j=>j.payload.working))throw new Error('请先结束当前调查或复盘。');
     const duration=Number(data.flags[`ash:${site.region_id}`]??0)>Date.now()&&talent.number==='B08'?30:120;
     data.jobs.push({id:randomUUID(),kind:'investigation',created:Date.now(),ready:Date.now()+duration*1000,payload:{working:true,...Object.fromEntries(['id','region_id','pos_x','pos_y','pos_z','danger_level'].map(k=>[k,site[k]])),key,mode}});
     await c.execute("UPDATE characters SET activity_status='resting',rest_started_at=NULL WHERE id=?",[id]);
-    return `雾石调查：${duration}秒。${mode==='mechanism'?`每次成功推进${talent.number==='B09'?3:1}/3，进度完成后才有奖励；刻痕公开线索：湿润面、缺口面、完整面。`:'搜寻一次普通废料。'}${talent.number==='B06'?' 陷阱类型：冰冷环境伤害。':' 石缝中有寒雾渗出。'}`;
+    return `雾石调查：${duration}秒。每次成功推进${talent.number==='B09'?3:1}/3，进度完成后才有奖励；刻痕公开线索：湿润面、缺口面、完整面。${talent.number==='B06'?' 陷阱类型：冰冷环境伤害。':' 石缝中有寒雾渗出。'}`;
   }
   if(action==='完成调查'){
     const job=data.jobs.find(j=>j.id===arg&&['survey','investigation'].includes(j.kind));if(!job||!job.payload.working||job.ready>Date.now())throw new Error('调查尚未完成或已经取消。');
@@ -69,7 +90,7 @@ export const talentActivity=async(c:PoolConnection,actor:Record<string,any>,tale
     }
     data.flags[job.payload.key]=true;
     const [items]=await c.execute<RowDataPacket[]>("SELECT id,name FROM item_definitions WHERE code='blood_residue' AND rarity='普通'");if(!items[0])throw new Error('搜寻产物尚未初始化。');
-    const quantity=job.payload.mode==='ruins'&&talent.number==='B05'?3:1;await grantInventory(c,id,Number(items[0].id),{unbound:quantity,personal:0,trade:0});
+    const quantity=1;await grantInventory(c,id,Number(items[0].id),{unbound:quantity,personal:0,trade:0});
     await award(c,actor,data,Math.max(1,Math.floor(experienceRequiredForLevel(Math.min(10,Number(actor.level)))*.01)),'exploration');
     return `完成调查，获得${items[0].name}×${quantity}。该处普通搜寻明日补充。`;
   }

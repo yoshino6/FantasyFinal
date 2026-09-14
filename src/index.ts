@@ -44,7 +44,7 @@ const appGroup = router.group({ // 精准规则匹配，复杂度 O1，稳定 �
     stripPrefix: true, // 匹配时去掉前缀 
     allowBare: true  // 允许不使用前缀 
   }
-}, () => import('./middleware/opening'), () => import('./middleware/floating-leaf-tour'), () => import('./middleware/worldtree-witness'), () => import('./middleware/pvp-defeat-protection'))
+}, () => import('./middleware/heart-question'), () => import('./middleware/opening'), () => import('./middleware/floating-leaf-tour'), () => import('./middleware/worldtree-witness'), () => import('./middleware/pvp-defeat-protection'))
 
 registerSecondaryShopRoutes(appGroup);
 registerOpeningRoutes(appGroup);
@@ -95,6 +95,12 @@ appGroup.use({ path: '恩赐搜索', schema: { usage: '/恩赐搜索 <神器|天
 appGroup.use({ path: '选择恩赐', schema: { usage: '/选择恩赐 <代号>', args: [{ name: 'gift', rules: [{ required: true, type: 'string' }] }] } }, () => import('./response/gift-select'))
 appGroup.use('冒险者登记', () => import('./response/adventurer-register'))
 appGroup.use('角色', () => import('./response/character'))
+appGroup.use({ path: '行迹', schema: { usage: '/行迹 [游标]', args: [{ name: 'cursor', rules: [{ type: 'number', min: 1 }] }] } }, () => import('./response/character-operation').then(module => ({ default: module.characterOperationsHandler })))
+appGroup.use({ path: '行迹详情', schema: { usage: '/行迹详情 <编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/character-operation').then(module => ({ default: module.characterOperationDetailHandler })))
+appGroup.use('育成', () => import('./response/character-operation').then(module => ({ default: module.characterTendencyHandler })))
+appGroup.use('窥尘问心', () => import('./response/heart-question').then(module => ({ default: module.openHeartQuestionHandler })))
+appGroup.use({ path: '问心选择', schema: { usage: '/问心选择 <题目编号> <A-F>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'choice', rules: [{ required: true, type: 'enum', enum: ['A', 'B', 'C', 'D', 'E', 'F'] }] }] } }, () => import('./response/heart-question').then(module => ({ default: module.heartAnswerHandler })))
+appGroup.use({ path: '问心跳过', schema: { usage: '/问心跳过 <题目编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/heart-question').then(module => ({ default: module.heartSkipHandler })))
 appGroup.use('我', () => import('./response/character'))
 appGroup.use('状态', () => import('./response/system-status'))
 appGroup.use('设备状态', () => import('./response/system-status'))
@@ -261,7 +267,7 @@ appGroup.use({ path: '自动战斗 设置门槛', schema: { usage: '/自动战�
 appGroup.use({ path: '自动战斗 药剂选择', schema: { usage: '/自动战斗 药剂选择 <生命|魔力> [页码] [PVP]', args: [{ name: 'kind', rules: [{ required: true, type: 'enum', enum: ['生命', '魔力'] }] }, { name: 'page' }, { name: 'mode', rules: [{ type: 'enum', enum: ['PVP'] }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.potionListHandler })))
 appGroup.use({ path: '自动战斗 选择药剂', schema: { usage: '/自动战斗 选择药剂 <生命|魔力> <物品编号> [PVP]', args: [{ name: 'kind', rules: [{ required: true, type: 'enum', enum: ['生命', '魔力'] }] }, { name: 'item', rules: [{ required: true, type: 'number', min: 0 }] }, { name: 'mode', rules: [{ type: 'enum', enum: ['PVP'] }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.potionChoiceHandler })))
 appGroup.use({ path: '自动战斗 药剂搜索', schema: { usage: '/自动战斗 药剂搜索 <生命|魔力> <关键词>', args: [{ name: 'kind', rules: [{ required: true, type: 'enum', enum: ['生命', '魔力'] }] }, { name: 'keyword', rules: [{ required: true, type: 'rest' }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.potionSearchHandler })))
-appGroup.use({ path: '前往', schema: { usage: '/前往 <横坐标> <纵坐标>', args: [{ name: 'x', rules: [{ required: true, type: 'number' }] }, { name: 'y', rules: [{ required: true, type: 'number' }] }] } }, () => import('./response/go-to'))
+appGroup.use({ path: '前往', schema: { usage: '/前往 <横坐标> <纵坐标> <高度坐标>', args: [{ name: 'x', rules: [{ required: true, type: 'number' }] }, { name: 'y', rules: [{ required: true, type: 'number' }] }, { name: 'z', rules: [{ required: true, type: 'number' }] }] } }, () => import('./response/go-to'))
 appGroup.use({ path: '前往地图', schema: { usage: '/前往地图 <地图编号>', args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/adventure').then(module => ({ default: module.goToMapHandler })))
 appGroup.use('寻怪', () => import('./response/adventure').then(module => ({ default: module.huntHandler })))
 appGroup.use({ path: '下迷宫', schema: { usage: '/下迷宫 <入口编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/adventure').then(module => ({ default: module.dungeonEnterHandler })))
@@ -495,6 +501,10 @@ appGroup.use({ path: '构造搜索', schema: { usage: '/构造搜索 <基材|构
 appGroup.use('关于无形的禁锢', () => import('./response/adventure').then(module => ({ default: module.guildBarrierHandler })))
 appGroup.use('询问等级停滞', () => import('./response/evolution-quest').then(module => ({ default: module.evolutionGuildHandler })))
 appGroup.use({ path: '图书馆调查', schema: { usage: '/图书馆调查 <hall|reading|archive|rest>', args: [{ name: 'source', rules: [{ required: true, type: 'enum', enum: ['hall', 'reading', 'archive', 'rest'] }] }] } }, () => import('./response/evolution-quest').then(module => ({ default: module.evolutionInvestigationHandler })))
+appGroup.use({ path: '图书馆技能', schema: { usage: '/图书馆技能 <页码>', args: [{ name: 'page', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/evolution-quest').then(module => ({ default: module.librarySkillsHandler })))
+appGroup.use({ path: '图书馆领悟', schema: { usage: '/图书馆领悟 <技能编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/evolution-quest').then(module => ({ default: module.librarySkillDiscoverHandler })))
+// 兼容已发出的旧按钮；旧命令也只能领悟，不能绕过 SP 直接学习。
+appGroup.use({ path: '图书馆学习', schema: { usage: '/图书馆学习 <技能编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/evolution-quest').then(module => ({ default: module.librarySkillDiscoverHandler })))
 appGroup.use('寻访噶的研究室', () => import('./response/evolution-quest').then(module => ({ default: module.gaStudyHandler })))
 appGroup.use('感悟进化之种', () => import('./response/evolution-quest').then(module => ({ default: module.contemplateEvolutionSeedHandler })))
 appGroup.use('进化研究室', () => import('./response/evolution').then(module => ({ default: module.evolutionLabHandler })))
@@ -630,6 +640,19 @@ appGroup.use('传送门 世界树', () => import('./response/girl-gratitude').th
 appGroup.use('世界树界门 返回', () => import('./response/girl-gratitude').then(module => ({ default: module.worldTreeGateReturnHandler })))
 appGroup.use('收下梨子喵的礼物', () => import('./response/girl-gratitude').then(module => ({ default: module.receiveGirlGratitudeGiftHandler })))
 appGroup.use('万叶联市', () => import('./response/market').then(module => ({ default: module.marketHomeHandler })))
+appGroup.use('钱庄', () => import('./response/finance').then(module => ({ default: module.bankHandler })))
+appGroup.use({ path: '钱庄存入', schema: { usage: '/钱庄存入 <整数铜币>', args: [{ name: 'copper', rules: [{ required: true, type: 'string' }] }] } }, () => import('./response/finance').then(module => ({ default: () => module.bankTransferHandler('in') })))
+appGroup.use({ path: '钱庄取出', schema: { usage: '/钱庄取出 <整数铜币>', args: [{ name: 'copper', rules: [{ required: true, type: 'string' }] }] } }, () => import('./response/finance').then(module => ({ default: () => module.bankTransferHandler('out') })))
+appGroup.use({ path: '钱庄定存', schema: { usage: '/钱庄定存 <七日|三十日|百日> <整数铜币>', args: [{ name: 'term', rules: [{ required: true, type: 'enum', enum: ['七日', '三十日', '百日'] }] }, { name: 'copper', rules: [{ required: true, type: 'string' }] }] } }, () => import('./response/finance').then(module => ({ default: module.depositHandler })))
+appGroup.use({ path: '钱庄兑付', schema: { usage: '/钱庄兑付 <存单编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/finance').then(module => ({ default: () => module.depositSettleHandler(false) })))
+appGroup.use({ path: '钱庄提前支取', schema: { usage: '/钱庄提前支取 <存单编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/finance').then(module => ({ default: () => module.depositSettleHandler(true) })))
+appGroup.use('势力份额', () => import('./response/finance').then(module => ({ default: module.exchangeHandler })))
+appGroup.use({ path: '份额买入', schema: { usage: '/份额买入 <势力代号> <份数> <页面单价>', args: [{ name: 'code', rules: [{ required: true }] }, { name: 'shares', rules: [{ required: true, type: 'number', min: 1, max: 100 }] }, { name: 'price', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/finance').then(module => ({ default: () => module.shareTradeHandler('buy') })))
+appGroup.use({ path: '份额卖出', schema: { usage: '/份额卖出 <势力代号> <份数> <页面单价>', args: [{ name: 'code', rules: [{ required: true }] }, { name: 'shares', rules: [{ required: true, type: 'number', min: 1, max: 100 }] }, { name: 'price', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/finance').then(module => ({ default: () => module.shareTradeHandler('sell') })))
+appGroup.use('势力委托索引', () => import('./response/finance').then(module => ({ default: module.missionIndexHandler })))
+appGroup.use({ path: '每日势力委托', schema: { usage: '/每日势力委托 <势力代号>', args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/finance').then(module => ({ default: module.missionHandler })))
+appGroup.use({ path: '接取势力委托', schema: { usage: '/接取势力委托 <势力代号>', args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/finance').then(module => ({ default: module.missionAcceptHandler })))
+appGroup.use('交易所闲聊', () => import('./response/finance').then(module => ({ default: module.newsHandler })))
 appGroup.use({ path: '万叶市场', schema: { usage: '/万叶市场 <页码> [类型] [关键词]', args: [{ name: 'page', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'type' }, { name: 'keyword' }] } }, () => import('./response/market').then(module => ({ default: module.marketListHandler })))
 appGroup.use({ path: '万叶搜索', schema: { usage: '/万叶搜索 <物品名关键词>', args: [{ name: 'keyword', rules: [{ required: true }] }] } }, () => import('./response/market').then(module => ({ default: module.marketSearchHandler })))
 appGroup.use({ path: '万叶详情', schema: { usage: '/万叶详情 <物品编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/market').then(module => ({ default: module.marketDetailHandler })))
@@ -685,6 +708,7 @@ export default defineChildren({
       await spawnMonsters({ refreshBosses: false, trimExcess: false });
       // 重启补怪后立刻重建悬赏槽，避免玩家在下个整点前看到过期或空白的悬赏板。
       await refreshBounties(pool);
+      await (await import('./game/finance-settlement')).settleFinancePeriod();
       logger.info('游戏数据库、初始地图与怪物群已就绪');
     })
       .catch(error => logger.error({ err: error }, '游戏数据库初始化失败'));
@@ -706,6 +730,7 @@ export default defineChildren({
     }, combatTimeoutSweepMs);
     // 动态世界每十分钟独立推进：天气只允许相邻演变，巡游实体的每次路线推进都会写入事件账本。
     setCron('*/10 * * * *', () => void runMonitoredJob('world.dynamic_settlement', () => import('./game/world-dynamics.service').then(module => module.settleDynamicWorld())).catch(error => logger.warn({ err: error }, '动态世界结算失败')));
+    setCron('0 */4 * * *', () => void runMonitoredJob('finance.period_settlement', () => import('./game/finance-settlement').then(module => module.settleFinancePeriod())).catch(error => logger.warn({ err: error }, '势力份额结算失败')));
     setInterval(()=>void import('./game/achievement-announcements').then(module=>module.deliverAchievementAnnouncements()).catch(error=>logger.warn({err:error},'成就公告队列处理失败')),15000);
     setCron('*/5 * * * *', () => void runMonitoredJob('monitor.evaluate', evaluateMonitoring).catch(error => logger.warn({ err: error }, '后台监控检查失败')));
     // 整点子系统独立容错：商店、地下城或悬赏同步异常都不能阻断野外补怪与矿脉刷新。

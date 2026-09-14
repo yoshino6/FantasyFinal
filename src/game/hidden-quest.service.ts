@@ -1,4 +1,6 @@
 import { recordAchievement } from './achievement-events';
+import { randomUUID } from 'node:crypto';
+import { recordCharacterOperation } from './character-operation.service';
 import { advanceHiddenTrial, type HiddenTrial } from './hidden-trial';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
@@ -104,7 +106,7 @@ export const hiddenTrackedQuests = async (user: string) => {
     const npc = npcs[0], atShop = npc && ['pos_x','pos_y','pos_z'].every(key => Number(row[key]) === Number(npc[key])) && Number(row.current_region_id) === Number(npc.region_id);
     lines.push(`导师：${profession.mentor}${npc ? ` · ${npc.region_name} (${npc.pos_x}, ${npc.pos_y}, ${npc.pos_z})` : ''}`, '交付、教学和推进均需回店当面完成。');
     entries.push({ title: `【二转·${profession.name} ${stage}/10】${quest.name}`, description: lines.join('\n'),
-      action: npc ? { label: atShop ? `[与${profession.mentor}继续委托]` : `[返回导师·${profession.mentor}]`, command: atShop ? `/店内委托 ${profession.code}` : `/前往 ${npc.pos_x} ${npc.pos_y}` } : undefined });
+      action: npc ? { label: atShop ? `[与${profession.mentor}继续委托]` : `[返回导师·${profession.mentor}]`, command: atShop ? `/店内委托 ${profession.code}` : `/前往 ${npc.pos_x} ${npc.pos_y} ${npc.pos_z}` } : undefined });
   }
   return entries;
 };
@@ -133,6 +135,7 @@ export const becomeHiddenProfession = (user: string, code: string) => withTransa
   }
   await connection.execute('DELETE FROM player_hidden_action_drafts WHERE character_id=?', [character.id]);
   await recalculateCharacterStats(connection, Number(character.id));
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'profession.hidden_completed',source:{system:'hidden_profession',id:randomUUID(),step:'awakened'},outcome:'完成',summary:`完成${profession.name}隐藏二转`,detail:{professionCode:profession.code,mentorCode:profession.npc},scoreKey:`hidden_profession:${profession.code}`});
   return { profession, reset };
 });
 
@@ -228,6 +231,7 @@ export const hiddenQuestAction = (user: string, code: string, revision: number, 
   row.evidence_json = action === 'finish' ? {} : evidence;
   row.completed_json = completed;
   await connection.execute('UPDATE player_hidden_profession_quests SET stage=?,accepted_at=?,materials_paid=?,evidence_json=?,completed_json=?,qualified_at=?,revision=? WHERE character_id=? AND profession_code=?', [row.stage, row.accepted_at, row.materials_paid, JSON.stringify(row.evidence_json), JSON.stringify(completed), row.qualified_at, row.revision, character.id, profession.code]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:action==='finish'?'quest.hidden_stage_completed':action==='accept'?'quest.hidden_stage_accepted':action==='prepare'?'quest.hidden_materials_prepared':'quest.hidden_lesson_advanced',source:{system:'hidden_profession_quest',id:`${character.id}:${profession.code}:${stage}`,step:`${revision}:${action}`},outcome:action,summary:`${profession.name}第${stage}环委托：${action}`,detail:{professionCode:profession.code,stage,action,choice:choice??null,revisionBefore:revision,revisionAfter:Number(row.revision),qualified:Boolean(row.qualified_at)}});
   return { ...view(data), receipt };
 });
 
@@ -242,4 +246,5 @@ export const recordHiddenQuestObservation = async (connection: PoolConnection, c
   if (evidence.observations.some(item => item.code === record.code)) return;
   evidence.observations.push({ ...record, observedAt: new Date().toISOString() });
   await connection.execute('UPDATE player_hidden_profession_quests SET evidence_json=?,revision=revision+1 WHERE character_id=? AND profession_code=\'tactician\'', [JSON.stringify(evidence), characterId]);
+  await recordCharacterOperation(connection,{characterId,kind:'quest.hidden_observation',source:{system:'hidden_quest_observation',id:`${characterId}:${record.code}`,step:'recorded'},actorRole:'system',outcome:'记录',summary:`记录${record.code}的试炼观察`,detail:{professionCode:'tactician',targetCode:record.code,fact:record.fact}});
 };

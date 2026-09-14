@@ -7,6 +7,7 @@ import {itemEffect,itemUsePolicy} from './item-use-policy';
 import {applyBattleElixir} from './battle-elixir.service';
 import {recalculateCharacterStats} from './character.service';
 import {consumeAchievementRewardItem} from './achievement.service';
+import {recordCharacterOperation} from './character-operation.service';
 
 export const useInventoryItem=async(user:string,itemId:number,token:string)=>withTransaction(async connection=>{
   if(!Number.isInteger(itemId)||itemId<1||!/^[-a-f0-9]{36}$/i.test(token))throw new Error('使用请求无效，请重新打开背包。');
@@ -58,7 +59,11 @@ export const useInventoryItem=async(user:string,itemId:number,token:string)=>wit
     if(consumed)await connection.execute("UPDATE characters SET current_hp=?,current_mp=?,activity_status=IF(activity_status IN ('resting','unconscious') AND ?>=hp_max AND ?>=mp_max,'active',activity_status) WHERE id=?",[hp,mp,hp,mp,id]);
     result={consumed,message:consumed?`HP ${character.current_hp}→${hp}｜MP ${character.current_mp}→${mp}`:'当前无需回复，未消耗道具。',name:String(item.name)};
   }
-  if(result.consumed){await consumeAchievementRewardItem(connection,id,String(item.code),1);await consumeInventory(connection,id,itemId,1);}
+  if(result.consumed){
+    await consumeAchievementRewardItem(connection,id,String(item.code),1);await consumeInventory(connection,id,itemId,1);
+    const kind=effect.foodBuff?'item.used.food':effect.experienceBonusPct||effect.partyDropBonusPct?'item.used.battle_elixir':effect.deviceBlueprintBox?'item.used.blueprint_box':effect.revivePct||effect.heal||effect.healPct||effect.restoreMp||effect.restoreMpPct?'item.used.recovery':'item.used.other';
+    await recordCharacterOperation(connection,{characterId:id,kind,source:{system:'inventory_use',id:token,step:'consumed'},outcome:'已使用',summary:`使用${item.name}`,detail:{itemId,code:String(item.code),name:String(item.name),result:result.message},scoreKey:`item:${item.code}`});
+  }
   if(result.consumed&&effect.foodBuff)recordAchievement(connection,id,[{metric:'ACH_E22',distinct:String(itemId)}],'food:'+token);
   await completeCraftRequest(connection,id,token,result);return result;
 });

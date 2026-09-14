@@ -1,6 +1,7 @@
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { grantInventory } from './inventory-binding';
+import { recordCharacterOperation } from './character-operation.service';
 import { newWorldEquipmentCodes, newWorldItems, newWorldLevels, newWorldWeaponProfile, type NewWorldLevel } from './new-world.config';
 
 const journeyCharacter = async (connection: Pool | PoolConnection, user: string, lock = false) => {
@@ -57,6 +58,7 @@ export const claimNewWorldOnConnection = async (connection: PoolConnection, user
     await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [id, item.id]);
     received.push(`${item.name} ×${quantity}`);
   }
+  await recordCharacterOperation(connection,{characterId:id,kind:'reward.new_world_claimed',source:{system:'new_world_reward',id:id,step:String(level)},outcome:'领取',summary:`领取新世界 ${level} 级奖励`,detail:{rewardLevel:level,received}});
   return { level, received };
 };
 export const claimNewWorld = (user: string, level: number) => withTransaction(connection => claimNewWorldOnConnection(connection, user, level));

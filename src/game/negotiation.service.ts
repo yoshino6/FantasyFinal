@@ -8,6 +8,7 @@ import { classifyNegotiationItem, negotiationInventoryPage, type NegotiationItem
 import { initialNegotiationState, moodBand, resolveNegotiationMove, synchronizeNegotiation, negotiationVersion, type NegotiationState } from './negotiation-rules';
 import { consumeBinding, consumeInventory } from './inventory-binding';
 import { hiddenAttributesFor } from './hidden-attributes.service';
+import { recordCharacterOperation } from './character-operation.service';
 
 export type NegotiationCommand = { type: 'view' | 'talk' | 'gift' | 'leave' | 'fight'; sessionId?: string; revision?: number; itemId?: number; quantity?: number; page?: number; keyword?: string };
 export class NegotiationCombatError extends Error {
@@ -189,6 +190,11 @@ export const runNegotiation = async (connection: PoolConnection, ctx: Negotiatio
     result = await readNegotiationView(connection, ctx, session, state, command);
   }
   if(['talk','gift'].includes(command.type))recordAchievement(connection,ctx.actorId,['ACH_F01']);
-  if (command.type !== 'view') await connection.execute('INSERT INTO negotiation_actions (session_id,revision,actor_id,request_key,result_json) VALUES (?,?,?,?,?)', [session.id, Number(command.revision), ctx.actorId, requestKey(ctx.actorId, command), JSON.stringify(result)]);
+  if (command.type !== 'view') {
+    await connection.execute('INSERT INTO negotiation_actions (session_id,revision,actor_id,request_key,result_json) VALUES (?,?,?,?,?)', [session.id, Number(command.revision), ctx.actorId, requestKey(ctx.actorId, command), JSON.stringify(result)]);
+    const operationKind=result.kind==='success'?'negotiation.succeeded':result.kind==='combat_started'||result.kind==='combat_resumed'?command.type==='fight'?'negotiation.fought':'negotiation.failed':command.type==='gift'?'negotiation.gifted':command.type==='talk'?'negotiation.talked':'negotiation.left';
+    const outcome=result.kind==='success'?'和平结束':result.kind==='combat_started'||result.kind==='combat_resumed'?'进入战斗':result.kind==='closed'?'结束交涉':command.type==='gift'?'交付礼物':'继续交谈';
+    await recordCharacterOperation(connection,{characterId:ctx.actorId,kind:operationKind,source:{system:'negotiation_actions',id:session.id,step:`revision_${command.revision}`},outcome,summary:`与${ctx.target.name}交涉：${outcome}`,detail:{sessionId:session.id,spawnId:ctx.target.id,monsterCode:ctx.target.code,monsterName:ctx.target.name,action:command.type,itemId:command.type==='gift'?command.itemId:null,quantity:command.type==='gift'?command.quantity:null,result:result.kind},scoreKey:`negotiation:${ctx.target.code}`});
+  }
   return result;
 };

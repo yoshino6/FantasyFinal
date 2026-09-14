@@ -1,4 +1,6 @@
 import { playerGrowthShares } from './growth-rules';
+import { heartGrowthAdjustment } from './heart-question.service';
+import { recordCharacterOperation } from './character-operation.service';
 import { armorSetsFor } from './armor-set';
 import { recalculateCharacterStats } from './character.service';
 import { neutralTalentSnapshot } from './talent-data';
@@ -14,7 +16,7 @@ import { skillSpecialization, type SkillSpecializationResult } from './skill-spe
 import { normalSkillSpecializationFacts } from './achievement-hooks';
 import { recordAchievement } from './achievement-events';
 import { achievementBookSkillUsed } from './achievement-state';
-import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
+import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import {combatItemEffect} from './item-use-policy';
 import { getPool, withTransaction } from '../database/pool';
 import { detentionMessage } from './time-format';
@@ -43,8 +45,9 @@ type PvpBattleRow = RowDataPacket & { id: string; attacker_character_id: number;
 export type PvpAmbushDelivery = { scope: 'group' | 'c2c'; targetId: string; botId?: string };
 
 const random = <T>(items: T[]) => items[Math.floor(Math.random() * items.length)];
+const heartPerception = new WeakMap<object, number>();
 const perceptionRange = (character: PvpCharacter) => {
-  const perception = Number(character.perception) + Number(character.perception_growth) * playerGrowthShares(Number(character.level));
+  const perception = Number(character.perception) + Number(character.perception_growth) * playerGrowthShares(Number(character.level)) + (heartPerception.get(character) ?? 0);
   const statValue = 1 + Math.floor(Math.pow(Math.max(1, perception) / 7, .9));
   const levelCap = Math.min(10, 2 + Math.floor(Math.max(1, Number(character.level)) / 5));
   return Math.max(1, Math.min(10, levelCap, statValue));
@@ -64,6 +67,8 @@ const activeDeviceCodesFor = async (connection: PoolConnection, characterId: num
 const characterFor = async (connection: PoolConnection, qqUserId: string) => {
   const [rows] = await connection.execute<PvpCharacter[]>('SELECT c.* FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE', [qqUserId]);
   if (!rows[0]) throw new Error('请先发送“注册”创建角色。');
+  const heart = await heartGrowthAdjustment(connection, Number(rows[0].id));
+  if (heart) heartPerception.set(rows[0], heart.delta.perception * playerGrowthShares(Number(rows[0].level)) + heart.offset.perception);
   return rows[0];
 };
 const townRegion = async (connection: PoolConnection) => {
@@ -128,8 +133,21 @@ export const createPvpBattleLog = async (connection: PoolConnection, attacker: P
   return id;
 };
 
-export const finishPvpBattleLog = async (connection: PoolConnection, id: string, outcome: 'attacker_win' | 'defender_win' | 'draw' | 'escaped', winner: Pick<PvpCharacter, 'id' | 'name'> | null = null, lootText: string | null = null) => {
-  await connection.execute(`UPDATE player_pvp_battle_logs SET outcome=?,winner_character_id=?,winner_name=?,loot_text=?,ended_at=NOW() WHERE id=?`, [outcome, winner?.id ?? null, winner?.name ?? null, lootText, id]);
+export const finishPvpBattleLog = async (connection: PoolConnection, id: string, outcome: 'attacker_win' | 'defender_win' | 'draw' | 'escaped', winner: Pick<PvpCharacter, 'id' | 'name'> | null = null, lootText: string | null = null, escapedCharacterId: number | null = null) => {
+  const [finished] = await connection.execute<ResultSetHeader>(`UPDATE player_pvp_battle_logs SET outcome=?,winner_character_id=?,winner_name=?,loot_text=?,ended_at=NOW() WHERE id=? AND outcome='ongoing'`, [outcome, winner?.id ?? null, winner?.name ?? null, lootText, id]);
+  if (!finished.affectedRows) return;
+  const [financeRows] = await connection.execute<(RowDataPacket & { attacker_character_id: number; defender_character_id: number; battle_type: string })[]>('SELECT attacker_character_id,defender_character_id,battle_type FROM player_pvp_battle_logs WHERE id=? LIMIT 1', [id]);
+  const financeBattle = financeRows[0];
+  if (financeBattle) for (const characterId of [Number(financeBattle.attacker_character_id), Number(financeBattle.defender_character_id)]) {
+    const isWinner = outcome === 'attacker_win' ? characterId === Number(financeBattle.attacker_character_id) : outcome === 'defender_win' ? characterId === Number(financeBattle.defender_character_id) : false;
+    const isEscaper = outcome === 'escaped' && characterId === Number(escapedCharacterId);
+    const kind = outcome === 'draw' || outcome === 'escaped' && !isEscaper ? 'combat.pvp.draw' : isEscaper ? 'combat.pvp.escaped' : isWinner ? 'combat.pvp.victory' : 'combat.pvp.defeat';
+    await recordCharacterOperation(connection, { characterId, kind, source: { system: 'pvp_battle', id, step: 'settled' }, outcome: isWinner ? '胜利' : isEscaper ? '撤离' : outcome === 'draw' || outcome === 'escaped' ? '平局' : '落败', summary: isWinner ? '玩家对战获胜' : isEscaper ? '从玩家对战撤离' : outcome === 'draw' || outcome === 'escaped' ? '玩家对战结束' : '玩家对战落败', detail: { sessionId: id, battleType: financeBattle.battle_type, role: characterId === Number(financeBattle.attacker_character_id) ? 'attacker' : 'defender', finalOutcome: outcome, winnerCharacterId: winner?.id ?? null }, scoreKey: `pvp:${characterId === Number(financeBattle.attacker_character_id) ? financeBattle.defender_character_id : financeBattle.attacker_character_id}` });
+  }
+  if (financeBattle && outcome !== 'draw') {
+    const affected = outcome === 'attacker_win' ? Number(financeBattle.defender_character_id) : outcome === 'defender_win' ? Number(financeBattle.attacker_character_id) : escapedCharacterId;
+    if (affected !== null && [Number(financeBattle.attacker_character_id), Number(financeBattle.defender_character_id)].includes(affected)) await (await import('./finance-settlement')).recordFinanceSignal(connection, { sourceKey: `pvp:${id}`, factionCode: 'adventurer_guild', characterId: affected, eventType: outcome === 'escaped' ? 'pvp.escaped' : lootText ? 'pvp.robbed' : 'pvp.defeated', score: -1 });
+  }
   if(winner&&['attacker_win','defender_win'].includes(outcome))await recordPvpAchievements(connection,id,Number(winner.id));
 };
 
@@ -777,7 +795,7 @@ export const continuePvpChant = async (qqUserId: string) => {
 export const pvpCombatAction = async (qqUserId: string, type: 'attack' | 'skill' | 'item' | 'escape' | 'auto' | 'device', slot?: number, deviceSkillCode?: string, targetKind?: 'member' | 'target', automaticChant = false, skillId?: number, hiddenTicket?: HiddenTicket) => withTransaction(async connection => {
   const requester = await characterFor(connection, qqUserId); const battle = await activePvpBattle(connection, Number(requester.id), true); if (!battle) throw new Error('当前不在玩家对战中。');
   if (Number(requester.id) !== Number(battle.attacker_character_id)) throw new Error('对方正在发起攻击，你会按 PVP 自动战斗配置进行反击。');
-  if (type === 'escape') { await connection.execute("UPDATE player_pvp_battle_sessions SET state='escaped' WHERE id=?", [battle.id]); await finishPvpBattleLog(connection, battle.id, 'escaped'); return { ended: true, log: `战斗<${battle.turn_no}>回合\n➤【${requester.name}】撤离了战斗。`, settlement: '你脱离了玩家对战。', requesterId: Number(requester.id), winnerId: null, winnerName: null }; }
+  if (type === 'escape') { await connection.execute("UPDATE player_pvp_battle_sessions SET state='escaped' WHERE id=?", [battle.id]); await finishPvpBattleLog(connection, battle.id, 'escaped', null, null, Number(requester.id)); return { ended: true, log: `战斗<${battle.turn_no}>回合\n➤【${requester.name}】撤离了战斗。`, settlement: '你脱离了玩家对战。', requesterId: Number(requester.id), winnerId: null, winnerName: null }; }
   const [fighters] = await connection.execute<PvpCharacter[]>('SELECT * FROM characters WHERE id IN (?,?) ORDER BY id FOR UPDATE', [battle.attacker_character_id, battle.defender_character_id]);
   const attacker = fighters.find(row => Number(row.id) === Number(battle.attacker_character_id)); const defender = fighters.find(row => Number(row.id) === Number(battle.defender_character_id)); if (!attacker || !defender) throw new Error('对战对象已失效。');
   attacker.current_hp = Number(battle.attacker_hp); attacker.current_mp = Number(battle.attacker_mp); defender.current_hp = Number(battle.defender_hp); defender.current_mp = Number(battle.defender_mp);
@@ -923,24 +941,24 @@ export const restitutionDetail = async (qqUserId: string, restitutionId: string)
 
 export const cityWantedAlert = async (qqUserId: string) => {
   const pool = await getPool();
-  const [rows] = await pool.execute<(RowDataPacket & { id: number; name: string; game_id: number; pos_x: number; pos_y: number; region_name: string })[]>(`SELECT w.id,c.name,c.game_id,c.pos_x,c.pos_y,r.name AS region_name FROM characters c
+  const [rows] = await pool.execute<(RowDataPacket & { id: number; name: string; game_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string })[]>(`SELECT w.id,c.name,c.game_id,c.pos_x,c.pos_y,c.pos_z,r.name AS region_name FROM characters c
     JOIN players p ON p.id=c.player_id JOIN map_regions r ON r.id=c.current_region_id
     JOIN player_warrants w ON w.wanted_character_id=c.id AND w.city_region_id=c.current_region_id AND w.status='active'
     WHERE p.qq_user_id=? AND r.code='baina_town' LIMIT 1`, [qqUserId]);
-  return rows[0] ? { warrantId: Number(rows[0].id), name: rows[0].name, gameId: Number(rows[0].game_id), x: Number(rows[0].pos_x), y: Number(rows[0].pos_y), regionName: rows[0].region_name } : null;
+  return rows[0] ? { warrantId: Number(rows[0].id), name: rows[0].name, gameId: Number(rows[0].game_id), x: Number(rows[0].pos_x), y: Number(rows[0].pos_y), z: Number(rows[0].pos_z), regionName: rows[0].region_name } : null;
 };
 
 /** 百纳镇居民发言时可被动获知的、正暴露行踪的其他通缉者。 */
 export const townPassiveWantedAlert = async (qqUserId: string) => {
   const pool = await getPool();
-  const [rows] = await pool.execute<(RowDataPacket & { id: number; name: string; game_id: number; pos_x: number; pos_y: number; region_name: string })[]>(`SELECT w.id,c.name,c.game_id,c.pos_x,c.pos_y,r.name AS region_name
+  const [rows] = await pool.execute<(RowDataPacket & { id: number; name: string; game_id: number; pos_x: number; pos_y: number; pos_z: number; region_name: string })[]>(`SELECT w.id,c.name,c.game_id,c.pos_x,c.pos_y,c.pos_z,r.name AS region_name
     FROM players viewer_player JOIN characters viewer ON viewer.player_id=viewer_player.id
     JOIN player_warrants w ON w.status='active' AND w.city_region_id=viewer.current_region_id
     JOIN characters c ON c.id=w.wanted_character_id AND c.current_region_id=w.city_region_id
     JOIN map_regions r ON r.id=w.city_region_id
     WHERE viewer_player.qq_user_id=? AND r.code='baina_town' AND c.id<>viewer.id
     ORDER BY w.created_at DESC LIMIT 1`, [qqUserId]);
-  return rows[0] ? { warrantId: Number(rows[0].id), name: rows[0].name, gameId: Number(rows[0].game_id), x: Number(rows[0].pos_x), y: Number(rows[0].pos_y), regionName: rows[0].region_name } : null;
+  return rows[0] ? { warrantId: Number(rows[0].id), name: rows[0].name, gameId: Number(rows[0].game_id), x: Number(rows[0].pos_x), y: Number(rows[0].pos_y), z: Number(rows[0].pos_z), regionName: rows[0].region_name } : null;
 };
 
 const futureCooldown = (value: unknown) => value ? new Date(String(value)).getTime() > Date.now() : false;
@@ -1028,7 +1046,7 @@ export const townWarrantsFor = async (qqUserId: string, filter: '已暴露' | '�
     FROM characters c JOIN players p ON p.id=c.player_id JOIN map_regions r ON r.id=c.current_region_id WHERE p.qq_user_id=? LIMIT 1`, [qqUserId]);
   const viewer = viewerRows[0]; if (!viewer) throw new Error('请先注册角色。');
   if (viewer.region_code !== 'baina_town') throw new Error('请先前往城镇，再查看当地的通缉令。');
-  const [rows] = await pool.execute<(RowDataPacket & { id: number; name: string; region_name: string; current_region_id: number; pos_x: number; pos_y: number; last_seen_at: Date | null; last_seen_x: number | null; last_seen_y: number | null; victim_count: number; pursuit_defeats: number; reward_copper: number; reward_items: string | null })[]>(`SELECT w.id,c.name,r.name AS region_name,c.current_region_id,c.pos_x,c.pos_y,w.last_seen_at,w.last_seen_x,w.last_seen_y,w.pursuit_defeats,
+  const [rows] = await pool.execute<(RowDataPacket & { id: number; name: string; region_name: string; current_region_id: number; pos_x: number; pos_y: number; pos_z: number; last_seen_at: Date | null; last_seen_x: number | null; last_seen_y: number | null; victim_count: number; pursuit_defeats: number; reward_copper: number; reward_items: string | null })[]>(`SELECT w.id,c.name,r.name AS region_name,c.current_region_id,c.pos_x,c.pos_y,c.pos_z,w.last_seen_at,w.last_seen_x,w.last_seen_y,w.pursuit_defeats,
     COALESCE(v.victim_count,0) AS victim_count,COALESCE(rw.reward_copper,0) AS reward_copper,rw.reward_items
     FROM player_warrants w JOIN characters c ON c.id=w.wanted_character_id JOIN map_regions r ON r.id=w.city_region_id
     LEFT JOIN (SELECT warrant_id,COUNT(*) AS victim_count FROM player_warrant_victims GROUP BY warrant_id) v ON v.warrant_id=w.id
@@ -1044,7 +1062,7 @@ export const townWarrantsFor = async (qqUserId: string, filter: '已暴露' | '�
     const baseStars = victims >= 15 ? 5 : victims >= 10 ? 4 : victims >= 6 ? 3 : victims >= 3 ? 2 : 1;
     const pursuitTier = baseStars + Number(row.pursuit_defeats);
     const stars = Math.min(5, pursuitTier); const skulls = Math.max(0, Math.min(5, pursuitTier - 5));
-    return { id: Number(row.id), name: row.name, regionName: row.region_name, x: exposed ? Number(row.pos_x) : Number(row.last_seen_x ?? 0), y: exposed ? Number(row.pos_y) : Number(row.last_seen_y ?? 0), exposed, recent, stars, skulls, copper: Number(row.reward_copper), items: row.reward_items ?? '' };
+    return { id: Number(row.id), name: row.name, regionName: row.region_name, x: exposed ? Number(row.pos_x) : Number(row.last_seen_x ?? 0), y: exposed ? Number(row.pos_y) : Number(row.last_seen_y ?? 0), z: exposed ? Number(row.pos_z) : 0, exposed, recent, stars, skulls, copper: Number(row.reward_copper), items: row.reward_items ?? '' };
   });
   return { regionName: viewer.region_name, warrants: filter === '全部' ? mapped : mapped.filter(warrant => filter === '已暴露' ? warrant.exposed : filter === '近期露面' ? warrant.recent : !warrant.exposed && !warrant.recent) };
 };
@@ -1058,7 +1076,8 @@ export const addWarrantReward = async (qqUserId: string, warrantId: number, item
   if (!eligible[0]) throw new Error('只有被该通缉者夺走失物的玩家可以追加赏金。');
   if (copper > 0) { const [spent] = await connection.execute<any>('UPDATE characters SET copper_coins=copper_coins-? WHERE id=? AND copper_coins>=?', [copper, issuer.id, copper]); if (!Number(spent.affectedRows)) throw new Error('铜币不足。'); }
   if (itemId) { const [items] = await connection.execute<(RowDataPacket & { quantity: number; name: string })[]>('SELECT pi.quantity,i.name FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.item_id=? AND i.is_tradeable=1 FOR UPDATE', [issuer.id, itemId]); if (!items[0] || Number(items[0].quantity) < quantity) throw new Error('用于悬赏的物品数量不足或不可交易。'); await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [quantity, issuer.id, itemId]); await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [issuer.id, itemId]); }
-  await connection.execute('INSERT INTO player_warrant_rewards (warrant_id,issuer_character_id,reward_item_id,quantity,copper_amount) VALUES (?,?,?,?,?)', [warrantId, issuer.id, itemId, quantity, copper]);
+  const [reward] = await connection.execute<ResultSetHeader>('INSERT INTO player_warrant_rewards (warrant_id,issuer_character_id,reward_item_id,quantity,copper_amount) VALUES (?,?,?,?,?)', [warrantId, issuer.id, itemId, quantity, copper]);
+  if (copper > 0 || itemId && quantity > 0) await recordCharacterOperation(connection, { characterId: Number(issuer.id), kind: 'pvp.warrant_reward_added', source: { system: 'player_warrant_rewards', id: Number(reward.insertId), step: 'added' }, outcome: '追加', summary: '向通缉令追加赏金', detail: { warrantId, rewardId: Number(reward.insertId), itemId, quantity, copper } });
   return { copper, quantity };
 });
 import { recordPvpAchievements } from './achievement-pvp';

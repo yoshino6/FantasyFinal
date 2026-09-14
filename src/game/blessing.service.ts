@@ -2,6 +2,7 @@ import { randomInt } from 'node:crypto';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { withTransaction } from '../database/pool';
 import { recalculateCharacterStats } from './character.service';
+import { recordCharacterOperation } from './character-operation.service';
 
 const businessDate = () => {
   const parts = new Intl.DateTimeFormat('en', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
@@ -36,7 +37,8 @@ export const claimChurchBlessing = (qqUserId: string) => withTransaction(async c
   if (bouquet) await addItem(connection, Number(character.id), 'heart_bouquet', bouquet);
   if (fruit) await addItem(connection, Number(character.id), 'resonance_fruit', fruit);
   await connection.execute(`UPDATE player_daily_blessings SET reward_bouquet_quantity=?,reward_fruit_quantity=? WHERE character_id=? AND business_date=?`, [bouquet, fruit, character.id, date]);
-  await connection.execute(`INSERT INTO player_events (player_id,event_type,payload) VALUES (?,?,?)`, [character.player_id, 'social.blessing.claimed', JSON.stringify({ date, bouquet, fruit, expiresInMinutes: 60 })]);
+  const [event]=await connection.execute<any>(`INSERT INTO player_events (player_id,event_type,payload) VALUES (?,?,?)`, [character.player_id, 'social.blessing.claimed', JSON.stringify({ date, bouquet, fruit, expiresInMinutes: 60 })]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'social.blessing.claimed',source:{system:'church_blessing',id:`${character.id}:${date}`,step:'claimed'},existingEventId:Number(event.insertId),outcome:'祈福',summary:'在教堂完成每日祈福',detail:{date,bouquet,fruit,expiresInMinutes:60}});
   await recalculateCharacterStats(connection, Number(character.id));
   return { bouquet, fruit, expiresInMinutes: 60, isOath: Boolean(oaths[0]) };
 });

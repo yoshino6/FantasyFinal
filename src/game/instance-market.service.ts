@@ -6,6 +6,7 @@ import { marketCharacterFor, marketWeeklySales, marketFeeForSale } from './marke
 import { createCraftRequest, craftRequestFor, completeCraftRequest, craftJson } from './alchemy-journal.service';
 import type { AutomatonState } from './automaton';
 import { recordAutomatonFirstEvent } from './automaton.service';
+import { recordCharacterOperation } from './character-operation.service';
 
 const integer=(value:number)=>{if(!Number.isSafeInteger(value)||value<1||value>99999999)throw new Error('编号或单价须为 1～99999999 的整数。');return value;};
 const release=async(c:PoolConnection,row:RowDataPacket,status:string)=>{
@@ -13,7 +14,7 @@ const release=async(c:PoolConnection,row:RowDataPacket,status:string)=>{
   await c.execute(`UPDATE ${table} SET market_listing_id=NULL WHERE id=? AND market_listing_id=?`,[row.resource_id,row.id]);
   await c.execute('UPDATE market_instance_listings SET status=?,active_instance_id=NULL,active_automaton_id=NULL,settled_at=NOW() WHERE id=?',[status,row.id]);
 };
-const expire=async(c:PoolConnection)=>{const [rows]=await c.execute<RowDataPacket[]>("SELECT * FROM market_instance_listings WHERE status='open' AND expires_at<=NOW() FOR UPDATE");for(const row of rows)await release(c,row,'expired');};
+const expire=async(c:PoolConnection)=>{const [rows]=await c.execute<RowDataPacket[]>("SELECT * FROM market_instance_listings WHERE status='open' AND expires_at<=NOW() FOR UPDATE");for(const row of rows){await release(c,row,'expired');await recordCharacterOperation(c,{characterId:Number(row.seller_id),kind:'instance_market.expired',source:{system:'market_instance_listing',id:Number(row.id),step:'expired'},actorRole:'system',outcome:'到期',summary:`实例寄售「${row.name}」到期`,detail:{listingId:Number(row.id),resourceKind:String(row.kind),resourceId:Number(row.resource_id),price:Number(row.price)}});}};
 export const instanceMarketList=(user:string,page=1,category='全部',keyword='')=>withTransaction(async c=>{
   const categories:Record<string,string>={全部:'全部',装备:'装备',equipment:'装备',异械:'异械',device:'异械',机巧:'机巧',automaton:'机巧',instance:'装备与异械'};
   if(!Object.hasOwn(categories,category))throw new Error('不存在该寄售分类。');category=categories[category];
@@ -56,11 +57,13 @@ export const confirmInstanceMarket=(user:string,token:string)=>withTransaction(a
     const [daily]=await c.execute<RowDataPacket[]>('SELECT COUNT(*) total FROM market_instance_listings WHERE seller_id=? AND kind=? AND resource_id=? AND created_at>=CURDATE()',[characterId,kind,id]);if(Number(daily[0]?.total)>=20)throw new Error('该实例今日发布次数已达20次。');
     const [insert]=await c.execute<ResultSetHeader>('INSERT INTO market_instance_listings(seller_id,kind,resource_id,active_instance_id,active_automaton_id,name,price,snapshot_json,expires_at) VALUES (?,?,?,?,?,?,?,?,DATE_ADD(NOW(),INTERVAL 72 HOUR))',[characterId,kind,id,kind==='instance'?id:null,kind==='automaton'?id:null,r.name,price,JSON.stringify(r.snapshot)]);
     await c.execute(`UPDATE ${kind==='automaton'?'player_automatons':'player_item_instances'} SET market_listing_id=? WHERE id=?`,[insert.insertId,id]);text=`已寄售 ${r.name}，订单 #${insert.insertId}。`;
+    await recordCharacterOperation(c,{characterId,kind:'instance_market.listed',source:{system:'market_instance_listing',id:Number(insert.insertId),step:'listed'},outcome:'发布',summary:`寄售${r.name}`,detail:{listingId:Number(insert.insertId),resourceKind:kind,resourceId:id,price}});
   }else{
     const [rows]=await c.execute<RowDataPacket[]>("SELECT * FROM market_instance_listings WHERE id=? AND status='open' FOR UPDATE",[id]);const row=rows[0];if(!row||Number(row.price)!==price)throw new Error('订单已变化或已成交。');const sellerId=Number(row.seller_id),week=await marketWeeklySales(c,sellerId);
     if(action==='cancel'){
       if(sellerId!==characterId)throw new Error('只能撤回自己的寄售。');const fee=Date.now()-new Date(row.created_at).getTime()<120000?Math.max(1,Math.ceil(price*(week.cancellations>=5?.02:.005))):0;
       const [paid]=await c.execute<ResultSetHeader>('UPDATE characters SET copper_coins=copper_coins-? WHERE id=? AND copper_coins>=?',[fee,characterId,fee]);if(!paid.affectedRows)throw new Error('铜币不足以支付撤单手续费。');await release(c,row,'cancelled');await c.execute('UPDATE market_weekly_volume SET cancellation_count=cancellation_count+1 WHERE character_id=? AND week_key=?',[characterId,week.key]);text=`已撤回 ${row.name}，手续费 ${fee} 铜币，原实例与绑定状态保留。`;
+      await recordCharacterOperation(c,{characterId,kind:'instance_market.cancelled',source:{system:'market_instance_listing',id,step:'cancelled'},outcome:'撤回',summary:`撤回实例寄售「${row.name}」`,detail:{listingId:id,resourceKind:String(row.kind),resourceId:Number(row.resource_id),feeCopper:fee}});
     }else{
       if(sellerId===characterId)throw new Error('不能购买自己的寄售。');
       const [sellers]=await c.execute<RowDataPacket[]>('SELECT created_at FROM characters WHERE id=? FOR UPDATE',[sellerId]);const cap=Date.now()-new Date(sellers[0]!.created_at).getTime()<14*86400000?20000:300000;if(week.gross+price>cap)throw new Error('卖家本周交易额度已满。');
@@ -71,6 +74,8 @@ export const confirmInstanceMarket=(user:string,token:string)=>withTransaction(a
       let achievementItemId=0;if(row.kind!=='automaton'){const [items]=await c.execute<RowDataPacket[]>('SELECT item_id FROM player_item_instances WHERE id=?',[row.resource_id]);achievementItemId=Number(items[0]?.item_id??0);}
       await achievementTrade(c,characterId,sellerId,achievementItemId,price,price-fee,'instance-market:'+token);
       await release(c,row,'filled');await c.execute('UPDATE market_instance_listings SET buyer_id=?,fee=? WHERE id=?',[characterId,fee,id]);await c.execute('UPDATE market_weekly_volume SET gross_sales=gross_sales+?,fee_paid=fee_paid+? WHERE character_id=? AND week_key=?',[price,fee,sellerId,week.key]);text=`已购得 ${row.name}，支付 ${price} 铜币，物品已绑定。`;
+      await recordCharacterOperation(c,{characterId,kind:'instance_market.bought',source:{system:'market_instance_listing',id,step:`bought:${characterId}`},outcome:'成交',summary:`购得实例「${row.name}」`,detail:{listingId:id,resourceKind:String(row.kind),resourceId:Number(row.resource_id),price,feeCopper:fee,counterpartyCharacterId:sellerId}});
+      await recordCharacterOperation(c,{characterId:sellerId,kind:'instance_market.sold',source:{system:'market_instance_listing',id,step:`sold:${sellerId}`},actorRole:'system',outcome:'成交',summary:`售出实例「${row.name}」`,detail:{listingId:id,resourceKind:String(row.kind),resourceId:Number(row.resource_id),grossCopper:price,receivedCopper:price-fee,feeCopper:fee,counterpartyCharacterId:characterId}});
     }
   }
   const result={text};await completeCraftRequest(c,characterId,token,result);return result;

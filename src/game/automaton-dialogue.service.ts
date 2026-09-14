@@ -1,5 +1,7 @@
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { withTransaction } from '../database/pool';
+import { randomUUID } from 'node:crypto';
+import { recordCharacterOperation } from './character-operation.service';
 import { automatonCharacter, automatonFor, automatonIntimacy, saveAutomaton, assertAutomatonSafe, recordAutomatonEvent } from './automaton.service';
 import { craftJson } from './alchemy-journal.service';
 import type { AutomatonState } from './automaton';
@@ -16,10 +18,12 @@ export const prepareAutomatonQuote=async(connection:PoolConnection,id:number,sta
 };
 export const greetAutomaton=(user:string,id:number,key:string,_privateOutput:boolean)=>withTransaction(async connection=>{
   const character=await automatonCharacter(connection,user),{row,state}=await automatonFor(connection,character.id,id);
+  const previousIntimacy=state.intimacy;
   const previousInteraction=state.lastInteractionAt,reunion=Boolean(previousInteraction&&Date.now()-Date.parse(previousInteraction)>=3*86400000);
   if(reunion)await recordAutomatonEvent(connection,id,character.id,`reunion:${previousInteraction}`,'reunion',{name:state.name,absenceDays:Math.floor((Date.now()-Date.parse(previousInteraction!))/86400000)});state.lastInteractionAt=new Date().toISOString();
   await automatonIntimacy(connection,character.id,state,'interaction',id);await saveAutomaton(connection,row,state,false);
   const quote=await prepareAutomatonQuote(connection,id,state,reunion?'reunion':'greeting',key,new Set(reunion?['absence_days_at_least_3']:[]),false);
+  if(state.intimacy>previousIntimacy||quote)await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'automaton.greeted',source:{system:'automaton_greeting',id:key,step:'settled'},outcome:'互动',summary:`与机巧「${state.name}」交谈`,detail:{automatonId:id,intimacyBefore:previousIntimacy,intimacyAfter:state.intimacy,dialogueId:quote?.id??null,reunion}});
   return {quote,name:state.name,note:quote?'':'近期可用语句已用完，它安静地陪在你身旁。'};
 });
 export const reserveDailyAutomaton=(user:string,_privateOutput:boolean)=>withTransaction(async connection=>{
@@ -47,6 +51,7 @@ export const rateAutomatonQuote=(user:string,id:number,quoteId:number,like:boole
   const [old]=await connection.execute<RowDataPacket[]>('SELECT vote FROM automaton_quote_feedback WHERE dialogue_id=? FOR UPDATE',[quoteId]);const vote=like?1:-1;if(Number(old[0]?.vote)===vote)return;
   await connection.execute('INSERT INTO automaton_quote_feedback(dialogue_id,character_id,vote) VALUES(?,?,?) ON DUPLICATE KEY UPDATE vote=VALUES(vote)',[quoteId,character.id,vote]);
   const key=String(quotes[0].quote_id);state.preferences[key]=Math.max(-9,Math.min(40,(state.preferences[key]??0)+vote-Number(old[0]?.vote??0)));await saveAutomaton(connection,row,state,false);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'automaton.quote_rated',source:{system:'automaton_quote_vote',id:randomUUID(),step:'changed'},outcome:like?'喜欢':'不喜欢',summary:`评价机巧「${state.name}」的语录`,detail:{automatonId:id,dialogueId:quoteId,vote,previousVote:old[0]?.vote??null}});
 });
 export const rememberAutomatonQuote=(user:string,id:number,quoteId:number)=>withTransaction(async connection=>{
   const character=await automatonCharacter(connection,user);await automatonFor(connection,character.id,id);
@@ -54,9 +59,10 @@ export const rememberAutomatonQuote=(user:string,id:number,quoteId:number)=>with
   const [old]=await connection.execute<RowDataPacket[]>('SELECT id FROM automaton_memories WHERE automaton_id=? AND dialogue_id=?',[id,quoteId]);if(old.length)return;
   const [count]=await connection.execute<RowDataPacket[]>('SELECT COUNT(*) total FROM automaton_memories WHERE automaton_id=?',[id]);if(Number(count[0]?.total)>=20)throw new Error('最多收藏二十条，请先取消旧收藏。');
   await connection.execute('INSERT INTO automaton_memories(automaton_id,character_id,dialogue_id,text_value) VALUES(?,?,?,?)',[id,character.id,quoteId,quotes[0].text_value]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'automaton.memory_saved',source:{system:'automaton_memory',id:quoteId,step:'saved'},outcome:'收藏',summary:'收藏机巧语录',detail:{automatonId:id,dialogueId:quoteId}});
 });
 export const automatonMemories=(user:string,id:number)=>withTransaction(async connection=>{const character=await automatonCharacter(connection,user);await automatonFor(connection,character.id,id);const [rows]=await connection.execute<RowDataPacket[]>('SELECT * FROM automaton_memories WHERE automaton_id=? AND character_id=? ORDER BY id DESC',[id,character.id]);return rows;});
-export const forgetAutomatonMemory=(user:string,id:number,memoryId:number)=>withTransaction(async connection=>{const character=await automatonCharacter(connection,user);await automatonFor(connection,character.id,id);await connection.execute('DELETE FROM automaton_memories WHERE id=? AND automaton_id=? AND character_id=?',[memoryId,id,character.id]);});
+export const forgetAutomatonMemory=(user:string,id:number,memoryId:number)=>withTransaction(async connection=>{const character=await automatonCharacter(connection,user);await automatonFor(connection,character.id,id);const[deleted]=await connection.execute<any>('DELETE FROM automaton_memories WHERE id=? AND automaton_id=? AND character_id=?',[memoryId,id,character.id]);if(Number(deleted.affectedRows)>0)await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'automaton.memory_forgotten',source:{system:'automaton_memory',id:memoryId,step:'forgotten'},outcome:'取消收藏',summary:'取消收藏机巧语录',detail:{automatonId:id,memoryId}});});
 
 export const acknowledgeAutomatonBattleText=(user:string,text:string)=>withTransaction(async connection=>{
   const character=await automatonCharacter(connection,user);

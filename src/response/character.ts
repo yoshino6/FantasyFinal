@@ -5,6 +5,7 @@ import { experienceRequiredForLevel } from '../game/constants';
 import { messageFormat } from '../game/message';
 import { durationText } from '../game/time-format';
 import { evolutionLabAvailable } from '../game/evolution.service';
+import { pendingHeartQuestionCount } from '../game/heart-question.service';
 
 const elementOrder = ['水', '火', '木', '土', '风', '冰', '雷', '光', '暗'];
 const numberText = (value: number) => Number.isInteger(value) ? String(value) : value.toFixed(1);
@@ -67,7 +68,7 @@ const appendDetails = (markdown: ReturnType<typeof Format.createMarkdown>, chara
   return markdown;
 };
 
-const overviewFormat = (character: CharacterView, evolutionUnlocked: boolean) => {
+const overviewFormat = (character: CharacterView, evolutionUnlocked: boolean, pendingHeartQuestions: number) => {
   const gender = character.gender === '男' ? '♂' : character.gender === '女' ? '♀' : '未设定';
   const experienceNeed = experienceRequiredForLevel(character.level);
   const staminaText = `体力：${Math.round(character.stamina)}/${Math.round(character.staminaMax)}（${character.stamina >= character.staminaMax ? '已回满' : `约${durationText(character.staminaFullSeconds)}后回满`}）`;
@@ -75,7 +76,9 @@ const overviewFormat = (character: CharacterView, evolutionUnlocked: boolean) =>
     .addTitle('我').addNewline().addNewline()
     .addText(`昵称：${character.name}`).addButton('[改名]', { data: '/角色改名 ', autoEnter: false }).addNewline().addNewline()
     .addText(`性别：${gender}`).addButton('[改性]', { data: '/改性 ', autoEnter: false }).addNewline().addNewline()
-    .addText(`等级：Lv${character.level}`).addNewline().addNewline()
+    .addText(`等级：Lv${character.level}`);
+  if (pendingHeartQuestions) markdown.addButton('[窥尘问心]', { data: '/窥尘问心', autoEnter: true });
+  markdown.addNewline().addNewline()
     .addText(`职业：${character.professionName ?? '未选择'}`).addNewline().addNewline()
     .addText(`经验：${character.experience}/${experienceNeed}`).addNewline().addNewline()
     .addText(progressBar(character.experience, experienceNeed)).addNewline().addNewline()
@@ -105,7 +108,8 @@ const loadCharacter = async (message: any, qqUserId: string, detail: boolean) =>
     const character = await getCharacter(qqUserId);
     if (!character) { await message.send({ format: messageFormat('尚未注册', '发送“注册”开始异世界之旅。') }); return; }
     const evolutionUnlocked = detail ? false : await evolutionLabAvailable(qqUserId);
-    await message.send({ format: detail ? detailFormat(character) : overviewFormat(character, evolutionUnlocked) });
+    const pendingHeartQuestions = detail ? 0 : await pendingHeartQuestionCount(qqUserId);
+    await message.send({ format: detail ? detailFormat(character) : overviewFormat(character, evolutionUnlocked, pendingHeartQuestions) });
   } catch (error) {
     logger.error({ err: error, userId: qqUserId }, 'load character failed');
     await message.send({ format: messageFormat('读取失败', '角色数据暂时无法读取，请稍后重试。') });

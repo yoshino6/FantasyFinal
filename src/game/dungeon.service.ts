@@ -2,6 +2,8 @@ import { recordAchievement } from './achievement-events';
 import { armorSetsFor } from './armor-set';
 import { recalculateCharacterStats } from './character.service';
 import { correctedHitChance, strikeCorrections } from './combat-math';
+import { randomUUID } from 'node:crypto';
+import { recordCharacterOperation } from './character-operation.service';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { assertPvpDefeatUnprotected, createPvpBattleLog, finishPvpBattleLog, recordPvpAttack, resolvePvpVictory } from './pvp.service';
@@ -366,6 +368,7 @@ export const enterDungeon = async (qqUserId: string, dungeonId: number) => withT
   const dungeonRegion = await regionId(connection, DUNGEON_REGION_CODE); const [entry] = await connection.execute<DungeonCell[]>('SELECT * FROM dungeon_cells WHERE dungeon_id=? AND cell_type=\'entrance\' LIMIT 1', [dungeonId]);
   if (!entry[0]) throw new Error('这座迷宫的入口结构尚未形成。');
   await connection.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=?,pos_z=? WHERE id=?', [dungeonRegion, entry[0].pos_x, entry[0].pos_y, entry[0].pos_z, character.id]);
+  await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'dungeon.entered', source: { system: 'dungeon_entry', id: randomUUID(), step: 'entered' }, outcome: '进入', summary: `进入地下迷宫 ${dungeonId}`, detail: { dungeonId, x: Number(entry[0].pos_x), y: Number(entry[0].pos_y), z: Number(entry[0].pos_z) } });
   return { dungeonId, x: Number(entry[0].pos_x), y: Number(entry[0].pos_y), z: Number(entry[0].pos_z) };
 });
 
@@ -386,13 +389,16 @@ const eventForCell = async (connection: PoolConnection, character: CharacterRow)
   if (!Number(trigger.affectedRows)) return null;
   if (cell.trap_type === '毒针') {
     const damage = Math.max(1, Math.ceil(Number(character.hp_max) * .08)); await connection.execute('UPDATE characters SET current_hp=GREATEST(1,current_hp-?) WHERE id=?', [damage, character.id]);
+    await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'dungeon.trap_triggered', source: { system: 'dungeon_cell', id: Number(cell.id), step: 'triggered' }, outcome: '触发', summary: '触发毒针陷阱', detail: { dungeonId: Number(cell.dungeon_id), cellId: Number(cell.id), trapType: '毒针', damage } });
     return { kind: 'trap' as const, text: withLandmark(`$毒针陷阱$石缝中弹出毒针，造成 ${damage} 点伤害。`) };
   }
   if (cell.trap_type === '吸魔符文') {
     const loss = Math.max(1, Math.ceil(Number(character.mp_max) * .18)); await connection.execute('UPDATE characters SET current_mp=GREATEST(0,current_mp-?) WHERE id=?', [loss, character.id]);
+    await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'dungeon.trap_triggered', source: { system: 'dungeon_cell', id: Number(cell.id), step: 'triggered' }, outcome: '触发', summary: '触发吸魔符文', detail: { dungeonId: Number(cell.dungeon_id), cellId: Number(cell.id), trapType: '吸魔符文', manaLoss: loss } });
     return { kind: 'trap' as const, text: withLandmark(`$吸魔符文$脚下的符文亮起，流失 ${loss} 点魔力。`) };
   }
   const damage = Math.max(1, Math.ceil(Number(character.hp_max) * .05)); await connection.execute('UPDATE characters SET current_hp=GREATEST(1,current_hp-?) WHERE id=?', [damage, character.id]);
+  await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'dungeon.trap_triggered', source: { system: 'dungeon_cell', id: Number(cell.id), step: 'triggered' }, outcome: '触发', summary: '触发坍塌地砖', detail: { dungeonId: Number(cell.dungeon_id), cellId: Number(cell.id), trapType: '坍塌地砖', damage } });
   return { kind: 'trap' as const, text: withLandmark(`$坍塌地砖$碎石自头顶坠落，造成 ${damage} 点伤害。`) };
 };
 
@@ -435,6 +441,7 @@ export const openDungeonChest = async (qqUserId: string, cellId: number) => with
       }
     }
   }
+  await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'dungeon.chest_opened', source: { system: 'dungeon_cell', id: Number(cell.id), step: 'chest_opened' }, outcome: '开启', summary: `开启${quality}迷宫宝箱`, detail: { dungeonId: Number(cell.dungeon_id), cellId: Number(cell.id), quality, copper, silver, gold, itemCode, itemName: item[0]?.name ?? '未知材料', quantity, blueprintName: blueprintName ?? null } });
   return { quality, copper, silver, gold, name: item[0]?.name ?? '未知材料', quantity, blueprintName };
 });
 
@@ -453,6 +460,7 @@ export const changeDungeonFloor = async (qqUserId: string, direction: 'down' | '
       usedTeleporter = true;
     }
     await connection.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=?,pos_z=0 WHERE id=?', [dungeon.entrance_region_id, dungeon.entrance_x, dungeon.entrance_y, character.id]);
+    await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'dungeon.left', source: { system: 'dungeon_visit', id: randomUUID(), step: 'left' }, outcome: '离开', summary: `离开地下迷宫 ${dungeon.id}`, detail: { dungeonId: Number(dungeon.id), usedTeleporter } });
     return { action: 'leave' as const, x: Number(dungeon.entrance_x), y: Number(dungeon.entrance_y), z: 0, usedTeleporter };
   }
   const expected = direction === 'down' ? 'stairs_down' : 'stairs_up'; if (cell.cell_type !== expected) throw new Error(direction === 'down' ? '这里没有通向下一层的石阶。' : '这里没有通向上一层的石阶。');
@@ -476,6 +484,7 @@ export const changeDungeonFloor = async (qqUserId: string, direction: 'down' | '
   const targetZ = Number(character.pos_z) + (direction === 'down' ? -10 : 10); const targetType = direction === 'down' ? 'stairs_up' : Number(targetZ) === -10 ? 'entrance' : 'stairs_down';
   const [target] = await connection.execute<DungeonCell[]>('SELECT * FROM dungeon_cells WHERE dungeon_id=? AND pos_z=? AND cell_type=? LIMIT 1', [dungeon.id, targetZ, targetType]); if (!target[0]) throw new Error('楼层之间的石阶已经坍塌。');
   await connection.execute('UPDATE characters SET pos_x=?,pos_y=?,pos_z=? WHERE id=?', [target[0].pos_x, target[0].pos_y, target[0].pos_z, character.id]);
+  await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'dungeon.floor_changed', source: { system: 'dungeon_floor_visit', id: randomUUID(), step: direction }, outcome: direction === 'down' ? '下楼' : '上楼', summary: `地下迷宫${direction === 'down' ? '下至' : '返回'} ${Math.abs(targetZ) / 10} 层`, detail: { dungeonId: Number(dungeon.id), fromZ: Number(character.pos_z), toZ: targetZ, direction } });
   return { action: direction, x: Number(target[0].pos_x), y: Number(target[0].pos_y), z: Number(target[0].pos_z) };
 });
 

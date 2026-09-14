@@ -1,4 +1,6 @@
 import { fixedTalentMaterials, consumeTalentMaterial, recordTalentProduct } from './talent-production';
+import { randomUUID } from 'node:crypto';
+import { recordCharacterOperation } from './character-operation.service';
 import { grantInventory, productionBinding, type Binding } from './inventory-binding';
 import { shopProgressFor, currentSecondaryShop } from './secondary-shop-context';
 import type { RowDataPacket,PoolConnection } from 'mysql2/promise';
@@ -17,7 +19,9 @@ export const useForgeRepairKit=async(user:string,instanceId:number)=>withTransac
   const[kits]=await connection.execute<RowDataPacket[]>("SELECT pi.item_id FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.code='forge_repair_kit' AND pi.quantity>0 FOR UPDATE",[id]);if(!kits[0])throw new Error('需要锻造维修包×1，可在铁匠铺购买成品或由锻造师制作。');
   await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=?',[id,kits[0].item_id]);
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND quantity<=0',[id]);
-  await connection.execute('UPDATE player_item_instances SET durability=durability_max WHERE id=? AND character_id=?',[instanceId,id]);return String(item.name);
+  await connection.execute('UPDATE player_item_instances SET durability=durability_max WHERE id=? AND character_id=?',[instanceId,id]);
+  await recordCharacterOperation(connection,{characterId:id,kind:'craft.equipment_repaired',source:{system:'equipment_repair',id:randomUUID(),step:'settled'},outcome:'修复',summary:`使用维修包修复${item.name}`,detail:{instanceId,itemName:String(item.name),beforeDurability:Number(item.durability),afterDurability:Number(item.durability_max)}});
+  return String(item.name);
 });
 export const craftForgeRepairKit=async(user:string)=>withTransaction(async connection=>{
   const id=await craftCharacterId(connection,user,true);await outsideBattle(connection,id);
@@ -28,4 +32,5 @@ export const craftForgeRepairKit=async(user:string)=>withTransaction(async conne
   const[definitions]=await connection.execute<RowDataPacket[]>("SELECT id FROM item_definitions WHERE code='forge_repair_kit'");if(!definitions[0])throw new Error('维修包尚未初始化。');
   await grantInventory(connection,id,Number(definitions[0].id),productionBinding(binding,1,true));if(!currentSecondaryShop())await recordTalentProduct(connection,id,Number(definitions[0].id),1);await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND quantity<=0',[id]);
   await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)',[id,definitions[0].id]);
+  await recordCharacterOperation(connection,{characterId:id,kind:'craft.repair_kit_made',source:{system:'repair_kit_craft',id:randomUUID(),step:'settled'},outcome:'制成',summary:'制作锻造维修包',detail:{itemId:Number(definitions[0].id),quantity:1,paidCopper:10}});
 });

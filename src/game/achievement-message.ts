@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { Format } from 'alemonjs';
 import type { AchievementEntry } from './achievement.service';
-import { achievementBoxes, type AchievementBoxKey } from './achievement-rewards.config';
+import { achievementBoxes, achievementBoxRewardForRarity, type AchievementBoxKey } from './achievement-rewards.config';
 import { createFormatWithoutGroupMention } from '../middleware/group-reply-mention';
-export const achievementAnnouncementFormat=(entry:{winner:string;winners?:string[];name:string;description:string})=>{
+export const achievementAnnouncementFormat=(entry:{winner:string;winners?:string[];name:string;description:string;rarity?:string})=>{
+  const reward=achievementBoxRewardForRarity(entry.rarity??'稀有');
   const md=Format.createMarkdown().addTitle('世界的回响').addNewline().addNewline();
   md.addText(`${(entry.winners?.length?entry.winners:[entry.winner]).map(name=>`【${name}】`).join('、')}达成`).addNewline().addNewline()
     .addText(entry.name).addNewline().addNewline().addBlockquote(`${entry.description}\n>\n>`).addNewline().addNewline()
-    .addText('获得：奇珍道具匣 ×1').addNewline().addNewline();
+    .addText(`获得：${achievementBoxes[reward.key].name} ×${reward.quantity}`).addNewline().addNewline();
   return createFormatWithoutGroupMention().addMarkdown(md);
 };
 const numbers='①②③④⑤⑥⑦⑧⑨⑩';

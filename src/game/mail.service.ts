@@ -1,6 +1,7 @@
 import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { requireAdministrator } from './permission.service';
+import { recordCharacterOperation } from './character-operation.service';
 
 const PAGE_SIZE = 5;
 type Connection = PoolConnection | Awaited<ReturnType<typeof getPool>>;
@@ -102,6 +103,7 @@ const claimMailForCharacter = async (connection: PoolConnection, characterId: nu
     await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [characterId, attachment.id]);
   }
   await connection.execute('UPDATE player_mails SET claimed_at=NOW() WHERE id=?', [mail.id]);
+  await recordCharacterOperation(connection,{characterId,kind:'mail.attachments_claimed',source:{system:'player_mail',id:Number(mail.id),step:'claimed'},outcome:'领取',summary:`领取邮件 ${mail.id} 的附件`,detail:{mailId:Number(mail.id),items:attachments.map(item=>({itemId:Number(item.id),name:item.name,quantity:Number(item.quantity)}))}});
   return { items: attachments.map(item => ({ name: item.name, quantity: Number(item.quantity) })) };
 };
 
@@ -132,6 +134,7 @@ export const deleteMail = async (qqUserId: string, mailId: number) => withTransa
   const [attachmentRows] = await connection.execute<(RowDataPacket & { total: number })[]>('SELECT COUNT(*) AS total FROM player_mail_attachments WHERE mail_id=?', [mail.id]);
   if (!mail.claimed_at && Number(attachmentRows[0]?.total ?? 0) > 0) throw new Error('请先领取附件，再删除邮件。');
   await connection.execute('UPDATE player_mails SET deleted_at=NOW() WHERE id=?', [mail.id]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'mail.deleted',source:{system:'player_mail',id:Number(mail.id),step:'deleted'},outcome:'删除',summary:`删除邮件 ${mail.id}`,detail:{mailId:Number(mail.id),hadAttachments:Number(attachmentRows[0]?.total??0)>0}});
 });
 
 export const sendAdminItemMail = async (adminQqUserId: string, targetQqUserId: string, itemKey: string, quantity: number, title?: string) => withTransaction(async connection => {

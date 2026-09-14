@@ -192,7 +192,7 @@ const schemaStatements = [
   `CREATE TABLE IF NOT EXISTS characters (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, player_id BIGINT UNSIGNED NULL, npc_id BIGINT UNSIGNED NULL, npc_code VARCHAR(64) NULL, name VARCHAR(24) NOT NULL,
     gender VARCHAR(8) NOT NULL DEFAULT '未设定', free_name_change_used TINYINT(1) NOT NULL DEFAULT 0, free_gender_change_used TINYINT(1) NOT NULL DEFAULT 0,
-    level INT UNSIGNED NOT NULL DEFAULT 1, experience BIGINT UNSIGNED NOT NULL DEFAULT 0, realm_stage TINYINT UNSIGNED NOT NULL DEFAULT 1, skill_points INT UNSIGNED NOT NULL DEFAULT 1, copper_coins BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    level INT UNSIGNED NOT NULL DEFAULT 1, experience BIGINT UNSIGNED NOT NULL DEFAULT 0, realm_stage TINYINT UNSIGNED NOT NULL DEFAULT 1, skill_points INT UNSIGNED NOT NULL DEFAULT 1, copper_coins BIGINT UNSIGNED NOT NULL DEFAULT 0, guild_contribution BIGINT UNSIGNED NOT NULL DEFAULT 0,
     stamina SMALLINT UNSIGNED NOT NULL DEFAULT 120, stamina_updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     constitution SMALLINT UNSIGNED NOT NULL, spirit SMALLINT UNSIGNED NOT NULL, strength SMALLINT UNSIGNED NOT NULL,
     intelligence SMALLINT UNSIGNED NOT NULL, agility SMALLINT UNSIGNED NOT NULL, perception SMALLINT UNSIGNED NOT NULL,
@@ -214,11 +214,56 @@ const schemaStatements = [
     CONSTRAINT fk_character_player FOREIGN KEY (player_id) REFERENCES players(id),
     CONSTRAINT fk_character_region FOREIGN KEY (current_region_id) REFERENCES map_regions(id)
   ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS character_heart_growth (
+    character_id BIGINT UNSIGNED NOT NULL,
+    birth_json JSON NOT NULL, delta_json JSON NOT NULL, offset_json JSON NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (character_id), CONSTRAINT fk_heart_growth_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS character_heart_questions (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, character_id BIGINT UNSIGNED NOT NULL, to_level INT UNSIGNED NOT NULL,
+    event_code VARCHAR(16) NOT NULL, event_snapshot JSON NOT NULL,
+    status ENUM('active','queued','deferred','answered') NOT NULL DEFAULT 'queued',
+    choice_code CHAR(1) NULL, result_json JSON NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    answered_at DATETIME NULL,
+    PRIMARY KEY (id), UNIQUE KEY uk_heart_character_level (character_id,to_level),
+    KEY idx_heart_pending (character_id,status,id),
+    CONSTRAINT fk_heart_question_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`,
   `CREATE TABLE IF NOT EXISTS player_events (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, player_id BIGINT UNSIGNED NOT NULL, event_type VARCHAR(64) NOT NULL, payload JSON NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    character_id BIGINT UNSIGNED NULL, root_event_id BIGINT UNSIGNED NULL, kind_version SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+    source_system VARCHAR(64) NULL, source_id VARCHAR(255) NULL, source_step VARCHAR(64) NULL, source_hash CHAR(64) NULL,
+    correlation_id VARCHAR(64) NULL, actor_role ENUM('player','system','admin') NULL, outcome VARCHAR(32) NULL,
+    title VARCHAR(128) NULL, summary VARCHAR(500) NULL, weight_json JSON NULL,
+    raw_points_units INT UNSIGNED NOT NULL DEFAULT 0, effective_points_units INT UNSIGNED NOT NULL DEFAULT 0,
+    point_delta_json JSON NULL, score_key VARCHAR(128) NULL, score_reason VARCHAR(48) NULL,
+    mapping_status ENUM('mapped','unmapped','legacy') NOT NULL DEFAULT 'legacy', business_date DATE NULL,
+    occurred_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3), created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id), KEY idx_player_events_player_created (player_id, created_at),
-    CONSTRAINT fk_event_player FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
+    UNIQUE KEY uk_player_events_character_source (character_id,source_hash),
+    KEY idx_player_events_character_time (character_id,occurred_at,id),
+    KEY idx_player_events_character_kind (character_id,event_type,occurred_at,id),
+    KEY idx_player_events_character_score (character_id,event_type,business_date,score_key),
+    CONSTRAINT fk_event_player FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE,
+    CONSTRAINT fk_player_event_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS character_tendency_balances (
+    character_id BIGINT UNSIGNED NOT NULL, earned_json JSON NOT NULL, spent_json JSON NOT NULL,
+    mutation_json JSON NOT NULL, version INT UNSIGNED NOT NULL DEFAULT 0,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (character_id),
+    CONSTRAINT fk_tendency_balance_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`,
+  `CREATE TABLE IF NOT EXISTS character_tendency_changes (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, character_id BIGINT UNSIGNED NOT NULL,
+    fact_id BIGINT UNSIGNED NULL, change_kind ENUM('earn','claim') NOT NULL,
+    attribute_key VARCHAR(24) NULL, delta_json JSON NOT NULL, before_json JSON NOT NULL, after_json JSON NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id), UNIQUE KEY uk_tendency_fact (fact_id),
+    KEY idx_tendency_change_character (character_id,id),
+    CONSTRAINT fk_tendency_change_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
+    CONSTRAINT fk_tendency_change_fact FOREIGN KEY (fact_id) REFERENCES player_events(id) ON DELETE CASCADE
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_story_progress (
     character_id BIGINT UNSIGNED NOT NULL, story_code VARCHAR(64) NOT NULL, status ENUM('met','joined','declined','completed') NOT NULL DEFAULT 'met', stage TINYINT UNSIGNED NOT NULL DEFAULT 1,
@@ -713,7 +758,7 @@ const schemaStatements = [
     PRIMARY KEY (id), UNIQUE KEY uk_bounty_refresh_target (refresh_key,target_template_id), KEY idx_bounty_active (is_active,expires_at)
   ) ENGINE=InnoDB`
   , `CREATE TABLE IF NOT EXISTS player_bounties (
-    character_id BIGINT UNSIGNED NOT NULL, bounty_id BIGINT UNSIGNED NOT NULL, progress SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    character_id BIGINT UNSIGNED NOT NULL, bounty_id BIGINT UNSIGNED NOT NULL, instance_key CHAR(36) NOT NULL DEFAULT '', progress SMALLINT UNSIGNED NOT NULL DEFAULT 0,
     status ENUM('accepted','completed','claimed') NOT NULL DEFAULT 'accepted', accepted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     completed_at DATETIME NULL, claimed_at DATETIME NULL,
     PRIMARY KEY (character_id,bounty_id), KEY idx_player_bounty_status (character_id,status),
@@ -1340,6 +1385,38 @@ const seedEpicForgeContent = async (pool: Pool) => {
 
 export const initializeSchema = async (pool: Pool) => {
   for (const statement of schemaStatements) await pool.query(statement);
+  const [playerEventColumns] = await pool.execute<(RowDataPacket & { Field: string })[]>('SHOW COLUMNS FROM player_events');
+  const existingPlayerEventColumns = new Set(playerEventColumns.map(row => row.Field));
+  for (const column of [
+    'character_id BIGINT UNSIGNED NULL', 'root_event_id BIGINT UNSIGNED NULL', 'kind_version SMALLINT UNSIGNED NOT NULL DEFAULT 1',
+    'source_system VARCHAR(64) NULL', 'source_id VARCHAR(255) NULL', 'source_step VARCHAR(64) NULL', 'source_hash CHAR(64) NULL',
+    'correlation_id VARCHAR(64) NULL', "actor_role ENUM('player','system','admin') NULL", 'outcome VARCHAR(32) NULL',
+    'title VARCHAR(128) NULL', 'summary VARCHAR(500) NULL', 'weight_json JSON NULL',
+    'raw_points_units INT UNSIGNED NOT NULL DEFAULT 0', 'effective_points_units INT UNSIGNED NOT NULL DEFAULT 0',
+    'point_delta_json JSON NULL', 'score_key VARCHAR(128) NULL', 'score_reason VARCHAR(48) NULL',
+    "mapping_status ENUM('mapped','unmapped','legacy') NOT NULL DEFAULT 'legacy'", 'business_date DATE NULL',
+    'occurred_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)'
+  ]) {
+    const name = column.split(' ')[0];
+    if (!existingPlayerEventColumns.has(name)) await pool.query(`ALTER TABLE player_events ADD COLUMN ${column}`);
+  }
+  const [playerEventIndexes] = await pool.execute<(RowDataPacket & { Key_name: string })[]>('SHOW INDEX FROM player_events');
+  const existingPlayerEventIndexes = new Set(playerEventIndexes.map(row => row.Key_name));
+  for (const index of [
+    'UNIQUE KEY uk_player_events_character_source (character_id,source_hash)',
+    'KEY idx_player_events_character_time (character_id,occurred_at,id)',
+    'KEY idx_player_events_character_kind (character_id,event_type,occurred_at,id)',
+    'KEY idx_player_events_character_score (character_id,event_type,business_date,score_key)'
+  ]) {
+    const name = index.match(/^(?:UNIQUE )?KEY (\S+)/)?.[1];
+    if (!name) throw new Error(`无法识别玩家事件索引：${index}`);
+    if (!existingPlayerEventIndexes.has(name)) await pool.query(`ALTER TABLE player_events ADD ${index}`);
+  }
+  const [playerEventConstraints] = await pool.execute<(RowDataPacket & { CONSTRAINT_NAME: string })[]>("SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='player_events' AND CONSTRAINT_NAME='fk_player_event_character' AND CONSTRAINT_TYPE='FOREIGN KEY'");
+  if (!playerEventConstraints.length) await pool.query('ALTER TABLE player_events ADD CONSTRAINT fk_player_event_character FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE');
+  const [bountyColumns] = await pool.execute<(RowDataPacket & { Field: string })[]>('SHOW COLUMNS FROM player_bounties');
+  if (!bountyColumns.some(row => row.Field === 'instance_key')) await pool.query("ALTER TABLE player_bounties ADD COLUMN instance_key CHAR(36) NOT NULL DEFAULT '' AFTER bounty_id");
+  await pool.query("UPDATE player_bounties SET instance_key=UUID() WHERE instance_key=''");
   await (await import('./achievements')).initializeAchievements(pool);
   await(await import('../game/talent-data')).initializeTalentPersistence(pool);
   await(await import('./talent-codes')).migrateTalentCodes(pool);
@@ -1521,6 +1598,7 @@ export const initializeSchema = async (pool: Pool) => {
   for (const column of ['skill_points INT UNSIGNED NOT NULL DEFAULT 1']) {
     try { await pool.query(`ALTER TABLE characters ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   }
+  try { await pool.query('ALTER TABLE characters ADD COLUMN guild_contribution BIGINT UNSIGNED NOT NULL DEFAULT 0'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   try { await pool.query('ALTER TABLE characters ADD COLUMN realm_stage TINYINT UNSIGNED NOT NULL DEFAULT 1 AFTER experience'); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
   for (const column of ['stamina SMALLINT UNSIGNED NOT NULL DEFAULT 120', 'stamina_updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP']) {
     try { await pool.query(`ALTER TABLE characters ADD COLUMN ${column}`); } catch (error: any) { if (error?.code !== 'ER_DUP_FIELDNAME') throw error; }
@@ -2410,9 +2488,10 @@ export const initializeSchema = async (pool: Pool) => {
   await pool.query(`UPDATE skill_definitions SET category='bound',skill_kind='绑定',range_type='自身',learn_cost=0,upgrade_cost=1,max_level=13,power_per_level=0,passive_effect_json=JSON_OBJECT('revealMonsterTraits',true,'unlockMonsterDetail',true),description='降临异世界时由女神授予的通用绑定能力，初始 Lv.1，无需学习。后续须自行消耗技能点升级慧眼与识珠：慧眼每升一级可额外鉴识高于自身 3 级的目标；识珠可逐步解锁更多情报。' WHERE code='appraisal'`);
   await pool.query(`UPDATE skill_definitions SET category='bound',skill_kind='绑定',range_type='自身' WHERE code IN ('longsword_mastery','shield_mastery','staff_mastery','spellbook_mastery','orb_mastery','dagger_mastery','fistblade_mastery','craftsmanship')`);
   await pool.query(`UPDATE player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id SET ps.passive_linked=0,ps.quick_slot=NULL WHERE s.category='bound'`);
+  // 初始天赋只由 player_blessings 保存并由各结算服务读取；清理旧版技能镜像，避免它出现在技能栏或未学习列表。
+  await pool.query(`DELETE ps FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE s.code LIKE CONCAT('talent',CHAR(95),'%')`);
+  await pool.query(`DELETE d FROM player_skill_discoveries d JOIN skill_definitions s ON s.id=d.skill_id WHERE s.code LIKE CONCAT('talent',CHAR(95),'%')`);
   await pool.query(`UPDATE skill_definitions SET codex_id=CONCAT(CASE category WHEN 'physical' THEN '41' WHEN 'magic' THEN '42' ELSE '49' END, CASE WHEN id>=100000 THEN CAST(id AS CHAR) ELSE LPAD(id,5,'0') END) WHERE codex_id IS NULL`);
-  await pool.query(`INSERT IGNORE INTO player_skills (character_id,skill_id)
-    SELECT b.character_id,s.id FROM player_blessings b JOIN skill_definitions s ON s.code=b.code AND s.category='bound'`);
   // 仅补齐缺少基础鉴识的角色；重复初始化不得覆盖已付费提升的技能与专精等级。
   await pool.query(`INSERT IGNORE INTO player_skills (character_id,skill_id,level,passive_linked)
     SELECT c.id,s.id,1,0 FROM characters c JOIN skill_definitions s ON s.code='appraisal'
@@ -2641,7 +2720,7 @@ export const initializeSchema = async (pool: Pool) => {
     ((SELECT id FROM map_regions WHERE code='baina_town'), 'oddworkshop', '异工坊', '异工坊的门牌歪斜地挂在墙上，屋内不时传出弹簧、齿轮与不明小玩意的清脆响动。', 'building', 6, -189, 0),
     ((SELECT id FROM map_regions WHERE code='baina_town'), 'bookshop', '百味书屋', '三层高的书屋挤满了书架与求知的人。窗边一位白须老人正抱着厚重的百科全书，逐字细读。', 'building', 14, -176, 0),
     ((SELECT id FROM map_regions WHERE code='baina_town'), 'baina_residence', '百纳居', '挂着木材与石料样本的生活工坊，负责出售建材、兑换锻材并协助冒险者安置小屋。', 'building', 7, -166, 0),
-    ((SELECT id FROM map_regions WHERE code='baina_town'), 'world_gate', '界门驿站', '银蓝色的界门静静立在圆形大厅中央，负责将持有通行资格的旅人送往远方。', 'building', 14, -167, 0),
+    ((SELECT id FROM map_regions WHERE code='baina_town'), 'world_gate', '界门驿站', '银蓝色的界门静静立在圆形大厅中央，旅人可以经此自由往返百纳镇与世界树。', 'building', 14, -167, 0),
     ((SELECT id FROM map_regions WHERE code='world_tree'), 'world_tree_gate', '世界树界门', '由巨根与叶脉光纹共同构成的归途界门，门内隐约映着百纳镇的灯火。', 'building', 2, -2, 0),
     ((SELECT id FROM map_regions WHERE code='world_tree'), 'canopy_exchange', '万叶联市', '世界树下没有城墙的交易所。商人循着叶脉光流交换来自各地的契约与奇物。', 'building', 4, 2, 0),
     ((SELECT id FROM map_regions WHERE code='world_tree'), 'world_library', '世界图书馆', '依附在世界树枝冠间的宏伟图书馆。大厅、阅览室、资料室与无尽回廊收藏着漫长岁月的知识。', 'building', -4, 5, 0),
@@ -3625,6 +3704,22 @@ export const initializeSchema = async (pool: Pool) => {
     for (const character of characters) await recalculateCharacterStats(pool, Number(character.id));
     await pool.execute("INSERT IGNORE INTO game_data_migrations (code) VALUES ('weapon_mastery_panel_recalculation_v3')");
   }
+  // 同类型双持专精由仅取主手改为主副手相加；为已装备的玩家刷新缓存面板。
+  const [dualMasteryMigration] = await pool.query("SELECT 1 FROM game_data_migrations WHERE code='dual_weapon_mastery_panel_recalculation_v1' LIMIT 1") as unknown as [[{ 1: number }]];
+  if (!dualMasteryMigration.length) {
+    const [activeBattles] = await pool.query("SELECT 1 FROM combat_sessions WHERE state='active' UNION ALL SELECT 1 FROM player_pvp_battle_sessions WHERE state='active' LIMIT 1") as unknown as [[{ 1: number }]];
+    // 保留未完成标记，等无活动战斗的下次初始化再重算，避免改写战斗中的缓存面板。
+    if (!activeBattles.length) {
+      const [characters] = await pool.query(`SELECT c.id FROM characters c
+        JOIN player_equipment main ON main.character_id=c.id AND main.slot='weapon'
+        JOIN player_equipment offhand ON offhand.character_id=c.id AND offhand.slot='offhand'
+        JOIN item_definitions primary_item ON primary_item.id=main.item_id
+        JOIN item_definitions secondary_item ON secondary_item.id=offhand.item_id
+        WHERE c.npc_code IS NULL AND primary_item.weapon_type IS NOT NULL AND primary_item.weapon_type=secondary_item.weapon_type`) as unknown as [[{ id: number }]];
+      for (const character of characters) await recalculateCharacterStats(pool, Number(character.id));
+      await pool.execute("INSERT IGNORE INTO game_data_migrations (code) VALUES ('dual_weapon_mastery_panel_recalculation_v1')");
+    }
+  }
   // 二转固有被动中的无条件人物属性已改为在派生面板缓存；为既有角色执行一次重算。
   const [advancedPassivePanelMigration] = await pool.query("SELECT 1 FROM game_data_migrations WHERE code='advanced_passive_panel_recalculation_v1' LIMIT 1") as unknown as [[{ 1: number }]];
   if (!advancedPassivePanelMigration.length) {
@@ -3644,5 +3739,7 @@ export const initializeSchema = async (pool: Pool) => {
   await (await import('./lamplight')).initializeLamplight(pool);
   await (await import('./achievements')).seedAchievementProfiles(pool);
   await migrateEquipmentVitalAffixes(pool, recalculateCharacterStats);
+  await (await import('./skill-access')).initializeSkillAccess(pool);
   await refreshShopStocks(pool);
+  await (await import('./finance')).initializeFinance(pool);
 };

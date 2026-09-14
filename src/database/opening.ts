@@ -1,6 +1,6 @@
 import { forgedPrimaryStats } from '../game/constants';
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
-import { openingRouteVersions, talentDefinitions } from '../game/opening-content';
+import { openingRouteVersions } from '../game/opening-content';
 import { openingHubs, openingSpawnRegions, openingStartRouteCodes } from '../game/opening-world.config';
 import { talentSchema } from '../game/talent-data';
 import { openingRouteDrawSchema } from '../game/opening-route-draw';
@@ -58,9 +58,6 @@ export const initializeOpening = async (pool: Pool) => {
   const spawnCodes = Object.keys(openingSpawnRegions);
   await pool.execute('UPDATE map_regions SET newbie_spawn_enabled=0 WHERE newbie_spawn_enabled<>0');
   await pool.execute(`UPDATE map_regions SET newbie_spawn_enabled=1 WHERE code IN (${spawnCodes.map(() => '?').join(',')})`, spawnCodes);
-  for (const skill of talentDefinitions) await pool.execute(`INSERT INTO skill_definitions (code,name,description,category,learn_cost,upgrade_cost,max_level,power_per_level,skill_kind,range_type,passive_effect_json)
-    VALUES (?,?,?,'bound',99,99,1,0,'绑定','自身',?) ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),category=VALUES(category),learn_cost=VALUES(learn_cost),upgrade_cost=VALUES(upgrade_cost),max_level=VALUES(max_level),power_per_level=VALUES(power_per_level),skill_kind=VALUES(skill_kind),range_type=VALUES(range_type),passive_effect_json=VALUES(passive_effect_json)`,
-  [skill.code, skill.name, skill.description, JSON.stringify({ openingTalent: skill.number })]);
   const item = async (code: string, name: string, description: string, category: string, effect: object) => pool.execute(`INSERT INTO item_definitions (code,name,description,obtain_source,item_type,item_category,weight,trade_price,is_tradeable,effect_json)
     VALUES (?,?,?,'初行剧情','consumable',?,0,0,0,?) ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),effect_json=VALUES(effect_json)`, [code,name,description,category,JSON.stringify(effect)]);
   const directRewards=new Set(['F01-A','F01-B','F02-A','S03-A','S03-B']);

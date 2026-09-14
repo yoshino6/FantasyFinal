@@ -1,7 +1,9 @@
 import { achievementSocialPair } from './achievement-state';
 import { randomUUID } from 'node:crypto';
 import { recordAchievement } from './achievement-events';
-import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
+import { recordCharacterOperation } from './character-operation.service';
+import { characterOperationKinds } from './character-operation-kinds';
+import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { withTransaction } from '../database/pool';
 import {
   AFFINITY_REQUEST_TTL_MINUTES, BOUQUET_DAILY_LIMIT, FRIEND_GIFT_DAILY_LIMIT,
@@ -80,12 +82,17 @@ export const isFriendRelation = async (connection: PoolConnection, leftId: numbe
   return Boolean(rows[0]);
 };
 const eventFor = async (connection: PoolConnection, actor: CharacterRow, eventType: string, payload: Record<string, unknown>, target?: CharacterRow) => {
-  await connection.execute('INSERT INTO player_events (player_id,event_type,payload) VALUES (?, ?, ?)', [actor.player_id, eventType, JSON.stringify({ ...payload, targetCharacterId: target?.id ?? null })]);
+  const title = characterOperationKinds[eventType]?.title ?? '社交关系变化';
+  const [actorEvent] = await connection.execute<ResultSetHeader>('INSERT INTO player_events (player_id,event_type,payload) VALUES (?, ?, ?)', [actor.player_id, eventType, JSON.stringify({ ...payload, targetCharacterId: target?.id ?? null })]);
+  await recordCharacterOperation(connection, { characterId: Number(actor.id), kind: eventType, existingEventId: Number(actorEvent.insertId), source: { system: 'social_event', id: Number(actorEvent.insertId), step: 'actor' }, outcome: '已发生', summary: `${title}：${target?.name ?? '相关人物'}`, detail: { ...payload, targetCharacterId: target?.id ?? null, targetName: target?.name ?? null }, scoreKey: target ? `social:${target.id}` : undefined });
   const metric: Record<string,string>={'social.friend.accepted':'ACH_G13','social.oath.started':'ACH_G17','social.oath.memory':'ACH_G18'};
   if(metric[eventType]) { recordAchievement(connection,Number(actor.id),[metric[eventType]]);if(target)recordAchievement(connection,Number(target.id),[metric[eventType]]); }
   if(eventType==='social.oath.memory'&&target)await achievementSocialPair(connection,Number(actor.id),Number(target.id),'oath',randomUUID());
   if(eventType==='social.affinity_gift')recordAchievement(connection,Number(actor.id),['ACH_G16']);
-  if (target) await connection.execute('INSERT INTO player_events (player_id,event_type,payload) VALUES (?, ?, ?)', [target.player_id, eventType, JSON.stringify({ ...payload, actorCharacterId: actor.id })]);
+  if (target) {
+    const [targetEvent] = await connection.execute<ResultSetHeader>('INSERT INTO player_events (player_id,event_type,payload) VALUES (?, ?, ?)', [target.player_id, eventType, JSON.stringify({ ...payload, actorCharacterId: actor.id })]);
+    await recordCharacterOperation(connection, { characterId: Number(target.id), kind: eventType, existingEventId: Number(targetEvent.insertId), source: { system: 'social_event', id: Number(targetEvent.insertId), step: 'recipient' }, actorRole: 'system', outcome: '收到', summary: `${title}：${actor.name}`, detail: { ...payload, actorCharacterId: actor.id, actorName: actor.name } });
+  }
 };
 
 const ensureFriend = (relationship: RelationshipRow | null) => {
@@ -138,6 +145,9 @@ export const rejectFriendRequest = (qqUserId: string, requestId: number) => with
   const actor = await characterFor(connection, qqUserId, true);
   const [result] = await connection.execute<any>(`UPDATE player_friend_requests SET status='rejected',responded_at=NOW() WHERE id=? AND target_character_id=? AND status='pending'`, [requestId, actor.id]);
   if (!Number(result.affectedRows)) throw new Error('好友申请不存在或已处理。');
+  const [requests] = await connection.execute<(RowDataPacket & { requester_character_id: number })[]>('SELECT requester_character_id FROM player_friend_requests WHERE id=?', [requestId]);
+  const requester = requests[0] ? await characterById(connection, Number(requests[0].requester_character_id), true) : null;
+  await eventFor(connection, actor, 'social.friend.rejected', { requestId }, requester ?? undefined);
   return true;
 });
 
@@ -229,7 +239,11 @@ export const oathRequests = (qqUserId: string) => withTransaction(async connecti
 
 export const rejectOath = (qqUserId: string, requestId: number) => withTransaction(async connection => {
   const actor = await characterFor(connection, qqUserId, true); const [result] = await connection.execute<any>(`UPDATE player_oath_requests SET status='rejected',responded_at=NOW() WHERE id=? AND target_character_id=? AND status='pending'`, [requestId, actor.id]);
-  if (!Number(result.affectedRows)) throw new Error('星誓申请不存在或已处理。'); return true;
+  if (!Number(result.affectedRows)) throw new Error('星誓申请不存在或已处理。');
+  const [requests] = await connection.execute<(RowDataPacket & { proposer_character_id: number })[]>('SELECT proposer_character_id FROM player_oath_requests WHERE id=?', [requestId]);
+  const proposer = requests[0] ? await characterById(connection, Number(requests[0].proposer_character_id), true) : null;
+  await eventFor(connection, actor, 'social.oath.rejected', { requestId }, proposer ?? undefined);
+  return true;
 });
 
 export const acceptOath = (qqUserId: string, requestId: number) => withTransaction(async connection => {

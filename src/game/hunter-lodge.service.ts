@@ -2,6 +2,8 @@ import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { recordPvpLootSale } from './pvp.service';
 import { recordAchievement } from './achievement-events';
+import { randomUUID } from 'node:crypto';
+import { recordCharacterOperation } from './character-operation.service';
 
 const PAGE_SIZE = 5;
 type CharacterRow = RowDataPacket & { id: number; copper_coins: number };
@@ -75,6 +77,7 @@ export const buyHunterItem = async (qqUserId: string, itemId: number, quantity =
   await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),acquired_at=NOW()', [character.id, item.id, amount]);
   await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [character.id, item.id]);
   recordAchievement(connection,Number(character.id),[{metric:'ACH_K08',value:price,life:true}]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'hunter_shop.bought',source:{system:'hunter_shop_purchase',id:randomUUID(),step:'settled'},outcome:'购入',summary:`在猎人小屋购入${item.name} ×${amount}`,detail:{itemId,itemName:item.name,quantity:amount,paidCopper:price}});
   return { name: item.name, quantity: amount, price };
 });
 
@@ -91,5 +94,6 @@ export const sellHunterItem = async (qqUserId: string, itemId: number, quantity 
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, item.id]);
   await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [price, character.id]);
   recordAchievement(connection,Number(character.id),[{metric:'ACH_K09',value:price,life:true}]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'hunter_shop.sold',source:{system:'hunter_shop_sale',id:randomUUID(),step:'settled'},outcome:'售出',summary:`向猎人小屋出售${item.name} ×${amount}`,detail:{itemId,itemName:item.name,quantity:amount,receivedCopper:price}});
   return { name: item.name, quantity: amount, price };
 });

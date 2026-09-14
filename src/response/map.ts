@@ -9,7 +9,7 @@ import { durationText } from '../game/time-format';
 import { markerName, sortMapMarkers } from '../game/map-marker.service';
 
 type OwnedMap = RowDataPacket & { code: string; name: string; description: string; region_code: string | null; region_name: string | null; region_description: string | null; region_danger: number | null; is_current_region: number | null };
-type MapTarget = RowDataPacket & { code: string; name: string; x: number; y: number; siteType?: string | null };
+type MapTarget = RowDataPacket & { code: string; name: string; x: number; y: number; z: number; siteType?: string | null };
 
 const displayName = (map: OwnedMap) => (map.region_name ?? map.name).replace(/^地图[·・：:\s]*/, '');
 const regionOverview: Record<string, string> = {
@@ -99,12 +99,12 @@ export default async () => {
     markdown.addButton('[前往该区域]', { data: `/前往地图 ${selectedMap.code}`, autoEnter: false }).addNewline().addNewline();
     if (selectedMap.region_code) {
       // 世界地图与操作面板保持一致：仅把可进入建筑作为地图标识。
-      const [targets] = await pool.execute<MapTarget[]>(`SELECT n.code,n.name,n.pos_x AS x,n.pos_y AS y,s.site_type AS siteType
+      const [targets] = await pool.execute<MapTarget[]>(`SELECT n.code,n.name,n.pos_x AS x,n.pos_y AS y,n.pos_z AS z,s.site_type AS siteType
         FROM map_npcs n LEFT JOIN world_site_states s ON s.code=n.code AND s.region_id=n.region_id
         WHERE n.region_id=(SELECT id FROM map_regions WHERE code=?) AND n.interaction_kind='building'
         `, [selectedMap.region_code]);
       if (selectedMap.region_code === 'baina_town') {
-        const [homes] = await pool.execute<(RowDataPacket & MapTarget)[]>(`SELECT 'player_home' AS code,CONCAT('我的小屋·',h.house_level,'级') AS name,h.plot_x AS x,h.plot_y AS y
+        const [homes] = await pool.execute<(RowDataPacket & MapTarget)[]>(`SELECT 'player_home' AS code,CONCAT('我的小屋·',h.house_level,'级') AS name,h.plot_x AS x,h.plot_y AS y,h.plot_z AS z
           FROM player_homes h JOIN characters c ON c.id=h.character_id JOIN players p ON p.id=c.player_id
           WHERE p.qq_user_id=? AND h.status='active' LIMIT 1`, [event.current.UserId]);
         targets.push(...homes);
@@ -114,7 +114,7 @@ export default async () => {
         markdown.addText('建筑站点').addNewline();
         for (const target of visibleTargets) {
           const seconds = estimateSeconds(x, y, target, bag.movementSpeed);
-          markdown.addText('> ').addButton(markerName(target), { data: `/前往 ${target.x} ${target.y}`, autoEnter: false }).addText(`（${target.x}, ${target.y}）[预计${durationText(seconds)}]`).addNewline();
+          markdown.addText('> ').addButton(markerName(target), { data: `/前往 ${target.x} ${target.y} ${target.z}`, autoEnter: false }).addText(`（${target.x}, ${target.y}, ${target.z}）[预计${durationText(seconds)}]`).addNewline();
         }
       } else {
         markdown.addBlockquote('这片区域暂未发现可直接前往的建筑站点。');

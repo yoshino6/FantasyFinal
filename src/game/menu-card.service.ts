@@ -54,7 +54,7 @@ const pages: Record<MenuPage, MenuSection[]> = {
       entries: [
         { command: '/面板', description: '查看周边目标、移动方向与快捷操作' },
         { command: '/地图', description: '查看已解锁区域与地点标识' },
-        { command: '/前往 <横坐标> <纵坐标>', description: '前往当前地图内的指定坐标' },
+        { command: '/前往 <横坐标> <纵坐标> <高度坐标>', description: '沿连续持有的地图前往指定坐标' },
         { command: '/移动 <上|下|左|右>', description: '按方向进行单步移动' },
         { command: '/调整移速 <距离>', description: '设置单次移动距离' },
         { command: '/寻怪', description: '搜索附近怪物并开始寻路' },

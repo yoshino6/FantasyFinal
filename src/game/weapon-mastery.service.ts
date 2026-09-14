@@ -31,17 +31,18 @@ export const weaponMasteryBonusesFor = async (connection: Pool | PoolConnection,
   const bonuses: MasteryBonuses = { physicalAttackPct: 0, magicAttackPct: 0, physicalDefensePct: 0, magicDefensePct: 0, accuracyPct: 0, critRatePct: 0, critDamagePct: 0, critResistPct: 0, critDamageReductionPct: 0, mpPct: 0, chantSpeedPct: 0, details: [], offhandAttributeMultiplier: offhandAttributeMultiplier(offhandMastery?.focus) };
   for (const skill of skillRows) {
     const effect = jsonRecord(skill.passive_effect_json); const weaponType = String(effect.weaponType ?? '');
-    const matched = equipmentRows.find(item => item.slot === 'weapon' && item.weapon_type === weaponType) ?? equipmentRows.find(item => item.weapon_type === weaponType);
-    if (!matched) continue;
+    const matched = equipmentRows.filter(item => item.weapon_type === weaponType && (item.slot === 'weapon' || item.slot === 'offhand'));
+    if (!matched.length) continue;
     const proficiency = Math.min(5, Math.max(1, Number(skill.proficiency)));
     const focus = Math.min(6, Math.max(1, Number(skill.focus)));
-    const scale = matched.slot === 'offhand' ? offhandAttributeMultiplier(focus) : 1;
     const step = Number(effect.masteryStepPct ?? 0);
     // 成长只作用于该精通本身声明的属性；例如长剑精通只提升暴击，不能把同一档成长误加到物攻、防御等全部面板。
-    const active = masteryKeys.filter(key => Number(effect[key] ?? 0) !== 0).map(key => [key, (Number(effect[key] ?? 0) + step * (proficiency - 1)) * scale] as const);
-    if (!active.length) continue;
-    for (const [key, value] of active) bonuses[key] += value;
-    if (active.length) bonuses.details.push(`【${skill.name}】${matched.slot === 'offhand' ? '副手' : '主手'}${weaponType}：${active.map(([key, value]) => `${masteryLabels[key]}+${formatPercent(value)}%`).join('、')}`);
+    for (const weapon of matched) {
+      const scale = weapon.slot === 'offhand' ? offhandAttributeMultiplier(focus) : 1;
+      const active = masteryKeys.filter(key => Number(effect[key] ?? 0) !== 0).map(key => [key, (Number(effect[key] ?? 0) + step * (proficiency - 1)) * scale] as const);
+      for (const [key, value] of active) bonuses[key] += value;
+      if (active.length) bonuses.details.push(`【${skill.name}】${weapon.slot === 'offhand' ? '副手' : '主手'}${weaponType}：${active.map(([key, value]) => `${masteryLabels[key]}+${formatPercent(value)}%`).join('、')}`);
+    }
   }
   return bonuses;
 };

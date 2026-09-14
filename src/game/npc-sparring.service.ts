@@ -1,5 +1,7 @@
 import { recordAchievement } from './achievement-events';
 import { playerGrowthShares } from './growth-rules';
+import { heartAttributeCorrection } from './heart-question.service';
+import { recordCharacterOperation } from './character-operation.service';
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
@@ -30,7 +32,7 @@ const profileFor = async (connection: Db, character: RowDataPacket, input: strin
   const [visits] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_home_visits WHERE character_id=? LIMIT 1', [character.id]);
   if (visits.length) throw new Error('请先离开住宅，再与外面的域民切磋。');
   if (npc.pos_x === null || npc.pos_y === null) throw new Error('这位域民当前不在场。');
-  const perception = Number(character.perception) + Number(character.perception_growth) * playerGrowthShares(Number(character.level));
+  const perception = Number(character.perception) + Number(character.perception_growth) * playerGrowthShares(Number(character.level)) + await heartAttributeCorrection(connection, Number(character.id), 'perception', Number(character.level));
   const range = Math.max(1, Math.min(10, 2 + Math.floor(Number(character.level) / 5), 1 + Math.floor(Math.pow(Math.max(1, perception) / 7, .9))));
   if (Math.abs(Number(character.pos_x) - Number(npc.pos_x)) + Math.abs(Number(character.pos_y) - Number(npc.pos_y)) > range) throw new Error('这位域民已离开你的感知范围。');
   const [stages] = await connection.execute<RowDataPacket[]>("SELECT COALESCE(MAX(stage),0) AS stage FROM worldline_states WHERE JSON_UNQUOTE(JSON_EXTRACT(state_json,'$.regionCode'))=?", [npc.region_code]);
@@ -74,6 +76,14 @@ export const startNpcSparring = async (userId: string, code: string) => withTran
   return { sessionId, profile };
 });
 
+export const sparInsightChance = (result: 'victory' | 'defeat' | 'escaped' | 'timeout', affinity: number, exploited: boolean, knowledge: number, farBelowBand: boolean) => {
+  const baseChance = result === 'victory' ? .25 : result === 'defeat' ? .10 : 0;
+  if (!baseChance) return 0;
+  const affinityBonus = affinity >= 500 ? .03 : affinity >= 200 ? .02 : affinity >= 50 ? .01 : 0;
+  return Math.max(0, Math.min(result === 'victory' ? .30 : .15,
+    baseChance + affinityBonus + (exploited ? .02 : 0) + Math.min(.02, knowledge * .005) - (farBelowBand ? .02 : 0)));
+};
+
 export const finishNpcSparring = async (connection: PoolConnection, sessionId: string, result: 'victory' | 'defeat' | 'escaped' | 'timeout') => {
   const worldtree=await(await import('./worldtree-witness.service')).finishAesonDuel(connection,sessionId,result);
   if(worldtree)return worldtree;
@@ -89,8 +99,7 @@ export const finishNpcSparring = async (connection: PoolConnection, sessionId: s
     COALESCE((SELECT LEAST(4,sp.level) FROM player_secondary_professions sp WHERE sp.character_id=c.id AND sp.profession_code='omniscient' AND c.secondary_profession_code='omniscient' LIMIT 1),0)) AS level FROM characters c WHERE c.id=?`, [attempt.character_id]);
   const [members] = await connection.execute<RowDataPacket[]>('SELECT cooldowns FROM combat_members WHERE session_id=? AND character_id=?', [sessionId, attempt.character_id]);
   const exploited = Boolean(json(members[0]?.cooldowns).__rules?.memory?.sparWeakness);
-  const affinity = Number(affinities[0]?.affinity ?? 0); const affinityBonus = affinity >= 500 ? .03 : affinity >= 200 ? .02 : affinity >= 50 ? .01 : 0;
-  const chance = Math.min(.15, .05 + (result === 'victory' ? .03 : 0) + affinityBonus + (exploited ? .02 : 0) + Math.min(.02, Number(knowledge[0]?.level ?? 0) * .005) - (Number(characters[0]?.level) < profile.band[0] - 5 ? .02 : 0));
+  const chance = sparInsightChance(result, Number(affinities[0]?.affinity ?? 0), exploited, Number(knowledge[0]?.level ?? 0), Number(characters[0]?.level) < profile.band[0] - 5);
   let discovered: { id: number; name: string } | undefined;
   const eligible = carriedSparSkills(profile).filter(code => { const skill = residentSkillByCode(code); return skill && (skill.tier !== '中位' || Number(characters[0]?.level) >= 25) && (skill.tier !== '下位' || Number(characters[0]?.level) >= 6); });
   if (eligible.length && Math.random() < chance) {
@@ -101,6 +110,7 @@ export const finishNpcSparring = async (connection: PoolConnection, sessionId: s
     if (discovered) await connection.execute('INSERT IGNORE INTO player_skill_discoveries (character_id,skill_id) VALUES (?,?)', [attempt.character_id, discovered.id]);
   }
   await connection.execute('UPDATE player_npc_spar_attempts SET state=?,discovered_skill_id=?,finished_at=NOW() WHERE id=?', [result, discovered?.id ?? null, attempt.id]);
+  await recordCharacterOperation(connection, { characterId: Number(attempt.character_id), kind: `npc.spar.${result}`, source: { system: 'npc_spar_session', id: sessionId, step: 'settled' }, outcome: result === 'victory' ? '胜利' : result === 'defeat' ? '落败' : result === 'timeout' ? '超时' : '结束', summary: `与${profile.name}切磋${result === 'victory' ? '胜利' : result === 'defeat' ? '落败' : '结束'}`, detail: { sessionId, npcCode: String(attempt.npc_code), npcName: profile.name, result, discoveredSkillId: discovered?.id ?? null, discoveredSkillName: discovered?.name ?? null }, scoreKey: `npc_spar:${attempt.npc_code}` });
   await connection.execute('UPDATE characters SET current_hp=?,current_mp=? WHERE id=?', [snapshot.hp, snapshot.mp, attempt.character_id]);
   await connection.execute('UPDATE combat_sessions SET state=? WHERE id=?', [result === 'timeout' ? 'escaped' : result, sessionId]);
   await connection.execute('DELETE FROM combat_status_effects WHERE session_id=?', [sessionId]);

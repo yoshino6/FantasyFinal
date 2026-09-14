@@ -40,6 +40,7 @@ export const marketHomeFormat = async (qqUserId: string) => {
     .addButton('我要出售', '/万叶出售 1', { type: 'command', autoEnter: true, style: 'blue' })
     .addButton('我要收购', '/万叶市场 1 全部', { type: 'command', autoEnter: true, style: 'blue' })
     .addButton('我的订单', '/万叶订单', { type: 'command', autoEnter: true, style: 'blue' })
+    .addRow().addButton('势力份额', '/势力份额', { type: 'command', autoEnter: false, style: 'blue' }).addButton('交易所闲聊', '/交易所闲聊', { type: 'command', autoEnter: false, style: 'blue' })
     .addRow().addButton('手续费说明', '/万叶手续费', { type: 'command', autoEnter: true }).addButton('离开', '/建筑离开 canopy_exchange', { type: 'command', autoEnter: true }));
 };
 

@@ -80,9 +80,9 @@ export const blacksmithChatHandler = async () => {
       const markdown = Format.createMarkdown().addTitle('百纳镇·铁匠铺').addNewline().addNewline().addText('【漠北·Lv.3 锻造师】').addNewline().addNewline().addBlockquote(text).addNewline().addNewline();
       if (detailsUnlocked) markdown.addText(`好感：${affinity}｜${rank.title}`).addNewline().addNewline();
       markdown.addText('小北从工具架上取下一枚刻着锤纹的铁片：“我有个不错的本事，或许你学得会。要不要试试？”').addNewline().addNewline()
-        .addText('是否消耗 5 技能点学习绑定技能【匠心】？');
+        .addText('是否消耗 2 技能点学习绑定技能【匠心】？');
       const buttons = Format.createButtonGroup().addRow()
-        .addButton('确认学习', '/学习小北的匠心', { type: 'command', autoEnter: true, style: 'blue' })
+        .addButton('确认学习', '/学习小北的匠心', { type: 'command', autoEnter: false, style: 'blue' })
         .addButton('下次再来', '/铁匠铺', { type: 'command', autoEnter: true })
         .addRow().addButton('切磋', '/切磋 blacksmith', { type: 'command', autoEnter: true, style: 'blue' }).addButton('继续闲聊', '/铁匠铺闲聊', { type: 'command', autoEnter: true, style: 'blue' });
       await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) });

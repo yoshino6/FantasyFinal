@@ -12,7 +12,7 @@ export const worldtreeWitnessFormat=(scene:Scene)=>{
   if(scene.kind==='tour'&&scene.stage===2)md.addText('**【获得地图】世界树草原环带**').addNewline().addNewline();
   const buttons=Format.createButtonGroup().addRow();
   if(scene.stage<scene.total)buttons.addButton('继续',`/世界树见证 ${scene.kind==='tour'?'游览':'邀约'} ${scene.stage}`,{type:'command',autoEnter:true,style:'blue'});
-  else if(scene.kind==='challenge')buttons.addButton('前往竞技场','/前往 6 -4',{type:'command',autoEnter:true,style:'blue'});
+  else if(scene.kind==='challenge')buttons.addButton('前往竞技场','/前往 6 -4 0',{type:'command',autoEnter:false,style:'blue'});
   buttons.addButton('任务','/任务',{type:'command',autoEnter:true});
   return Format.create().addMarkdown(md).addButtonGroup(buttons);
 };

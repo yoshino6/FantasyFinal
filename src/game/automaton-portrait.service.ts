@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto';
-import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
+import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { automatonCharacter, automatonFor, recordAutomatonEvent } from './automaton.service';
+import { recordCharacterOperation } from './character-operation.service';
 
 type Context={Platform?:string;BotId?:string;UserId?:string;ChannelId?:string;GuildId?:string;IsPrivate?:boolean};
 export const portraitScope=(event:Context)=>{
@@ -44,8 +45,9 @@ export const submitPortraitReview=(user:string,upload:PortraitUpload,portrait:{k
   if(character.id!==upload.characterId||!rows.length)throw new Error('上传已取消、超时或被新上传替代，本次图片未保存。');
   const {state}=await automatonFor(c,character.id,upload.id);
   await assertQueueAvailable(c,character.id,upload.id);
-  await c.execute('INSERT INTO automaton_portrait_reviews(character_id,automaton_id,token,file_key,width,height) VALUES(?,?,?,?,?,?)',[character.id,upload.id,upload.token,portrait.key,portrait.width,portrait.height]);
+  const [review]=await c.execute<ResultSetHeader>('INSERT INTO automaton_portrait_reviews(character_id,automaton_id,token,file_key,width,height) VALUES(?,?,?,?,?,?)',[character.id,upload.id,upload.token,portrait.key,portrait.width,portrait.height]);
   await c.execute('DELETE FROM automaton_portrait_uploads WHERE character_id=? AND scope_key=? AND token=?',[character.id,upload.scope,upload.token]);
+  await recordCharacterOperation(c,{characterId:character.id,kind:'automaton.portrait_submitted',source:{system:'automaton_portrait_reviews',id:review.insertId,step:'submitted'},outcome:'submitted',summary:`提交${state.name}的形象审核`,detail:{automatonId:upload.id,reviewId:review.insertId,width:portrait.width,height:portrait.height}});
   return {name:state.name};
 });
 export const portraitReviewStatus=async(user:string,id:number)=>{
@@ -63,6 +65,10 @@ export const resetPortrait=(user:string,id:number)=>withTransaction(async c=>{
   await c.execute('DELETE FROM automaton_portrait_uploads WHERE character_id=? AND automaton_id=?',[character.id,id]);
   const [pending]=await c.execute<RowDataPacket[]>("SELECT file_key FROM automaton_portrait_reviews WHERE character_id=? AND automaton_id=? AND status='pending' FOR UPDATE",[character.id,id]);
   await c.execute("UPDATE automaton_portrait_reviews SET status='cancelled',reason='玩家恢复默认形象',reviewed_at=NOW() WHERE character_id=? AND automaton_id=? AND status='pending'",[character.id,id]);
-  if(state.portrait)await recordAutomatonEvent(c,id,character.id,'portrait-reset:'+randomBytes(16).toString('hex'),'portrait_reset',{name:state.name});
+  if(state.portrait||pending.length){
+    const resetId='portrait-reset:'+randomBytes(16).toString('hex');
+    if(state.portrait)await recordAutomatonEvent(c,id,character.id,resetId,'portrait_reset',{name:state.name});
+    await recordCharacterOperation(c,{characterId:character.id,kind:'automaton.portrait_reset',source:{system:'player_automatons',id:resetId,step:'reset'},outcome:'reset',summary:`恢复${state.name}的默认形象`,detail:{automatonId:id,cancelledReviews:pending.length,hadPortrait:Boolean(state.portrait)}});
+  }
   return {name:state.name,oldKey:state.portrait?.key,pendingKeys:pending.map(r=>String(r.file_key))};
 });

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { recordCharacterOperation } from './character-operation.service';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { openingCharacter } from './opening.service';
@@ -49,7 +50,9 @@ export const confirmOpeningChest=async(user:string,token:string)=>withTransactio
   for(const output of outputs){const item=byCode.get(output.code)!;
     if(output.equipment){for(let count=0;count<output.quantity;count++){const gear=await grantOpeningEquipment(connection,Number(character.id),output.code);items.push({...gear,quantity:1});}}
     else{await grantInventory(connection,Number(character.id),Number(item.id),{personal:output.quantity,trade:0,unbound:0});await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)',[character.id,item.id]);const prior=items.find(i=>!i.id&&i.name===item.name);if(prior)prior.quantity+=output.quantity;else items.push({name:String(item.name),quantity:output.quantity});}}
-  const result={quantity:Number(request.quantity),items};await connection.execute("UPDATE opening_chest_requests SET state='complete',result_json=? WHERE token=?",[JSON.stringify(result),token]);return result;
+  const result={quantity:Number(request.quantity),items};await connection.execute("UPDATE opening_chest_requests SET state='complete',result_json=? WHERE token=?",[JSON.stringify(result),token]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'inventory.chest_opened',source:{system:'opening_chest_request',id:token,step:'complete'},outcome:'开启',summary:`开启${request.chest_code} ×${request.quantity}`,detail:{chestCode:String(request.chest_code),quantity:Number(request.quantity),items}});
+  return result;
 });
 
 export const openingChestResult=async(user:string,token:string)=>{

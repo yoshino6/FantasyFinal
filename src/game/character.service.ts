@@ -1,9 +1,11 @@
 import { updateAchievementState } from './achievement-state';
 import { playerGrowthShares, STAT_BALANCE_VERSION } from './growth-rules';
+import { applyHeartGrowthToRow, ensureHeartGrowth, heartGrowthAdjustment } from './heart-question.service';
+import { recordCharacterOperation } from './character-operation.service';
 import { armorPanelPercent } from './armor-class';
 import { armorSetFromRows } from './armor-set';
 import { randomUUID } from 'node:crypto';
-import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
+import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { SESSION_TTL_MINUTES, STAMINA_RECOVERY_MS, calculateDerivedStats, equipmentQualityMultiplier, staminaMaxForRealm, virtualEquipmentStats, type VirtualEquipmentTier } from './constants';
 import { homeRestRecoveryBonus } from './home.service';
@@ -107,7 +109,7 @@ export const effectiveCharacterAttributes = async (connection: Pool | PoolConnec
       LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
       WHERE pe.character_id=?`, [characterId])
   ]);
-  const multiplier = Number(timedRows[0]?.all_core_attributes_multiplier ?? 1); const base = finalAttributes(character);
+  const multiplier = Number(timedRows[0]?.all_core_attributes_multiplier ?? 1); const base = finalAttributes(await applyHeartGrowthToRow(connection, characterId, character));
   const achievementBonus = await achievementStatBonus(connection, characterId);
   for (const key of attributes) base[key] += achievementBonus[key] ?? 0;
   const bonus = (key: string) => equipmentRows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? mastery.offhandAttributeMultiplier : 1), 0);
@@ -180,7 +182,7 @@ export const recalculateCharacterStats = async (connection: Pool | PoolConnectio
   await connection.execute('DELETE FROM player_food_buffs WHERE character_id=? AND expires_at<=NOW()', [characterId]);
   const [timedRows] = await connection.execute<(RowDataPacket & { all_core_attributes_multiplier: number })[]>(`SELECT all_core_attributes_multiplier FROM player_timed_buffs WHERE character_id=? AND buff_code='church_blessing' AND expires_at>NOW() LIMIT 1`, [characterId]);
   const attributeMultiplier = Number(timedRows[0]?.all_core_attributes_multiplier ?? 1);
-  const baseAttributes = finalAttributes(character);
+  const baseAttributes = finalAttributes(await applyHeartGrowthToRow(connection, characterId, character));
   const achievementBonus = await achievementStatBonus(connection, characterId);
   for (const key of attributes) baseAttributes[key] += achievementBonus[key] ?? 0;
   const masteryBonuses = await weaponMasteryBonusesFor(connection, characterId);
@@ -372,6 +374,7 @@ export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: 
   );
   const [newCharacters] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM characters WHERE player_id=?', [player.id]);
   const characterId = newCharacters[0].id;
+  await ensureHeartGrowth(connection, Number(characterId), growth);
   await (await import('./hidden-attributes.service')).hiddenAttributesFor(connection, Number(characterId));
   await recordSkillPointChange(connection, Number(characterId), 1, 'initial_grant', null, '角色创建时获得的初始技能点');
   await connection.execute('UPDATE characters SET game_id=? WHERE id=?', [10000000 + Number(characterId), characterId]);
@@ -384,7 +387,6 @@ export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: 
     SELECT ?,id,1,0 FROM skill_definitions WHERE code='appraisal'`, [characterId]);
   await connection.execute('INSERT INTO player_appraisal_progress (character_id,range_level,information_level) VALUES (?,1,1)', [characterId]);
   await connection.execute('INSERT INTO player_blessings (character_id,code) VALUES (?,?)', [characterId, giftCode]);
-  await connection.execute(`INSERT INTO player_skills (character_id,skill_id) SELECT ?,id FROM skill_definitions WHERE code=? AND category='bound'`, [characterId, giftCode]);
   await grantOpeningItem(connection, Number(characterId), 'opening_last_ration', 3);
   await grantOpeningItem(connection, Number(characterId), 'opening_mineral_water', 3);
   for (const [itemCode, slot] of [['opening_staff','weapon'],['opening_clothes','upper']]) {
@@ -413,7 +415,8 @@ export const chooseGift = async (qqUserId: string, giftCode: string, nickname?: 
   await connection.execute('INSERT IGNORE INTO achievement_profiles(identity_key) VALUES (?)',[qqUserId]);
   await connection.execute('UPDATE players SET status = \'active\' WHERE id = ?', [player.id]);
   await connection.execute('DELETE FROM registration_sessions WHERE id = ?', [session.id]);
-  await connection.execute('INSERT INTO player_events (player_id, event_type, payload) VALUES (?, \'character.created\', ?)', [player.id, JSON.stringify({ characterId, region: region.name, x, y, z, giftCode, giftName: gift.name })]);
+  const [createdEvent] = await connection.execute<ResultSetHeader>('INSERT INTO player_events (player_id, event_type, payload) VALUES (?, \'character.created\', ?)', [player.id, JSON.stringify({ characterId, region: region.name, x, y, z, giftCode, giftName: gift.name })]);
+  await recordCharacterOperation(connection, { characterId: Number(characterId), kind: 'character.created', existingEventId: Number(createdEvent.insertId), source: { system: 'character', id: Number(characterId), step: 'created' }, outcome: '创建', summary: '来到异世界并完成角色创建', detail: { characterId: Number(characterId), region: region.name } });
   return { ...allocation, ...stats, growth, name, gender: '未设定', professionName: null, regionName: String(region.name), x, y, z, level: 1, experience: 0, realmStage: 1, adventurerRegistered: false, giftName: gift.name, currentHp: stats.hpMax, currentMp: stats.mpMax, stamina: 120, staminaMax: 120, staminaFullSeconds: 0, activityStatus: 'active', elementMastery, elementResistance, extraAttributes: {}, activeBuffs: [], combatNotes: [] };
 });
 
@@ -436,6 +439,7 @@ export const getCharacter = async (qqUserId: string): Promise<CharacterView | nu
     effectiveCharacterAttributes(pool, row as unknown as Record<string, unknown>, Number(characterRows[0].id)),
     homeRestRecoveryBonus(pool, Number(characterRows[0].id))
   ]);
+  const heartProfile = await heartGrowthAdjustment(pool, Number(characterRows[0].id));
   const staminaMax = staminaMaxForRealm(Number(row.realmStage)); const stamina = Math.min(staminaMax, Math.max(0, Number(row.stamina)));
   const staminaIntervalMs = STAMINA_RECOVERY_MS / (1 + homeRecoveryBonus / 100); const elapsed = Math.max(0, Date.now() - new Date(row.staminaUpdatedAt).getTime());
   const staminaFullSeconds = stamina >= staminaMax ? 0 : Math.ceil((staminaIntervalMs - elapsed % staminaIntervalMs + Math.max(0, staminaMax - stamina - 1) * staminaIntervalMs) / 1000);
@@ -451,7 +455,7 @@ export const getCharacter = async (qqUserId: string): Promise<CharacterView | nu
     elementResistance: typeof row.elementResistance === 'string' ? JSON.parse(row.elementResistance) : row.elementResistance ?? {},
     extraAttributes,
     ...activeEffects,
-    growth: Object.fromEntries(attributes.map(key => [key, Number(row[`${key}Growth` as keyof typeof row])])) as Growth
+    growth: Object.fromEntries(attributes.map(key => [key, Number(row[`${key}Growth` as keyof typeof row]) + Number(heartProfile?.delta[key] ?? 0)])) as Growth
   };
 };
 
@@ -479,16 +483,22 @@ export const changeCharacterName = async (qqUserId: string, input: string) => wi
   const name = input.trim();
   if (Array.from(name).length < 2 || Array.from(name).length > 24 || /[\r\n]/.test(name)) throw new Error('昵称长度需为 2～24 个字符，且不能包含换行。');
   const characterId = await characterIdForChange(connection, qqUserId);
+  const [before]=await connection.execute<(RowDataPacket&{name:string})[]>('SELECT name FROM characters WHERE id=? FOR UPDATE',[characterId]);
+  if(before[0]?.name===name)return {name,usedCard:false};
   const usedCard = await consumeIdentityChange(connection, characterId, 'free_name_change_used', 'rename_card');
   await connection.execute('UPDATE characters SET name=? WHERE id=?', [name, characterId]);
+  await recordCharacterOperation(connection,{characterId:Number(characterId),kind:'character.name_changed',source:{system:'character_identity',id:randomUUID(),step:'name_changed'},outcome:'改名',summary:`角色更名为${name}`,detail:{oldName:before[0]?.name??null,newName:name,usedCard}});
   return { name, usedCard };
 });
 
 export const changeCharacterGender = async (qqUserId: string, gender: string) => withTransaction(async connection => {
   if (gender !== '男' && gender !== '女') throw new Error('性别只能选择“男”或“女”。');
   const characterId = await characterIdForChange(connection, qqUserId);
+  const [before]=await connection.execute<(RowDataPacket&{gender:string})[]>('SELECT gender FROM characters WHERE id=? FOR UPDATE',[characterId]);
+  if(before[0]?.gender===gender)return {gender,usedCard:false};
   const usedCard = await consumeIdentityChange(connection, characterId, 'free_gender_change_used', 'gender_change_card');
   await connection.execute('UPDATE characters SET gender=? WHERE id=?', [gender, characterId]);
+  await recordCharacterOperation(connection,{characterId:Number(characterId),kind:'character.gender_changed',source:{system:'character_identity',id:randomUUID(),step:'gender_changed'},outcome:'更改',summary:`角色性别更改为${gender}`,detail:{oldGender:before[0]?.gender??null,newGender:gender,usedCard}});
   return { gender, usedCard };
 });
 
@@ -496,12 +506,17 @@ export const registerAdventurer = async (qqUserId: string) => withTransaction(as
   const player = await getPlayer(connection, qqUserId);
   const [rows] = await connection.execute<(RowDataPacket & { id: number; level: number; adventurer_registered: number })[]>('SELECT id,level,adventurer_registered FROM characters WHERE player_id=? FOR UPDATE', [player.id]);
   if (!rows[0]) throw new Error('请先完成转生。');
-  if (rows[0].adventurer_registered) return false;
+  if (rows[0].adventurer_registered) {
+    await (await import('./guild-map.service')).ensureRegistrationMapExchange(connection, Number(rows[0].id));
+    return false;
+  }
   await (await import('./guild-context')).requireGuildService(connection,Number(rows[0].id));
   await connection.execute('UPDATE characters SET adventurer_registered=1 WHERE id=?', [rows[0].id]);
+  await (await import('./guild-map.service')).ensureRegistrationMapExchange(connection, Number(rows[0].id));
   recordAchievement(connection, Number(rows[0].id), ['ACH_A02']);
   const [card] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM item_definitions WHERE code=\'adventurer_card\' LIMIT 1', []);
   if (card[0]) await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,1) ON DUPLICATE KEY UPDATE quantity=quantity+1,acquired_at=NOW()', [rows[0].id, card[0].id]);
+  await recordCharacterOperation(connection,{characterId:Number(rows[0].id),kind:'character.adventurer_registered',source:{system:'adventurer_registration',id:Number(rows[0].id),step:'registered'},outcome:'登记',summary:'完成冒险者公会登记',detail:{cardItemId:card[0]?.id??null}});
   return true;
 });
 
@@ -525,6 +540,7 @@ export const chooseProfession = async (qqUserId: string, code: string) => withTr
   for (const skillCode of skills) await connection.execute('INSERT IGNORE INTO player_skills (character_id,skill_id) SELECT ?,id FROM skill_definitions WHERE code=?', [character.id, skillCode]);
   const weapon = await (await import('./opening-pack.service')).grantOpeningProfessionWeapon(connection, Number(character.id), code);
   recordAchievement(connection, Number(character.id), ['ACH_A16']);
+  await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'profession.chosen', source: { system: 'character_profession', id: Number(character.id), step: code }, outcome: '已选择', summary: `选择职业：${code}`, detail: { professionCode: code, professionGrowth: growth, grantedSkillCodes: skills } });
   await recalculateCharacterStats(connection, character.id);
   return { code, reset, weapon };
 });

@@ -4,6 +4,7 @@ import { recalculateCharacterStats } from './character.service';
 import { resetSkillPointAllocation, skillAllocationPlan } from './skill-point-ledger.service';
 import { alchemyFingerprint } from './alchemy-journal';
 import { completeCraftRequest, craftCharacterId, craftRequestFor, createCraftRequest } from './alchemy-journal.service';
+import { recordCharacterOperation } from './character-operation.service';
 
 const assertCanReset = async (connection: PoolConnection, id: number) => {
   const [characters] = await connection.execute<RowDataPacket[]>('SELECT current_hp FROM characters WHERE id=? FOR UPDATE', [id]);
@@ -30,5 +31,6 @@ export const executeSkillReset = async (user: string, token: string) => withTran
   await connection.execute('UPDATE player_inventory SET quantity=quantity-1 WHERE character_id=? AND item_id=? AND quantity>0',[id,itemId]);
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0',[id,itemId]);
   await recalculateCharacterStats(connection,id);
+  await recordCharacterOperation(connection, { characterId: id, kind: 'skill.allocation_reset', source: { system: 'skill_reset_request', id: token, step: 'settled' }, outcome: '洗练', summary: '使用归悟洗练露重置技能投入', detail: { requestToken: token, consumedItemId: itemId, result } });
   await completeCraftRequest(connection,id,token,result); return result;
 });

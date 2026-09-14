@@ -66,7 +66,7 @@ const bossManagementFormat = async (isOwner = false) => {
       markdown.addBlockquote(`指定词条：BOSS刷新 ${event.bossCode} 普通｜梦幻`).addNewline();
       if (isOwner) markdown.addBlockquote(`测试词条：BOSS测试 ${event.bossCode} 普通｜梦幻（只对你与当前队伍可见）`).addNewline();
       if (event.x === null) markdown.addBlockquote('未刷新').addNewline().addNewline();
-      else markdown.addText('> 当前坐标：').addButton(`(${event.x}, ${event.y}, ${event.z})`, textButton('前往Boss坐标', `前往 ${event.x} ${event.y}`)).addNewline().addBlockquote(`当前词条：${event.traits.join('、') || '无'}`).addNewline().addNewline();
+      else markdown.addText('> 当前坐标：').addButton(`(${event.x}, ${event.y}, ${event.z})`, textButton('前往Boss坐标', `前往 ${event.x} ${event.y} ${event.z}`)).addNewline().addBlockquote(`当前词条：${event.traits.join('、') || '无'}`).addNewline().addNewline();
     }
   }
   if (isOwner) markdown.addNewline().addText('> ').addButton('[离开测试场]', textButton('离开首领测试场', 'BOSS测试离开')).addNewline().addBlockquote('结束当前测试并将测试队伍送回进入前的位置。测试首领不会掉落经验、材料或图鉴收益。');
@@ -80,7 +80,7 @@ const dungeonManagementFormat = async () => {
     markdown.addText('【幽暗密林】').addNewline().addNewline();
     markdown.addText('①地下迷宫').addNewline();
     markdown.addText('入口：');
-    event.entrances.forEach((entrance, index) => { if (index) markdown.addText('｜'); markdown.addButton(`(${entrance.x}, ${entrance.y})`, textButton('前往迷宫入口', `前往 ${entrance.x} ${entrance.y}`)); });
+    event.entrances.forEach((entrance, index) => { if (index) markdown.addText('｜'); markdown.addButton(`(${entrance.x}, ${entrance.y}, 0)`, textButton('前往迷宫入口', `前往 ${entrance.x} ${entrance.y} 0`)); });
     markdown.addNewline();
     const floorText = (z: number, name: string) => { const floor = event.floors.find(item => item.z === z); return `${name}：${floor?.explorers ?? 0}人｜${floor?.cleared ? '已攻略' : '未攻略'}`; };
     markdown.addBlockquote(floorText(-10, '一层')).addNewline();

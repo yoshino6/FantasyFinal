@@ -2,6 +2,8 @@ import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { activeDeviceCodes, constructionRecipeByCode } from './deconstructor-catalog';
 import { assertCombatLoadoutMutable } from './combat-loadout-lock.service';
+import { randomUUID } from 'node:crypto';
+import { recordCharacterOperation } from './character-operation.service';
 import type { InventorCapability } from './hidden-device-protocol';
 
 export type DeviceTargetScope = 'self' | 'ally' | 'enemy' | 'all_allies' | 'all_enemies' | 'any';
@@ -86,7 +88,8 @@ export const activateDevice = async (qqUserId: string, instanceId: number) => wi
   `, [instanceId, characterId]);
   const device = rows[0]; if (!device) throw new Error('未找到该异械。');
   await connection.execute(`DELETE pe FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id WHERE pe.character_id=? AND pe.instance_id=? AND i.item_category='异械'`, [characterId, instanceId]);
-  await connection.execute('INSERT IGNORE INTO player_active_devices (character_id,instance_id) VALUES (?,?)', [characterId, instanceId]);
+  const [activated]=await connection.execute<any>('INSERT IGNORE INTO player_active_devices (character_id,instance_id) VALUES (?,?)', [characterId, instanceId]);
+  if(Number(activated.affectedRows)>0)await recordCharacterOperation(connection,{characterId,kind:'device.activated',source:{system:'device_activation',id:randomUUID(),step:'activated'},outcome:'启用',summary:`启用异械${device.name}`,detail:{instanceId,deviceName:device.name}});
   return device.name;
 });
 
@@ -100,6 +103,7 @@ export const deactivateDevice = async (qqUserId: string, instanceId: number) => 
   if (!rows[0]) throw new Error('该异械尚未生效。');
   await connection.execute('DELETE FROM player_device_quick_slots WHERE character_id=? AND instance_id=?', [characterId, instanceId]);
   await connection.execute('DELETE FROM player_active_devices WHERE character_id=? AND instance_id=?', [characterId, instanceId]);
+  await recordCharacterOperation(connection,{characterId,kind:'device.deactivated',source:{system:'device_activation',id:randomUUID(),step:'deactivated'},outcome:'停用',summary:`停用异械${rows[0].name}`,detail:{instanceId,deviceName:rows[0].name}});
   return rows[0].name;
 });
 
@@ -125,6 +129,7 @@ export const setDeviceQuickSlot = async (qqUserId: string, slot: number, instanc
   if (sameTypeRows[0]) throw new Error('同型号主动异械只提供一组技能，请先取消其原有快捷配置。');
   await connection.execute('DELETE FROM player_device_quick_slots WHERE character_id=? AND (quick_slot=? OR instance_id=?)', [characterId, slot, instanceId]);
   await connection.execute('INSERT INTO player_device_quick_slots (character_id,quick_slot,instance_id) VALUES (?,?,?)', [characterId, slot, instanceId]);
+  await recordCharacterOperation(connection,{characterId,kind:'device.quick_slot_changed',source:{system:'device_quick_slot',id:randomUUID(),step:'set'},outcome:'设置',summary:`将${device.name}放入异械栏 ${slot}`,detail:{slot,instanceId,deviceName:device.name}});
   return device.name;
 });
 
@@ -132,7 +137,8 @@ export const clearDeviceQuickSlot = async (qqUserId: string, slot: number) => wi
   if (!Number.isInteger(slot) || slot < 1 || slot > 4) throw new Error('异械栏位仅限 ① 至 ④。');
   const characterId = await characterIdFor(connection, qqUserId, true);
   await assertCombatLoadoutMutable(connection, characterId);
-  await connection.execute('DELETE FROM player_device_quick_slots WHERE character_id=? AND quick_slot=?', [characterId, slot]);
+  const [deleted]=await connection.execute<any>('DELETE FROM player_device_quick_slots WHERE character_id=? AND quick_slot=?', [characterId, slot]);
+  if(Number(deleted.affectedRows)>0)await recordCharacterOperation(connection,{characterId,kind:'device.quick_slot_changed',source:{system:'device_quick_slot',id:randomUUID(),step:'clear'},outcome:'清除',summary:`清除异械栏 ${slot}`,detail:{slot}});
 });
 
 type DeviceDb = Pool | PoolConnection;

@@ -1,6 +1,7 @@
 import { achievementAutomatonFeeds } from './achievement-state';
 import { achievementActivity, achievementSecondaryLevel } from './achievement-hooks';
 import { recordAchievement } from './achievement-events';
+import { recordCharacterOperation } from './character-operation.service';
 import { currentSecondaryShop } from './secondary-shop-context';
 import { talentProficiency, talentProductionRecord } from './talent-rewards';
 import { consumeTalentMaterial, talentMaterialPayment } from './talent-production';
@@ -194,6 +195,7 @@ export const confirmAutomatonCraft=(user:string,token:string)=>withTransaction(a
   await connection.execute('UPDATE player_secondary_professions SET level=?,proficiency=? WHERE character_id=? AND profession_code=?',[level,level>=secondaryProfessionMaxLevel?0:xp,character.id,recipe.profession]);
   achievementSecondaryLevel(connection,Number(character.id),level);
   if(successes>0&&!currentSecondaryShop())achievementActivity(connection,Number(character.id));
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:successes?'craft.automaton_batch_succeeded':'craft.automaton_batch_failed',source:{system:'automaton_craft_request',id:token,step:'settled'},outcome:successes?'完成':'失败',summary:`${recipe.name}：${snapshot.batches} 批，成功 ${successes} 批`,detail:{requestToken:token,recipeCode:snapshot.code,recipeName:recipe.name,batches:Number(snapshot.batches),successes,failures:Number(snapshot.batches)-successes,journalId:journal,outputs:batches.flatMap(batch=>batch.outputs.map(output=>({code:output.code,name:output.name,quantity:output.quantity})))},scoreKey:`automaton_craft:${snapshot.code}`});
   await completeCraftRequest(connection,character.id,token,result);return result;
 });
 
@@ -280,5 +282,6 @@ export const confirmAutomatonMutation=(user:string,token:string)=>withTransactio
   if(action==='培养'&&state.level>before.level){recordAchievement(connection,Number(character.id),['ACH_J09']);if(state.learned.some(s=>!before.learned.includes(s)))recordAchievement(connection,Number(character.id),['ACH_J14']);}
   const learned=state.learned.filter(s=>!before.learned.includes(s)).map(id=>automatonSkills.find(s=>s.id===id)?.name??id);
   const growth=action==='培养'||action==='重调'?'\n'+labels.map((label,i)=>`${label} ${Math.floor(before.stats[i]!)} → ${Math.floor(state.stats[i]!)}`).join('｜'):'';
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:action==='培养'?'automaton.cultivated':action==='重调'?'automaton.respecced':action==='维修'?'automaton.repaired':'automaton.state_changed',source:{system:'automaton_mutation_request',id:token,step:'settled'},outcome:action,summary:`${action}机巧「${state.name}」`,detail:{automatonId:id,action,args,previousName:before.name,name:state.name,previousLevel:before.level,level:state.level,learned,previousStats:before.stats,stats:state.stats},scoreKey:`automaton:${action}:${id}`});
   const result={text:`${action}完成：${state.name} #${id}，Lv.${state.level}。${state.level>before.level?` 新领悟：${learned.join('、')||'本次未领悟技能'}。`:''}${growth}`};await completeCraftRequest(connection,character.id,token,result);return result;
 });

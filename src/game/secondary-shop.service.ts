@@ -1,7 +1,7 @@
 import { recordAchievement } from './achievement-events';
 import { achievementItem } from './achievement-hooks';
 import { grantInventory } from './inventory-binding';
-import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
+import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { requireNpcAtCurrentPosition } from './adventure.service';
 import { craftCharacterId } from './alchemy-journal.service';
@@ -9,6 +9,8 @@ import { alchemyOutputDefinitions } from './alchemy-catalog';
 import { activeDeviceCodes, constructionRecipes } from './deconstructor-catalog';
 import { secondaryFinishedPrice } from './secondary-shop-pricing';
 import { openingShopQuote, payOpeningShopDiscount } from './divine-effects';
+import { recordCharacterOperation } from './character-operation.service';
+import { randomUUID } from 'node:crypto';
 
 export const secondaryShopNames = { blacksmith:'铁匠铺',alchemy_sweetshop:'糖水屋',oddworkshop:'异工坊' };
 export type SecondaryShop = keyof typeof secondaryShopNames;
@@ -61,7 +63,8 @@ export const discoverSecondaryFinished = async(user:string,shopName:string,codex
     const id=await craftCharacterId(connection,user,true);
     const[rows]=await connection.execute<RowDataPacket[]>('SELECT * FROM item_definitions WHERE codex_id=?',[codex]);
     const item=rows[0];if(!item||!isSecondaryFinishedProduct(shop,item as any))throw new Error('该物品不在此店的基础成品货架中。');
-    await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)',[id,item.id]);
+    const [discovered]=await connection.execute<ResultSetHeader>('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)',[id,item.id]);
+    if(discovered.affectedRows)await recordCharacterOperation(connection,{characterId:id,kind:'item.codex_discovered',source:{system:'player_item_codex',id:Number(item.id),step:'discovered'},outcome:'发现',summary:`在${secondaryShopNames[shop]}发现「${item.name}」`,detail:{itemId:Number(item.id),itemCode:String(item.code),shopCode:shop}});
     return String(item.codex_id);
   });
 };
@@ -89,5 +92,6 @@ const buyFinishedFor = async (connection:PoolConnection,user:string,shop:Seconda
   if(item.code==='demon_breaker_teleporter') await (await import('./dungeon-quest.service')).completeDungeonSecretPurchase(connection,id);
   recordAchievement(connection,id,[{metric:'ACH_K01'},{metric:'ACH_K08',value:price,life:true}]);
   await achievementItem(connection,id,itemId);
+  await recordCharacterOperation(connection, { characterId: id, kind: 'npc_shop.bought', source: { system: 'npc_shop_purchase', id: randomUUID(), step: 'settled' }, outcome: '购入', summary: `在${secondaryShopNames[shop]}购入${item.name} ×${quantity}`, detail: { shop, itemId, itemCode: String(item.code), itemName: String(item.name), quantity, paidCopper: price } });
   return { name:String(item.name),quantity,price };
 };

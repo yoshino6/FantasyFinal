@@ -36,7 +36,7 @@ const guildCareerQuestFor = async (pool: Pool, character: CareerCharacter): Prom
     && Number(character.pos_z) === Number(guild.pos_z);
   const action = atGuild
     ? { label: '[前往 公会前台]', command: '/建筑区域 guild_counter 前台' }
-    : guild ? { label: '[前往 冒险者公会]', command: `/前往 ${guild.pos_x} ${guild.pos_y}` } : undefined;
+    : guild ? { label: '[前往 冒险者公会]', command: `/前往 ${guild.pos_x} ${guild.pos_y} ${guild.pos_z}` } : undefined;
   if (!Number(character.adventurer_registered)) return {
     title: '【主线·成为冒险者】',
     description: '梨子喵已经带你认识了百纳镇，也将你领到了冒险者公会。接下来，该让这段冒险有一个正式的开始。\n\n前往冒险者公会的前台，与莫妮卡交谈，选择【冒险者 注册】，完成登记并领取冒险者卡。',
@@ -69,7 +69,7 @@ export const advancedProfessionMainQuest = async (qqUserId: string): Promise<Mai
   const mentorAction = (route: AdvancedProfession) => character.region_code === 'world_tree'
     && Number(character.pos_x) === route.mentor.x && Number(character.pos_y) === route.mentor.y && Number(character.pos_z) === 0
     ? { label: `[关于 ${route.name}]`, command: `/二转职业 ${route.mentor.code}` }
-    : { label: `[前往 ${route.mentor.name}·${route.name}]`, command: `/前往 ${route.mentor.x} ${route.mentor.y}` };
+    : { label: `[前往 ${route.mentor.name}·${route.name}]`, command: `/前往 ${route.mentor.x} ${route.mentor.y} 0` };
   if (!active) {
     const prerequisite = await guildCareerQuestFor(pool, character);
     if (prerequisite) return { ...prerequisite, title: '【主线·二转之路】', description: '你已达到 Lv.25，可以开始寻找二转导师。先完成冒险者注册与主职业选择，再决定要深入哪一条道路。\n\n' + prerequisite.description };
@@ -83,7 +83,7 @@ export const advancedProfessionMainQuest = async (qqUserId: string): Promise<Mai
   if (!profession) throw new Error('当前二转试炼的职业配置不存在。');
   const huntAction = character.region_code === 'ridge_foothills'
     ? { label: '[寻找 试炼目标]', command: '/寻怪' }
-    : { label: '[前往 岩脊山麓]', command: '/前往 -221 0' };
+    : { label: '[前往 岩脊山麓]', command: '/前往 -221 0 0' };
   const title = `【主线·二转·${profession.name}】`;
   const mentor = `世界树·${profession.mentor.title}·${profession.mentor.name}（${profession.mentor.x}, ${profession.mentor.y}）`;
   const retraining = completed[0] ? '你正在重新二转，击败新导师前仍保留当前二转职业。\n\n' : '';

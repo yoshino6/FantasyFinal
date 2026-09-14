@@ -5,6 +5,7 @@ import { recordWebOperation, type WebRole } from './operation-journal.service';
 import { readPortrait } from './automaton-portrait-image';
 import { uploadPortraitToHost } from './automaton-portrait-host';
 import { cleanupPortrait } from './automaton-portrait-upload';
+import { recordCharacterOperation } from './character-operation.service';
 
 const statuses=['pending','approved','rejected','cancelled'];
 export const adminPortraitReviews=async(query:{page?:unknown;keyword?:unknown;status?:unknown})=>{
@@ -53,6 +54,7 @@ export const decidePortraitReview=async(actor:{username:string;role:WebRole},id:
     }
     const status=approve?'approved':'rejected';
     await c.execute('UPDATE automaton_portrait_reviews SET status=?,reason=?,reviewer=?,reviewed_at=NOW() WHERE id=?',[status,reason,actor.username,id]);
+    await recordCharacterOperation(c,{characterId,kind:approve?'automaton.portrait_approved':'automaton.portrait_rejected',source:{system:'automaton_portrait_reviews',id,step:status},actorRole:'system',outcome:status,summary:`机巧形象审核${approve?'通过':'未通过'}`,detail:{reviewId:id,automatonId,reason}});
     const operation=await recordWebOperation({actorRef:actor.username,actionType:'portrait.'+status,reason,target:{kind:'automaton',id:automatonId,characterId},request:{reviewId:id},result:{status}},c);
     return {status,operationId:operation.id,cleanupKey:approve?state.portrait?.key:key};
   });

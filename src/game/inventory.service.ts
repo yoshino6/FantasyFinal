@@ -1,4 +1,6 @@
 import type { RowDataPacket } from 'mysql2/promise';
+import { randomUUID } from 'node:crypto';
+import { recordCharacterOperation } from './character-operation.service';
 import { withTransaction } from '../database/pool';
 
 /** 丢弃可堆叠材料；打造面板中已选择的同一材料会同步收缩，避免留下失效的选材记录。 */
@@ -18,5 +20,6 @@ export const discardMaterial = async (qqUserId: string, itemId: number, quantity
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, itemId]);
   await connection.execute('UPDATE player_forge_materials SET quantity=LEAST(quantity,?) WHERE character_id=? AND item_id=?', [remaining, character.id, itemId]);
   await connection.execute('DELETE FROM player_forge_materials WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, itemId]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'inventory.material_discarded',source:{system:'inventory_discard',id:randomUUID(),step:'settled'},outcome:'丢弃',summary:`丢弃${item.name} ×${quantity}`,detail:{itemId,itemName:item.name,quantity,remaining}});
   return { name: item.name, quantity, remaining };
 });

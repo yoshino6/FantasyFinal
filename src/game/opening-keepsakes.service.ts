@@ -1,5 +1,6 @@
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
+import { recordCharacterOperation } from './character-operation.service';
 import { openingCharacter, grantOpeningItem } from './opening.service';
 import { requireGuildService } from './guild-context';
 import { keepsakeByCode } from './opening-keepsakes.config';
@@ -46,7 +47,9 @@ export const keepsakeAction=async(user:string,code:string,action:string,value=''
   const context=await requireGuildService(c,id);
   const saveResult=async(result:string)=>{
     record.revision=Number(record.revision??0)+1;record.lastResult=result;
-    await c.execute('UPDATE player_opening_keepsakes SET record_json=? WHERE character_id=? AND code=?',[JSON.stringify(record),id,code]);return result;
+    await c.execute('UPDATE player_opening_keepsakes SET record_json=? WHERE character_id=? AND code=?',[JSON.stringify(record),id,code]);
+    await recordCharacterOperation(c,{characterId:id,kind:'opening.keepsake_settled',source:{system:'opening_keepsake',id:`${id}:${code}`,step:`${record.revision}:${action}`},outcome:action,summary:`初行凭物「${code}」完成${action}`,detail:{keepsakeCode:code,action,revision:Number(record.revision),kind:d.kind,remaining:Number(record.remaining??0),registered:Boolean(record.registered),archived:action==='archive'}});
+    return result;
   };
   const prefix=`【${d.desk}·${d.npc}】\n\n${context.code===d.home?'':'当地联络员核验你的凭据，接收经办窗口的回函。\n\n'}`;
   if(action==='archive'){

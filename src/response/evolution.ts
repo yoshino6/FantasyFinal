@@ -69,7 +69,7 @@ export const evolutionPanelFormat = async (qqUserId: string, inLab = false) => {
     buttons.addRow().addButton('管理 变异', '/进化变异', { type: 'command', autoEnter: true, style: 'blue' });
     buttons.addRow().addButton('查看 进化面板', '/进化面板', { type: 'command', autoEnter: true })
       .addButton('离开', '/建筑离开 evolution_lab', { type: 'command', autoEnter: true });
-  } else buttons.addRow().addButton('前往 研究室', '/前往 -6 7', { type: 'command', autoEnter: true, style: 'blue' });
+  } else buttons.addRow().addButton('前往 研究室', '/前往 -6 7 0', { type: 'command', autoEnter: false, style: 'blue' });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 

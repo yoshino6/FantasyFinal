@@ -3,6 +3,7 @@ import { randomInt } from 'node:crypto';
 import { achievementBoxes, achievementBoxLoot, achievementBoxRewardForRarity, achievementRewardItemByKey, type AchievementBoxKey } from './achievement-rewards.config';
 import { grantInventory } from './inventory-binding';
 import { getPool, withTransaction } from '../database/pool';
+import { recordCharacterOperation } from './character-operation.service';
 import { achievementCategories } from './achievement.config';
 import { achievementAttributeKeys, achievementById, achievementThreshold, completionPercent } from './achievement-rules';
 import { isCooperativeAchievement, type AchievementEvent } from './achievement-events';
@@ -63,12 +64,10 @@ export const flushAchievements = async (connection: PoolConnection, events: Achi
       const d=achievementById.get(id)!,actor=byIdentity.get(identity)!;
       const [attribute,points]=d.attribute.split('+');
       await connection.execute('INSERT INTO achievement_completions(identity_key,achievement_id,ordinal,reward_attribute,reward_points,rarity,name_snapshot) VALUES (?,?,?,?,?,?,?)',[identity,id,++rank,achievementAttributeKeys[attribute],Number(points),d.rarity,actor.name]);
+      await recordCharacterOperation(connection,{characterId:Number(actor.id),kind:'achievement.unlocked',source:{system:'achievement_completion',id:`${identity}:${id}`,step:'unlocked'},actorRole:'system',outcome:'达成',summary:`达成成就「${d.name}」`,detail:{achievementId:id,ordinal:rank,rarity:d.rarity,rewardAttribute:achievementAttributeKeys[attribute],rewardPoints:Number(points)}});
       dirty.add(Number(actor.id));
       const first=rank===1||!!firstCooperation&&cooperation.get(id)?.get(identity)===firstCooperation;
-      const baseBox=achievementBoxRewardForRarity(d.rarity);
-      const [rewardReceipt]=await connection.execute<any>('INSERT IGNORE INTO achievement_box_rewards(identity_key,achievement_id,reward_key,quantity) VALUES (?,?,?,?)',[identity,id,baseBox.key,baseBox.quantity]);
-      if(rewardReceipt.affectedRows)await connection.execute('INSERT INTO achievement_rewards(identity_key,reward_key,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity)',[identity,baseBox.key,baseBox.quantity]);
-      if(first)await connection.execute("INSERT INTO achievement_rewards(identity_key,reward_key,quantity) VALUES (?,'rare_box',1) ON DUPLICATE KEY UPDATE quantity=quantity+1",[identity]);
+      if(first){const box=achievementBoxRewardForRarity(d.rarity);const [rewardReceipt]=await connection.execute<any>('INSERT IGNORE INTO achievement_box_rewards(identity_key,achievement_id,reward_key,quantity) VALUES (?,?,?,?)',[identity,id,box.key,box.quantity]);if(rewardReceipt.affectedRows)await connection.execute('INSERT INTO achievement_rewards(identity_key,reward_key,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity)',[identity,box.key,box.quantity]);}
       if(first)await connection.execute('INSERT INTO achievement_first_members(achievement_id,identity_key,name_snapshot) VALUES (?,?,?)',[id,identity,actor.name]);
       if(rank===1){
         await connection.execute('INSERT INTO achievement_announcements(achievement_id,name_snapshot,rarity) VALUES (?,?,?)',[id,actor.name,d.rarity]);
@@ -102,10 +101,9 @@ export const unlockAccountAchievement = async (connection: PoolConnection, ident
   await connection.execute('INSERT INTO achievement_completions(identity_key,achievement_id,ordinal,reward_attribute,reward_points,rarity,name_snapshot) VALUES (?,?,?,?,?,?,?)', [identity, achievementId, ordinal, achievementAttributeKeys[attribute], Number(points), definition.rarity, name]);
   await connection.execute('UPDATE achievement_counters SET completed_count=? WHERE achievement_id=?', [ordinal, achievementId]);
   const reward = achievementBoxRewardForRarity(definition.rarity);
-  const [rewardReceipt] = await connection.execute<any>('INSERT IGNORE INTO achievement_box_rewards(identity_key,achievement_id,reward_key,quantity) VALUES (?,?,?,?)', [identity, achievementId, reward.key, reward.quantity]);
-  if (rewardReceipt.affectedRows) await connection.execute('INSERT INTO achievement_rewards(identity_key,reward_key,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity)', [identity, reward.key, reward.quantity]);
   if (ordinal === 1) {
-    await connection.execute("INSERT INTO achievement_rewards(identity_key,reward_key,quantity) VALUES (?,'rare_box',1) ON DUPLICATE KEY UPDATE quantity=quantity+1", [identity]);
+    const [rewardReceipt] = await connection.execute<any>('INSERT IGNORE INTO achievement_box_rewards(identity_key,achievement_id,reward_key,quantity) VALUES (?,?,?,?)', [identity, achievementId, reward.key, reward.quantity]);
+    if (rewardReceipt.affectedRows) await connection.execute('INSERT INTO achievement_rewards(identity_key,reward_key,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity)', [identity, reward.key, reward.quantity]);
     await connection.execute('INSERT INTO achievement_first_members(achievement_id,identity_key,name_snapshot) VALUES (?,?,?)', [achievementId, identity, name]);
     await connection.execute('INSERT INTO achievement_announcements(achievement_id,name_snapshot,rarity) VALUES (?,?,?)', [achievementId, name, definition.rarity]);
     await connection.execute('INSERT IGNORE INTO achievement_deliveries(achievement_id,bot_id,group_id) SELECT ?,bot_id,group_openid FROM bot_group_channels', [achievementId]);
@@ -205,6 +203,7 @@ export const openAchievementBoxInDatabase=async(connection:PoolConnection,identi
   }
   const result={boxKey,boxName:box.name,quantity,items};
   await connection.execute("INSERT INTO achievement_progress(identity_key,life_key,metric,value_json) VALUES (?,'',?,?)",[identity,metric,JSON.stringify(result)]);
+  await recordCharacterOperation(connection,{characterId:Number(characters[0].id),kind:'achievement.box_opened',source:{system:'achievement_box',id:token,step:'opened'},outcome:'开启',summary:`开启${box.name} ×${quantity}`,detail:{boxKey,boxName:box.name,quantity,items:items.map(item=>({key:item.key,name:item.name,quantity:item.quantity}))}});
   return result;
 };
 export const openAchievementBox=async(identity:string,boxKey:AchievementBoxKey,token:string,quantity=1)=>withTransaction(connection=>openAchievementBoxInDatabase(connection,identity,boxKey,token,quantity));
@@ -215,7 +214,7 @@ export const backfillAchievementBoxRewards=async(pool:Pool)=>{
     await connection.beginTransaction();
     const [marker]=await connection.execute<any>("INSERT IGNORE INTO game_data_migrations(code) VALUES ('achievement_rarity_boxes_v1')");
     if(marker.affectedRows){
-      const [rows]=await connection.execute<RowDataPacket[]>('SELECT identity_key,achievement_id,rarity FROM achievement_completions ORDER BY identity_key,achievement_id FOR UPDATE');
+      const [rows]=await connection.execute<RowDataPacket[]>('SELECT c.identity_key,c.achievement_id,c.rarity FROM achievement_completions c WHERE c.ordinal=1 OR EXISTS(SELECT 1 FROM achievement_first_members f WHERE f.achievement_id=c.achievement_id AND f.identity_key=c.identity_key) ORDER BY c.identity_key,c.achievement_id FOR UPDATE');
       for(const row of rows){const reward=achievementBoxRewardForRarity(String(row.rarity));await connection.execute('INSERT IGNORE INTO achievement_box_rewards(identity_key,achievement_id,reward_key,quantity) VALUES (?,?,?,?)',[row.identity_key,row.achievement_id,reward.key,reward.quantity]);await connection.execute('INSERT INTO achievement_rewards(identity_key,reward_key,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity)',[row.identity_key,reward.key,reward.quantity]);}
     }
     await connection.commit();

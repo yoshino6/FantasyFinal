@@ -1,10 +1,11 @@
 import { achievementNpcState } from './achievement-hooks';
 import { achievementSecondaryLevel } from './achievement-hooks';
 import { recordAchievement } from './achievement-events';
+import { recordCharacterOperation } from './character-operation.service';
 import { talentOptions } from './talent-options.service';
 import { rollTalentDropPack } from './talent-drops';
 import { talentPreparationSkills, talentTransferEffects } from './talent-battle.service';
-import { talentActivity, talentActivityActions, talentNpcLinks } from './talent-activities';
+import { canUseTalentActivity, talentActivity, talentActivityActions, talentActivityCommands, talentNpcLinks } from './talent-activities';
 import { isTalentProduct } from './talent-production';
 import { randomUUID } from 'node:crypto';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
@@ -29,7 +30,7 @@ const commandsFor=(talent:TalentDefinition)=>{
   const commands=Object.entries(settings).filter(([,s])=>s.id===talent.number).flatMap(([label,s])=>(s.values??(label==='预备'?talentPreparationSkills:[])).map(value=>`设置 ${label} ${value}`));
   if(talent.number==='A10')commands.push('选择 指挥');
   if(talent.number==='I07')commands.push('选择 借位');
-  commands.push('勘察','调查 废墟','调查 机关','购买种子','种植');
+  commands.push(...talentActivityCommands(talent.number).map(command=>command.startsWith('调查')?`调查 ${command.slice('调查'.length)}`:command));
   if(talent.number==='I06')commands.push('选择 无名拜访');
   if(talent.number==='G06')commands.push('月露');
   if(talent.number==='D05')commands.push('选择 分享料理');
@@ -37,7 +38,7 @@ const commandsFor=(talent:TalentDefinition)=>{
   if(talent.number==='D10')commands.push('选择 同心');
   if(talent.number==='C04')commands.push('选择 旁通');
   if(talent.number==='C10')commands.push('暂停复盘','选择 舍弃复盘','舍弃新复盘','收录新复盘');
-  commands.push('选择 赠礼','选择 共餐','选择 委托');
+  for(const command of talentActivityCommands(talent.number).filter(command=>['赠礼','共餐','委托'].includes(command)))commands.push(`选择 ${command}`);
   if(talent.number==='D06')commands.push('选择 引荐');
   if(talent.number==='D04')commands.push('选择 立约委托');
   if(talent.number==='D09')commands.push('人物索引');
@@ -50,6 +51,11 @@ const view=async(connection:PoolConnection,actor:Record<string,any>,talent:Talen
   const [items]=codes.length?await connection.execute<RowDataPacket[]>(`SELECT code,name FROM item_definitions WHERE code IN (${codes.map(()=>'?').join(',')})`,codes):[[]];
   const names=new Map(items.map(i=>[String(i.code),String(i.name)] as const)),notes:string[]=[];
   if(talent.number==='C03'&&data.flags.experienceNotice)notes.push(String(data.flags.experienceNotice));
+  if(talent.number==='B05'){
+    const ledger=data.flags.scavenge;
+    notes.push(ledger?.day===talentDay()?`今日拾荒：${Number(ledger.units??0)}/32 份｜移动触发 ${Number(ledger.moveTriggers??0)}/2｜战斗触发 ${Number(ledger.combatTriggers??0)}/6。`:'今日拾荒：0/32 份｜移动触发 0/2｜战斗触发 0/6。');
+    notes.push(`累计拾得普通残料：${Number(data.counters.scavengeTotal??0)} 份。`);
+  }
   if(talent.number==='C04')notes.push('成功换配方熟练度×4；首次或连续同配方×1.5。旧版旁通点不再生成，可投入当前副职业；满级未用余额保留。');
   if(talent.number==='C10'&&data.flags.reviewOverflow)notes.push(`待选择的新复盘：${data.flags.reviewOverflow.kind==='experience'?'角色经验':'副职业熟练度'} ${data.flags.reviewOverflow.amount}。请选择舍弃旧记录以收录它，或舍弃新记录；记录不会自动覆盖。`);
   for(const [label,setting] of Object.entries(settings).filter(([,setting])=>setting.id===talent.number)){
@@ -111,6 +117,7 @@ export const talentActionWithConnection=async(connection:PoolConnection,user:str
   const [versions]=await connection.execute<RowDataPacket[]>('SELECT revision FROM player_talent_state WHERE character_id=? FOR UPDATE',[id]);
   if(!Number.isSafeInteger(revision)||revision!==Number(versions[0].revision))throw new Error('天赋状态已变化，请用 /天赋 刷新后再操作。');
   let data=await readTalentData(connection,id),text='';
+  const originalDataJson=JSON.stringify(data);
   if(action==='设置'){
     const setting=settings[arg];if(!setting||setting.id!==talent.number)throw new Error('这不是当前天赋的可选效果。');await active(connection,actor);
     if(setting.values&&!setting.values.includes(value))throw new Error(`请选择：${setting.values.join('、')}。`);
@@ -122,6 +129,7 @@ export const talentActionWithConnection=async(connection:PoolConnection,user:str
     if(arg==='指挥'&&!/^(automaton|companion|spirit):[a-zA-Z0-9_]+$/.test(value))throw new Error('请填写 automaton:编号 或 companion:编号；入战时再核验所属关系。');
     data.settings[setting.key]=value==='开启'?true:value==='关闭'?false:value;text=['指挥','借位','预备'].includes(arg)?`已设置${arg}。`:`已设置${arg}：${value}。`;
   }else if(talentActivityActions.includes(action)){
+    if(!canUseTalentActivity(talent.number,action,arg))throw new Error('这项生活操作不会触发当前天赋的效果。');
     await active(connection,actor,['完成调查','取消调查'].includes(action));
     text=await talentActivity(connection,actor,talent,data,action,arg,value);
   }else if(action==='同心'){
@@ -215,7 +223,12 @@ export const talentActionWithConnection=async(connection:PoolConnection,user:str
     data=await readTalentData(connection,id);data.counters[key]=count+1;text=`${action}完成，好感+${gain}。`;
   }else throw new Error('未知天赋操作，请查看 /天赋。');
   await saveTalentData(connection,id,data);const result=await view(connection,actor,talent,text);
-  await connection.execute('INSERT INTO player_talent_events(character_id,event_key,result_json) VALUES (?,?,?)',[id,eventKey,JSON.stringify(result)]);return result;
+  await connection.execute('INSERT INTO player_talent_events(character_id,event_key,result_json) VALUES (?,?,?)',[id,eventKey,JSON.stringify(result)]);
+  if(action!=='设置'||JSON.stringify(data)!==originalDataJson){
+    const kind=action==='设置'||action==='投影'?'talent.configuration':action==='赠礼'||action==='共餐'||action==='无名拜访'||action==='分享料理'?'talent.social':action==='领取'||action==='接受来信'||action==='重抽来信'||action==='取消封存'?'talent.reward_settled':'talent.activity_settled';
+    await recordCharacterOperation(connection,{characterId:id,kind,source:{system:'player_talent_event',id:eventKey,step:'settled'},outcome:action,summary:`天赋「${talent.name}」完成${action}`,detail:{talentNumber:talent.number,action,arg,value,revisionBefore:revision,receipt:text},scoreKey:`talent:${action}:${arg}`});
+  }
+  return result;
 };
 export const talentAction=(user:string,revision?:number,action='状态',arg='',value='')=>withTransaction(c=>talentActionWithConnection(c,user,revision,action,arg,value));
 

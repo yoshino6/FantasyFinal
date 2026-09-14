@@ -138,7 +138,9 @@ test('刚出生的armed状态可读取，不会访问尚未选择的分支',()=>
       const arrival=view({...row,state:'arrival',branch_code:choice.code,page_index:0,reward_claimed:1,flags_json:{rewardName:choice.rewardName}});
       const expectedArrival=(choice.arrival??route.arrival)[0];
       assert.equal(arrival.title,expectedArrival.title,`${route.code}-${choice.code}`);
-      assert.equal(arrival.text,openingNarrativeText(openingNewcomerText(expectedArrival.text)),`${route.code}-${choice.code}`);
+      assert.ok(arrival.text.startsWith(openingNarrativeText(openingNewcomerText(expectedArrival.text))),`${route.code}-${choice.code}`);
+      const finalArrival=view({...row,state:'arrival',branch_code:choice.code,page_index:(choice.arrival??route.arrival).length-1,reward_claimed:1,flags_json:{rewardName:choice.rewardName}});
+      assert.match(finalArrival.text,new RegExp(`获得【地图·${openingHubs[route.destination as keyof typeof openingHubs].name}】`),`${route.code}-${choice.code}`);
     }
   }
 });
@@ -162,7 +164,8 @@ test('降临事务直接赠送Lv.1鉴识及基础专精，不占神技名额或�
     randomBalancedElements:()=>({}),chooseOpeningSpawn:async()=>({region:{id:1,name:'幽暗密林'},route:openingRouteByCode('F01'),x:0,y:0,z:0}),
     hiddenAttributes:{hiddenAttributesFor:async()=>({})},recordSkillPointChange:async(...args:unknown[])=>{ledger.push(args);},
     grantOpeningItem:async(...args:unknown[])=>{openingItems.push(args);},openingWorldFor:async()=>({reception_epoch:1}),recalculateCharacterStats:async()=>{},
-    updateAchievementState:async()=>{},recordAchievement:()=>{},flushAchievements:async()=>{},takeAchievementEvents:()=>[],achievementStatBonus:async()=>({})
+    updateAchievementState:async()=>{},recordAchievement:()=>{},flushAchievements:async()=>{},takeAchievementEvents:()=>[],achievementStatBonus:async()=>({}),
+    ensureHeartGrowth:async()=>{},recordCharacterOperation:async()=>{}
   };
   const chooseGift=new Function(...Object.keys(dependencies),`${code}\nreturn chooseGift;`)(...Object.values(dependencies));
   await assert.rejects(chooseGift('player','divine_g01'),/当前天赋目录/);

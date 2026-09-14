@@ -3,6 +3,7 @@ import { getPool, withTransaction } from '../database/pool';
 import { availableOpeningSpawns, openingSpawnPoint } from './opening-state';
 import { openingRouteByCode } from './opening-content';
 import { openingHubs, openingStartRouteCodes } from './opening-world.config';
+import { recordCharacterOperation } from './character-operation.service';
 
 type Connection = Pool | PoolConnection;
 type RoadCharacter = RowDataPacket & { id: number; current_region_id: number };
@@ -48,5 +49,6 @@ export const selectOpeningRoad = async (user: string, revision: number, code: st
     const point = openingSpawnPoint(candidate, areas);
     await connection.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=?,pos_z=? WHERE id=?', [candidate.region.id, point.x, point.y, point.z, character.id]);
   }
+  if(route.code!==story.route_code)await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'opening.route_chosen',source:{system:'opening_story',id:character.id,step:`route:${revision}`},outcome:'选择',summary:`选择初行道路「${route.title}」`,detail:{routeCode:route.code,routeTitle:route.title,fromRouteCode:story.route_code,region:String(candidate.region.name),destination:route.destination}});
   return { code: route.code, title: route.title, region: String(candidate.region.name), destination: openingHubs[route.destination as keyof typeof openingHubs].name };
 });

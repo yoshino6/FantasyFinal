@@ -1,4 +1,6 @@
 import { recordAchievement } from './achievement-events';
+import { randomUUID } from 'node:crypto';
+import { recordCharacterOperation } from './character-operation.service';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { recordPvpLootSale } from './pvp.service';
@@ -43,5 +45,6 @@ export const sellOddWorkshopItem = async (qqUserId: string, itemId: number, quan
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, item.id]);
   await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [price, character.id]);
   recordAchievement(connection,Number(character.id),[{metric:'ACH_K09',value:Number(price),life:true}]);
+  await recordCharacterOperation(connection, { characterId:Number(character.id),kind:'npc_shop.sold_material',source:{system:'oddworkshop_sale',id:randomUUID(),step:'settled'},outcome:'售出',summary:`向异工坊出售${item.name} ×${amount}`,detail:{itemId,itemName:item.name,quantity:amount,receivedCopper:price} });
   return { name: item.name, quantity: amount, price };
 });

@@ -2,11 +2,12 @@ import { Format, useEvent, useRoute } from 'alemonjs';
 import { useGameMessage as useMessage } from '../game/use-game-message';
 import { advanceEvolutionQuest, contemplateEvolutionSeed, evolutionQuestStage, openGaStudy } from '../game/main-quest.service';
 import { messageFormat } from '../game/message';
+import { discoverLibrarySkill, librarySkillCatalog } from '../game/library-skills.service';
 
 const libraryButtons = () => Format.createButtonGroup()
   .addRow().addButton('前往 大厅', '/建筑区域 world_library 大厅', { type: 'command', autoEnter: true, style: 'blue' }).addButton('前往 阅览室', '/建筑区域 world_library 阅览室', { type: 'command', autoEnter: true, style: 'blue' })
   .addRow().addButton('前往 资料室', '/建筑区域 world_library 资料室', { type: 'command', autoEnter: true, style: 'blue' }).addButton('前往 休息室', '/建筑区域 world_library 休息室', { type: 'command', autoEnter: true, style: 'blue' })
-  .addRow().addButton('前往 无尽回廊', '/建筑区域 world_library 无尽回廊', { type: 'command', autoEnter: true, style: 'blue' })
+  .addRow().addButton('前往 无尽回廊', '/建筑区域 world_library 无尽回廊', { type: 'command', autoEnter: true, style: 'blue' }).addButton('基础技能馆藏', '/图书馆技能 1', { type: 'command', autoEnter: false, style: 'blue' })
   .addRow().addButton('离开 世界图书馆', '/建筑离开 world_library', { type: 'command', autoEnter: true });
 
 const investigationStories = {
@@ -70,6 +71,39 @@ export const worldLibraryFormat = async (qqUserId: string) => {
   return Format.create().addMarkdown(Format.createMarkdown().addTitle('世界图书馆').addNewline().addNewline().addText('世界树的枝干在此形成一座没有尽头的书库。每一层书架都嵌着微亮叶脉，仿佛整株巨树都在记忆。').addNewline().addNewline().addText(hint)).addButtonGroup(libraryButtons());
 };
 
+export const librarySkillsHandler = async () => {
+  const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
+  try {
+    const skills = await librarySkillCatalog(event.current.UserId);
+    const pages = Math.max(1, Math.ceil(skills.length / 5));
+    const page = Math.max(1, Math.min(pages, Math.trunc(Number(route.param('page') ?? 1)) || 1));
+    const markdown = Format.createMarkdown().addTitle('世界图书馆·基础技能馆藏').addNewline().addNewline()
+      .addBlockquote('馆藏可免费领悟；领悟后需到「技能列表·未学习」花费 1 SP 正式学习。').addNewline().addNewline();
+    for (const skill of skills.slice((page - 1) * 5, page * 5)) {
+      markdown.addText(`【${skill.name}】${skill.learned ? '已学习' : skill.discovered ? '已领悟·待学习' : '可领悟'}｜${skill.category === 'passive' ? '被动' : '主动'}`).addNewline()
+        .addBlockquote(skill.description).addNewline();
+      if (!skill.learned && !skill.discovered) markdown.addButton('[免费领悟]', { data: `/图书馆领悟 ${skill.id}`, autoEnter: false }).addNewline();
+      markdown.addNewline();
+    }
+    markdown.addText(`第 ${page}/${pages} 页`);
+    await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup()
+      .addRow().addButton('上一页', `/图书馆技能 ${Math.max(1, page - 1)}`, { type: 'command', autoEnter: true })
+      .addButton('下一页', `/图书馆技能 ${Math.min(pages, page + 1)}`, { type: 'command', autoEnter: false, style: 'blue' })
+      .addRow().addButton('返回图书馆', '/建筑进入 world_library', { type: 'command', autoEnter: true })) });
+  } catch (error) { await message.send({ format: messageFormat('馆藏暂不可用', error instanceof Error ? error.message : '请稍后重试。') }); }
+};
+
+export const librarySkillDiscoverHandler = async () => {
+  const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
+  try {
+    const result = await discoverLibrarySkill(event.current.UserId, Number(route.param('id')));
+    await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('馆藏领悟').addNewline().addNewline()
+      .addText(`已免费领悟「${result.name}」。尚未学会；请到「未学习」列表花费 ${result.learningCost} SP 正式学习。`))
+      .addButtonGroup(Format.createButtonGroup().addRow().addButton('前往未学习技能', '/技能列表 未学习', { type: 'command', autoEnter: false, style: 'blue' })) });
+    await librarySkillsHandler();
+  } catch (error) { await message.send({ format: messageFormat('研读失败', error instanceof Error ? error.message : '请稍后重试。') }); }
+};
+
 export const worldLibraryAreaHandler = async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
   const area = String(route.param('area'));
@@ -114,7 +148,7 @@ export const evolutionGuildHandler = async () => {
       .addText('莫妮卡沉吟片刻，像是忽然想起什么，转身从旧档的夹层里抽出一页发黄借阅条交给你：').addNewline().addNewline()
       .addText('“公会这里查不出更多东西了。不过我曾见过这张纸——上面写着‘灵阶的自我演化’，馆藏章来自世界图书馆；借阅者的名字被水渍抹去了，只余一个像‘噶’的模糊偏旁。”').addNewline().addNewline()
       .addText('她轻轻摇头：“我无法替你指出那个人在哪。但若真有人研究过你遇到的状况，答案恐怕只会藏在世界树上。”');
-    await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('前往 世界图书馆', '/前往 -4 5', { type: 'command', autoEnter: true, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
+    await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('前往 世界图书馆', '/前往 -4 5 0', { type: 'command', autoEnter: false, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
   } catch (error) { await message.send({ format: messageFormat('无法询问', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
 

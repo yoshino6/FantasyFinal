@@ -12,12 +12,12 @@ const warrantFormat = async (qqUserId: string, filter: WarrantFilter = '全部')
   if (!data.warrants.length) markdown.addBlockquote(filter === '全部' ? '这座城镇目前没有生效中的通缉。' : `当前没有「${filter}」的通缉者。`);
   for (const [index, warrant] of data.warrants.entries()) {
     const bounty = [warrant.copper ? `铜币×${warrant.copper}` : '', warrant.items].filter(Boolean).join('|') || '暂无赏金';
-    const trace = warrant.exposed ? `已暴露|${warrant.regionName}（${warrant.x}，${warrant.y}）` : warrant.recent ? `近期露面|${warrant.regionName}（${warrant.x}，${warrant.y}）` : '无行踪|最后行踪已消失';
+    const trace = warrant.exposed ? `已暴露|${warrant.regionName}（${warrant.x}，${warrant.y}，${warrant.z}）` : warrant.recent ? `近期露面|${warrant.regionName}（${warrant.x}，${warrant.y}，${warrant.z}）` : '无行踪|最后行踪已消失';
     markdown.addText(`${sequence.charAt(index) || `${index + 1}.`}【${warrant.name}】`).addNewline()
       .addBlockquote(`星级：${'★'.repeat(warrant.stars)}${'☆'.repeat(5 - warrant.stars)}${warrant.skulls ? `｜追捕烈度：${'☠'.repeat(warrant.skulls)}` : ''}`).addNewline()
       .addBlockquote(`赏金：${bounty}`).addNewline()
       .addBlockquote(trace).addNewline();
-    if (warrant.exposed || warrant.recent) markdown.addButton('[前往]', { data: `/前往 ${warrant.x} ${warrant.y}`, autoEnter: false }).addText(' ');
+    if (warrant.exposed || warrant.recent) markdown.addButton('[前往]', { data: `/前往 ${warrant.x} ${warrant.y} ${warrant.z}`, autoEnter: false }).addText(' ');
     markdown.addButton('[追加赏金]', { data: `/通缉上赏 ${warrant.id} 铜币 `, autoEnter: false }).addNewline().addNewline();
   }
   const buttons = Format.createButtonGroup().addRow()

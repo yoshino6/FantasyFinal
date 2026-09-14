@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { achievementActivity, achievementItem, achievementSecondaryLevel } from './achievement-hooks';
 import { recordAchievement } from './achievement-events';
 import { addMaterialCosts, takeMaterialCosts, recoveryMaterialBudget, scaleMaterialCost, type MaterialCost } from './talent-material-recovery';
@@ -8,6 +9,7 @@ import { currentSecondaryShop, shopProgressFor, shopProficiency } from './second
 import { consumeInventory, grantInventory, productionBinding, type Binding } from './inventory-binding';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
+import { recordCharacterOperation } from './character-operation.service';
 import { materialValueMultiplierForLevel } from './monster-crafting-material.service';
 import { secondaryProfessionBonus, secondaryProfessionMaxLevel, secondaryProfessionProficiencyRequired } from './secondary-profession';
 import {
@@ -30,19 +32,21 @@ const characterIdFor = async (connection: PoolConnection | Awaited<ReturnType<ty
   return Number(rows[0].id);
 };
 
-export const deconstructorQuest = async (qqUserId: string) => {
-  const pool = await getPool();
-  const characterId = await characterIdFor(pool, qqUserId);
-  const [rows] = await pool.execute<(RowDataPacket & { status: string | null; secondary_profession_code: string | null })[]>(`SELECT q.status,c.secondary_profession_code FROM characters c LEFT JOIN player_side_quests q ON q.character_id=c.id AND q.quest_code=? WHERE c.id=?`, [questCode, characterId]);
-  const [items] = await pool.execute<(RowDataPacket & { quantity: number })[]>(`SELECT pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.code='beast_core'`, [characterId]);
+export const deconstructorQuest = async (qqUserId: string) => withTransaction(async connection => {
+  const characterId = await characterIdFor(connection, qqUserId, true);
+  const [rows] = await connection.execute<(RowDataPacket & { status: string | null; secondary_profession_code: string | null })[]>(`SELECT q.status,c.secondary_profession_code FROM characters c LEFT JOIN player_side_quests q ON q.character_id=c.id AND q.quest_code=? WHERE c.id=? FOR UPDATE`, [questCode, characterId]);
+  const [items] = await connection.execute<(RowDataPacket & { quantity: number })[]>(`SELECT pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.code='beast_core' FOR UPDATE`, [characterId]);
   const cores = Number(items[0]?.quantity ?? 0);
   const completed = rows[0]?.status === 'accepted' && cores >= 1;
-  if (completed) await pool.execute('UPDATE player_side_quests SET status=\'completed\',completed_at=NOW() WHERE character_id=? AND quest_code=?', [characterId, questCode]);
+  if (completed) {
+    await connection.execute('UPDATE player_side_quests SET status=\'completed\',completed_at=NOW() WHERE character_id=? AND quest_code=? AND status=\'accepted\'', [characterId, questCode]);
+    await recordCharacterOperation(connection,{characterId,kind:'profession.deconstructor_quest_completed',source:{system:'player_side_quests',id:characterId,step:'deconstructor_apprentice_completed'},actorRole:'system',outcome:'完成',summary:'备齐唯薇安要求的兽核',detail:{questCode,cores}});
+  }
   // 副职业主体以 characters.secondary_profession_code 为准。测试删档时若只遗留了已领取任务，
   // 不能把它误判为已经转职，允许玩家重新接取。
   const status = completed ? 'completed' : rows[0]?.secondary_profession_code === 'deconstructor' ? 'claimed' : rows[0]?.status === 'claimed' ? 'none' : rows[0]?.status ?? 'none';
   return { status, cores } as const;
-};
+});
 
 export const acceptDeconstructorQuest = async (qqUserId: string) => withTransaction(async connection => {
   const characterId = await characterIdFor(connection, qqUserId, true);
@@ -50,7 +54,9 @@ export const acceptDeconstructorQuest = async (qqUserId: string) => withTransact
   if (Number(rows[0]?.level ?? 0) < 10) throw new Error('secondary_profession_level_required');
   if (rows[0]?.secondary_profession_code && rows[0].secondary_profession_code !== 'deconstructor') throw new Error('你已经拥有其他副职业，无法再选择解构师。');
   if (rows[0]?.secondary_profession_code === 'deconstructor') return;
+  const [before]=await connection.execute<(RowDataPacket&{status:string})[]>('SELECT status FROM player_side_quests WHERE character_id=? AND quest_code=? FOR UPDATE',[characterId,questCode]);
   await connection.execute('INSERT INTO player_side_quests (character_id,quest_code) VALUES (?,?) ON DUPLICATE KEY UPDATE status=\'accepted\',completed_at=NULL,claimed_at=NULL', [characterId, questCode]);
+  if(before[0]?.status!=='accepted')await recordCharacterOperation(connection,{characterId,kind:'profession.deconstructor_quest_accepted',source:{system:'side_quest_change',id:randomUUID(),step:'accepted'},outcome:'接取',summary:'接取解构师转职委托',detail:{questCode}});
 });
 
 export const claimDeconstructorQuest = async (qqUserId: string) => withTransaction(async connection => {
@@ -70,6 +76,7 @@ export const claimDeconstructorQuest = async (qqUserId: string) => withTransacti
   await connection.execute('UPDATE characters SET secondary_profession_code=\'deconstructor\' WHERE id=?', [characterId]);
   await connection.execute('INSERT IGNORE INTO player_secondary_professions (character_id,profession_code,level,proficiency) VALUES (?,\'deconstructor\',1,0)', [characterId]);
   recordAchievement(connection,characterId,['ACH_A05']);
+  await recordCharacterOperation(connection,{characterId,kind:'profession.deconstructor_claimed',source:{system:'player_side_quests',id:characterId,step:'deconstructor_claimed'},outcome:'转职',summary:'完成解构师转职并领取唯薇安的赠礼',detail:{questCode,consumedItemId:Number(cores[0].item_id),consumedQuantity:1,giftItemId:Number(gifts[0].id)}});
   return { name: '解构师', characterName: characters[0]?.name ?? '冒险者', giftName: '唯薇安的赠礼' };
 });
 
@@ -288,6 +295,7 @@ export const claimVivianCourseBlueprints = async (qqUserId: string) => withTrans
       await grantBlueprintCodes(connection, characterId, [recipe.blueprintCode]); affinityAwarded.push(recipe.name);
     }
   }
+  if(awarded.length||affinityAwarded.length)await recordCharacterOperation(connection,{characterId,kind:'profession.deconstructor_blueprints_learned',source:{system:'vivian_course',id:randomUUID(),step:'blueprints_granted'},outcome:'领得',summary:`从唯薇安处领得 ${awarded.length+affinityAwarded.length} 张异械图纸`,detail:{level:progress.level,course:awarded,affinity:affinityAwarded}});
   return { level: progress.level, awarded, highestLevel: awarded.length ? awarded[awarded.length - 1]!.level : 0, affinityAwarded };
 });
 
@@ -360,6 +368,7 @@ export const constructItemFor = async (connection:PoolConnection,qqUserId:string
       await grantInventory(connection, characterId, Number(material.id), {personal,trade,unbound:quantity-personal-trade});
       refunded.push({ name: material.name, quantity });
     }
+    await recordCharacterOperation(connection, { characterId, kind: 'craft.construction_failed', source: { system: 'construction_attempt', id: randomUUID(), step: 'failed' }, outcome: '失败', summary: `构造${recipe.name}失败`, detail: { recipeCode: recipe.code, recipeName: recipe.name, refunded } });
     return { success: false as const, recipe, successRate, refundRate, refunded, proficiencyGain: Math.ceil(proficiencyGain * .5), progress: next };
   }
   const [definitions] = await connection.execute<(RowDataPacket & { id: number; name: string })[]>('SELECT id,name FROM item_definitions WHERE code=? FOR UPDATE', [recipe.code]);
@@ -370,6 +379,8 @@ export const constructItemFor = async (connection:PoolConnection,qqUserId:string
     if(risk)for(let i=0;i<3;i++)await connection.execute('INSERT INTO player_item_instances(character_id,item_id,effect_json,bound_kind) VALUES (?,?,?,?)',[characterId,output.id,JSON.stringify(recipe.effect??{}),usedBinding.personal?'personal':'none']);
     await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [characterId, output.id]);
     if(!currentSecondaryShop())achievementActivity(connection,characterId);
+    await (await import('./finance-settlement')).recordFinanceSignal(connection, { sourceKey: `construction:${instance.insertId}`, factionCode: 'deconstructors_association', characterId: Number(characterId), eventType: 'deconstruct.crafted', sourceType: 'deconstruct_craft', score: 2 });
+    await recordCharacterOperation(connection, { characterId, kind: 'craft.constructed_device', source: { system: 'construction_instance', id: Number(instance.insertId), step: 'constructed' }, outcome: '制成', summary: `构造${output.name}`, detail: { recipeCode: recipe.code, recipeName: recipe.name, outputItemId: Number(output.id), outputName: output.name, instanceId: Number(instance.insertId), outputCount: risk ? 4 : 1 }, scoreKey: `construction:${recipe.code}` });
     return { success: true as const, recipe, successRate, outputName: output.name, instanceId: Number(instance.insertId), proficiencyGain, progress: next };
   }
   await grantInventory(connection, characterId, Number(output.id), productionBinding(usedBinding, risk?4:1, true));
@@ -381,6 +392,8 @@ export const constructItemFor = async (connection:PoolConnection,qqUserId:string
     await completeDungeonSecretPurchase(connection, characterId);
   }
   if(!currentSecondaryShop())achievementActivity(connection,characterId);
+  await (await import('./finance-settlement')).recordFinanceSignal(connection, { sourceKey: `construction:${randomUUID()}`, factionCode: 'deconstructors_association', characterId: Number(characterId), eventType: 'deconstruct.crafted', sourceType: 'deconstruct_craft', score: 2 });
+  await recordCharacterOperation(connection, { characterId, kind: 'craft.constructed_material', source: { system: 'construction_batch', id: randomUUID(), step: 'constructed' }, outcome: '制成', summary: `构造${output.name} ×${risk ? 4 : 1}`, detail: { recipeCode: recipe.code, recipeName: recipe.name, outputItemId: Number(output.id), outputName: output.name, outputCount: risk ? 4 : 1 }, scoreKey: `construction:${recipe.code}` });
   return { success: true as const, recipe, successRate, outputName: output.name, proficiencyGain, progress: next };
 };
 export const constructItem = async (qqUserId:string,recipeCode:string)=>withTransaction(connection=>constructItemFor(connection,qqUserId,recipeCode));
@@ -454,5 +467,7 @@ export const deconstructItems = async (qqUserId: string, itemId: number, quantit
   const proficiencyGain = shopProficiency(Math.round(quantity * deconstructionMapMaterialGain(item)));
   const next = await addDeconstructorProficiency(connection, characterId, proficiencyGain);
   if(!constructed&&results.length&&!currentSecondaryShop())recordAchievement(connection,characterId,[{metric:'ACH_EGG11',distinct:String(itemId)},{metric:'ACH_J20'},...(item.item_type==='material'?[{metric:'ACH_J22',distinct:String(itemId)}]:[])]);
+  if (results.length) await (await import('./finance-settlement')).recordFinanceSignal(connection, { sourceKey: `deconstruct:${randomUUID()}`, factionCode: 'deconstructors_association', characterId: Number(characterId), eventType: 'deconstruct.processed', sourceType: 'deconstruct_craft', score: 1 });
+  await recordCharacterOperation(connection, { characterId, kind: results.length ? 'craft.deconstructed' : 'craft.deconstruct_empty', source: { system: 'deconstruction_batch', id: randomUUID(), step: 'settled' }, outcome: results.length ? '分解完成' : '无可用产物', summary: `分解${item.name} ×${quantity}`, detail: { inputItemId: Number(item.id), inputCode: item.code, inputName: item.name, inputQuantity: quantity, results }, scoreKey: `deconstruct:${item.code}` });
   return { inputName: item.name, inputQuantity: quantity, results, proficiencyGain, progress: next };
 });

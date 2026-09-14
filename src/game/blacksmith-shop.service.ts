@@ -4,6 +4,8 @@ import { buySecondaryFinished } from './secondary-shop.service';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { recordPvpLootSale } from './pvp.service';
+import { recordCharacterOperation } from './character-operation.service';
+import { randomUUID } from 'node:crypto';
 
 const PAGE_SIZE = 5;
 type CharacterRow = RowDataPacket & { id: number; copper_coins: number };
@@ -80,6 +82,7 @@ export const sellBlacksmithEquipment = async (qqUserId: string, instanceId: numb
   const item = rows[0]; if (!item) throw new Error('未找到可出售的未装备物品。');
   await connection.execute('DELETE FROM player_item_instances WHERE id=? AND character_id=?', [instanceId, character.id]);
   await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [item.sell_price, character.id]);
+  await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'npc_shop.sold_equipment', source: { system: 'item_instance', id: instanceId, step: 'sold_to_blacksmith' }, outcome: '售出', summary: `向铁匠出售${item.name}`, detail: { itemId: Number(item.item_id), instanceId, itemName: item.name, receivedCopper: Number(item.sell_price) } });
   recordAchievement(connection,Number(character.id),[{metric:'ACH_K09',value:Number(item.sell_price),life:true}]);
   return { name: item.name, price: Number(item.sell_price) };
 });
@@ -97,6 +100,7 @@ export const sellBlacksmithMaterial = async (qqUserId: string, itemId: number, q
   await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [amount, character.id, item.id]);
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, item.id]);
   await connection.execute('UPDATE characters SET copper_coins=copper_coins+? WHERE id=?', [price, character.id]);
+  await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'npc_shop.sold_material', source: { system: 'blacksmith_material_sale', id: randomUUID(), step: 'settled' }, outcome: '售出', summary: `向铁匠出售${item.name} ×${amount}`, detail: { itemId: Number(item.id), itemName: item.name, quantity: amount, receivedCopper: price } });
   recordAchievement(connection,Number(character.id),[{metric:'ACH_K09',value:Number(price),life:true}]);
   return { name: item.name, quantity: amount, price };
 });

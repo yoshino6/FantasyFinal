@@ -14,7 +14,7 @@ export const startGoblinKingQuestHandler = async () => {
   const [event] = useEvent(); const [message] = useMessage();
   try {
     const text = await startGoblinKingQuest(event.current.UserId);
-    await message.send({ format: storyFormat('主线·失踪的少女（1/7）', text, Format.createButtonGroup().addRow().addButton('前往 异工坊', '/前往 6 -189', { type: 'command', autoEnter: true, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
+    await message.send({ format: storyFormat('主线·失踪的少女（1/7）', text, Format.createButtonGroup().addRow().addButton('前往 异工坊', '/前往 6 -189 0', { type: 'command', autoEnter: false, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
   } catch (error) { await fail(message, '无法接受征召', error); }
 };
 

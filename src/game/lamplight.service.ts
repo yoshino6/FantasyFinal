@@ -1,4 +1,5 @@
 import { recordAchievement } from './achievement-events';
+import { recordCharacterOperation } from './character-operation.service';
 import { achievementActivity } from './achievement-hooks';
 import type {PoolConnection,RowDataPacket} from 'mysql2/promise';
 import {getPool,withTransaction} from '../database/pool';
@@ -256,6 +257,7 @@ export const lamplightAction=(user:string,revision:number,action:string)=>withTr
   await c.execute('UPDATE player_lamplight_progress SET phase=?,node_index=?,revision=?,flags_json=? WHERE character_id=?',[state.phase,state.node_index,state.revision,JSON.stringify(flags),id]);
   const result=await view(c,character,state);
   await c.execute('INSERT INTO player_lamplight_actions (character_id,revision,action_key,result_json) VALUES (?,?,?,?)',[id,revision,action,JSON.stringify(result)]);
+  await recordCharacterOperation(c,{characterId:id,kind:'quest.lamplight_action',source:{system:'lamplight_action',id:id,step:String(revision)},outcome:action,summary:`灯火旅途：${action}`,detail:{action,revisionBefore:revision,revisionAfter:Number(state.revision),phase:state.phase,nodeIndex:Number(state.node_index)}});
   return result;
 });
 

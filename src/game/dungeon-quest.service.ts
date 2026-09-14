@@ -2,6 +2,8 @@ import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { blindBoxBlueprints, blueprintRecipeCode, constructionBlueprintCodes } from './deconstructor-catalog';
 import { recordAchievement } from './achievement-events';
+import { randomUUID } from 'node:crypto';
+import { recordCharacterOperation } from './character-operation.service';
 
 const questCode = 'dungeon_secret';
 const passCode = 'demon_breaker_teleporter';
@@ -52,6 +54,8 @@ export const discoverDungeonEntrance = async (connection: PoolConnection, charac
   if (!progress) {
     await connection.execute('INSERT INTO player_dungeon_secret_progress (character_id,stage,dungeon_id) VALUES (?,1,?)', [characterId, dungeonId]);
     await connection.execute('INSERT IGNORE INTO player_side_quests (character_id,quest_code) VALUES (?,?)', [characterId, questCode]);
+    await recordCharacterOperation(connection,{characterId,kind:'quest.dungeon_secret_started',source:{system:'dungeon_secret',id:characterId,step:'started'},outcome:'开启',summary:'发现地下迷宫的秘密',detail:{questCode,dungeonId,regionId,posX,posY}});
+    if(mapped&&Number(mark.affectedRows)>0)await recordCharacterOperation(connection,{characterId,kind:'exploration.dungeon_entrance_marked',source:{system:'dungeon_entrance',id:`${characterId}:${dungeonId}`,step:'marked'},outcome:'标记',summary:'在地图上标记地下迷宫入口',detail:{dungeonId,regionId,posX,posY}});
     return { stage: 1, newMark: mapped && Number(mark.affectedRows) > 0, started: true };
   }
   // 迷宫刷新会关闭旧实例并生成新入口。旧入口失效后，保留任务阶段并迁移绑定，避免玩家带着传送器却无法继续剧情。
@@ -62,6 +66,7 @@ export const discoverDungeonEntrance = async (connection: PoolConnection, charac
       return { stage: Number(progress.stage), newMark: mapped && Number(mark.affectedRows) > 0, started: false, rebound: true };
     }
   }
+  if(mapped&&Number(mark.affectedRows)>0)await recordCharacterOperation(connection,{characterId,kind:'exploration.dungeon_entrance_marked',source:{system:'dungeon_entrance',id:`${characterId}:${dungeonId}`,step:'marked'},outcome:'标记',summary:'在地图上标记地下迷宫入口',detail:{dungeonId,regionId,posX,posY}});
   return { stage: Number(progress.stage), newMark: mapped && Number(mark.affectedRows) > 0, started: false };
 };
 
@@ -82,6 +87,7 @@ export const consultDungeonAtGuild = async (qqUserId: string) => withTransaction
   const progress = await progressFor(connection, character.id, true); if (!progress || Number(progress.stage) !== 1) throw new Error('你暂时没有需要向公会询问的地下秘密。');
   const affinity = await affinityFor(connection, character.id, 'guild_counter');
   await connection.execute('UPDATE player_dungeon_secret_progress SET stage=2 WHERE character_id=?', [character.id]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'quest.dungeon_secret_stage',source:{system:'dungeon_secret',id:character.id,step:'stage_2'},outcome:'推进',summary:'向公会询问地下迷宫',detail:{questCode,stage:2,npcCode:'guild_counter'}});
   const warm = affinity >= 200 ? '莫妮卡停下手中的登记笔，先替你倒了一杯温水，才将那份泛黄的旧档案摊开。' : '莫妮卡听完你的描述，神情严肃地从档案柜深处取出一卷泛黄的旧地图。';
   return `${warm}\n\n“那很可能是地下城迷宫的入口。很久以前，大法师在门上留下封印，是为了不让误入的平民被它吞没；可迷宫会在不同地方显形，封印只能挡住脚步，挡不住它的阴影。”\n\n她指向图纸上的警示符号：“里面有强大的怪物、陷阱和会误导方向的岔路，但也埋着没有被人带走的宝藏。若你真想进去，先去异工坊找唯薇安。她或许有办法处理那层结界。”`;
 });
@@ -91,13 +97,14 @@ export const consultDungeonAtWorkshop = async (qqUserId: string) => withTransact
   const progress = await progressFor(connection, character.id, true); if (!progress || Number(progress.stage) !== 2) throw new Error('你暂时不需要向唯薇安询问迷宫。');
   const affinity = await affinityFor(connection, character.id, 'oddworkshop');
   await connection.execute('UPDATE player_dungeon_secret_progress SET stage=3 WHERE character_id=?', [character.id]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'quest.dungeon_secret_stage',source:{system:'dungeon_secret',id:character.id,step:'stage_3'},outcome:'推进',summary:'向异工坊询问破魔传送器',detail:{questCode,stage:3,npcCode:'oddworkshop'}});
   const familiar = affinity >= 200 ? '唯薇安一听见“结界”两个字，立刻从零件堆里钻了出来，像是早就等着你问。' : '唯薇安听完后眼睛一亮，踮脚从高处的货架上取下一只巴掌大的银黑色圆盘。';
   return `${familiar}\n\n“这是破魔传送器！它能让携带者穿过那种老式封印，还能把你传回地下大门外——真遇到危险时，按下侧面的符文就能强制脱离。”\n\n她把装置在掌心转了一圈，忽然竖起一根手指：“制作这东西很麻烦，平时我只留图纸给解构师研习。不过晴儿会替我在糖水屋备好应急成品，一台 200 铜币。要进去之前，至少带上一台。”`;
 });
 
 export const completeDungeonSecretPurchase = async (connection: PoolConnection, characterId: number) => {
   const progress = await progressFor(connection, characterId, true);
-  if (progress && Number(progress.stage) === 3) await connection.execute('UPDATE player_dungeon_secret_progress SET stage=4 WHERE character_id=?', [characterId]);
+  if (progress && Number(progress.stage) === 3) { await connection.execute('UPDATE player_dungeon_secret_progress SET stage=4 WHERE character_id=?', [characterId]); await recordCharacterOperation(connection,{characterId,kind:'quest.dungeon_secret_stage',source:{system:'dungeon_secret',id:characterId,step:'stage_4'},outcome:'推进',summary:'取得破魔传送器',detail:{questCode,stage:4}}); }
 };
 
 export const studyWorkshopBlueprint = async (qqUserId: string, code: string) => withTransaction(async connection => {
@@ -125,6 +132,7 @@ export const studyWorkshopBlueprint = async (qqUserId: string, code: string) => 
     await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,1) ON DUPLICATE KEY UPDATE quantity=quantity+1,acquired_at=NOW()', [character.id, rewardRows[0].id]);
     await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [character.id, rewardRows[0].id]);
     recordAchievement(connection,Number(character.id),[{metric:'ACH_K08',value:Number(item.buy_price),life:true}]);
+    await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'npc_shop.bought',source:{system:'oddworkshop_blueprint_box',id:randomUUID(),step:'settled'},outcome:'购入',summary:`在异工坊购买${item.name}`,detail:{itemId:Number(item.id),itemCode:code,itemName:item.name,paidCopper:Number(item.buy_price),rewardItemId:Number(rewardRows[0].id),rewardName:rewardRows[0].name}});
     return { name: item.name, price: Number(item.buy_price), rewardName: rewardRows[0].name };
   }
   if (constructionBlueprintCodes.has(code) && await ownsItem(connection, character.id, code)) throw new Error('这张图纸已经在你的背包中。');
@@ -134,6 +142,7 @@ export const studyWorkshopBlueprint = async (qqUserId: string, code: string) => 
   await connection.execute('INSERT IGNORE INTO player_item_codex (character_id,item_id) VALUES (?,?)', [character.id, item.id]);
   recordAchievement(connection,Number(character.id),[{metric:'ACH_K08',value:Number(item.buy_price),life:true}]);
   if (code === passCode) await completeDungeonSecretPurchase(connection, character.id);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'npc_shop.bought',source:{system:'oddworkshop_blueprint_purchase',id:randomUUID(),step:'settled'},outcome:'购入',summary:`在异工坊购买${item.name}`,detail:{itemId:Number(item.id),itemCode:code,itemName:item.name,paidCopper:Number(item.buy_price)}});
   return { name: item.name, price: Number(item.buy_price), rewardName: blueprintRecipeCode(code) ? item.name : undefined };
 });
 
@@ -154,6 +163,7 @@ export const entranceStory = async (qqUserId: string, dungeonId: number) => with
   if (!await ownsItem(connection, character.id, passCode)) return { stage, text: '你曾拿到过破魔传送器的线索，但背包里还没有那台装置。结界安静地挡在石门之外。' };
   if (stage === 4) {
     await connection.execute('UPDATE player_dungeon_secret_progress SET stage=5 WHERE character_id=?', [character.id]);
+    await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'quest.dungeon_secret_stage',source:{system:'dungeon_secret',id:character.id,step:'stage_5'},outcome:'推进',summary:'打开地下迷宫的封印',detail:{questCode,stage:5,dungeonId}});
     const affinity = await affinityFor(connection, character.id, 'hunter_lodge');
     const extra = affinity >= 200 ? '雷恩认出你后，没有阻拦，只把磨得雪亮的箭头压回箭袋。' : '石门另一侧忽然传来脚步声。雷恩·霍尔特从阴影里走出，斗篷上还带着地下的冷尘。';
     return { stage: 5, text: `${extra}\n\n他看了一眼你掌中的传送器，低声道：“进去后，别只盯着宝箱。岔路上的壁画、地砖的划痕、风从哪儿吹来，都是迷宫留下的标记；怪物会守在要道，陷阱却最爱等在你觉得安全的地方。看不懂路，就回头，别拿命和墙赌。”\n\n雷恩的目光越过你，落向石门深处。“传送器能送你回来，可别把它当成第二条命。祝你能带着自己的脚印出来。”\n\n他说完侧身让开。破魔传送器亮起一道细线，结界缓缓裂开可供一人通过的缝隙。` };
@@ -165,15 +175,17 @@ export const authorizeDungeonEntry = async (connection: PoolConnection, characte
   const progress = await progressFor(connection, characterId, true);
   if (!progress || Number(progress.dungeon_id) !== dungeonId || Number(progress.stage) < 5) throw new Error('石门上的结界尚未解除。先完成支线【地下的秘密】的引导。');
   if (!await ownsItem(connection, characterId, passCode)) throw new Error('缺少破魔传送器，无法穿过石门结界。');
-  if (Number(progress.stage) === 5) await connection.execute('UPDATE player_dungeon_secret_progress SET stage=6 WHERE character_id=?', [characterId]);
+  if (Number(progress.stage) === 5) { await connection.execute('UPDATE player_dungeon_secret_progress SET stage=6 WHERE character_id=?', [characterId]); await recordCharacterOperation(connection,{characterId,kind:'quest.dungeon_secret_stage',source:{system:'dungeon_secret',id:characterId,step:'stage_6'},outcome:'推进',summary:'进入地下迷宫',detail:{questCode,stage:6,dungeonId}}); }
 };
 
 export const completeDungeonSecretForLeader = async (connection: PoolConnection, characterIds: number[], spawnIds: number[]) => {
   if (!characterIds.length || !spawnIds.length) return false;
   const [leaders] = await connection.execute<RowDataPacket[]>(`SELECT dm.dungeon_id FROM dungeon_monsters dm WHERE dm.is_floor_leader=1 AND dm.spawn_id IN (${spawnIds.map(() => '?').join(',')}) LIMIT 1`, spawnIds);
   const dungeonId = Number(leaders[0]?.dungeon_id ?? 0); if (!dungeonId) return false;
+  const [eligible]=await connection.execute<(RowDataPacket&{character_id:number})[]>(`SELECT p.character_id FROM player_dungeon_secret_progress p JOIN player_side_quests q ON q.character_id=p.character_id AND q.quest_code=? WHERE p.dungeon_id=? AND p.stage=6 AND p.character_id IN (${characterIds.map(() => '?').join(',')}) FOR UPDATE`,[questCode,dungeonId,...characterIds]);
   await connection.execute(`UPDATE player_dungeon_secret_progress p JOIN player_side_quests q ON q.character_id=p.character_id AND q.quest_code=?
     SET p.stage=7,q.status='completed',q.completed_at=NOW() WHERE p.dungeon_id=? AND p.stage=6 AND p.character_id IN (${characterIds.map(() => '?').join(',')})`, [questCode, dungeonId, ...characterIds]);
+  for(const row of eligible)await recordCharacterOperation(connection,{characterId:Number(row.character_id),kind:'quest.dungeon_secret_completed',source:{system:'dungeon_secret',id:row.character_id,step:'completed'},actorRole:'system',outcome:'完成',summary:'击败迷宫层主，解开地下的秘密',detail:{questCode,dungeonId,spawnIds}});
   return true;
 };
 

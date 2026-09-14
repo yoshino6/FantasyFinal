@@ -3,6 +3,7 @@ import { useGameMessage as useMessage } from '../game/use-game-message';
 import { nearbyPoints } from '../game/adventure.service';
 import { messageFormat } from '../game/message';
 import { acceptWorldSiteCommissionFromAttendant, claimWorldSiteCommission, useWorldSite, worldSiteKnock, worldSiteView, submitWorldSiteCommission } from '../game/world-dynamics.service';
+import { guildContributionReward } from '../game/skill-access.config';
 
 const fail = async (message: any, error: unknown) => message.send({ format: messageFormat('特色站点', error instanceof Error ? error.message : '站点暂时无法响应。') });
 export const submitWorldSiteCommissionHandler = async () => {
@@ -58,7 +59,7 @@ export const acceptWorldSiteCommissionHandler = async () => {
     const commission = result.commission;
     const markdown = Format.createMarkdown().addTitle(`站点委托·${result.siteName}`).addNewline().addNewline()
       .addText(`【域民】${commission.issuerName}`).addNewline().addNewline().addBlockquote(commission.briefing).addNewline().addNewline()
-      .addText('任务目标').addNewline().addText(commission.objective).addNewline().addText(`报酬：铜币 ×${commission.reward}`).addNewline()
+      .addText('任务目标').addNewline().addText(commission.objective).addNewline().addText(`报酬：铜币 ×${commission.reward}、贡献度 ×${guildContributionReward(commission.reward)}`).addNewline()
       .addText('委托已加入任务栏；完成交接后可领取报酬。').addNewline().addNewline().addBlockquote(`今日还可接取 ${result.usage.remaining} 次委托。`);
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('任务栏', '/任务', { type: 'command', autoEnter: true, style: 'blue' }).addButton('返回站点', `/建筑进入 ${code}`, { type: 'command', autoEnter: true })) });
   } catch (error) { await fail(message, error); }
@@ -68,7 +69,7 @@ export const claimWorldSiteCommissionHandler = async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
   try {
     const result = await claimWorldSiteCommission(event.current.UserId, Number(route.param('id')));
-    await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('委托结算').addNewline().addNewline().addText(`已完成「${result.title}」\n获得铜币 ×${result.copper}`)).addButtonGroup(Format.createButtonGroup().addRow().addButton('任务栏', '/任务', { type: 'command', autoEnter: true, style: 'blue' })) });
+    await message.send({ format: Format.create().addMarkdown(Format.createMarkdown().addTitle('委托结算').addNewline().addNewline().addText(`已完成「${result.title}」\n获得铜币 ×${result.copper}、贡献度 ×${result.contribution}`)).addButtonGroup(Format.createButtonGroup().addRow().addButton('任务栏', '/任务', { type: 'command', autoEnter: true, style: 'blue' })) });
   } catch (error) { await fail(message, error); }
 };
 

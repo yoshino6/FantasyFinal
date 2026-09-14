@@ -19,7 +19,7 @@ export const floatingTourHandler = async () => { const [event] = useEvent(); con
 export const floatingBarrierHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try {
   const source = String(route.param('source')) === 'observatory' ? 'observatory' : 'guild';
   const text = await floatingBarrierAdvice(event.current.UserId, source);
-  await message.send({ format: prose(source === 'guild' ? '主线·无形的禁锢' : '主线·观风台', text, Format.createButtonGroup().addRow().addButton(source === 'guild' ? '前往观风台' : '打开材料背包', source === 'guild' ? '/前往 13 2' : '/背包 材料', { type: 'command', autoEnter: true, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
+  await message.send({ format: prose(source === 'guild' ? '主线·无形的禁锢' : '主线·观风台', text, Format.createButtonGroup().addRow().addButton(source === 'guild' ? '前往观风台' : '打开材料背包', source === 'guild' ? '/前往 13 2 30' : '/背包 材料', { type: 'command', autoEnter: false, style: 'blue' }).addButton('任务', '/任务', { type: 'command', autoEnter: true })) });
 } catch (error) { await fail(message, error); } };
 export const floatingManorHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try {
   const { floatingStoryMainQuest } = await import('../game/floating-leaf.service'); const quest = await floatingStoryMainQuest(event.current.UserId);

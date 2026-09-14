@@ -5,6 +5,7 @@ import ts from 'typescript';
 import { skillSpecialization, specializationUpgradeCost, specializationOptions, specializationMaximum, specializeEffectValue, specializeEffectDuration, specializeControlChance } from '../src/game/skill-specialization';
 import { canSpecializePassive, passiveSpecializationFactor } from '../src/game/passive-specialization';
 import { talentByCode, talentDefinitions } from '../src/game/talent.config';
+import { tierLearningCost } from '../src/game/skill-access.config';
 
 // 执行真实服务函数，以内存查询替身核对扣费、流水和详情；不连接真实数据库。
 const file = ts.createSourceFile('adventure.ts', readFileSync(new URL('../src/game/adventure.service.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
@@ -19,7 +20,8 @@ const fixture = (overrides: Record<string, unknown> = {}, points = 100, specLeve
   const writes: Array<{ sql: string; args: any[] }> = []; const logs: any[][] = [];
   const effects = [{ code: 'slow', effect_type: 'stat_modifier', value: 20, duration: 3 }];
   const connection = { execute: async (sql: string, args: any[] = []) => {
-    if (!sql.startsWith('SELECT')) { writes.push({ sql, args }); return [[]]; }
+    if (!sql.startsWith('SELECT')) { writes.push({ sql, args }); return [{ affectedRows: 1 }]; }
+    if (sql.startsWith('SELECT skill_points FROM characters')) return [[{ skill_points: points }]];
     if (sql.startsWith('SELECT 1 FROM combat_members')) return [[]];
     if (sql.includes('FROM skill_effects')) return [effects.map(e => ({ ...e }))];
     if (sql.includes('FROM player_appraisal_progress')) return [[{ range_level: specLevel, information_level: specLevel }]];
@@ -33,13 +35,13 @@ const fixture = (overrides: Record<string, unknown> = {}, points = 100, specLeve
     talentByCode,
     characterFor: async () => ({ id: 1, level: 40, skill_points: points }), getPool: async () => connection,
     withTransaction: async (callback: (c: typeof connection) => unknown) => callback(connection),
-    recordSkillPointChange: async (...args: any[]) => { logs.push(args); }, recalculateCharacterStats: async () => {},
+    recordSkillPointChange: async (...args: any[]) => { logs.push(args); }, recalculateCharacterStats: async () => {}, achievementBookLearned: async () => {},
     isAdvancedProfessionSkillCode: () => false, residentSkillByCode: () => undefined,
     jsonObject: (value: any) => value ?? {}, skillSpecialization, specializationUpgradeCost, specializationOptions, specializationMaximum,
-    specializeEffectValue, specializeEffectDuration, specializeControlChance, canSpecializePassive, passiveSpecializationFactor
+    specializeEffectValue, specializeEffectDuration, specializeControlChance, canSpecializePassive, passiveSpecializationFactor, tierLearningCost
   };
   const service = new Function(...Object.keys(deps), `${compiled}\nreturn { ${names.join(',')} };`)(...Object.values(deps));
-  const charged = () => writes.filter(w => w.sql === 'UPDATE characters SET skill_points=skill_points-? WHERE id=?').map(w => w.args[0]);
+  const charged = () => writes.filter(w => w.sql.startsWith('UPDATE characters SET skill_points=skill_points-? WHERE id=?')).map(w => w.args[0]);
   return { service, writes, logs, charged };
 };
 
@@ -106,15 +108,20 @@ test('七种武器专精两条路线保留当前等级乘2的成本，预览一�
   }
 });
 
-test('鉴识慧眼和识珠保留独立价格，其他技能学习费用不变', async () => {
+test('鉴识慧眼和识珠保留独立价格，普通学习按阶位扣费', async () => {
   for (const [direction, cost] of [['range', 3], ['information', 4]]) {
     const f = fixture({ code: 'appraisal', category: 'bound' }, 100, 3);
     assert.equal((await f.service.upgradeAppraisal('test', direction)).cost, cost);
     assert.deepEqual(f.charged(), [cost]); assert.equal(f.logs[0][2], -Number(cost));
   }
-  const learning = fixture();
-  assert.equal((await learning.service.learnSkill('test', 7)).cost, 8);
-  assert.deepEqual(learning.charged(), [8]); assert.equal(learning.logs[0][2], -8);
+  for (const [tier, cost] of [['基础', 1], ['下位', 2], ['中位', 3]] as const) {
+    const learning = fixture({ tier }, cost);
+    assert.equal((await learning.service.learnSkill('test', 7)).cost, cost);
+    assert.deepEqual(learning.charged(), [cost]); assert.equal(learning.logs[0][2], -cost);
+    const poor = fixture({ tier }, cost - 1);
+    await assert.rejects(poor.service.learnSkill('test', 7), new RegExp(`需要 ${cost} 点`));
+    assert.deepEqual(poor.charged(), []);
+  }
 });
 
 test('女神赠送的基础鉴识无需再次学习，旧学习入口不能扣费', async () => {

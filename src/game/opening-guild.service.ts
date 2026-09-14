@@ -1,5 +1,7 @@
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
+import { randomUUID } from 'node:crypto';
+import { recordCharacterOperation } from './character-operation.service';
 import { openingCharacter, grantOpeningItem } from './opening.service';
 import { openingWorldFor, assertOpeningFree } from './opening-state';
 import { openingHubs, type OpeningHubCode } from './opening-world.config';
@@ -8,7 +10,7 @@ import { guildLessons, rootGuildPeople, rootGuildScenes } from './opening-guild.
 import { consumeInventory } from './inventory-binding';
 import { staminaMaxForRealm } from './constants';
 import { repairClaimedOpeningPack, grantOpeningProfessionWeapon } from './opening-pack.service';
-import { guildMapCatalog } from './guild-map.service';
+import { ensureRegistrationMapExchange, guildMapCatalog } from './guild-map.service';
 
 const parse=(v:unknown):Record<string,any>=>typeof v==='string'?JSON.parse(v):(v??{}) as Record<string,any>;
 export const grantOpeningService=async(c:PoolConnection,id:number,code:string,uses:number)=>{
@@ -17,9 +19,11 @@ export const grantOpeningService=async(c:PoolConnection,id:number,code:string,us
 const useService=async(c:PoolConnection,id:number,code:string)=>{
   const[result]=await c.execute<any>('UPDATE player_opening_services SET uses=uses-1 WHERE character_id=? AND code=? AND uses>0',[id,code]);
   if(!result.affectedRows)throw new Error('这项免费服务已经使用完了。');
+  await recordCharacterOperation(c,{characterId:id,kind:'opening.guild_service_used',source:{system:'opening_guild_service',id:randomUUID(),step:'used'},outcome:'核销',summary:`使用公会初行服务「${code}」`,detail:{serviceCode:code,usesConsumed:1}});
 };
 export const openingGuildView=async(user:string)=>{
   const pool=await getPool();const character=await openingCharacter(pool,user);
+  if(character.adventurer_registered)await ensureRegistrationMapExchange(pool,Number(character.id));
   let destination=String(character.region_code) as OpeningHubCode;
   if(!openingHubs[destination]){const[story]=await pool.execute<RowDataPacket[]>('SELECT destination_code FROM player_opening_stories WHERE character_id=?',[character.id]);destination=(story[0]?.destination_code??'world_tree') as OpeningHubCode;}
   const hub=openingHubs[destination];
@@ -29,32 +33,40 @@ export const openingGuildView=async(user:string)=>{
   const[visits]=await pool.execute<RowDataPacket[]>('SELECT * FROM player_opening_visits WHERE character_id=? AND building_code=?',[character.id,hub.guild]);
   const[services]=await pool.execute<RowDataPacket[]>('SELECT code,uses FROM player_opening_services WHERE character_id=? AND uses>0',[character.id]);
   const world=await openingWorldFor(pool);
-  const maps=await guildMapCatalog(pool,destination);
-  return{hub,code:destination,at,inside:at&&(visits.length>0||destination==='baina_town'&&character.npc_code===hub.guild),place,services,maps,registered:Boolean(character.adventurer_registered),world};
+  const maps=await guildMapCatalog(pool);
+  return{hub,code:destination,at,inside:at&&(visits.length>0||destination==='baina_town'),place,services,maps,registered:Boolean(character.adventurer_registered),world};
 };
 export const enterOpeningGuild=async(user:string,inside=true)=>withTransaction(async c=>{
   const character=await openingCharacter(c,user,true);await assertOpeningFree(c,Number(character.id));const context=await guildContextFor(c,Number(character.id));
-  if(!inside){await c.execute('DELETE FROM player_opening_visits WHERE character_id=?',[character.id]);return;}
+  if(!inside){const [left]=await c.execute<any>('DELETE FROM player_opening_visits WHERE character_id=?',[character.id]);if(left.affectedRows)await recordCharacterOperation(c,{characterId:Number(character.id),kind:'opening.guild_left',source:{system:'opening_guild_visit',id:randomUUID(),step:'left'},outcome:'离开',summary:'离开初行公会',detail:{buildingCode:context.hub.guild}});return;}
   if(character.activity_status!=='active')throw new Error('请先恢复行动状态。');
+  const [visits]=await c.execute<(RowDataPacket & { building_code:string;area:string })[]>('SELECT building_code,area FROM player_opening_visits WHERE character_id=? FOR UPDATE',[character.id]);
   await c.execute("INSERT INTO player_opening_visits (character_id,building_code) VALUES (?,?) ON DUPLICATE KEY UPDATE building_code=VALUES(building_code),area='大厅'",[character.id,context.hub.guild]);
   await requireGuildService(c,Number(character.id));
   await repairClaimedOpeningPack(c,Number(character.id));
   if(character.profession_code)await grantOpeningProfessionWeapon(c,Number(character.id),String(character.profession_code));
+  if(!visits[0]||visits[0].building_code!==context.hub.guild||visits[0].area!=='大厅')await recordCharacterOperation(c,{characterId:Number(character.id),kind:'opening.guild_entered',source:{system:'opening_guild_visit',id:randomUUID(),step:'entered'},outcome:'进入',summary:'进入初行公会大厅',detail:{buildingCode:context.hub.guild,previousBuildingCode:visits[0]?.building_code??null,previousArea:visits[0]?.area??null}});
 });
 export const openingGuildAction=async(user:string,action:string,value='')=>withTransaction(async c=>{
   const character=await openingCharacter(c,user,true);const id=Number(character.id);const context=await requireGuildService(c,id);
+  if(character.adventurer_registered)await ensureRegistrationMapExchange(c,id);
   await repairClaimedOpeningPack(c,id);
   if(action==='pack')return '接引员核对了你当时选择的路线，缺少的礼包物品和服务额度已经补齐；此前领过的部分不会重复发放。';
   if(action==='profession_weapon'){
     const weapon=await grantOpeningProfessionWeapon(c,id,String(character.profession_code??''));
+    if(weapon)await recordCharacterOperation(c,{characterId:id,kind:'opening.weapon_claimed',source:{system:'opening_weapon',id:weapon.id,step:'claimed'},outcome:'领取',summary:`领取职业适配武器${weapon.name}`,detail:{instanceId:weapon.id,weaponName:weapon.name,professionCode:String(character.profession_code)}});
     return weapon?`工匠递来${weapon.name}（装备编号 ${weapon.id}）：“先熟悉它的重心。别急着追求花哨的招式。”\n\n武器已收入背包，可从装备页面穿戴。`:'你已领过适配武器，或尚未完成初行登记与职业选择。';
   }
   if(action==='map_exchange'){
-    const item=(await guildMapCatalog(c,context.code)).find(map=>map.code===value&&map.canExchange);
-    if(!item)throw new Error('只能兑换当前公会周边已开放的低危地图或邻近安全城镇地图。');
+    if(!character.adventurer_registered)throw new Error('完成冒险者注册后，才能在集结区兑换地图。');
+    const item=(await guildMapCatalog(c)).find(map=>map.code===value&&map.canExchange);
+    if(!item)throw new Error('登记额度只能兑换已开放的安全城镇或最高常规魔物等级不超过 Lv.30 的地图。');
     const[owned]=await c.execute<RowDataPacket[]>(`SELECT 1 FROM player_inventory WHERE character_id=? AND item_id=? AND quantity>0 UNION ALL SELECT 1 FROM player_home_storage_items s JOIN player_homes h ON h.id=s.home_id WHERE h.character_id=? AND s.item_id=? AND s.quantity>0`,[id,item.id,id,item.id]);
     if(owned.length)throw new Error('你已经持有这张地图，兑换额度没有消耗。');
-    await useService(c,id,'map_exchange');await grantOpeningItem(c,id,String(item.code));return `鉴物员按你的勘路笔记核准了${item.name}，将回程的路口又描深了一遍。\n\n已兑换地图 ×1。`;
+    const[credits]=await c.execute<RowDataPacket[]>("SELECT code,uses FROM player_opening_services WHERE character_id=? AND code IN ('registration_map_exchange','map_exchange') FOR UPDATE",[id]);
+    const credit=credits.find(row=>row.code==='registration_map_exchange'&&Number(row.uses)>0)??credits.find(row=>row.code==='map_exchange'&&Number(row.uses)>0);
+    if(!credit)throw new Error('地图兑换额度已经使用完了。');
+    await useService(c,id,String(credit.code));await grantOpeningItem(c,id,String(item.code));return `鉴物员核准了${item.name}，将回程的路口又描深了一遍。\n\n已兑换地图 ×1。`;
   }
   if(action==='craft_practice'){
     await useService(c,id,'craft_practice');
@@ -87,17 +99,17 @@ export const openingGuildAction=async(user:string,action:string,value='')=>withT
   if(action==='lesson'){
     const lesson=guildLessons.find(l=>l.code===value);if(!lesson)throw new Error('请选择柜台提供的入门练习。');
     const[result]=await c.execute<any>("INSERT IGNORE INTO player_opening_services (character_id,code,uses) VALUES (?,?,0)",[id,`lesson_${value}`]);if(!result.affectedRows)return `${lesson.text}\n\n这次是复习，初次练习的用品已经领取过。`;
-    await grantOpeningItem(c,id,lesson.reward,lesson.quantity);return `${lesson.text}\n\n已领取本次练习用品。`;
+    await grantOpeningItem(c,id,lesson.reward,lesson.quantity);await recordCharacterOperation(c,{characterId:id,kind:'opening.lesson_completed',source:{system:'opening_guild_lesson',id:`${id}:${value}`,step:'completed'},outcome:'完成',summary:`完成公会入门练习「${value}」`,detail:{lessonCode:value,rewardCode:lesson.reward,rewardQuantity:lesson.quantity}});return `${lesson.text}\n\n已领取本次练习用品。`;
   }
   if(action==='chat'){
     const person=rootGuildPeople.find(p=>p.code===value);if(context.code!=='world_tree'||!person)throw new Error('这位接待员不在当前分会。');
     const[seen]=await c.execute<RowDataPacket[]>('SELECT 1 FROM player_opening_relations WHERE character_id=? AND npc_code=?',[id,value]);
-    await c.execute("INSERT IGNORE INTO player_opening_relations (character_id,npc_code,flags_json) VALUES (?,?,'{}')",[id,value]);return `${rootGuildScenes[person.code]}\n“${seen.length?person.again:person.first}”`;
+    await c.execute("INSERT IGNORE INTO player_opening_relations (character_id,npc_code,flags_json) VALUES (?,?,'{}')",[id,value]);if(!seen.length)await recordCharacterOperation(c,{characterId:id,kind:'npc.first_met',source:{system:'opening_guild_npc',id:`${id}:${value}`,step:'first_met'},outcome:'相识',summary:`初次与${person.code}交谈`,detail:{npcCode:value}});return `${rootGuildScenes[person.code]}\n“${seen.length?person.again:person.first}”`;
   }
   if(action==='coupon'){
     if(!['opening_medical_coupon','opening_trade_coupon'].includes(value))throw new Error('这张凭单不能在此兑换。');
     const[items]=await c.execute<RowDataPacket[]>('SELECT id FROM item_definitions WHERE code=?',[value]);await consumeInventory(c,id,Number(items[0]?.id),1);
-    await grantOpeningService(c,id,value==='opening_medical_coupon'?'arrival_recovery':'supplies',value==='opening_medical_coupon'?1:150);return value==='opening_medical_coupon'?'急救券已登记，可以进行一次免费恢复。':'补给券已登记，购买公会普通补给时可累计抵扣150铜币。';
+    await grantOpeningService(c,id,value==='opening_medical_coupon'?'arrival_recovery':'supplies',value==='opening_medical_coupon'?1:150);await recordCharacterOperation(c,{characterId:id,kind:'opening.coupon_redeemed',source:{system:'opening_coupon',id:randomUUID(),step:'redeemed'},outcome:'兑换',summary:`兑换初行凭单「${value}」`,detail:{couponCode:value}});return value==='opening_medical_coupon'?'急救券已登记，可以进行一次免费恢复。':'补给券已登记，购买公会普通补给时可累计抵扣150铜币。';
   }
   throw new Error('请选择当前分会提供的服务。');
 });
@@ -117,5 +129,6 @@ export const openingTransport=async(user:string,destination:string)=>withTransac
   const[places]=await c.execute<RowDataPacket[]>('SELECT r.id,n.pos_x,n.pos_y,n.pos_z FROM map_regions r JOIN map_npcs n ON n.region_id=r.id WHERE r.code=? AND n.code=? AND r.is_enabled=1 AND r.is_owner_only=0',[destination,target.guild]);
   if(!places[0])throw new Error('目的地暂时停航，请留在当前安全城镇。');
   const point=places[0];await c.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=?,pos_z=? WHERE id=?',[point.id,point.pos_x,point.pos_y,point.pos_z,character.id]);await c.execute('DELETE FROM player_opening_visits WHERE character_id=?',[character.id]);
+  await recordCharacterOperation(c,{characterId:Number(character.id),kind:'travel.guild_transport',source:{system:'guild_transport',id:randomUUID(),step:'arrived'},outcome:'抵达',summary:`乘公会接驳舱抵达${target.name}`,detail:{destinationCode:destination,destinationRegionId:Number(point.id)}});
   return `公会工作人员打开有护栏的接驳舱，确认行李安放妥当后启动线路。途中无需穿过野怪领地。\n\n舱门再次打开时，${target.name}的公会入口已经在眼前。`;
 });

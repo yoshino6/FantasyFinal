@@ -41,16 +41,16 @@ export const outsidePanel = (title: string, location: string, speed: number, ran
     if (showLandmarks) {
       for (const landmark of regularLandmarks) {
         const seconds = Math.max(1, Math.ceil((Math.abs(landmark.x - x) + Math.abs(landmark.y - y)) / speedLimit));
-        markdown.addText('> ').addButton(markerName(landmark), { data: `/前往 ${landmark.x} ${landmark.y}`, autoEnter: false }).addText(`（${landmark.x}, ${landmark.y}）[预计${durationText(seconds)}]`).addNewline();
+        markdown.addText('> ').addButton(markerName(landmark), { data: `/前往 ${landmark.x} ${landmark.y} ${landmark.z}`, autoEnter: false }).addText(`（${landmark.x}, ${landmark.y}, ${landmark.z}）[预计${durationText(seconds)}]`).addNewline();
       }
     }
     if (showLandmarks) for (const landmark of bountyLandmarks) {
       const seconds = Math.max(1, Math.ceil((Math.abs(landmark.x - x) + Math.abs(landmark.y - y)) / speedLimit));
-      markdown.addText('> ').addButton(`🎯 ${landmark.name}`, { data: `/前往 ${landmark.x} ${landmark.y}`, autoEnter: false }).addText(`（${landmark.x}, ${landmark.y}）[预计${durationText(seconds)}]`).addNewline();
+      markdown.addText('> ').addButton(`🎯 ${landmark.name}`, { data: `/前往 ${landmark.x} ${landmark.y} ${landmark.z}`, autoEnter: false }).addText(`（${landmark.x}, ${landmark.y}, ${landmark.z}）[预计${durationText(seconds)}]`).addNewline();
     }
     if (showLandmarks) for (const landmark of entranceLandmarks) {
       const seconds = Math.max(1, Math.ceil((Math.abs(landmark.x - x) + Math.abs(landmark.y - y)) / speedLimit));
-      markdown.addText('> ').addButton(markerName(landmark), { data: `/前往 ${landmark.x} ${landmark.y}`, autoEnter: false }).addText(`（${landmark.x}, ${landmark.y}）[预计${durationText(seconds)}]`).addNewline();
+      markdown.addText('> ').addButton(markerName(landmark), { data: `/前往 ${landmark.x} ${landmark.y} ${landmark.z}`, autoEnter: false }).addText(`（${landmark.x}, ${landmark.y}, ${landmark.z}）[预计${durationText(seconds)}]`).addNewline();
     }
   }
   const visiblePoints = showPlayers ? points : points.filter(point => point.type !== '玩家');
@@ -65,14 +65,14 @@ export const outsidePanel = (title: string, location: string, speed: number, ran
       markdown.addText(label);
       markdown.addText(` · ${directionText(point, x, y)}${point.distance}`);
       // 域民只有离开驻点时才会进入野外感知；此时明确给出坐标，便于追踪巡游路线。
-      if (point.type === '域民') markdown.addText(`（${point.x}, ${point.y}）`);
+      if (point.type === '域民') markdown.addText(`（${point.x}, ${point.y}, ${point.z}）`);
       // 同格目标的“前往”只会把玩家原地送回；建筑则可直接进入，其余目标重开对应互动。
       if (point.type === '怪物' && point.code) markdown.addText(' ').addButton('[交互]', { data: `/怪物交互 ${point.code}`, autoEnter: false });
       else if (point.distance === 0 && point.interaction?.type === '建筑') markdown.addText(' ').addButton('[进入]', { data: `/建筑进入 ${point.interaction.id}`, autoEnter: false });
       else if (point.type === '玩家' && point.distance === 0 && point.code) markdown.addText(' ').addButton('[互动]', { data: `/玩家互动 ${point.code}`, autoEnter: false });
-      else if (point.type === '玩家' && point.distance > 0) markdown.addText(' ').addButton('[前往]', { data: `/前往 ${point.x} ${point.y}`, autoEnter: false });
+      else if (point.type === '玩家' && point.distance > 0) markdown.addText(' ').addButton('[前往]', { data: `/前往 ${point.x} ${point.y} ${point.z}`, autoEnter: false });
       else if (point.type !== '玩家' && point.distance === 0 && point.interaction) markdown.addText(' ').addButton('[互动]', { data: `/坐标互动 ${point.interaction.type} ${point.interaction.id}`, autoEnter: false });
-      else if (point.type !== '玩家' && point.distance > 0 && speedLimit >= point.distance) markdown.addText(' ').addButton('[前往]', { data: `/前往 ${point.x} ${point.y}`, autoEnter: false });
+      else if (point.type !== '玩家' && point.distance > 0 && speedLimit >= point.distance) markdown.addText(' ').addButton('[前往]', { data: `/前往 ${point.x} ${point.y} ${point.z}`, autoEnter: false });
       if (point.type === '怪物' && point.code) markdown.addText(' ').addButton('[攻击]', { data: `/怪物攻击 ${point.code}`, autoEnter: false });
       if (point.isTrialTarget && point.code) markdown.addText(' ').addButton('[试炼]', { data: `/怪物攻击 ${point.code}`, autoEnter: false });
       if (point.type === '玩家' && point.code) {
@@ -110,7 +110,7 @@ const travelPanel = (travel: NonNullable<Awaited<ReturnType<typeof travelStatus>
   const hunting = travel.activityType === 'hunt';
   const buttons = limitedViewButtons(Format.createButtonGroup().addRow().addButton('刷新', '/刷新行动', { type: 'command', autoEnter: true, style: 'blue' }).addButton(hunting ? '取消寻怪' : '取消移动', hunting ? '/取消寻怪' : '/取消移动', { type: 'command', autoEnter: true, style: 'blue' }));
   return Format.create()
-    .addMarkdown(Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText(`${hunting ? '正在寻怪' : `正在前往${travel.regionName}${travel.destinationName ? `·${travel.destinationName}` : ''}（${travel.x}, ${travel.y}）`}\n预计耗时${durationText(travel.seconds)}\n当前剩余${durationText(travel.remaining)}`))
+    .addMarkdown(Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText(`${hunting ? '正在寻怪' : `正在前往${travel.regionName}${travel.destinationName ? `·${travel.destinationName}` : ''}（${travel.x}, ${travel.y}, ${travel.z}）`}\n预计耗时${durationText(travel.seconds)}\n当前剩余${durationText(travel.remaining)}`))
     .addButtonGroup(buttons);
 };
 const miningPanel = (mining: NonNullable<Awaited<ReturnType<typeof resourceMiningStatus>>>) => Format.create()

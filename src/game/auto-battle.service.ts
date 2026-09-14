@@ -1,10 +1,13 @@
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
+import { randomUUID } from 'node:crypto';
+import { recordCharacterOperation } from './character-operation.service';
 import { readRuleState, visibleResidentBuff } from './combat-rule-registry';
 import { assertCombatLoadoutMutable } from './combat-loadout-lock.service';
 
 type CharacterRow = RowDataPacket & { id: number };
 type ActionRow = RowDataPacket & { sequence_no: number; skill_id: number | null; name: string | null };
+const recordAutoConfiguration=async(connection:PoolConnection,characterId:number,mode:AutoBattleMode,summary:string,detail:Record<string,unknown>)=>recordCharacterOperation(connection,{characterId,kind:'combat.auto_config_changed',source:{system:'auto_battle_config',id:randomUUID(),step:'changed'},outcome:'调整',summary,detail:{mode,...detail}});
 type SettingRow = RowDataPacket & { enabled: number; default_encounter_action?: 'battle' | 'persuade'; auto_potion_enabled: number; hp_threshold: number; hp_item_id: number | null; hp_item_name: string | null; mp_threshold: number; mp_item_id: number | null; mp_item_name: string | null };
 type AutoCombatStateRow = RowDataPacket & { character_id: number; qq_user_id?: string; enabled: number; auto_potion_enabled: number; hp_threshold: number; hp_item_id: number | null; mp_threshold: number; mp_item_id: number | null; turn_no: number; current_hp: number; current_mp: number; hp_max: number; mp_max: number; selected_target_id?: number | null; cooldowns?: unknown };
 type AutoCombatAction = { type: 'attack' } | { type: 'skill'; skillId: number } | { type: 'item'; itemId: number };
@@ -43,7 +46,8 @@ export const autoBattleConfig = async (qqUserId: string, mode: AutoBattleMode = 
 
 export const setAutoBattleEnabled = async (qqUserId: string, enabled: boolean, mode: AutoBattleMode = 'pve') => withTransaction(async connection => {
   const characterId = await mutableCharacterIdFor(connection, qqUserId);
-  await connection.execute(`INSERT INTO ${autoTables(mode).settings} (character_id,enabled) VALUES (?,?) ON DUPLICATE KEY UPDATE enabled=VALUES(enabled)`, [characterId, enabled ? 1 : 0]);
+  const [changed]=await connection.execute<any>(`INSERT INTO ${autoTables(mode).settings} (character_id,enabled) VALUES (?,?) ON DUPLICATE KEY UPDATE enabled=VALUES(enabled)`, [characterId, enabled ? 1 : 0]);
+  if(Number(changed.affectedRows)>0)await recordAutoConfiguration(connection,characterId,mode,`${enabled?'启用':'停用'}自动战斗`,{setting:'enabled',enabled});
   return enabled;
 });
 
@@ -53,12 +57,14 @@ export const toggleAutoBattleEncounterAction = async (qqUserId: string) => withT
   await connection.execute('INSERT IGNORE INTO player_auto_battle_settings (character_id) VALUES (?)', [characterId]);
   await connection.execute("UPDATE player_auto_battle_settings SET default_encounter_action=IF(default_encounter_action='battle','persuade','battle') WHERE character_id=?", [characterId]);
   const [settings] = await connection.execute<(RowDataPacket & { default_encounter_action: 'battle' | 'persuade' })[]>('SELECT default_encounter_action FROM player_auto_battle_settings WHERE character_id=?', [characterId]);
+  await recordAutoConfiguration(connection,characterId,'pve','调整自动寻怪决策',{setting:'default_encounter_action',action:settings[0]?.default_encounter_action??'battle'});
   return settings[0]?.default_encounter_action ?? 'battle';
 });
 
 export const setAutoPotionEnabled = async (qqUserId: string, enabled: boolean, mode: AutoBattleMode = 'pve') => withTransaction(async connection => {
   const characterId = await mutableCharacterIdFor(connection, qqUserId);
-  await connection.execute(`INSERT INTO ${autoTables(mode).settings} (character_id,auto_potion_enabled) VALUES (?,?) ON DUPLICATE KEY UPDATE auto_potion_enabled=VALUES(auto_potion_enabled)`, [characterId, enabled ? 1 : 0]);
+  const [changed]=await connection.execute<any>(`INSERT INTO ${autoTables(mode).settings} (character_id,auto_potion_enabled) VALUES (?,?) ON DUPLICATE KEY UPDATE auto_potion_enabled=VALUES(auto_potion_enabled)`, [characterId, enabled ? 1 : 0]);
+  if(Number(changed.affectedRows)>0)await recordAutoConfiguration(connection,characterId,mode,`${enabled?'启用':'停用'}自动药剂`,{setting:'auto_potion_enabled',enabled});
   return enabled;
 });
 
@@ -80,18 +86,21 @@ export const saveAutoBattleAction = async (qqUserId: string, sequence: number, s
   const characterId = await mutableCharacterIdFor(connection, qqUserId);
   if (!Number.isInteger(sequence) || sequence < 1 || sequence > 30) throw new Error('出招位置需在 1 至 30 之间。');
   await assertSkill(connection, characterId, skillId);
-  await connection.execute(`INSERT INTO ${autoTables(mode).actions} (character_id,sequence_no,skill_id) VALUES (?,?,?) ON DUPLICATE KEY UPDATE skill_id=VALUES(skill_id)`, [characterId, sequence, skillId]);
+  const [changed]=await connection.execute<any>(`INSERT INTO ${autoTables(mode).actions} (character_id,sequence_no,skill_id) VALUES (?,?,?) ON DUPLICATE KEY UPDATE skill_id=VALUES(skill_id)`, [characterId, sequence, skillId]);
+  if(Number(changed.affectedRows)>0)await recordAutoConfiguration(connection,characterId,mode,`设置自动出招 ${sequence}`,{setting:'action',sequence,skillId});
 });
 
 export const deleteAutoBattleAction = async (qqUserId: string, sequence: number, mode: AutoBattleMode = 'pve') => withTransaction(async connection => {
   const characterId = await mutableCharacterIdFor(connection, qqUserId);
-  await connection.execute(`DELETE FROM ${autoTables(mode).actions} WHERE character_id=? AND sequence_no=?`, [characterId, sequence]);
+  const [deleted]=await connection.execute<any>(`DELETE FROM ${autoTables(mode).actions} WHERE character_id=? AND sequence_no=?`, [characterId, sequence]);
+  if(Number(deleted.affectedRows)>0)await recordAutoConfiguration(connection,characterId,mode,`删除自动出招 ${sequence}`,{setting:'action',sequence,deleted:true});
 });
 
 export const beginAutoBattleQuickSetup = async (qqUserId: string, mode: AutoBattleMode = 'pve') => withTransaction(async connection => {
   const characterId = await mutableCharacterIdFor(connection, qqUserId);
   const tables = autoTables(mode); await connection.execute(`DELETE FROM ${tables.actions} WHERE character_id=?`, [characterId]);
   await connection.execute(`INSERT INTO ${tables.quick} (character_id,next_sequence) VALUES (?,1) ON DUPLICATE KEY UPDATE next_sequence=1`, [characterId]);
+  await recordAutoConfiguration(connection,characterId,mode,'开始快速配置自动战斗',{setting:'quick_setup',phase:'started'});
   return 1;
 });
 
@@ -100,12 +109,14 @@ export const saveQuickAutoBattleAction = async (qqUserId: string, skillId: numbe
   const tables = autoTables(mode); const [setup] = await connection.execute<(RowDataPacket & { next_sequence: number })[]>(`SELECT next_sequence FROM ${tables.quick} WHERE character_id=? FOR UPDATE`, [characterId]); if (!setup[0]) throw new Error('请先点击“快速配置”。');
   const sequence = Number(setup[0].next_sequence); await assertSkill(connection, characterId, skillId);
   await connection.execute(`INSERT INTO ${tables.actions} (character_id,sequence_no,skill_id) VALUES (?,?,?)`, [characterId, sequence, skillId]);
-  await connection.execute(`UPDATE ${tables.quick} SET next_sequence=next_sequence+1 WHERE character_id=?`, [characterId]); return sequence + 1;
+  await connection.execute(`UPDATE ${tables.quick} SET next_sequence=next_sequence+1 WHERE character_id=?`, [characterId]);
+  await recordAutoConfiguration(connection,characterId,mode,`快速配置自动出招 ${sequence}`,{setting:'quick_action',sequence,skillId});return sequence + 1;
 });
 
 export const finishAutoBattleQuickSetup = async (qqUserId: string, mode: AutoBattleMode = 'pve') => withTransaction(async connection => {
   const characterId = await mutableCharacterIdFor(connection, qqUserId);
-  await connection.execute(`DELETE FROM ${autoTables(mode).quick} WHERE character_id=?`, [characterId]);
+  const [finished]=await connection.execute<any>(`DELETE FROM ${autoTables(mode).quick} WHERE character_id=?`, [characterId]);
+  if(Number(finished.affectedRows)>0)await recordAutoConfiguration(connection,characterId,mode,'完成快速配置自动战斗',{setting:'quick_setup',phase:'finished'});
 });
 
 export const autoPotionItems = async (qqUserId: string, page = 1, keyword = '') => {
@@ -116,13 +127,15 @@ export const autoPotionItems = async (qqUserId: string, page = 1, keyword = '') 
 export const setAutoPotionThreshold = async (qqUserId: string, kind: 'hp' | 'mp', threshold: number, mode: AutoBattleMode = 'pve') => withTransaction(async connection => {
   const characterId = await mutableCharacterIdFor(connection, qqUserId);
   if (!Number.isInteger(threshold) || threshold < 1 || threshold > 99) throw new Error('门槛需要是 1 至 99 的整数百分比。');
-  await connection.execute(`INSERT INTO ${autoTables(mode).settings} (character_id,${kind}_threshold) VALUES (?,?) ON DUPLICATE KEY UPDATE ${kind}_threshold=VALUES(${kind}_threshold)`, [characterId, threshold]);
+  const [changed]=await connection.execute<any>(`INSERT INTO ${autoTables(mode).settings} (character_id,${kind}_threshold) VALUES (?,?) ON DUPLICATE KEY UPDATE ${kind}_threshold=VALUES(${kind}_threshold)`, [characterId, threshold]);
+  if(Number(changed.affectedRows)>0)await recordAutoConfiguration(connection,characterId,mode,`设置${kind.toUpperCase()}自动药剂门槛`,{setting:`${kind}_threshold`,threshold});
 });
 
 export const setAutoPotionItem = async (qqUserId: string, kind: 'hp' | 'mp', itemId: number | null, mode: AutoBattleMode = 'pve') => withTransaction(async connection => {
   const characterId = await mutableCharacterIdFor(connection, qqUserId);
   if (itemId !== null) { const [items] = await connection.execute<RowDataPacket[]>('SELECT 1 FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.id=? AND i.item_type=\'consumable\'', [characterId, itemId]); if (!items[0]) throw new Error('背包中没有该可使用道具。'); }
-  await connection.execute(`INSERT INTO ${autoTables(mode).settings} (character_id,${kind}_item_id) VALUES (?,?) ON DUPLICATE KEY UPDATE ${kind}_item_id=VALUES(${kind}_item_id)`, [characterId, itemId]);
+  const [changed]=await connection.execute<any>(`INSERT INTO ${autoTables(mode).settings} (character_id,${kind}_item_id) VALUES (?,?) ON DUPLICATE KEY UPDATE ${kind}_item_id=VALUES(${kind}_item_id)`, [characterId, itemId]);
+  if(Number(changed.affectedRows)>0)await recordAutoConfiguration(connection,characterId,mode,`设置${kind.toUpperCase()}自动药剂`,{setting:`${kind}_item_id`,itemId});
 });
 
 /** 自动嗑药优先于常规出招：生命危险时先保命，随后才补充魔力。 */

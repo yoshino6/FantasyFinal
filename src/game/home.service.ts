@@ -1,7 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { recordAchievement } from './achievement-events';
 import { talentMaterialPayment, consumeTalentMaterial } from './talent-production';
 import { consumeInventory } from './inventory-binding';
-import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
+import { recordCharacterOperation } from './character-operation.service';
+import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { BAINA_GUILD_POSITION, BAINA_RESIDENCE_CODE, homeCosts, homePlotDistance, slotsPerFloor } from './home.constants';
 import { backfillHomeFloorLayout, findFurniturePlacement, occupyFurnitureCells } from './home-layout.service';
@@ -134,7 +136,8 @@ export const purchaseHome = async (qqUserId: string) => withTransaction(async co
   if (!Number(paid.affectedRows)) throw new Error(`铜币不足，需要 ${homeCosts.purchase.copper} 铜币。`);
   const homeName = `${character.name}的小屋`;
   const [created] = await connection.execute<any>('INSERT INTO player_homes (character_id,home_name,town_region_id,plot_x,plot_y,plot_z) VALUES (?,?,?,?,?,?)', [character.id, homeName, character.current_region_id, plot.x, plot.y, plot.z]);
-  await connection.execute('INSERT INTO player_events (player_id,event_type,payload) VALUES (?,\'home.purchased\',JSON_OBJECT(\'homeId\',?,\'x\',?,\'y\',?))', [character.player_id, created.insertId, plot.x, plot.y]);
+  const [homeEvent] = await connection.execute<ResultSetHeader>('INSERT INTO player_events (player_id,event_type,payload) VALUES (?,\'home.purchased\',JSON_OBJECT(\'homeId\',?,\'x\',?,\'y\',?))', [character.player_id, created.insertId, plot.x, plot.y]);
+  await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'home.purchased', existingEventId: Number(homeEvent.insertId), source: { system: 'home', id: Number(created.insertId), step: 'purchased' }, outcome: '购得', summary: `购得家园：${homeName}`, detail: { homeId: Number(created.insertId), name: homeName, plot, paidCopper: homeCosts.purchase.copper } });
   recordAchievement(connection,Number(character.id),['ACH_K10']);
   return { plot, copper: homeCosts.purchase.copper };
 });
@@ -144,11 +147,13 @@ export const enterHome = async (qqUserId: string) => withTransaction(async conne
   if (!home) throw new Error('你还没有小屋，请先在百纳居购买。');
   if (character.region_code !== 'baina_town' || Number(character.pos_x) !== Number(home.plot_x) || Number(character.pos_y) !== Number(home.plot_y) || Number(character.pos_z) !== Number(home.plot_z)) throw new Error('请先前往自己的小屋地块。');
   await assertFree(connection, character);
+  if(await isInHome(connection,Number(character.id)))throw new Error('你已经在自己的家园中。');
   await connection.execute('INSERT INTO player_home_visits (character_id,home_id) VALUES (?,?) ON DUPLICATE KEY UPDATE home_id=VALUES(home_id),entered_at=NOW()', [character.id, home.id]);
   const { recordWarrantSighting } = await import('./pvp.service');
   await recordWarrantSighting(connection, Number(character.id), Number(home.town_region_id), Number(home.plot_x), Number(home.plot_y));
   const { createCityPursuitAtCurrentPosition } = await import('./adventure.service');
   const pursuit = await createCityPursuitAtCurrentPosition(connection, qqUserId);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'home.entered',source:{system:'home_visit',id:randomUUID(),step:'entered'},outcome:'进入',summary:`进入家园：${home.home_name}`,detail:{homeId:Number(home.id),homeName:home.home_name}});
   return { home, pursuit };
 });
 
@@ -159,7 +164,8 @@ export const leaveHome = async (qqUserId: string) => withTransaction(async conne
   await settleHomeRestExperience(connection, Number(character.id));
   await connection.execute('DELETE FROM player_home_visits WHERE character_id=?', [character.id]);
   await connection.execute('UPDATE characters SET home_rest_experience_updated_at=NULL WHERE id=?', [character.id]);
-  await connection.execute('INSERT INTO player_events (player_id,event_type,payload) VALUES (?,\'home.left\',JSON_OBJECT(\'homeId\',?))', [character.player_id, home.id]);
+  const [leaveEvent] = await connection.execute<ResultSetHeader>('INSERT INTO player_events (player_id,event_type,payload) VALUES (?,\'home.left\',JSON_OBJECT(\'homeId\',?))', [character.player_id, home.id]);
+  await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'home.left', existingEventId: Number(leaveEvent.insertId), source: { system: 'home_event', id: Number(leaveEvent.insertId), step: 'left' }, outcome: '离开', summary: `离开家园：${home.home_name}`, detail: { homeId: Number(home.id), name: home.home_name } });
   return home;
 });
 
@@ -168,8 +174,10 @@ export const renameHome = async (qqUserId: string, input: string) => withTransac
   if (Array.from(name).length < 2 || Array.from(name).length > 32 || /[\r\n]/.test(name)) throw new Error('小屋名称需为 2～32 个字符，且不能包含换行。');
   const character = await characterFor(connection, qqUserId, true); const home = await homeFor(connection, character.id, true);
   if (!home) throw new Error('你还没有小屋。');
+  if (name === home.home_name) return { name };
   await connection.execute('UPDATE player_homes SET home_name=? WHERE id=?', [name, home.id]);
-  await connection.execute('INSERT INTO player_events (player_id,event_type,payload) VALUES (?,\'home.renamed\',JSON_OBJECT(\'homeId\',?,\'name\',?))', [character.player_id, home.id, name]);
+  const [renameEvent] = await connection.execute<ResultSetHeader>('INSERT INTO player_events (player_id,event_type,payload) VALUES (?,\'home.renamed\',JSON_OBJECT(\'homeId\',?,\'name\',?))', [character.player_id, home.id, name]);
+  await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'home.renamed', existingEventId: Number(renameEvent.insertId), source: { system: 'home_event', id: Number(renameEvent.insertId), step: 'renamed' }, outcome: '改名', summary: `家园改名：${home.home_name} → ${name}`, detail: { homeId: Number(home.id), oldName: home.home_name, newName: name } });
   recordAchievement(connection,Number(character.id),['ACH_K12']);
   return { name };
 });
@@ -179,7 +187,10 @@ export const upgradeHome = async (qqUserId: string) => withTransaction(async con
   const cost = costForUpgrade(home); if (!cost) throw new Error('房屋已经达到最高等级。');
   await consumeMaterials(connection, character.id, { ...cost.materials });
   const [paid] = await connection.execute<any>('UPDATE characters SET copper_coins=copper_coins-? WHERE id=? AND copper_coins>=?', [cost.copper, character.id, cost.copper]); if (!Number(paid.affectedRows)) throw new Error(`铜币不足，需要 ${cost.copper} 铜币。`);
-  await connection.execute('UPDATE player_homes SET house_level=house_level+1 WHERE id=?', [home.id]); await connection.execute('UPDATE player_home_furniture SET layout_version=0 WHERE home_id=?', [home.id]); await connection.execute('DELETE FROM player_home_floor_renders WHERE home_id=?', [home.id]); return { level: Number(home.house_level) + 1, cost };
+  await connection.execute('UPDATE player_homes SET house_level=house_level+1 WHERE id=?', [home.id]); await connection.execute('UPDATE player_home_furniture SET layout_version=0 WHERE home_id=?', [home.id]); await connection.execute('DELETE FROM player_home_floor_renders WHERE home_id=?', [home.id]);
+  const level = Number(home.house_level) + 1;
+  await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'home.upgraded', source: { system: 'home', id: Number(home.id), step: `level_${level}` }, outcome: '升级', summary: `家园升至 Lv${level}`, detail: { homeId: Number(home.id), level, cost } });
+  return { level, cost };
 });
 
 export const expandHome = async (qqUserId: string, floor: 2 | 3) => withTransaction(async connection => {
@@ -188,7 +199,9 @@ export const expandHome = async (qqUserId: string, floor: 2 | 3) => withTransact
   if (Number(home.floor_count) + 1 !== target || Number(home.house_level) < target || (target === 3 && Number(home.floor_count) < 2)) throw new Error(target === 2 ? '需要房屋 Lv.2 且尚未扩建二层。' : '需要房屋 Lv.3 且已拥有二层。');
   await consumeMaterials(connection, character.id, { ...cost.materials });
   const [paid] = await connection.execute<any>('UPDATE characters SET copper_coins=copper_coins-? WHERE id=? AND copper_coins>=?', [cost.copper, character.id, cost.copper]); if (!Number(paid.affectedRows)) throw new Error(`铜币不足，需要 ${cost.copper} 铜币。`);
-  await connection.execute('UPDATE player_homes SET floor_count=? WHERE id=?', [target, home.id]); return { floor: target, cost };
+  await connection.execute('UPDATE player_homes SET floor_count=? WHERE id=?', [target, home.id]);
+  await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'home.expanded', source: { system: 'home', id: Number(home.id), step: `floor_${target}` }, outcome: '扩建', summary: `家园扩建至 ${target} 层`, detail: { homeId: Number(home.id), floor: target, cost } });
+  return { floor: target, cost };
 });
 
 export const listFurniture = async (qqUserId: string, floor?: number) => {
@@ -230,6 +243,7 @@ export const craftFurniture = async (qqUserId: string, code: string, floor: numb
   const [created] = await connection.execute<any>('INSERT INTO player_home_furniture (home_id,furniture_code,floor_no,slot_key,grid_x,grid_y,rotation,layout_version) VALUES (?,?,?,?,?,?,?,2)', [home.id, code, floor, slotKey, placement.x, placement.y, placement.rotation]);
   await occupyFurnitureCells(connection, Number(home.id), floor, Number(created.insertId), placement);
   await connection.execute('DELETE FROM player_home_floor_renders WHERE home_id=? AND floor_no=?', [home.id, floor]);
+  await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'home.furniture_crafted', source: { system: 'home_furniture', id: Number(created.insertId), step: 'crafted' }, outcome: '制成', summary: `制成并摆放${definition.name}`, detail: { furnitureId: Number(created.insertId), homeId: Number(home.id), code, name: definition.name, floor, placement, materials: recipe.map(item => ({ name: item.name, quantity: Number(item.quantity) })) } });
   recordAchievement(connection,Number(character.id),['ACH_K13']);
   const [furnitureCount]=await connection.execute<RowDataPacket[]>('SELECT COUNT(DISTINCT furniture_code) AS n FROM player_home_furniture WHERE home_id=?',[home.id]);
   recordAchievement(connection,Number(character.id),[{metric:'ACH_K14',maximum:true,value:Number(furnitureCount[0].n),life:true}]);
@@ -239,7 +253,9 @@ export const craftFurniture = async (qqUserId: string, code: string, floor: numb
 export const removeFurniture = async (qqUserId: string, furnitureId: number) => withTransaction(async connection => {
   const character = await characterFor(connection, qqUserId, true); const home = await homeFor(connection, character.id, true); if (!home) throw new Error('你还没有小屋。');
   const [rows] = await connection.execute<Furniture[]>('SELECT f.id,f.furniture_code,d.name,d.description,d.effect_json,f.floor_no,f.slot_key,f.grid_x,f.grid_y,f.rotation,d.grid_width,d.grid_height FROM player_home_furniture f JOIN home_furniture_definitions d ON d.code=f.furniture_code WHERE f.id=? AND f.home_id=? FOR UPDATE', [furnitureId, home.id]); if (!rows[0]) throw new Error('没有找到该家具。');
-  await connection.execute('DELETE FROM player_home_furniture WHERE id=?', [furnitureId]); await connection.execute('DELETE FROM player_home_floor_renders WHERE home_id=? AND floor_no=?', [home.id, rows[0].floor_no]); return rows[0];
+  await connection.execute('DELETE FROM player_home_furniture WHERE id=?', [furnitureId]); await connection.execute('DELETE FROM player_home_floor_renders WHERE home_id=? AND floor_no=?', [home.id, rows[0].floor_no]);
+  await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'home.furniture_removed', source: { system: 'home_furniture', id: furnitureId, step: 'removed' }, outcome: '拆除', summary: `拆除${rows[0].name}`, detail: { furnitureId, homeId: Number(home.id), code: rows[0].furniture_code, name: rows[0].name, floor: Number(rows[0].floor_no) } });
+  return rows[0];
 });
 
 export const listHomeShop = async (qqUserId: string) => {
@@ -260,7 +276,9 @@ export const tradeHomeOffer = async (qqUserId: string, offerId: number, quantity
   } else {
     const price = Number(offer.copper_price) * quantity; const [paid] = await connection.execute<any>('UPDATE characters SET copper_coins=copper_coins-? WHERE id=? AND copper_coins>=?', [price, character.id, price]); if (!Number(paid.affectedRows)) throw new Error(`铜币不足，需要 ${price} 铜币。`);
   }
-  const gained = Number(offer.output_quantity) * quantity; await addItem(connection, character.id, Number(offer.output_item_id), gained); return { name: offer.output_name, quantity: gained };
+  const gained = Number(offer.output_quantity) * quantity; await addItem(connection, character.id, Number(offer.output_item_id), gained);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'home.offer_traded',source:{system:'home_shop_trade',id:randomUUID(),step:'settled'},outcome:'兑换',summary:`在家园兑换${offer.output_name} ×${gained}`,detail:{offerId,tradeCount:quantity,outputItemId:Number(offer.output_item_id),outputName:offer.output_name,outputQuantity:gained,inputItemId:offer.input_item_id?Number(offer.input_item_id):null,inputQuantity:offer.input_item_id?Number(offer.input_quantity)*quantity:0,paidCopper:offer.input_item_id?0:Number(offer.copper_price)*quantity}});
+  return { name: offer.output_name, quantity: gained };
 });
 
 export type HomeStorageScope = 'backpack' | 'storage';
@@ -310,5 +328,6 @@ export const depositHomeStorage = async (qqUserId: string, itemId: number, quant
   if (usedWeight + addedWeight > capacity + 0.000001) throw new Error(`仓储容量不足，还可放入 ${Math.max(0, capacity - usedWeight).toFixed(2)} kg。`);
   const binding=await consumeInventory(connection,Number(character.id),Number(item.item_id),quantity);
   await connection.execute('INSERT INTO player_home_storage_items (home_id,item_id,quantity,trade_bound_quantity,personal_bound_quantity) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),trade_bound_quantity=trade_bound_quantity+VALUES(trade_bound_quantity),personal_bound_quantity=personal_bound_quantity+VALUES(personal_bound_quantity),stored_at=NOW()', [home.id,item.item_id,quantity,binding.trade,binding.personal]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'home.storage_deposited',source:{system:'home_storage_deposit',id:randomUUID(),step:'settled'},outcome:'存入',summary:`向家园仓储存入${item.name} ×${quantity}`,detail:{homeId:Number(home.id),itemId:Number(item.item_id),itemName:item.name,quantity,binding}});
   return { name: item.name, quantity, usedWeight: usedWeight + addedWeight, capacity };
 });

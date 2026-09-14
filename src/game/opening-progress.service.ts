@@ -5,6 +5,7 @@ import { openingRouteByCode } from './opening-content';
 import { getPool, withTransaction } from '../database/pool';
 import { requireGuildService } from './guild-context';
 import { openingReplay, saveOpeningReplay } from './opening-replay';
+import { recordCharacterOperation } from './character-operation.service';
 
 export const openingExperienceShares=()=>{
   const total=experienceRequiredForLevel(1)+experienceRequiredForLevel(2);
@@ -74,6 +75,6 @@ export const openingJob=async(user:string,revision?:number)=>withTransaction(asy
   const result:JobView=settled?{title:job.title,text:`${job.done}\n\n【结算】经验已到账，铜币 ×40。${Number(current[0].level)>=5?'你已经可以继续常规旅途，初行委托圆满结束。':'可继续查看下一份初行委托。'}`,revision:step,action:undefined}
     :Number(current[0].level)>=5?{title:'初行委托已完成',text:'你的等级已达到 Lv.5。公会将继续提供正常委托与旅途指引，这份入门补助已经结清。',revision:step,action:undefined}
     :{title:`${job.npc}·${job.title}`,text:step%2===0?job.intro:job.middle,revision:step,action:step%2===0?job.first:job.second};
-  if(step!==startingStep)await saveOpeningReplay(c,id,'job',startingStep,'next',result);
+  if(step!==startingStep){await saveOpeningReplay(c,id,'job',startingStep,'next',result);await recordCharacterOperation(c,{characterId:id,kind:settled?'opening.job_settled':'opening.job_accepted',source:{system:'opening_job',id:id,step:String(startingStep)},outcome:settled?'结算':'推进',summary:`初行委托「${job.title}」${settled?'完成结算':'进入下一阶段'}`,detail:{jobTitle:job.title,stepBefore:startingStep,stepAfter:step,settled,rewardCopper:settled?40:0}});}
   return result;
 });

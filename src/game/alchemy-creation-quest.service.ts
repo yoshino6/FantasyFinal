@@ -1,6 +1,7 @@
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { withTransaction } from '../database/pool';
 import { craftCharacterId } from './alchemy-journal.service';
+import { recordCharacterOperation } from './character-operation.service';
 
 export const alchemyCreationQuestCode = 'alchemy_world_beyond_bottles';
 export const alchemyCreationQuestTitle = '瓶中之外的世界';
@@ -37,5 +38,6 @@ export const learnAlchemyCreation = (user: string) => withTransaction(async conn
     WHERE c.id=? AND n.code='alchemy_sweetshop' LIMIT 1`, [id]);
   if (!nearby.length) throw new Error('请先到糖水屋晴儿所在的坐标，再与她交谈。');
   await connection.execute("UPDATE player_side_quests SET status='claimed',completed_at=NOW(),claimed_at=NOW() WHERE character_id=? AND quest_code=? AND status<>'claimed'", [id, alchemyCreationQuestCode]);
+  if(!quest.unlocked)await recordCharacterOperation(connection,{characterId:id,kind:'quest.alchemy_creation_learned',source:{system:'side_quest',id:alchemyCreationQuestCode,step:'claimed'},outcome:'完成',summary:`完成${alchemyCreationQuestTitle}教学`,detail:{questCode:alchemyCreationQuestCode,questTitle:alchemyCreationQuestTitle}});
   return { alreadyLearned: quest.unlocked, story: alchemyCreationLesson };
 });

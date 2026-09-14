@@ -48,7 +48,8 @@ const setup = (overrides: Record<string, unknown> = {}) => {
     experienceRequiredForLevel: (level: number) => level * 100,
     barrierStage: (value: unknown) => Math.min(4, Math.max(0, Number(value) || 0)),
     goblinQuestFor: async () => state.goblinQuest,
-    relativeDirection: () => '附近'
+    relativeDirection: () => '附近',
+    require: (path: string) => path === './worldtree-witness.service' ? { worldtreeWitnessMainQuest: async () => null } : assert.fail(`意外加载：${path}`)
   });
   return { state, ...career, ...main };
 };
@@ -80,7 +81,7 @@ test('十级经验圆满后无形的禁锢直接指向糖水屋老板', async ()
   service.state.character.experience = 1000;
   const barrier = await service.currentMainQuest('player');
   assert.equal(barrier.title, '【主线·无形的禁锢】');
-  assert.equal(barrier.action.command, '/前往 -12 -196');
+  assert.equal(barrier.action.command, '/前往 -12 -196 0');
   assert.match(barrier.description, /糖水屋.*老板/);
 });
 
@@ -94,7 +95,8 @@ test('第一次向糖水屋老板请教即可开始天空粉尘调查', async ()
   } };
   const service = loadDeclarations('../src/game/main-quest.service.ts', ['barrierQuestCode', 'barrierStage', 'advanceRealmBarrier'], {
     withTransaction: async (work: (connection: unknown) => unknown) => work(connection),
-    experienceRequiredForLevel: (level: number) => level * 100
+    experienceRequiredForLevel: (level: number) => level * 100,
+    recordQuestStage: async () => {}
   });
   const progress = await service.advanceRealmBarrier('player', 'alchemist');
   assert.deepEqual(progress, { previous: 0, stage: 2 });
@@ -108,7 +110,7 @@ test('突破后升至十一级，再接回梨子喵失踪与哥布林国王主�
   const quest = await service.currentMainQuest('player');
   assert.equal(quest.title, '【主线·失踪的少女】');
   assert.match(quest.description, /梨子喵.*森林/s);
-  assert.equal(quest.action.command, '/前往 -2 -181');
+  assert.equal(quest.action.command, '/前往 -2 -181 0');
 });
 
 test('主线不再要求花技能点学习女神赠送的鉴识', async () => {
@@ -118,7 +120,7 @@ test('主线不再要求花技能点学习女神赠送的鉴识', async () => {
 
 test('公会导航读取实际位置，并在抵达后提供前台与选职操作', async () => {
   const service = setup({ adventurer_registered: 0, profession_code: null });
-  assert.equal((await service.guildCareerMainQuest('player')).action.command, '/前往 -2 -161');
+  assert.equal((await service.guildCareerMainQuest('player')).action.command, '/前往 -2 -161 0');
   Object.assign(service.state.character, { pos_x: -2, pos_y: -161 });
   assert.equal((await service.guildCareerMainQuest('player')).action.command, '/建筑区域 guild_counter 前台');
   service.state.character.adventurer_registered = 1;
@@ -139,7 +141,7 @@ test('四种一转职业均列出全部普通二转导师，抵达后可直接�
     const quest = await service.advancedProfessionMainQuest('player');
     assert.equal(quest.actions.length, expected.length);
     assert.match(quest.description, /不受一转职业限制/);
-    assert.deepEqual(quest.actions.map((action: { command: string }) => action.command), expected.map(route => `/前往 ${route.mentor.x} ${route.mentor.y}`));
+    assert.deepEqual(quest.actions.map((action: { command: string }) => action.command), expected.map(route => `/前往 ${route.mentor.x} ${route.mentor.y} 0`));
     const route = expected[0];
     Object.assign(service.state.character, { region_code: 'world_tree', pos_x: route.mentor.x, pos_y: route.mentor.y });
     assert.equal((await service.advancedProfessionMainQuest('player')).actions[0].command, `/二转职业 ${route.mentor.code}`);
@@ -159,7 +161,8 @@ const trialSetup = (base: string | null, code: string) => {
     writes.push({ sql, values }); return [{ affectedRows: 1 }];
   } };
   const service = loadDeclarations('../src/game/advanced-profession.service.ts', ['advancedProfessionRetrainCooldownMs', 'characterFor', 'assertAtMentor', 'beginAdvancedProfession'], {
-    withTransaction: (action: (connection: unknown) => unknown) => action(connection), advancedProfessionByCode, durationText: () => '24小时'
+    withTransaction: (action: (connection: unknown) => unknown) => action(connection), advancedProfessionByCode, durationText: () => '24小时',
+    recordCharacterOperation: async () => {}, randomUUID: () => 'test-operation'
   });
   return { ...service, state, writes };
 };
@@ -215,13 +218,13 @@ test('25级尚未选择主职业时，二转引导回公会补齐前置', async 
   const quest = await service.advancedProfessionMainQuest('player');
   assert.equal(quest.title, '【主线·二转之路】');
   assert.match(quest.description, /主职业选择/);
-  assert.equal(quest.action.command, '/前往 -2 -161');
+  assert.equal(quest.action.command, '/前往 -2 -161 0');
 });
 
 test('二转三段进度分别引导讨伐、交付与挑战导师，凭证需击杀和材料同时满足', async () => {
   const service = setup({ region_code: 'ridge_foothills' });
   const route = worldTreeAdvancedProfessions[0];
-  const mentorCommand = `/前往 ${route.mentor.x} ${route.mentor.y}`;
+  const mentorCommand = `/前往 ${route.mentor.x} ${route.mentor.y} 0`;
   service.state.active = { profession_code: route.code, stage: 1, story_kills: 0, proof_kills: 0 };
   assert.equal((await service.advancedProfessionMainQuest('player')).action.command, '/寻怪');
   service.state.active.story_kills = route.first.requiredKills;
@@ -253,7 +256,7 @@ test('二转完成后收起引导，重新二转仍追踪新任务', async () =>
 
 test('任务栏同时呈现生长结与二转，主线分类和搜索保留二转操作', async () => {
   const service = setup();
-  const hidden = [{ title: '【二转·魔学者 1/10】四份对照药', description: '目标：交付药剂，回店找晴儿。', action: { label: '[返回导师]', command: '/前往 12 34' } }];
+  const hidden = [{ title: '【二转·魔学者 1/10】四份对照药', description: '目标：交付药剂，回店找晴儿。', action: { label: '[返回导师]', command: '/前往 12 34 0' } }];
   const texts: string[] = []; const commands: string[] = [];
   const markdown: any = {};
   for (const method of ['addTitle', 'addText', 'addBlockquote']) markdown[method] = (value: string) => { texts.push(value); return markdown; };
@@ -272,15 +275,15 @@ test('任务栏同时呈现生长结与二转，主线分类和搜索保留二�
   await task.taskFormat('player', '主线');
   assert.match(texts.join('\n'), /主线·开化·生长结/);
   assert.match(texts.join('\n'), /主线·二转之路/);
-  assert.ok(commands.includes('/前往 -8 -7'));
+  assert.ok(commands.includes('/前往 -8 -7 0'));
   texts.length = 0; commands.length = 0;
   await task.taskFormat('player', undefined, 1, '二转');
   assert.doesNotMatch(texts.join('\n'), /主线·开化·生长结/);
   assert.match(texts.join('\n'), /主线·二转之路/);
-  assert.ok(commands.includes('/前往 -8 -7'));
+  assert.ok(commands.includes('/前往 -8 -7 0'));
   texts.length = 0; commands.length = 0;
   await task.taskFormat('player', '支线', 1, '魔学者');
   assert.match(texts.join('\n'), /四份对照药/);
   assert.doesNotMatch(texts.join('\n'), /主线·二转之路/);
-  assert.deepEqual(commands, ['/前往 12 34']);
+  assert.deepEqual(commands, ['/前往 12 34 0']);
 });

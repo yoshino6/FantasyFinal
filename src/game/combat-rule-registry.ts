@@ -497,7 +497,9 @@ export class CombatRules {
     const redirected = skill.scope === 'enemy' && ['physical', 'magic'].includes(skill.category);
     const foe = originalFoe && redirected ? this.redirect(source, originalFoe, true, expandedHit) : originalFoe;
     const supportBefore = !extra && skill.scope === 'ally' ? this.supportSnapshot(ally) : undefined;
+    const statusBefore = new Map(this.units.map(unit => [unit.key, new Map(unit.state.statuses.filter(effect => effect.until >= this.turn).map(effect => [effect.code, { value: effect.value, until: effect.until, stacks: effect.stacks }]))]));
     this.log.push(`➤${combatUnitLabel(source)}释放技能「${skill.name}」`);
+    const logStart = this.log.length;
     const buff = (code: string, value: number, duration: number, recipient = source) => this.add(recipient, code, specializeEffectValue(code, value, source.castSpecialization?.effectFactor), specializeEffectDuration(code, duration, source.castSpecialization?.durationChange), source);
     const debuff = (code: string, value: number, duration: number, recipient = foe) => { if (recipient) this.add(recipient, code, specializeEffectValue(code, value, source.castSpecialization?.effectFactor), specializeEffectDuration(code, duration, source.castSpecialization?.durationChange), source, true); };
     const attack = async (power = skill.power, element = skill.element) => {
@@ -520,7 +522,7 @@ export class CombatRules {
       case 'C01': if (!extra && !this.status(ally, 'extra_lock') && !this.status(ally, 'extra_block')) { buff('extra_lock', 1, 3, ally); this.hooks.extraAction(ally); } else this.log.push('　➥目标暂时不能获得额外行动。'); break;
       case 'C02': buff('speed', 35, 1); this.reduceCooldown(source); break;
       case 'C03': { const count = enemies.filter(unit => this.status(unit, 'slow')).length; for (const enemy of enemies) debuff('slow', 18, 2, enemy); await this.restore(source, source, 0, source.mpMax * Math.min(.12, count * .04)); break; }
-      case 'C04': case 'M01': { const keys = Object.keys(source.cooldowns).filter(code => code !== skill.code && isSkillCooldown(code) && Number(source.cooldowns[code]) >= (id === 'M01' ? 3 : 1) && !['resident_c01', 'resident_c04', 'resident_m01'].includes(code)).sort((a, b) => Number(source.cooldowns[b]) - Number(source.cooldowns[a])); const key = keys[0]; if (key) { source.cooldowns[key] = 0; if (id === 'C04') source.state.memory.debtSkill = key; } if (id === 'M01') { debuff('slow', 30, 1, source); debuff('exposed', 15, 1, source); } break; }
+      case 'C04': case 'M01': { const keys = Object.keys(source.cooldowns).filter(code => code !== skill.code && isSkillCooldown(code) && Number(source.cooldowns[code]) >= (id === 'M01' ? 3 : 1) && !['resident_c01', 'resident_c04', 'resident_m01'].includes(code)).sort((a, b) => Number(source.cooldowns[b]) - Number(source.cooldowns[a])); const key = keys[0]; if (key) { source.cooldowns[key] = 0; if (id === 'C04') source.state.memory.debtSkill = key; this.log.push(`　➥${combatUnitLabel(source)}的「${residentSkillByCode(key)?.name ?? key}」冷却已重置。`); } if (id === 'M01') { debuff('slow', 30, 1, source); debuff('exposed', 15, 1, source); } break; }
       case 'C05': { const setup = foe?.state.memory.lastHitTurn === this.turn && foe?.state.memory.lastHitter !== source.key; if (await attack() && setup) { buff('speed', 15, 1); debuff('slow', 10, 1); } break; }
       case 'C06': { const previous = source.selected; source.selected = ally.selected; ally.selected = previous; await this.hooks.swapThreat(source, ally); buff('reduction', 10, 1); buff('reduction', 10, 1, ally); break; }
       case 'D01': if (ally.key !== source.key) await this.restore(source, ally, 0, Number(source.state.memory.manaTransfer ?? paid)); delete source.state.memory.manaTransfer; break;
@@ -593,6 +595,16 @@ export class CombatRules {
       default: throw new Error(`未注册主动规则：${id}`);
     }
     if (supportBefore) await this.echoSupport(source, ally, supportBefore);
+    for (const unit of this.units) for (const effect of unit.state.statuses.filter(item => item.until >= this.turn)) {
+      const previous = statusBefore.get(unit.key)?.get(effect.code);
+      if (previous && previous.value === effect.value && previous.until === effect.until && previous.stacks === effect.stacks) continue;
+      const duration = Math.max(1, effect.until - this.turn + 1);
+      const detail = effect.code === 'beat' ? `下一次直接治疗或护盾 +${effect.value}%` :
+        ['shield', 'life_shield'].includes(effect.code) ? `${Math.floor(effect.value)} HP` :
+        effect.value === 1 ? '' : `${Number(effect.value.toFixed(1))}%`;
+      this.log.push(`　➥${combatUnitLabel(unit)}${effect.debuff ? '受到' : '获得'}${names[effect.code] ?? effect.code}${detail ? `（${detail}）` : ''}，剩余 ${duration} 回合。`);
+    }
+    if (this.log.length === logStart) this.log.push('　➥本次未满足生效条件，没有产生效果。');
   }
   /** 机制状态不按普通回合到期，必须用同一战场身份的机制键解除。 */
   addMechanism(source: RuleUnit, target: RuleUnit, code: string, value: number, key: string, debuff = true) {

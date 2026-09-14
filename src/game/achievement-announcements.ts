@@ -25,7 +25,7 @@ export const deliverAchievementAnnouncements=async()=>{
       let outcome=achievementDeliveryOutcome([]);
       try{
         const [members]=await db.execute<RowDataPacket[]>('SELECT name_snapshot FROM achievement_first_members WHERE achievement_id=? ORDER BY identity_key',[row.achievement_id]);
-        const format=achievementAnnouncementFormat({winner:row.name_snapshot,winners:members.length?members.map(m=>String(m.name_snapshot)):undefined,name:definition.name,description:definition.description});
+        const format=achievementAnnouncementFormat({winner:row.name_snapshot,winners:members.length?members.map(m=>String(m.name_snapshot)):undefined,name:definition.name,description:definition.description,rarity:String(row.rarity)});
         const results=await MessageDirect.create().sendToTarget({target:{scope:'group',targetId:String(row.group_id),BotId:String(row.bot_id)},format});
         outcome=achievementDeliveryOutcome(results);
       }catch(error){logger.warn({err:error},'成就首位公告发送结果待核查');}

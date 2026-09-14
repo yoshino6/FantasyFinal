@@ -5,6 +5,8 @@ import { hiddenMix } from './hidden-particles';
 import { HiddenBattleError } from './hidden-combat';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { withTransaction } from '../database/pool';
+import { randomUUID } from 'node:crypto';
+import { recordCharacterOperation } from './character-operation.service';
 import { hiddenQuestCharacter } from './hidden-quest.service';
 import { hiddenProfession, hiddenSkill } from './hidden-profession.config';
 import { hiddenParticles } from './hidden-particles';
@@ -66,6 +68,7 @@ export const hiddenLoadout = (user: string, type?: 'weapons' | 'devices', toggle
     if (config[type].length > 3) throw new Error('至多配置3件，请先移除一件。');
     if (type==='devices' && new Set(config[type].map((id:number)=>devices.find(d=>d.id===id)?.code)).size!==config[type].length) throw new Error('主脑不能连接重复型号。');
     await connection.execute('INSERT INTO player_hidden_profession_loadouts (character_id,profession_code,config_json) VALUES (?,?,?) ON DUPLICATE KEY UPDATE config_json=VALUES(config_json),revision=revision+1',[character.id,profession.code,JSON.stringify(config)]);
+    await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'profession.hidden_loadout_changed',source:{system:'hidden_loadout',id:randomUUID(),step:'changed'},outcome:'调整',summary:`调整${profession.name}${type==='weapons'?'武器':'异械'}阵列`,detail:{professionCode:profession.code,type,toggle,selected:config[type]}});
   }
   return { profession,config,weapons,devices };
 });
@@ -140,5 +143,6 @@ export const saveHiddenAuto = (user: string, code: string, revision: number) => 
   const config=object(configs[0]?.config_json);config.auto??={};config.auto[code]=choice;
   await connection.execute('INSERT INTO player_hidden_profession_loadouts (character_id,profession_code,config_json) VALUES (?,?,?) ON DUPLICATE KEY UPDATE config_json=VALUES(config_json),revision=revision+1',[character.id,skill.profession,JSON.stringify(config)]);
   await connection.execute('UPDATE player_hidden_action_drafts SET submitted=1 WHERE character_id=? AND battle_key=? AND turn_no=0',[character.id,`setup:${skill.profession}`]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'profession.hidden_auto_saved',source:{system:'hidden_auto_setup',id:randomUUID(),step:'saved'},outcome:'保存',summary:`保存${skill.name}自动战斗配置`,detail:{professionCode:skill.profession,skillCode:code,choice}});
   return skill.name;
 });

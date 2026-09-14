@@ -8,6 +8,7 @@ import { serveBasicOpeningMeal } from './opening-keepsakes.service';
 import { openingReplay, saveOpeningReplay } from './opening-replay';
 import { staminaMaxForRealm } from './constants';
 import { recordAchievement } from './achievement-events';
+import { recordCharacterOperation } from './character-operation.service';
 
 export type AquaView = { title: string; text: string; revision: number; choices: { code: string; label: string }[] };
 const chapters: { title: string; text: string; choices: { code: string; label: string }[] }[] = [
@@ -94,5 +95,6 @@ export const aquaAction = async (user: string, revision: number, action: string)
   world.revision = Number(world.revision) + 1;
   const next = ownerView(world, flags), response = { ...next, text: result + '\n\n' + next.text };
   await saveOpeningReplay(c, id, 'aqua', revision, action, response);
+  await recordCharacterOperation(c,{characterId:id,kind:action==='limit'||action==='commissioner'?'opening.aqua_commission_completed':action==='follow'||action==='stay'?'opening.aqua_follow_changed':'opening.aqua_story_advanced',source:{system:'opening_aqua',id:id,step:String(revision)},outcome:action,summary:`与阿库娅完成「${current.title}」的选择`,detail:{revision,action,newStage:Number(world.aqua_stage),location:String(world.aqua_location),rewardCopper:action==='limit'||action==='commissioner'?40:0}});
   return response;
 });

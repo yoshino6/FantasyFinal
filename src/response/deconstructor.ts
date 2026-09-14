@@ -163,7 +163,7 @@ export const deconstructorProfessionFormat = async (qqUserId: string) => {
     .addBlockquote(`分解产出+${progress.bonus}%`).addNewline()
     .addBlockquote('构造成功率由构造物推荐等级与当前解构师等级差决定；失败会返还部分全部投入材料。');
   return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('分解','/分解',{type:'command',autoEnter:true}).addButton('构造','/构造',{type:'command',autoEnter:true})
-    .addRow().addButton('前往 异工坊', '/前往 6 -189', { type: 'command', autoEnter: true, style: 'blue' }));
+    .addRow().addButton('前往 异工坊', '/前往 6 -189 0', { type: 'command', autoEnter: false, style: 'blue' }));
 };
 
 type DeconstructionCategory = '装备' | '道具' | '材料';

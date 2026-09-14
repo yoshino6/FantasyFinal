@@ -89,7 +89,8 @@ test('天赋确认先引导打开面板，初行场景使用正文而选项保�
   const giftText=converter.createMarkdownText(giftMarkdown.value);
   const giftButtons=converter.createButtonsData(gift.value.find((value:any)=>value.type==='BT.group').value).rows.flatMap((row:any)=>row.buttons);
   assert.equal(giftMarkdown.value.filter((value:any)=>value.type==='MD.blockquote').length,1,'降临叙事合并为一个引用块，避免QQ显示空引用行');
-  assert.match(giftText,/> 你的天赋【星火余烬】觉醒了/);
+  assert.match(giftText,/> 你的天赋【星火余烬】已经觉醒，会作为独立的常驻能力一直生效。可随时打开【天赋】查看详情。/);
+  assert.doesNotMatch(giftText,/绑定技能加入【技能】/);
   assert.match(giftText,/首次移动或寻怪时，初行故事才会展开/);
   assert.deepEqual(giftButtons.map((button:any)=>button.action.data),['/面板','/角色','/背包']);
 
@@ -248,7 +249,7 @@ test('世界树前台沿用百纳镇业务分组，登记和闲聊均留在维�
   await adventure.guildChatHandler();assert.deepEqual(chats,[['u','chat','root_guild_clerk']]);
   assert.deepEqual(rows(output)[0].map((b:any)=>b.action.data),['/前台闲聊','/初行公会']);
   await adventure.guildRegistrationHandler();assert.match(JSON.stringify(output.value),/维萝/);assert.doesNotMatch(JSON.stringify(output.value),/莫妮卡/);
-  assert.equal(rows(output)[0][0].action.data,'/初行公会 前台');
+  assert.deepEqual(rows(output)[0].map((button:any)=>button.action.data),['/初行公会 集结区','/初行公会 前台']);
   const guild=load('src/response/opening-guild.ts',{alemonjs:{Format},'../game/opening-guild.service':{openingGuildView:async()=>({hub:openingHubs.world_tree,code:'world_tree',at:true,inside:true,place:{},services:[],maps:[],world:{}})},'./adventure':adventure});
   assert.deepEqual((await guild.openingGuildFormat('u','前台')).value,local.value,'大厅前台入口与登记选职后的前台使用同一页面');
 });

@@ -31,7 +31,8 @@ test('首位公告公开角色名、成就名与引用简介，不公开条件�
     const output=serialized(achievementAnnouncementFormat({...definition,winner:'哥布林刺客',condition:'SECRET_REQUIREMENT'} as any));
     assert.ok(output.includes('世界的回响'));assert.ok(output.includes('【哥布林刺客】达成'));
     assert.ok(output.includes(JSON.stringify({type:'MD.text',value:definition.name})));
-    assert.ok(output.includes(JSON.stringify({type:'MD.text',value:'获得：奇珍道具匣 ×1'})));
+    const rewards:Record<string,string>={普通:'奇异道具匣 ×1',优秀:'奇异道具匣 ×2',精良:'奇异道具匣 ×3',稀有:'奇珍道具匣 ×1',传说:'奇珍道具匣 ×2',史诗:'珍藏道具匣 ×1'};
+    assert.ok(output.includes(JSON.stringify({type:'MD.text',value:`获得：${rewards[definition.rarity]}`})));
     assert.ok(output.includes(JSON.stringify({type:'MD.blockquote',value:`${definition.description}\n>\n>`})));assert.ok(!output.includes('SECRET_REQUIREMENT'));
   }
 

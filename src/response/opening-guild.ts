@@ -21,7 +21,7 @@ export const openingGuildFormat=async(user:string,area='大厅')=>{
   const add=(label:string,command:string,autoEnter=true)=>buttons.addButton(label,command,{type:'command',autoEnter,style:'blue'});
   if(!view.at){
     md.addText(`公会入口位于（${view.place.pos_x}，${view.place.pos_y}，${view.place.pos_z}）。`).addNewline().addBlockquote('办事员与补给都在柜台等候，请先抵达入口。');
-    buttons.addRow();add('前往公会',`/前往 ${view.place.pos_x} ${view.place.pos_y}`);add('查看地图','/地图');
+    buttons.addRow();add('前往公会',`/前往 ${view.place.pos_x} ${view.place.pos_y} ${view.place.pos_z}`,false);add('查看地图','/地图');
   }else if(!view.inside){
     md.addBlockquote((view.code==='world_tree'?'巨根在前方分开，托起一座挂满风铃的木厅。公会徽记被新生枝条稳稳托住。\n\n岑渡扶住木门，等抱着药箱的小树灵先过去，才转向你。\n\n“找工作、问路，或者只是刚走出一段不太好的路，都可以进去。”':view.hub.description).replace(/\r?\n/g,'\n> '));
     buttons.addRow();add('进入公会','/初行入会');add('查看附近','/面板');
@@ -38,8 +38,10 @@ export const openingGuildFormat=async(user:string,area='大厅')=>{
     buttons.addRow();add('返回委托板','/初行公会 委托板');
   }else if(area==='集结区'){
     md.addBlockquote((view.code==='world_tree'?'长桌上铺着地图，归来的冒险者擦去靴边的泥水，给空椅让出位置。有人将下一次出发的时刻写在纸上，招呼还在寻找同伴的旅人过来看看。':`你来到${view.hub.guildName}的集结区。有人摊开地图招呼同伴，有人对照队伍名册核实人数。桌边留出一处空位，供新来的冒险者写下打算前往的地方。`).replace(/\r?\n/g,'\n> '));
+    md.addNewline().addText('完成冒险者注册后，可在这里用一次登记额度兑换已开放的 Lv.30 及以下地图；更多地图可到公会商店购买。');
     buttons.addRow();add('我的队伍','/队伍');add('寻找队伍','/队伍列表');
     buttons.addRow();add('创建队伍','/组队 创建');add('加入队伍','/组队 加入 ',false);
+    buttons.addRow();add('兑换地图','/初行公会 地图',false);
     buttons.addRow();add('返回大厅','/初行公会');
   }else if(area==='后勤区'){
     md.addBlockquote('你沿侧廊来到后勤区。工台上摆着待检的工具，兽栏里备好了清水，接驳值守正核对出发名单。工匠抬手示意你避开地上的木屑，把通道让给运送补给的人。');
@@ -53,19 +55,20 @@ export const openingGuildFormat=async(user:string,area='大厅')=>{
     buttons.addRow();add('返回大厅','/初行公会');
   }else if(area==='地图'){
     const credits=Object.fromEntries(view.services.map(s=>[String(s.code),Number(s.uses)]));
-    md.addBlockquote('鉴物员展开公会周边的地图，把已知的魔物踪迹标在路旁：“先看清这段路通向哪里，再决定什么时候出发。”')
-      .addNewline().addNewline().addText(`地图兑换额度：${credits.map_exchange??0} 张（低危地图／邻近城镇）。`).addNewline()
-      .addText('低危：20级以下｜中危：20～50级｜高危：50级以上');
+    md.addBlockquote('鉴物员展开各地公会共用的地图目录，把已知的魔物踪迹标在路旁：“先看清这段路通向哪里，再决定什么时候出发。”')
+      .addNewline().addNewline().addText(`地图兑换额度：${(credits.registration_map_exchange??0)+(credits.map_exchange??0)} 张（低危地图／安全城镇）。`).addNewline()
+      .addText('按常规魔物分级：低危 Lv.30 及以下｜中危 Lv.31～50｜高危 Lv.51 及以上；区域 Boss 等级另列。');
     for(const map of view.maps){
       const level=map.minLevel===null||map.maxLevel===null?'等级待勘测':map.minLevel===map.maxLevel?`Lv.${map.maxLevel}`:`Lv.${map.minLevel}～${map.maxLevel}`;
-      md.addNewline().addNewline().addText(`【${map.regionName}】${map.risk}${map.safeTown?'':` · ${level}`}`).addNewline()
+      md.addNewline().addNewline().addText(`【${map.regionName}】${map.risk}${map.safeTown?'':` · 常规魔物 ${level}${map.bossLevel===null?'':` · 区域 Boss Lv.${map.bossLevel}`}`}`).addNewline()
         .addBlockquote(map.description.replace(/\r?\n/g,'\n> ')).addNewline();
       if(map.codexId)md.addButton('[地图详情]',{data:`/物品图鉴 ${map.codexId}`,autoEnter:false});
-      if(map.canExchange)md.addText(' ').addButton('[兑换地图]',{data:`/初行服务 map_exchange ${map.code}`,autoEnter:false});
+      if(view.registered&&map.canExchange)md.addText(' ').addButton('[用登记额度兑换]',{data:`/初行服务 map_exchange ${map.code}`,autoEnter:false});
     }
     if(!view.maps.length)md.addNewline().addNewline().addText('周边暂时没有已开放的地图资料。');
     buttons.addRow();add('初行见闻','/初行见闻');add('地图教学','/初行服务 lesson map');
-    buttons.addRow();add('返回休息区','/初行公会 休息区');
+    buttons.addRow();add('公会商店','/工会商店',false);
+    buttons.addRow();add('返回集结区','/初行公会 集结区');
   }else if(area==='工艺'){
     const credits=Object.fromEntries(view.services.map(s=>[String(s.code),Number(s.uses)]));
     md.addBlockquote('工匠收起锋利的工具，把练习用的木件放到桌边：“先认准榫口，再试着合上。做完还要摇一摇，看它站不站得稳。”').addNewline().addText(`工艺凭单练习：${credits.craft_practice??0} 次。`);
