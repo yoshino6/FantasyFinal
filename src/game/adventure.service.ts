@@ -678,7 +678,7 @@ const heartCorrections = new WeakMap<object, Awaited<ReturnType<typeof heartGrow
 const finalAttribute = (character: Pick<CharacterRow, keyof Allocation | `${keyof Allocation}_growth` | 'level'>, attribute: keyof Allocation) => {
   const shares = playerGrowthShares(Number(character.level));
   const heart = heartCorrections.get(character);
-  return Number(character[attribute]) + Number(character[`${attribute}_growth`]) * shares + (heart ? heart.delta[attribute] * shares + heart.offset[attribute] : 0);
+  return Number(character[attribute]) + Number(character[`${attribute}_growth`]) * shares + (heart ? heart.delta[attribute] * shares : 0);
 };
 // 以 0.9 次幂递减：平均角色约为 Lv.1=2、Lv.10=4、Lv.20=6；后期硬上限为 10。
 const explorationScale = (attribute: number, level: number) => {

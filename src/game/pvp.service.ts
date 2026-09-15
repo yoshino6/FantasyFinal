@@ -68,7 +68,7 @@ const characterFor = async (connection: PoolConnection, qqUserId: string) => {
   const [rows] = await connection.execute<PvpCharacter[]>('SELECT c.* FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE', [qqUserId]);
   if (!rows[0]) throw new Error('请先发送“注册”创建角色。');
   const heart = await heartGrowthAdjustment(connection, Number(rows[0].id));
-  if (heart) heartPerception.set(rows[0], heart.delta.perception * playerGrowthShares(Number(rows[0].level)) + heart.offset.perception);
+  if (heart) heartPerception.set(rows[0], heart.delta.perception * playerGrowthShares(Number(rows[0].level)));
   return rows[0];
 };
 const townRegion = async (connection: PoolConnection) => {

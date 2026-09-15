@@ -2,7 +2,32 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import type { PoolConnection } from 'mysql2/promise';
-import { ensureHeartQuestionsForCurrentLevel } from '../src/game/heart-question.service';
+import { applyHeartGrowthToRow, ensureHeartQuestionsForCurrentLevel } from '../src/game/heart-question.service';
+import { playerGrowthShares } from '../src/game/growth-rules';
+
+test('问心成长使用最新成长率追溯当前等级且忽略旧历史补偿', async () => {
+  const connection = { execute: async (sql: string): Promise<[any, any[]]> => {
+    if (sql.startsWith('SELECT delta_json,birth_json FROM character_heart_growth')) return [[{
+      birth_json: {},
+      delta_json: { intelligence: 1, strength: -1 },
+      offset_json: { intelligence: -999, strength: 999 }
+    }], []];
+    throw new Error(`未预期 SQL: ${sql}`);
+  } } as unknown as PoolConnection;
+  const level = 12;
+  const row = await applyHeartGrowthToRow(connection, 9, {
+    level,
+    intelligence: 5,
+    intelligence_growth: 2,
+    strength: 5,
+    strength_growth: 2
+  });
+  assert.equal(row.intelligence, 5);
+  assert.equal(row.intelligence_growth, 3);
+  assert.equal(row.strength, 5);
+  assert.equal(row.strength_growth, 1);
+  assert.equal(Number(row.intelligence) + Number(row.intelligence_growth) * playerGrowthShares(level), 5 + 3 * playerGrowthShares(level));
+});
 
 test('旧角色只补齐 Lv.11 到 Lv.20 问心，重复打开面板不重复生成', async () => {
   const tickets = new Map<number, { id: number; event_code: string; status: string }>();

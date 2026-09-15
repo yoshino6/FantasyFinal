@@ -4,7 +4,7 @@ import { withTransaction } from '../database/pool';
 import { playerGrowthShares } from './growth-rules';
 import { attributes, type Allocation, type AttributeKey } from './types';
 import { heartCards, greatHeartCopy, normalHeartCopy, type HeartCard } from './heart-question-content';
-import { calculateHeartGrowthChange, heartOffsetAfterChoice } from './heart-question-rules';
+import { calculateHeartGrowthChange } from './heart-question-rules';
 import { recordCharacterOperation } from './character-operation.service';
 
 type Db = Pool | PoolConnection;
@@ -38,17 +38,16 @@ export const ensureHeartGrowth = async (connection: PoolConnection, characterId:
 };
 
 export const heartGrowthAdjustment = async (connection: Db, characterId: number) => {
-  const [rows] = await connection.execute<HeartGrowthRow[]>('SELECT delta_json,offset_json,birth_json FROM character_heart_growth WHERE character_id=?', [characterId]);
-  return rows[0] ? { delta: vector(rows[0].delta_json), offset: vector(rows[0].offset_json), birth: vector(rows[0].birth_json) } : null;
+  const [rows] = await connection.execute<HeartGrowthRow[]>('SELECT delta_json,birth_json FROM character_heart_growth WHERE character_id=?', [characterId]);
+  return rows[0] ? { delta: vector(rows[0].delta_json), birth: vector(rows[0].birth_json) } : null;
 };
 
-/** 将问心变化分配到未来等级，抵消作答时已取得的等级份数。 */
+/** 使用问心后的最新成长重算 Lv.1 至当前等级；历史 offset_json 仅作旧数据兼容，不再参与属性。 */
 export const applyHeartGrowthToRow = async <T extends Record<string, unknown>>(connection: Db, characterId: number, row: T): Promise<T> => {
   const profile = await heartGrowthAdjustment(connection, characterId);
   if (!profile) return row;
   const adjusted = { ...row };
   for (const key of attributes) {
-    adjusted[key as keyof T] = (Number(row[key] ?? 0) + profile.offset[key]) as T[keyof T];
     const camel = `${key}Growth`;
     const growth = Number(row[`${key}_growth`] ?? row[camel] ?? 0) + profile.delta[key];
     adjusted[`${key}_growth` as keyof T] = growth as T[keyof T];
@@ -59,7 +58,7 @@ export const applyHeartGrowthToRow = async <T extends Record<string, unknown>>(c
 
 export const heartAttributeCorrection = async (connection: Db, characterId: number, key: AttributeKey, level: number) => {
   const profile = await heartGrowthAdjustment(connection, characterId);
-  return profile ? profile.delta[key] * playerGrowthShares(level) + profile.offset[key] : 0;
+  return profile ? profile.delta[key] * playerGrowthShares(level) : 0;
 };
 
 export const createHeartQuestionsForLevels = async (connection: PoolConnection, characterId: number, fromLevel: number, toLevel: number, realmStage: number) => {
@@ -160,7 +159,7 @@ export const answerHeartQuestion = async (userId: string, ticketId: number, code
   const ticket = tickets[0]; if (!ticket || ticket.status !== 'active') throw new Error('这道问心题已失效，请重新打开当前题目。');
   const card = ticketView(ticket).card;
   const choice = card.options[choiceIndex]; if (!choice) throw new Error('题目选项已失效。');
-  const birth = vector(profile.birth_json), delta = vector(profile.delta_json), offset = vector(profile.offset_json);
+  const birth = vector(profile.birth_json), delta = vector(profile.delta_json);
   const before = { ...birth };
   const great = Math.random() < .2;
   const change = calculateHeartGrowthChange(birth, choice.favor, choice.repel, great);
@@ -168,13 +167,12 @@ export const answerHeartQuestion = async (userId: string, ticketId: number, code
   Object.assign(birth, change.after);
   delta[choice.favor] = (units(delta[choice.favor]) + gain) / 10;
   delta[choice.repel] = (units(delta[choice.repel]) - loss) / 10;
-  Object.assign(offset, heartOffsetAfterChoice(offset, choice.favor, choice.repel, change.gain, change.loss, Number(character.level)));
   const copyPool = great ? greatHeartCopy : normalHeartCopy;
   const copyIndex = Math.floor(Math.random() * copyPool.length);
   const copy = copyPool[copyIndex];
   const directions = [gain ? `${heartAttributeNames[choice.favor]}成长↑` : '', loss ? `${heartAttributeNames[choice.repel]}成长↓` : ''].filter(Boolean).join('，') || '六维成长未发生变化';
   const result = { choiceCode: codeFor[choiceIndex], outcome: great ? 'great' : 'normal', target: change.target, gain: change.gain, loss: change.loss, before, after: birth, levelAtChoice: Number(character.level), copyCode: `${great ? 'G' : 'N'}${String(copyIndex + 1).padStart(2, '0')}`, copy, directions };
-  await connection.execute('UPDATE character_heart_growth SET birth_json=?,delta_json=?,offset_json=? WHERE character_id=?', [JSON.stringify(birth), JSON.stringify(delta), JSON.stringify(offset), character.id]);
+  await connection.execute('UPDATE character_heart_growth SET birth_json=?,delta_json=?,offset_json=? WHERE character_id=?', [JSON.stringify(birth), JSON.stringify(delta), JSON.stringify(empty()), character.id]);
   await connection.execute("UPDATE character_heart_questions SET status='answered',choice_code=?,result_json=?,answered_at=NOW() WHERE id=?", [codeFor[choiceIndex], JSON.stringify(result), ticket.id]);
   await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'heart.choice', source: { system: 'heart_question', id: Number(ticket.id), step: 'answered' }, outcome: '已回答', summary: `回答问心片段：${card.title}`, detail: { questionId: Number(ticket.id), eventCode: card.code, title: card.title, choiceCode: codeFor[choiceIndex], choiceText: choice.text, favor: choice.favor, repel: choice.repel } });
   const { recalculateCharacterStats } = await import('./character.service');
@@ -187,7 +185,7 @@ export const answerTestHeartQuestions = async (connection: PoolConnection, chara
   const [tickets] = await connection.execute<HeartTicketRow[]>("SELECT * FROM character_heart_questions WHERE character_id=? AND to_level<=30 AND status<>'answered' ORDER BY to_level,id FOR UPDATE", [characterId]);
   if (!tickets.length) return 0;
   const profile = await ensureHeartGrowth(connection, characterId);
-  const birth = vector(profile.birth_json), delta = vector(profile.delta_json), offset = vector(profile.offset_json);
+  const birth = vector(profile.birth_json), delta = vector(profile.delta_json);
   for (const ticket of tickets) {
     const card = ticketView(ticket).card;
     const choiceIndex = Math.floor(Math.random() * card.options.length);
@@ -199,9 +197,8 @@ export const answerTestHeartQuestions = async (connection: PoolConnection, chara
     Object.assign(birth, change.after);
     delta[choice.favor] = (units(delta[choice.favor]) + gain) / 10;
     delta[choice.repel] = (units(delta[choice.repel]) - loss) / 10;
-    Object.assign(offset, heartOffsetAfterChoice(offset, choice.favor, choice.repel, change.gain, change.loss, Number(ticket.to_level)));
     await connection.execute("UPDATE character_heart_questions SET status='answered',choice_code=?,result_json=?,answered_at=NOW() WHERE id=?", [codeFor[choiceIndex], JSON.stringify({ choiceCode: codeFor[choiceIndex], outcome: great ? 'great' : 'normal', target: change.target, gain: change.gain, loss: change.loss, before, after: birth, levelAtChoice: Number(ticket.to_level), adminTest: true }), ticket.id]);
   }
-  await connection.execute('UPDATE character_heart_growth SET birth_json=?,delta_json=?,offset_json=? WHERE character_id=?', [JSON.stringify(birth), JSON.stringify(delta), JSON.stringify(offset), characterId]);
+  await connection.execute('UPDATE character_heart_growth SET birth_json=?,delta_json=?,offset_json=? WHERE character_id=?', [JSON.stringify(birth), JSON.stringify(delta), JSON.stringify(empty()), characterId]);
   return tickets.length;
 };

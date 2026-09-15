@@ -77,7 +77,7 @@ const overviewFormat = (character: CharacterView, evolutionUnlocked: boolean, pe
     .addText(`昵称：${character.name}`).addButton('[改名]', { data: '/角色改名 ', autoEnter: false }).addNewline().addNewline()
     .addText(`性别：${gender}`).addButton('[改性]', { data: '/改性 ', autoEnter: false }).addNewline().addNewline()
     .addText(`等级：Lv${character.level}`);
-  if (pendingHeartQuestions) markdown.addButton('[窥尘问心]', { data: '/窥尘问心', autoEnter: true });
+  if (pendingHeartQuestions) markdown.addButton('[窥尘问心]', { data: '/窥尘问心', autoEnter: false });
   markdown.addNewline().addNewline()
     .addText(`职业：${character.professionName ?? '未选择'}`).addNewline().addNewline()
     .addText(`经验：${character.experience}/${experienceNeed}`).addNewline().addNewline()

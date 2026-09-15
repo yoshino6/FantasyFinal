@@ -1,5 +1,4 @@
 import { attributes, type Allocation, type AttributeKey } from './types';
-import { playerGrowthShares } from './growth-rules';
 
 const units = (value: number) => Math.round(value * 10);
 
@@ -13,9 +12,4 @@ export const calculateHeartGrowthChange = (before: Allocation, favor: AttributeK
   const loss = great ? 0 : gain;
   const after = { ...before, [favor]: (units(before[favor]) + gain) / 10, [repel]: (units(before[repel]) - loss) / 10 } as Allocation;
   return { after, target: target / 10, gain: gain / 10, loss: loss / 10 };
-};
-
-export const heartOffsetAfterChoice = (before: Allocation, favor: AttributeKey, repel: AttributeKey, gain: number, loss: number, levelAtChoice: number) => {
-  const shares = playerGrowthShares(levelAtChoice);
-  return { ...before, [favor]: (units(before[favor]) - units(gain) * shares) / 10, [repel]: (units(before[repel]) + units(loss) * shares) / 10 } as Allocation;
 };

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculateHeartGrowthChange, heartOffsetAfterChoice } from '../src/game/heart-question-rules';
+import { calculateHeartGrowthChange } from '../src/game/heart-question-rules';
 import { playerGrowthShares } from '../src/game/growth-rules';
 import type { Allocation } from '../src/game/types';
 
@@ -30,15 +30,10 @@ test('大成功不扣排斥维，且不能越过 12 点预算', () => {
   assert.equal(calculateHeartGrowthChange({ ...nearCap, perception: 2 }, 'intelligence', 'strength', true).gain, 0);
 });
 
-test('问心作答不会重算过去等级，但未来升级会改变六维', () => {
+test('问心作答后的成长变化按当前等级全部成长份数重算', () => {
   const level = 12;
   const change = calculateHeartGrowthChange(growth(2, 2), 'intelligence', 'strength', false);
-  const offset = heartOffsetAfterChoice(growth(0, 0), 'intelligence', 'strength', change.gain, change.loss, level);
   const beforeAtChoice = 2 * playerGrowthShares(level);
-  const afterAtChoice = change.after.intelligence * playerGrowthShares(level) + offset.intelligence;
-  assert.equal(afterAtChoice, beforeAtChoice);
-  const nextLevel = level + 1;
-  const beforeNext = 2 * playerGrowthShares(nextLevel);
-  const afterNext = change.after.intelligence * playerGrowthShares(nextLevel) + offset.intelligence;
-  assert.equal(afterNext - beforeNext, 1 * (playerGrowthShares(nextLevel) - playerGrowthShares(level)));
+  const afterAtChoice = change.after.intelligence * playerGrowthShares(level);
+  assert.equal(afterAtChoice - beforeAtChoice, change.gain * playerGrowthShares(level));
 });
