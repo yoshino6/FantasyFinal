@@ -6,6 +6,7 @@ export type HeartOption = {
 };
 export type HeartCard = {
     code: string;
+    version: number;
     title: string;
     prompt: string;
     options: HeartOption[];

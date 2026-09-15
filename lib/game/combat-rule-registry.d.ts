@@ -69,6 +69,7 @@ export type RuleUnit = {
     castSpecialization?: SkillSpecializationResult;
     passiveSpecializations?: Record<string, number>;
     participating?: boolean;
+    bossEffects?: string[];
 };
 export type TakenDamage = {
     damage: number;
@@ -165,7 +166,7 @@ export declare class CombatRules {
     areaDamage(targets: RuleUnit[], hit: (target: RuleUnit) => Promise<void>): Promise<void>;
     takeUnlinked(target: RuleUnit, damage: number, shieldMultiplier?: number, source?: RuleUnit): Promise<number>;
     incoming(source: RuleUnit, target: RuleUnit, raw: number, element: string, magic: boolean, skill: boolean, single?: boolean, legacyResolved?: boolean, playerDirect?: boolean): Promise<number>;
-    afterHit(source: RuleUnit, target: RuleUnit, damage: number, element: string, skill: boolean, absorbed?: number, extra?: boolean, magic?: boolean): Promise<void>;
+    afterHit(source: RuleUnit, target: RuleUnit, damage: number, element: string, skill: boolean, absorbed?: number, extra?: boolean, magic?: boolean, ranged?: boolean, critical?: boolean): Promise<void>;
     weatherElement(weather?: string): "" | "水" | "火" | "风" | "冰" | "雷";
     attackSetup(source: RuleUnit, target: RuleUnit, magic: boolean, skill: boolean, ranged?: boolean): Promise<{
         forceHit: boolean;

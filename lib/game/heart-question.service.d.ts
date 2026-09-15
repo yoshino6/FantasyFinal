@@ -23,6 +23,11 @@ export declare const heartGrowthAdjustment: (connection: Db, characterId: number
 export declare const applyHeartGrowthToRow: <T extends Record<string, unknown>>(connection: Db, characterId: number, row: T) => Promise<T>;
 export declare const heartAttributeCorrection: (connection: Db, characterId: number, key: AttributeKey, level: number) => Promise<number>;
 export declare const createHeartQuestionsForLevels: (connection: PoolConnection, characterId: number, fromLevel: number, toLevel: number, realmStage: number) => Promise<void>;
+export declare const ensureHeartQuestionsForCurrentLevel: (connection: PoolConnection, userId: string) => Promise<(RowDataPacket & {
+    id: number;
+    level: number;
+    realm_stage: number;
+}) | null>;
 export declare const activeHeartQuestion: (userId: string) => Promise<HeartTicket | null>;
 export declare const pendingHeartQuestionCount: (userId: string) => Promise<number>;
 export declare const openHeartQuestion: (userId: string) => Promise<HeartTicket | null>;

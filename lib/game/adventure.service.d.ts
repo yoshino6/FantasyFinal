@@ -221,6 +221,7 @@ export declare const settleHomeRestExperience: (connection: PoolConnection, char
     realmStage: number;
     talentNotice: string | undefined;
 }>;
+export declare const bossRandomEffectSummary: (traits: unknown) => string[];
 export declare const decayWorldBossTraits: (pool: Pool) => Promise<number>;
 export declare const startRest: (qqUserId: string) => Promise<{
     resting: boolean;
@@ -281,6 +282,7 @@ export declare const adminStartBossTest: (qqUserId: string, code: string, traitN
     level: number;
     trait: string;
     participants: string[];
+    spawnId: number;
     x: number;
     y: number;
 }>;
@@ -4655,6 +4657,7 @@ export declare const battleStatus: (qqUserId: string) => Promise<{
         mpMax: string | number;
         defeated: boolean;
         identified: boolean;
+        isBoss: boolean;
         isBossComponent: boolean;
         bodyTargetId: number | null;
         passiveSummary: string | null;
@@ -4662,6 +4665,7 @@ export declare const battleStatus: (qqUserId: string) => Promise<{
         warning: string | null;
         bodyDamageReductionPct: number | null;
         livingComponentCount: number | null;
+        randomEffects: string[];
         mechanicSummary: string | null;
     }[];
 }>;

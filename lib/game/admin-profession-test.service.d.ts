@@ -9,6 +9,7 @@ export declare const professionTestOptions: ({
     group: string;
     role: "十二粒子调配、风险与大成功" | "器阵组合、攻守与多器合击" | "异械驱动、供能与能力协同" | "公开信息、保护预案与行动次序";
 })[];
+export declare const professionTestArmorSetFor: (advancedCode: string, base: string) => string;
 export declare const adminTestProfession: (user: string, code: string) => Promise<{
     characterId: number;
     name: string;
