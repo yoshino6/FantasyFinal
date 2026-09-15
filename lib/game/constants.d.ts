@@ -6,7 +6,7 @@ export declare const realmLevelCap: (stage: number) => number;
 export declare const realmEnergyDissipationText = "\u7CBE\u7EAF\u7684\u80FD\u91CF\u51B2\u5165\u4F60\u7684\u4F53\u58F3\uFF0C\u7136\u540E\u5411\u5916\u56DB\u6EA2\uFF0C\u6D88\u6563\u5728\u4E86\u7A7A\u4E2D\u3002\u3002\u3002";
 export declare const staminaMaxForRealm: (stage: number) => number;
 export declare const STAMINA_RECOVERY_MS: number;
-export declare const experienceRequiredForLevel: (level: number) => 0 | 100 | 1000 | 25 | 50 | 200 | 300 | 450 | 600 | 800 | 5200 | 5600 | 6000 | 6400 | 6800 | 7200 | 7600 | 8000 | 8400 | 8800 | 18000 | 20500 | 23100 | 25700 | 28300 | 30900 | 33500 | 36100 | 38700 | 41200 | 46693 | 52187 | 57876 | 64154 | 71021 | 78476 | 86716 | 95937 | 106139 | 117714 | 121638 | 127524 | 133410 | 141257 | 149105 | 156952 | 164800 | 172648 | 184419 | 202076;
+export declare const experienceRequiredForLevel: (level: number) => 0 | 100 | 50 | 1000 | 25 | 200 | 300 | 450 | 600 | 800 | 5200 | 5600 | 6000 | 6400 | 6800 | 7200 | 7600 | 8000 | 8400 | 8800 | 18000 | 20500 | 23100 | 25700 | 28300 | 30900 | 33500 | 36100 | 38700 | 41200 | 46693 | 52187 | 57876 | 64154 | 71021 | 78476 | 86716 | 95937 | 106139 | 117714 | 121638 | 127524 | 133410 | 141257 | 149105 | 156952 | 164800 | 172648 | 184419 | 202076;
 export declare const attributeNames: Record<keyof Allocation, string>;
 export declare const attributeAliases: Record<string, keyof Allocation>;
 export declare const calculateDerivedStats: (value: Allocation) => DerivedStats;

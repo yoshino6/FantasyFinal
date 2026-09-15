@@ -148,6 +148,7 @@ export declare const playerWorldSiteCommissions: (qqUserId: string) => Promise<{
     title: string;
     objectiveText: string;
     rewardCopper: number;
+    rewardContribution: number;
     status: "completed" | "accepted" | "claimed";
     targetName: string;
     location: {
@@ -161,6 +162,7 @@ export declare const completeWorldSiteCommissionsAtSite: (qqUserId: string, site
 export declare const claimWorldSiteCommission: (qqUserId: string, commissionId: number) => Promise<{
     title: string;
     copper: number;
+    contribution: number;
 }>;
 export declare const submitWorldSiteCommission: (qqUserId: string, commissionId: number) => Promise<string>;
 export declare const useWorldSite: (qqUserId: string, siteCode: string, action: WorldSiteAction) => Promise<{

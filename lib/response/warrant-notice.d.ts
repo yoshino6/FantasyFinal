@@ -5,6 +5,7 @@ export type WarrantNotice = {
     gameId: number;
     x: number;
     y: number;
+    z: number;
     regionName: string;
 };
 export declare const warrantNoticeFormat: (wanted: WarrantNotice, options?: {

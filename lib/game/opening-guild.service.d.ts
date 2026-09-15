@@ -53,6 +53,7 @@ export declare const openingGuildView: (user: string) => Promise<{
         codexId: string | null;
         minLevel: number | null;
         maxLevel: number | null;
+        bossLevel: number | null;
         risk: string;
         safeTown: boolean;
         canExchange: boolean;

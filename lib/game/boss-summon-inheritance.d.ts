@@ -1,0 +1,37 @@
+export type BossSummonCombatStats = {
+    hpMax: number;
+    mpMax: number;
+    physicalAttack: number;
+    magicAttack: number;
+    physicalDefense: number;
+    magicDefense: number;
+    accuracy: number;
+    evasion: number;
+    crit: number;
+    critResist: number;
+    critDamage: number;
+    critReduction: number;
+    tenacity: number;
+    tenacityPierce: number;
+    speed: number;
+    perception: number;
+};
+type InheritedStat = 'tenacity' | 'physicalAttack' | 'magicAttack' | 'physicalDefense' | 'magicDefense' | 'accuracy' | 'evasion' | 'speed' | 'critRate' | 'critDamage' | 'critResist' | 'critReduction';
+export type BossSummonInheritedTrait = {
+    statMultiplier?: number;
+    statMultipliers?: Partial<Record<InheritedStat | 'hp', number>>;
+    mpPct?: number;
+    physicalAttackPct?: number;
+    magicAttackPct?: number;
+    physicalDefensePct?: number;
+    magicDefensePct?: number;
+    accuracyPct?: number;
+    evasionPct?: number;
+    speedPct?: number;
+    critRatePct?: number;
+    critDamagePct?: number;
+    critResistPct?: number;
+    critReductionPct?: number;
+};
+export declare const applyBossSummonTrait: <T extends BossSummonCombatStats>(stats: T, trait?: BossSummonInheritedTrait) => T;
+export {};

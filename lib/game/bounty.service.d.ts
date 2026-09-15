@@ -13,6 +13,7 @@ export declare const bountyBoard: (qqUserId: string, _requestedPage?: number, ke
         targetName: string;
         requiredCount: number;
         copperReward: number;
+        contributionReward: number;
         sourceSpawnId: number;
         location: {
             regionName: string;
@@ -35,6 +36,7 @@ export declare const playerBounties: (qqUserId: string) => Promise<{
     targetName: string;
     requiredCount: number;
     copperReward: number;
+    contributionReward: number;
     sourceSpawnId: number | undefined;
     location: {
         regionName: string;
@@ -56,6 +58,7 @@ export declare const acceptBounty: (qqUserId: string, bountyId: number) => Promi
 export declare const claimBounty: (qqUserId: string, bountyId: number) => Promise<{
     title: string;
     copper: number;
+    contribution: number;
 }>;
 export declare const advanceBountyProgress: (connection: PoolConnection, characterId: number, targets: {
     spawnId: number;

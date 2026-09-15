@@ -1,8 +1,7 @@
 import type { OpeningConnection } from './opening-state';
-import { type OpeningHubCode } from './opening-world.config';
-export declare const guildMapRegions: Record<OpeningHubCode, readonly string[]>;
 export declare const guildMapRisk: (maxLevel: number | null) => "待勘测" | "低危" | "中危" | "高危";
-export declare const guildMapCatalog: (connection: OpeningConnection, hub: OpeningHubCode) => Promise<{
+export declare const guildMapContributionPrice: (risk: string) => 1000 | 200 | 10000 | null;
+export declare const guildMapCatalog: (connection: OpeningConnection) => Promise<{
     id: number | null;
     code: string | null;
     name: string;
@@ -12,7 +11,9 @@ export declare const guildMapCatalog: (connection: OpeningConnection, hub: Openi
     codexId: string | null;
     minLevel: number | null;
     maxLevel: number | null;
+    bossLevel: number | null;
     risk: string;
     safeTown: boolean;
     canExchange: boolean;
 }[]>;
+export declare const ensureRegistrationMapExchange: (connection: OpeningConnection, characterId: number) => Promise<void>;

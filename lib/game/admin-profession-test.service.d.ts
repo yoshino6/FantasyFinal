@@ -18,4 +18,11 @@ export declare const adminTestProfession: (user: string, code: string) => Promis
     changed: boolean;
     restoredPoints: number;
     skillCount: number;
+    growth: {
+        fromLevel: number;
+        level: number;
+        injections: number;
+    };
+    equipment: string[];
+    answeredHeartQuestions: number;
 }>;

@@ -66,4 +66,5 @@ export declare const startNpcSparring: (userId: string, code: string) => Promise
         advancedEffect: Record<string, number>;
     };
 }>;
+export declare const sparInsightChance: (result: "victory" | "defeat" | "escaped" | "timeout", affinity: number, exploited: boolean, knowledge: number, farBelowBand: boolean) => number;
 export declare const finishNpcSparring: (connection: PoolConnection, sessionId: string, result: "victory" | "defeat" | "escaped" | "timeout") => Promise<string>;

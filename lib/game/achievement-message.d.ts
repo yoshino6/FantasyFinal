@@ -6,6 +6,7 @@ export declare const achievementAnnouncementFormat: (entry: {
     winners?: string[];
     name: string;
     description: string;
+    rarity?: string;
 }) => Format;
 export declare const achievementListFormat: (data: {
     category: string;

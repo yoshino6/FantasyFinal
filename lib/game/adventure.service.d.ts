@@ -5,6 +5,7 @@ import { type HiddenChoice } from './hidden-combat-state';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { type Allocation } from './types';
 import { regionalBossComponentsFor } from './regional-boss-components.config';
+import { type BossPhaseTransition } from './kingbeast.config';
 type CharacterRow = RowDataPacket & Allocation & Record<`${keyof Allocation}_growth`, number> & {
     id: number;
     player_id: number;
@@ -265,6 +266,7 @@ export type ResourceManagementEvent = {
 };
 export declare const refreshRiotElites: (pool: Pool) => Promise<boolean>;
 export declare const bossEvents: () => Promise<BossEvent[]>;
+export declare const dungeonBossTestEvents: () => Promise<BossEvent[]>;
 export declare const adminSpawnBoss: (code: string, traitName?: string) => Promise<BossEvent | null>;
 export declare const activateWorldlineBoss: (code: string) => Promise<{
     state: "missing";
@@ -277,8 +279,6 @@ export declare const adminStartBossTest: (qqUserId: string, code: string, traitN
     bossName: string;
     bossCode: string;
     level: number;
-    skillPoints: number;
-    skillCount: number;
     trait: string;
     participants: string[];
     x: number;
@@ -484,6 +484,7 @@ export declare const togglePassiveLink: (qqUserId: string, skillId: number) => P
     limit: number;
 }>;
 export declare const skillDetail: (qqUserId: string, skillId: number) => Promise<{
+    learn_cost: number;
     level: number;
     learned: boolean;
     characterLevel: number;
@@ -552,7 +553,6 @@ export declare const skillDetail: (qqUserId: string, skillId: number) => Promise
     cooldown_turns: number;
     chant_turns: number;
     power: number;
-    learn_cost: number;
     upgrade_cost: number;
     power_per_level: number;
     cooldown_reduction_per_level: number;
@@ -632,6 +632,7 @@ export type NearbyPoint = {
     name: string;
     x: number;
     y: number;
+    z: number;
     distance: number;
     code?: string;
     interaction?: Pick<CoordinateInteractionTarget, 'type' | 'id'>;
@@ -644,6 +645,7 @@ export type MapLandmark = {
     name: string;
     x: number;
     y: number;
+    z: number;
     siteType?: string | null;
     kind?: 'landmark' | 'bounty';
 };
@@ -657,6 +659,7 @@ export declare const nearbyPoints: (qqUserId: string) => Promise<{
         name: any;
         x: number;
         y: number;
+        z: number;
         siteType: any;
         kind: "landmark";
     }[];
@@ -775,7 +778,7 @@ export declare const coordinateInteraction: (qqUserId: string, type: CoordinateI
     resource?: undefined;
     npc?: undefined;
 }>;
-export declare const moveTo: (qqUserId: string, x: number, y: number, options?: {
+export declare const moveTo: (qqUserId: string, x: number, y: number, z: number, options?: {
     destinationKind?: "normal" | "home";
     destinationRegionId?: number;
 }) => Promise<{
@@ -785,6 +788,7 @@ export declare const moveTo: (qqUserId: string, x: number, y: number, options?: 
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -862,6 +866,7 @@ export declare const moveTo: (qqUserId: string, x: number, y: number, options?: 
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -939,6 +944,7 @@ export declare const moveTo: (qqUserId: string, x: number, y: number, options?: 
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -1016,6 +1022,7 @@ export declare const moveTo: (qqUserId: string, x: number, y: number, options?: 
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -1102,6 +1109,7 @@ export declare const moveTo: (qqUserId: string, x: number, y: number, options?: 
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -1184,6 +1192,7 @@ export declare const moveTo: (qqUserId: string, x: number, y: number, options?: 
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -1275,6 +1284,7 @@ export declare const moveTo: (qqUserId: string, x: number, y: number, options?: 
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -1376,6 +1386,7 @@ export declare const moveTo: (qqUserId: string, x: number, y: number, options?: 
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -1453,6 +1464,7 @@ export declare const moveTo: (qqUserId: string, x: number, y: number, options?: 
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -1530,6 +1542,7 @@ export declare const moveTo: (qqUserId: string, x: number, y: number, options?: 
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -1607,6 +1620,7 @@ export declare const moveTo: (qqUserId: string, x: number, y: number, options?: 
     destinationKind: "normal" | "home";
     x: number;
     y: number;
+    z: number;
     seconds: number;
     remaining: number;
 }>;
@@ -1620,6 +1634,7 @@ export declare const moveToMap: (qqUserId: string, mapCode: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -1697,6 +1712,7 @@ export declare const moveToMap: (qqUserId: string, mapCode: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -1774,6 +1790,7 @@ export declare const moveToMap: (qqUserId: string, mapCode: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -1851,6 +1868,7 @@ export declare const moveToMap: (qqUserId: string, mapCode: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -1937,6 +1955,7 @@ export declare const moveToMap: (qqUserId: string, mapCode: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -2019,6 +2038,7 @@ export declare const moveToMap: (qqUserId: string, mapCode: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -2110,6 +2130,7 @@ export declare const moveToMap: (qqUserId: string, mapCode: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -2211,6 +2232,7 @@ export declare const moveToMap: (qqUserId: string, mapCode: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -2288,6 +2310,7 @@ export declare const moveToMap: (qqUserId: string, mapCode: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -2365,6 +2388,7 @@ export declare const moveToMap: (qqUserId: string, mapCode: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -2442,6 +2466,7 @@ export declare const moveToMap: (qqUserId: string, mapCode: string) => Promise<{
     destinationKind: "normal" | "home";
     x: number;
     y: number;
+    z: number;
     seconds: number;
     remaining: number;
 }>;
@@ -2479,6 +2504,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -2558,6 +2584,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -2637,6 +2664,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -2716,6 +2744,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -2804,6 +2833,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -2888,6 +2918,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -2981,6 +3012,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -3084,6 +3116,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -3163,6 +3196,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -3242,6 +3276,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -3363,6 +3398,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -3460,6 +3496,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -3557,6 +3594,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -3654,6 +3692,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -3760,6 +3799,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -3862,6 +3902,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -3973,6 +4014,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -4094,6 +4136,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -4191,6 +4234,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -4288,6 +4332,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             collected: number;
             remaining: number;
         };
+        talentScavengeNotice: string | undefined;
         current_region_id: number;
         region_name: string;
         pos_x: number;
@@ -4617,6 +4662,7 @@ export declare const battleStatus: (qqUserId: string) => Promise<{
         warning: string | null;
         bodyDamageReductionPct: number | null;
         livingComponentCount: number | null;
+        mechanicSummary: string | null;
     }[];
 }>;
 export declare const inspectCombat: (qqUserId: string) => Promise<{
@@ -4650,6 +4696,7 @@ export declare const monsterDetail: (qqUserId: string, spawnId: number) => Promi
         speed: number;
         perception: number;
     };
+    passive: string | undefined;
 }>;
 export declare const legacyCombatAction: (qqUserId: string, action: "attack" | "skill" | "item" | "escape", slot?: number) => Promise<{
     log: string;
@@ -4679,51 +4726,40 @@ export declare const combatAction: (qqUserId: string, action: Exclude<PendingAct
     ended: boolean;
     waiting: boolean;
     log: string;
-    settlement?: undefined;
-    ambushSessionId?: undefined;
 } | {
-    ended: boolean;
-    waiting: boolean;
-    log: string;
     settlement: string;
-    ambushSessionId?: undefined;
-} | {
+    log: string;
+    manualLog: string;
+    bossTransitions: BossPhaseTransition[];
     ended: boolean;
     waiting: boolean;
+} | {
     log: string;
+    manualLog: string;
+    bossTransitions: BossPhaseTransition[];
+    ended: boolean;
+    waiting: boolean;
+} | {
     settlement: VictorySettlement;
     ambushSessionId: string;
-} | {
+    log: string;
+    manualLog: string;
+    bossTransitions: BossPhaseTransition[];
     ended: boolean;
     waiting: boolean;
-    log: string;
+} | {
     settlement: string;
     ambushSessionId: string | undefined;
+    log: string;
+    manualLog: string;
+    bossTransitions: BossPhaseTransition[];
+    ended: boolean;
+    waiting: boolean;
 }>;
 export declare const continueCombatChant: (qqUserId: string) => Promise<{
     ended: boolean;
     waiting: boolean;
     log: string;
-    settlement?: undefined;
-    ambushSessionId?: undefined;
-} | {
-    ended: boolean;
-    waiting: boolean;
-    log: string;
-    settlement: string;
-    ambushSessionId?: undefined;
-} | {
-    ended: boolean;
-    waiting: boolean;
-    log: string;
-    settlement: VictorySettlement;
-    ambushSessionId: string;
-} | {
-    ended: boolean;
-    waiting: boolean;
-    log: string;
-    settlement: string;
-    ambushSessionId: string | undefined;
 } | null>;
 export declare const forceAutoBattleDefeat: (qqUserId: string, reason?: string) => Promise<{
     ended: true;

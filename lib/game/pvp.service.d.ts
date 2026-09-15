@@ -45,7 +45,7 @@ export declare const completePvpDefeatProtection: (qqUserId: string) => Promise<
 type PvpAttackLogOutcome = 'hit' | 'miss' | 'defeat' | 'utility';
 export declare const recordPvpAttack: (connection: PoolConnection, attacker: Pick<PvpCharacter, "id" | "name">, defender: Pick<PvpCharacter, "id" | "name">, actionName: string, damage: number, outcome: PvpAttackLogOutcome, lootText?: string | null) => Promise<void>;
 export declare const createPvpBattleLog: (connection: PoolConnection, attacker: Pick<PvpCharacter, "id" | "name">, defender: Pick<PvpCharacter, "id" | "name">, battleType: string, id?: `${string}-${string}-${string}-${string}-${string}`) => Promise<`${string}-${string}-${string}-${string}-${string}`>;
-export declare const finishPvpBattleLog: (connection: PoolConnection, id: string, outcome: "attacker_win" | "defender_win" | "draw" | "escaped", winner?: Pick<PvpCharacter, "id" | "name"> | null, lootText?: string | null) => Promise<void>;
+export declare const finishPvpBattleLog: (connection: PoolConnection, id: string, outcome: "attacker_win" | "defender_win" | "draw" | "escaped", winner?: Pick<PvpCharacter, "id" | "name"> | null, lootText?: string | null, escapedCharacterId?: number | null) => Promise<void>;
 export declare const pvpBattleHistory: (qqUserId: string, page?: number, filter?: "\u5168\u90E8" | "\u8FDB\u653B\u65B9" | "\u9632\u5B88\u65B9", keyword?: string) => Promise<{
     page: number;
     totalPages: number;
@@ -358,6 +358,7 @@ export declare const cityWantedAlert: (qqUserId: string) => Promise<{
     gameId: number;
     x: number;
     y: number;
+    z: number;
     regionName: string;
 } | null>;
 export declare const townPassiveWantedAlert: (qqUserId: string) => Promise<{
@@ -366,6 +367,7 @@ export declare const townPassiveWantedAlert: (qqUserId: string) => Promise<{
     gameId: number;
     x: number;
     y: number;
+    z: number;
     regionName: string;
 } | null>;
 export declare const reserveWarrantEntryNotice: (warrantId: number, groupOpenId: string) => Promise<boolean>;
@@ -414,6 +416,7 @@ export declare const townWarrantsFor: (qqUserId: string, filter?: "\u5DF2\u66B4\
         regionName: string;
         x: number;
         y: number;
+        z: number;
         exposed: boolean;
         recent: boolean;
         stars: number;

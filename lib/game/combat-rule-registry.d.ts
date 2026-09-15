@@ -76,11 +76,11 @@ export type TakenDamage = {
 };
 export type RuleHooks = {
     bodyMultiplier?: (unit: RuleUnit) => number;
-    linkDamage?: (unit: RuleUnit, damage: number, apply: (damage: number) => Promise<TakenDamage>, areaHit: boolean) => Promise<TakenDamage>;
+    linkDamage?: (unit: RuleUnit, damage: number, apply: (damage: number) => Promise<TakenDamage>, areaHit: boolean, source?: RuleUnit, secondary?: boolean) => Promise<TakenDamage>;
     areaDamage?: (targets: RuleUnit[], hit: (target: RuleUnit) => Promise<void>) => Promise<void>;
     beforeAction?: (unit: RuleUnit) => Promise<void>;
     beforeHpDamage?: (unit: RuleUnit, damage: number) => Promise<number>;
-    afterDamage?: (unit: RuleUnit, damage: number, shieldBroken: boolean, originalShield?: RuleStatus) => Promise<void>;
+    afterDamage?: (unit: RuleUnit, damage: number, shieldBroken: boolean, originalShield?: RuleStatus, source?: RuleUnit) => Promise<void>;
     absorb: (unit: RuleUnit, damage: number) => Promise<number>;
     legacyEffects: (unit: RuleUnit) => RuleStatus[];
     removeLegacy: (id: number) => Promise<void>;
@@ -161,7 +161,7 @@ export declare class CombatRules {
     elementFactor(source: RuleUnit, target: RuleUnit, element: string): number;
     secondary(source: RuleUnit, target: RuleUnit, damage: number, label: string, element?: string, areaHit?: boolean): Promise<void>;
     take(target: RuleUnit, damage: number, shieldMultiplier?: number, source?: RuleUnit): Promise<number>;
-    takeHit(target: RuleUnit, damage: number, shieldMultiplier?: number, areaHit?: boolean, source?: RuleUnit): Promise<TakenDamage>;
+    takeHit(target: RuleUnit, damage: number, shieldMultiplier?: number, areaHit?: boolean, source?: RuleUnit, secondary?: boolean): Promise<TakenDamage>;
     areaDamage(targets: RuleUnit[], hit: (target: RuleUnit) => Promise<void>): Promise<void>;
     takeUnlinked(target: RuleUnit, damage: number, shieldMultiplier?: number, source?: RuleUnit): Promise<number>;
     incoming(source: RuleUnit, target: RuleUnit, raw: number, element: string, magic: boolean, skill: boolean, single?: boolean, legacyResolved?: boolean, playerDirect?: boolean): Promise<number>;

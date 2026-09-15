@@ -1,8 +1,10 @@
 import { Format } from 'alemonjs';
 import { battleStatus } from '../game/adventure.service';
+import type { BossPhaseTransition } from '../game/kingbeast.config';
 export declare const appendBattleState: (markdown: ReturnType<typeof Format.createMarkdown>, battle: Awaited<ReturnType<typeof battleStatus>>) => import("alemonjs").FormatMarkDown;
 export declare const battleOperationFormat: (text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => Format;
 export declare const battleStartFormat: (text: string, battle: Awaited<ReturnType<typeof battleStatus>>, reward?: string) => Format;
+export declare const bossPhaseTransitionFormat: (transitions: BossPhaseTransition[]) => Format;
 export declare const scheduleTravelCompletion: (message: any, qqUserId: string, seconds: number) => void;
 export declare const guildFrontDeskFormat: (qqUserId: string, text?: string, continuingChat?: boolean) => Promise<Format>;
 export declare const exploreHandler: () => Promise<void>;

@@ -1,23 +1,31 @@
 export declare const shopCatalog: (qqUserId: string, page?: number, keyword?: string) => Promise<{
     keyword: string;
-    copper: number;
+    contribution: number;
     page: number;
     totalPages: number;
-    items: {
+    items: ({
+        id: number;
+        codexId: string | null;
+        name: string;
+        category: string;
+        description: string;
+        price: number;
+        stockQuantity: null;
+        ownedQuantity: number;
+    } | {
         id: number;
         codexId: string;
         name: string;
         category: string;
         description: string;
         price: number;
-        basePrice: number;
         stockQuantity: number;
         ownedQuantity: number;
-    }[];
+    })[];
 }>;
 export declare const sellCatalog: (qqUserId: string, page?: number, keyword?: string) => Promise<{
     keyword: string;
-    copper: number;
+    contribution: number;
     page: number;
     totalPages: number;
     items: {

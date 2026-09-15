@@ -100,6 +100,11 @@ export declare const injectEvolution: (qqUserId: string, code: InjectionCode, re
     pressure: number;
     stability: number;
 }>;
+export declare const simulateEvolutionToLevel30: (connection: PoolConnection, qqUserId: string) => Promise<{
+    fromLevel: number;
+    level: number;
+    injections: number;
+}>;
 export declare const evolutionObservationDashboard: (qqUserId: string) => Promise<{
     claimed: number;
     remaining: number;

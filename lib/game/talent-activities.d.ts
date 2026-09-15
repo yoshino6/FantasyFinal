@@ -3,4 +3,6 @@ import { type TalentData } from './talent-data';
 import type { TalentDefinition } from './talent.config';
 export declare const talentNpcLinks: Record<string, string[]>;
 export declare const talentActivityActions: string[];
+export declare const talentActivityCommands: (number: string) => string[];
+export declare const canUseTalentActivity: (number: string, action: string, arg?: string) => boolean;
 export declare const talentActivity: (c: PoolConnection, actor: Record<string, any>, talent: TalentDefinition, data: TalentData, action: string, arg: string, value: string) => Promise<any>;

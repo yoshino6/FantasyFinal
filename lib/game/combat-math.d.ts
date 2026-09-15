@@ -1,4 +1,5 @@
 export declare const opposedChance: (offense: number, defense: number) => number;
+export declare const opposedCritBonus: (critDamage: number, critReduction: number) => number;
 export type StrikeCorrections = {
     hitCorrectionPct?: number;
     evasionCorrectionPct?: number;

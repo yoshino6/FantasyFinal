@@ -284,6 +284,11 @@ export declare const craftEpicForgeEquipment: (qqUserId: string, blueprintCode: 
     setCode: import("../config/epic-forging").EpicSetCode | null;
     weaponEffect: string | null;
 }>;
+export declare const epicTestForgeDraft: (recipe: EpicForgeRecipe) => {
+    effect: Record<string, unknown>;
+    primaryKeys: string[];
+    quality: number;
+};
 export declare const blacksmithQuest: (qqUserId: string) => Promise<{
     status: string;
     wood: number;
