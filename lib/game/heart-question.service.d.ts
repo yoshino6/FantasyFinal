@@ -17,7 +17,6 @@ export declare const heartAttributeNames: Record<AttributeKey, string>;
 export declare const ensureHeartGrowth: (connection: PoolConnection, characterId: number, birth?: Allocation) => Promise<HeartGrowthRow>;
 export declare const heartGrowthAdjustment: (connection: Db, characterId: number) => Promise<{
     delta: Allocation;
-    offset: Allocation;
     birth: Allocation;
 } | null>;
 export declare const applyHeartGrowthToRow: <T extends Record<string, unknown>>(connection: Db, characterId: number, row: T) => Promise<T>;

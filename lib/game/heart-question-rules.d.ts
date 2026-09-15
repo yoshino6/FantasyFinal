@@ -5,4 +5,3 @@ export declare const calculateHeartGrowthChange: (before: Allocation, favor: Att
     gain: number;
     loss: number;
 };
-export declare const heartOffsetAfterChoice: (before: Allocation, favor: AttributeKey, repel: AttributeKey, gain: number, loss: number, levelAtChoice: number) => Allocation;
