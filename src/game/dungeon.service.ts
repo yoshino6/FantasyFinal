@@ -1,7 +1,7 @@
 import { recordAchievement } from './achievement-events';
 import { armorSetsFor } from './armor-set';
 import { recalculateCharacterStats } from './character.service';
-import { correctedHitChance, strikeCorrections } from './combat-math';
+import { correctedHitChance, opposedChance, strikeCorrections } from './combat-math';
 import { randomUUID } from 'node:crypto';
 import { recordCharacterOperation } from './character-operation.service';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
@@ -525,7 +525,7 @@ const resolvePvpAction = async (connection: PoolConnection, actor: CharacterRow,
   if (skill?.category === 'utility') { await recordPvpAttack(connection, actor, target, `技能「${skill.name}」`, 0, 'utility'); return `【${actor.name}】释放技能「${skill.name}」，但该辅助技能尚未在 PvP 对抗中形成直接伤害。`; }
   const magic = skill?.category === 'magic'; const attack = magic ? Number(actor.magic_attack) : Number(actor.physical_attack); const defense = magic ? Number(target.magic_defense) : Number(target.physical_defense); const label = skill ? `释放技能「${skill.name}」` : '普通攻击';
   const armorSets = await armorSetsFor(connection,[Number(actor.id),Number(target.id)]);
-  if (Math.random() >= correctedHitChance(Number(actor.accuracy) / Math.max(1, Number(actor.accuracy) + Number(target.evasion)),strikeCorrections({armorSet:armorSets.get(Number(actor.id))},{armorSet:armorSets.get(Number(target.id))}))) { await recordPvpAttack(connection, actor, target, label, 0, 'miss'); return `【${actor.name}】${label}，但【${target.name}】闪避了攻击。`; }
+  if (Math.random() >= correctedHitChance(opposedChance(Number(actor.accuracy), Number(target.evasion)),strikeCorrections({armorSet:armorSets.get(Number(actor.id))},{armorSet:armorSets.get(Number(target.id))}))) { await recordPvpAttack(connection, actor, target, label, 0, 'miss'); return `【${actor.name}】${label}，但【${target.name}】闪避了攻击。`; }
   const damage = Math.max(1, Math.floor(attack * attack / Math.max(1, attack + defense) * (skill ? skill.power / 100 : 1))); const hp = Math.max(0, Number(target.current_hp) - damage); const defeated = hp <= 0;
   if (defeated) {
     const settlement = await resolvePvpVictory(connection, Number(actor.id), Number(target.id)); target.current_hp = 1;

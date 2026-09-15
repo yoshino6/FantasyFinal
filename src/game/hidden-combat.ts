@@ -1,5 +1,5 @@
 import { talentCanPaySkill, talentPaySkill, talentCommitAction } from './talent-combat';
-import { correctedHitChance, strikeCorrections } from './combat-math';
+import { correctedHitChance, opposedChance, strikeCorrections } from './combat-math';
 import type { CombatRules, RuleStatus, RuleUnit } from './combat-rule-registry';
 import { hiddenSkill } from './hidden-profession.config';
 import { hiddenMix, rollHiddenMix } from './hidden-particles';
@@ -127,7 +127,7 @@ export const hiddenAfterHit = async (r: CombatRules, source: RuleUnit, target: R
     if (!window || !owner || owner.side !== source.side || data.created === key || !data.charges || data.used?.[source.key] === r.turn || enemy !== target) continue;
     if (!r.once(source, 'hiddenEchoAction' + key)) return;
     data.used ??= {}; data.used[source.key] = r.turn; data.charges--; window.data = JSON.stringify(data);
-    if (r.random() < correctedHitChance(data.accuracy / Math.max(1, data.accuracy + enemy.evasion),strikeCorrections(owner,enemy))) {
+    if (r.random() < correctedHitChance(opposedChance(data.accuracy, enemy.evasion),strikeCorrections(owner,enemy))) {
       const x = data.attack * .7, defense = data.magic ? enemy.magicDefense : enemy.defense;
       await r.secondary(owner, enemy, x * x / (x + Math.max(1, defense)) * data.scale, '合围追击', data.magic ? '奥术' : '无', false);
     } else r.log.push(`　➥【${enemy.name}】避开了合围追击。`);

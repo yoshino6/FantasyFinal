@@ -15,6 +15,11 @@ export type AdvancedSkillResourceRequirement = {
   label?: string;
 };
 
+export type AdvancedSkillTargetRequirement = {
+  effectCode: string;
+  effectName: string;
+};
+
 export const advancedResourceDefinitions: Record<string, AdvancedResourceDefinition> = {
   bulwark_guard: { professionCode: 'bulwark_guard', code: 'guard_stance', name: '守势', summary: '承受攻击、嘲讽与格挡会积攒；用于壁垒裁决。' },
   war_lord: { professionCode: 'war_lord', code: 'battle_fervor', name: '战意', summary: '命中敌人与压制受控目标会积攒；用于战旗与横扫。' },
@@ -54,6 +59,12 @@ export const advancedSkillResourceRequirements: Record<string, AdvancedSkillReso
   aegis_undying_dome: { professionCode: 'aegis_priest', amount: 100 },
   dawn_judgment_litany: { professionCode: 'dawn_inquisitor', amount: 50 },
   dawn_daybreak_decree: { professionCode: 'dawn_inquisitor', amount: 100 }
+};
+
+/** 需要敌方目标预先具有指定战斗状态，才允许提交的二转技能。 */
+export const advancedSkillTargetRequirements: Record<string, AdvancedSkillTargetRequirement> = {
+  nightblade_silent_finale: { effectCode: 'advanced_hunt', effectName: '追猎标定' },
+  ranger_hundred_hunt: { effectCode: 'advanced_hunt', effectName: '追猎标定' }
 };
 
 /** 二转主动技的面板正文。通用效果仍由 skill_effects 渲染，这里补足资源、连段和条件效果。 */
@@ -110,3 +121,4 @@ export const advancedSkillDescriptions: Record<string, string> = {
 
 export const advancedResourceForProfession = (professionCode: string | null | undefined) => professionCode ? advancedResourceDefinitions[professionCode] : undefined;
 export const advancedResourceRequirementForSkill = (skillCode: string) => advancedSkillResourceRequirements[skillCode];
+export const advancedTargetRequirementForSkill = (skillCode: string) => advancedSkillTargetRequirements[skillCode];

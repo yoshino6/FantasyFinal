@@ -152,3 +152,27 @@ export const answerHeartQuestion = async (userId: string, ticketId: number, code
   await recalculateCharacterStats(connection, Number(character.id));
   return { copy, directions };
 });
+
+/** 管理成长模拟：逐级随机回答尚未作答的问心题，按当时等级结算成长偏移。 */
+export const answerTestHeartQuestions = async (connection: PoolConnection, characterId: number) => {
+  const [tickets] = await connection.execute<HeartTicketRow[]>("SELECT * FROM character_heart_questions WHERE character_id=? AND to_level<=30 AND status<>'answered' ORDER BY to_level,id FOR UPDATE", [characterId]);
+  if (!tickets.length) return 0;
+  const profile = await ensureHeartGrowth(connection, characterId);
+  const birth = vector(profile.birth_json), delta = vector(profile.delta_json), offset = vector(profile.offset_json);
+  for (const ticket of tickets) {
+    const card = ticketView(ticket).card;
+    const choiceIndex = Math.floor(Math.random() * card.options.length);
+    const choice = card.options[choiceIndex]; if (!choice) continue;
+    const great = Math.random() < .2;
+    const before = { ...birth };
+    const change = calculateHeartGrowthChange(birth, choice.favor, choice.repel, great);
+    const gain = units(change.gain), loss = units(change.loss);
+    Object.assign(birth, change.after);
+    delta[choice.favor] = (units(delta[choice.favor]) + gain) / 10;
+    delta[choice.repel] = (units(delta[choice.repel]) - loss) / 10;
+    Object.assign(offset, heartOffsetAfterChoice(offset, choice.favor, choice.repel, change.gain, change.loss, Number(ticket.to_level)));
+    await connection.execute("UPDATE character_heart_questions SET status='answered',choice_code=?,result_json=?,answered_at=NOW() WHERE id=?", [codeFor[choiceIndex], JSON.stringify({ choiceCode: codeFor[choiceIndex], outcome: great ? 'great' : 'normal', target: change.target, gain: change.gain, loss: change.loss, before, after: birth, levelAtChoice: Number(ticket.to_level), adminTest: true }), ticket.id]);
+  }
+  await connection.execute('UPDATE character_heart_growth SET birth_json=?,delta_json=?,offset_json=? WHERE character_id=?', [JSON.stringify(birth), JSON.stringify(delta), JSON.stringify(offset), characterId]);
+  return tickets.length;
+};

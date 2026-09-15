@@ -33,6 +33,7 @@ import { gameAssetUrls, isPublicImageUrl } from '../config/game-assets';
 import { omniscientTraces } from '../game/omniscient.service';
 import { offerDynamicEncounter, recordExplorationMovement } from '../game/world-dynamics.service';
 import { encounterFormat, patrolMeetingFormat } from './world-dynamics';
+import type { BossPhaseTransition } from '../game/kingbeast.config';
 
 const pearGuideImagePath = decodeURIComponent(pearGuideImage).replace(/^([a-zA-Z]):(?![\\/])/, '$1:\\');
 const pearGuideImageBuffer = () => readFile(pearGuideImagePath);
@@ -145,6 +146,8 @@ export const appendBattleState = (markdown: ReturnType<typeof Format.createMarkd
     const bodyState = !target.isBossComponent && target.livingComponentCount ? `｜部位减伤 ${target.bodyDamageReductionPct}%` : '';
     const componentState = target.isBossComponent ? `｜${target.warning || target.passiveSummary}${target.breakSummary ? `｜击破：${target.breakSummary}` : ''}` : '';
     markdown.addText('> ').addButton(`${!battle.selectedAllyId && battle.selectedTargetId === target.id ? '▶' : ''}${hierarchy}敌方${index + 1} ${target.name}`, { data: `/切换目标 ${target.id}`, autoEnter: false }).addText(` HP ${target.hp}/${target.hpMax}${bodyState}${componentState}${target.defeated ? '（击败）' : ''}\n`);
+    if (!target.isBossComponent && target.passiveSummary) markdown.addBlockquote(`被动：${target.passiveSummary}`).addNewline();
+    if (target.mechanicSummary) markdown.addBlockquote(`机制：${target.mechanicSummary}`).addNewline();
     if (target.statusText) markdown.addBlockquote(`状态：${target.statusText}`).addNewline();
   }
   return markdown;
@@ -199,6 +202,17 @@ const finalBattleFormat = (log: string) => {
   const lines = log.split(/\r?\n/); const turn = battleRoundHeader.exec(lines[0]); const title = turn ? battleRoundTitle(turn[1] === '切磋' ? 'spar' : 'pve', Number(turn[2])) : '战斗'; if (turn) lines.shift();
   const markdown = Format.createMarkdown().addTitle(title).addNewline().addNewline();
   if (lines.join('\n')) appendCombatLog(markdown, lines.join('\n'));
+  return Format.create().addMarkdown(markdown);
+};
+export const bossPhaseTransitionFormat = (transitions: BossPhaseTransition[]) => {
+  const markdown = Format.createMarkdown().addTitle(transitions.length > 1 ? 'BOSS连续转场' : 'BOSS阶段转换').addNewline().addNewline();
+  for (const [index, transition] of transitions.entries()) {
+    if (index) markdown.addNewline().addText('————————————').addNewline().addNewline();
+    markdown.addBold(`【${transition.title}】`).addNewline().addNewline()
+      .addText(transition.description).addNewline().addNewline();
+    for (const line of transition.dialogue) markdown.addBlockquote(`【${line.speaker}】“${line.text}”`).addNewline();
+    markdown.addNewline().addBold(`阶段效果：${transition.effect}`).addNewline();
+  }
   return Format.create().addMarkdown(markdown);
 };
 const victoryButtons = (arrivalPending = false) => Format.createButtonGroup().addRow().addButton(arrivalPending ? '继续' : '操作面板', arrivalPending ? '/继续剧情' : '/面板', { type: 'command', autoEnter: true, style: 'blue' });
@@ -409,7 +423,7 @@ const scheduleStoryNpcBattle = (message: any, qqUserId: string) => {
       const battle = await battleStatus(qqUserId);
       if (battle.canAct) return;
       const result = await combatAction(qqUserId, 'attack');
-      await sendCombatResult(message, qqUserId, result);
+      await sendCombatResult(message, qqUserId, result, { transitionMode: 'inline' });
       if (!result.ended && !result.waiting) scheduleStoryNpcBattle(message, qqUserId);
     } catch (error) {
       // 非剧情队伍的倒下角色不会继续推进；其余错误保留在日志中便于定位。
@@ -418,10 +432,19 @@ const scheduleStoryNpcBattle = (message: any, qqUserId: string) => {
   }, 1000);
   storyNpcBattleTimers.set(qqUserId, timer);
 };
-const sendCombatResult = async (message: any, qqUserId: string, result: Awaited<ReturnType<typeof combatAction>>, options: { omitFinalLog?: boolean } = {}) => {
+type CombatResultPresentation = { log: string; manualLog?: string; bossTransitions?: BossPhaseTransition[] };
+const combatResultPresentation = (result: { log: string }) => result as CombatResultPresentation;
+const hasBossPhaseTransitions = (result: { log: string }) => Boolean(combatResultPresentation(result).bossTransitions?.length);
+const sendCombatResult = async (message: any, qqUserId: string, result: Awaited<ReturnType<typeof combatAction>>, options: { omitFinalLog?: boolean; transitionMode?: 'separate' | 'inline' } = {}) => {
+  const presentation = combatResultPresentation(result); const separateTransitions = options.transitionMode !== 'inline';
+  const sendBossTransitions = async () => {
+    if (separateTransitions && presentation.bossTransitions?.length) await message.send({ format: bossPhaseTransitionFormat(presentation.bossTransitions) });
+  };
+  const displayedLog = separateTransitions ? presentation.manualLog ?? result.log : result.log;
   if (result.ended) {
-    if (!options.omitFinalLog) await message.send({ format: finalBattleFormat(result.log) });
-    const settlement = result.settlement;
+    if (!options.omitFinalLog) await message.send({ format: finalBattleFormat(displayedLog) });
+    await sendBossTransitions();
+    const settlement = 'settlement' in result ? result.settlement : undefined;
     const victory = isVictorySettlement(settlement);
     const format = victory
       ? victoryFormat(settlement)
@@ -462,9 +485,10 @@ const sendCombatResult = async (message: any, qqUserId: string, result: Awaited<
     return;
   }
   const battle = await battleStatus(qqUserId);
-  await message.send({ format: battleFormat(result.waiting ? '行动已确认' : '战斗回合', result.log, battle) });
+  await message.send({ format: battleFormat(result.waiting ? '行动已确认' : '战斗回合', displayedLog, battle) });
+  await sendBossTransitions();
   const continued = await continueCombatChant(qqUserId);
-  if (continued) { await sendCombatResult(message, qqUserId, continued); return; }
+  if (continued) { await sendCombatResult(message, qqUserId, continued, options); return; }
   // 这一轮将主角击倒时，不能再等待玩家按钮；由仍存活的剧情队友每秒继续一轮。
   if (!result.waiting && !battle.canAct && battle.mode !== 'spar') scheduleStoryNpcBattle(message, qqUserId);
 };
@@ -497,11 +521,13 @@ const resolvePartyAutoBattleActions = async (qqUserId: string) => {
   }
   return latest;
 };
-const resolveRemainingAutoBattle = async (qqUserId: string) => {
+const resolveRemainingAutoBattle = async (qqUserId: string, initial?: Awaited<ReturnType<typeof combatAction>>) => {
   // 省略阶段不再逐回合发消息，以免触发 QQ 被动回复上限；仍逐回合复用同一套战斗计算。
+  let pending = initial;
   for (let round = 0; round < 200; round += 1) {
-    const result = await resolvePartyAutoBattleActions(qqUserId);
-    if (!result || result.ended || result.waiting) return result;
+    const result = pending ?? await resolvePartyAutoBattleActions(qqUserId); pending = undefined;
+    // 阶段转换不能随普通回合一起被省略；将该轮交回展示层后，再继续静默计算。
+    if (!result || result.ended || result.waiting || hasBossPhaseTransitions(result)) return result;
   }
   return null;
 };
@@ -534,17 +560,30 @@ const scheduleAutoBattle = (message: any, qqUserId: string, omitted = false) => 
       try {
         const result = await resolvePartyAutoBattleActions(qqUserId);
         if (!result) { stopAutoBattle(qqUserId); return; }
+        if (omitted) {
+          const preserved = await resolveRemainingAutoBattle(qqUserId, result);
+          if (!preserved) { stopAutoBattle(qqUserId); return; }
+          const preservesTransition = hasBossPhaseTransitions(preserved);
+          if (preserved.ended) await sendCombatResult(message, qqUserId, preserved, { omitFinalLog: !preservesTransition, transitionMode: 'inline' });
+          else if (preservesTransition) await sendCombatResult(message, qqUserId, preserved, { transitionMode: 'inline' });
+          if (preserved.ended || preserved.waiting) { stopAutoBattle(qqUserId); return; }
+          advance();
+          return;
+        }
         const visibleRounds = autoBattleVisibleRounds.get(qqUserId) ?? 0;
-        if (!omitted && !result.ended && !result.waiting && visibleRounds >= AUTO_BATTLE_VISIBLE_ROUND_LIMIT) {
+        if (!result.ended && !result.waiting && visibleRounds >= AUTO_BATTLE_VISIBLE_ROUND_LIMIT) {
           await message.send({ format: messageFormat('战斗过长，已省略', '后续回合战斗已省略，正在计算战斗结果。') });
-          const finalResult = await resolveRemainingAutoBattle(qqUserId);
-          if (finalResult?.ended) await sendCombatResult(message, qqUserId, finalResult, { omitFinalLog: true });
-          else if (finalResult && !finalResult.waiting) scheduleAutoBattle(message, qqUserId, true);
+          const finalResult = await resolveRemainingAutoBattle(qqUserId, result);
+          if (finalResult?.ended) await sendCombatResult(message, qqUserId, finalResult, { omitFinalLog: !hasBossPhaseTransitions(finalResult), transitionMode: 'inline' });
+          else if (finalResult && !finalResult.waiting) {
+            await sendCombatResult(message, qqUserId, finalResult, { transitionMode: 'inline' });
+            scheduleAutoBattle(message, qqUserId, true);
+          }
           else stopAutoBattle(qqUserId);
           return;
         }
-        await sendCombatResult(message, qqUserId, result, { omitFinalLog: omitted && result.ended });
-        if (!omitted && !result.ended && !result.waiting) autoBattleVisibleRounds.set(qqUserId, visibleRounds + 1);
+        await sendCombatResult(message, qqUserId, result, { transitionMode: 'inline' });
+        if (!result.ended && !result.waiting) autoBattleVisibleRounds.set(qqUserId, visibleRounds + 1);
         if (result.ended || result.waiting) { stopAutoBattle(qqUserId); return; }
         advance();
       } catch (error) {
@@ -563,13 +602,13 @@ const startAutoBattle = async (message: any, qqUserId: string, openingText = '')
     const full = await resolveFullAutoBattle(qqUserId);
     const fullLog = [openingText, full.log].filter(Boolean).join('\n\n');
     if (fullLog) await message.send({ format: fullAutoBattleFormat(fullLog) });
-    if (full.result?.ended) await sendCombatResult(message, qqUserId, full.result, { omitFinalLog: true });
+    if (full.result?.ended) await sendCombatResult(message, qqUserId, full.result, { omitFinalLog: true, transitionMode: 'inline' });
     else if (full.result && !full.result.waiting) scheduleAutoBattle(message, qqUserId, true);
     return Boolean(full.result);
   }
   const result = await resolvePartyAutoBattleActions(qqUserId);
   if (!result) return false;
-  await sendCombatResult(message, qqUserId, result);
+  await sendCombatResult(message, qqUserId, result, { transitionMode: 'inline' });
   if (!result.ended && !result.waiting) scheduleAutoBattle(message, qqUserId);
   return true;
 };

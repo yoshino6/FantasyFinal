@@ -1853,9 +1853,11 @@ export const initializeSchema = async (pool: Pool) => {
   for (const [code, minX, maxX, minY, maxY, minZ, maxZ] of worldRegionAreas) await pool.execute(`INSERT INTO map_region_areas (region_id,min_x,max_x,min_y,max_y,min_z,max_z)
     SELECT id,?,?,?,?,?,? FROM map_regions WHERE code=?`, [minX, maxX, minY, maxY, minZ, maxZ, code]);
   // 旧的单矩形刷新点若落在新拼接地块之外，立即失效并在下一轮刷新时迁回合法生态区。
+  // 战斗召唤物使用地图边界外的虚拟坐标；服务重启时必须保留仍在 active 会话中的实体。
   await pool.execute(`UPDATE monster_spawns s JOIN map_regions r ON r.id=s.region_id
     LEFT JOIN map_region_areas a ON a.region_id=s.region_id AND s.pos_x BETWEEN a.min_x AND a.max_x AND s.pos_y BETWEEN a.min_y AND a.max_y AND s.pos_z BETWEEN a.min_z AND a.max_z
-    SET s.current_hp=0,s.defeated_at=NOW() WHERE r.code IN (${areaRegionCodes.map(() => '?').join(',')}) AND s.defeated_at IS NULL AND a.id IS NULL`, areaRegionCodes);
+    SET s.current_hp=0,s.defeated_at=NOW() WHERE r.code IN (${areaRegionCodes.map(() => '?').join(',')}) AND s.defeated_at IS NULL AND a.id IS NULL
+      AND NOT EXISTS (SELECT 1 FROM combat_targets ct JOIN combat_sessions cs ON cs.id=ct.session_id WHERE ct.spawn_id=s.id AND cs.state='active')`, areaRegionCodes);
   await pool.execute(`UPDATE resource_spawns s JOIN map_regions r ON r.id=s.region_id
     LEFT JOIN map_region_areas a ON a.region_id=s.region_id AND s.pos_x BETWEEN a.min_x AND a.max_x AND s.pos_y BETWEEN a.min_y AND a.max_y AND s.pos_z BETWEEN a.min_z AND a.max_z
     SET s.mined_at=NOW() WHERE r.code IN (${areaRegionCodes.map(() => '?').join(',')}) AND s.mined_at IS NULL AND a.id IS NULL`, areaRegionCodes);
@@ -2528,6 +2530,8 @@ export const initializeSchema = async (pool: Pool) => {
     ,('shadow_pierce','影刺','stat_modifier',1,0,1,1,0,'下一次出招必定暴击。')
     ,('battle_cry','战吼','stat_modifier',10,2,1,1,0,'物理攻击与魔法攻击提高。')
     ,('royal_intercept','王庭拦截','stat_modifier',25,9,1,1,0,'下一次受到的单体伤害降低。')
+    ,('fear','恐惧','control',1,1,1,1,0,'跳过下一次行动；再次施加只刷新持续时间。')
+    ,('uzz_weakness','虚弱','stat_modifier',15,2,1,1,0,'物理攻击与魔法攻击降低15%。')
     ON DUPLICATE KEY UPDATE name=VALUES(name),default_value=VALUES(default_value),default_duration=VALUES(default_duration),max_level=VALUES(max_level),max_stacks=VALUES(max_stacks),stackable=VALUES(stackable),description=VALUES(description)`);
   await pool.query(`DELETE se FROM skill_effects se JOIN skill_definitions s ON s.id=se.skill_id
     WHERE s.code IN ('bite','jump_strike','charge','bite_slash','mist_pounce','mist_step_slash','moonbolt','moonlight_bolt','war_cry','vine_bolt')`);
@@ -2914,17 +2918,36 @@ export const initializeSchema = async (pool: Pool) => {
     ('valk_anvil_sentence','铁砧裁决','physical','打击','打击','火','近战',118,3,128,99,99,1,0,'瓦尔克将铁砧砸向被炉渣烙印的目标，专门处决被标记者。'),
     ('valk_furnace_stoke','炉温加压','utility','无','能量','火','自身',78,4,0,99,99,1,0,'炉温达到阈值后，瓦尔克向熔炉加压，下一次行动会释放过载热浪。'),
     ('valk_furnace_overdrive','赤炉过载','magic','火','元素','火','全体',136,5,118,99,99,1,0,'加压完成后的高温热浪覆盖全场，并将剩余炉温转为额外伤害。'),
-    ('threehead_venom_fang','腐毒獠牙','physical','刺击','刺击','无','近战',90,2,112,99,99,1,0,'蛇母的毒首撕咬主目标，施加中毒并为雾首创造追击窗口。'),
-    ('threehead_mist_lash','雾幕鞭击','magic','木','元素','木','全体',104,3,87,99,99,1,0,'雾首甩出遮蔽视野的藻雾鞭，对中毒目标造成更高伤害并削弱施法。'),
-    ('threehead_rootcoil','根沼绞缠','magic','木','元素','木','远程',98,3,105,99,99,1,0,'根首以沼根缠住最虚弱的猎物；命中后会为吞噬准备短暂窗口。'),
-    ('threehead_swallow','三首吞噬','physical','打击','打击','无','近战',128,4,132,99,99,1,0,'蛇母协同三首吞噬被根沼绞缠的目标；若窗口未建立则不会优先施放。'),
-    ('threehead_brood_regrow','蜕茧回生','utility','无','强化','木','自身',110,5,0,99,99,1,0,'蛇母在濒危时蜕下受损鳞茧，恢复生命并净化自身异常，但每场仅一次。'),
-    ('uzz_gravebrand','葬印蚀魂','magic','暗','元素','暗','远程',98,2,108,99,99,1,0,'乌兹以葬印蚀入目标灵魂；被葬印的目标会被后续墓群和鸣优先撕裂。'),
-    ('uzz_marrow_lash','髓骨缚鞭','magic','暗','元素','暗','远程',102,3,104,99,99,1,0,'乌兹用髓骨长鞭钉住最虚弱的猎物；命中后会为噬魂收割建立短暂窗口。'),
-    ('uzz_choir_of_graves','墓群和鸣','magic','暗','元素','暗','全体',116,3,88,99,99,1,0,'墓群齐声哀唱，暗属性波纹席卷全场；葬印目标承受额外冲击。'),
-    ('uzz_soul_reaping','噬魂收割','magic','暗','元素','暗','远程',128,4,134,99,99,1,0,'乌兹优先收割被髓骨缚住的灵魂；没有收割窗口时不会主动施放。'),
-    ('uzz_phylactery_turn','魂匣折返','utility','无','强化','暗','自身',116,5,0,99,99,1,0,'乌兹在受创后扭转魂匣，恢复生命、净化异常并临时凝出生命护盾；每场仅一次。'),
-    ('uzz_revenant_call','遗骸应召','utility','无','召唤','暗','全体',122,5,0,99,99,1,0,'乌兹唤醒两具骸骨守卫战场；战斗中至多发动两次。')
+    ('mother_plague_breath','瘟疫吐息','magic','木','元素','木','全体',0,0,75,99,99,1,0,'毒厄之首攻击全体，并以35%基础概率施加1层蛇母中毒。'),
+    ('threehead_venom_fang','腐毒獠牙','physical','刺击','刺击','木','近战',0,0,130,99,99,1,0,'毒厄之首撕咬最高仇恨目标，施加3层蛇母中毒并留下红莲追击标记。'),
+    ('mother_corrupt_colony','腐败菌群','utility','无','弱化','木','全体',0,0,0,99,99,1,0,'无命中判定地使全体双防降低20%三回合；中毒基础概率100%，仍受韧性抵抗。'),
+    ('mother_sleep_breath','催眠吐息','utility','无','控制','木','全体',0,0,0,99,99,1,0,'毒厄之首生命低于50%后解锁，以35%基础概率使全体沉睡至下一次行动。'),
+    ('mother_flame_torrent','炎息洪流','magic','火','元素','火','全体',0,0,80,99,99,1,0,'红莲之首攻击全体，并以35%基础概率施加1层蛇母灼烧。'),
+    ('mother_flame_bite','烈炎噬咬','physical','刺击','刺击','火','近战',0,0,140,99,99,1,0,'优先追击腐毒獠牙标记的目标，并施加3层蛇母灼烧。'),
+    ('mother_fire_roar','炎怒嘶吼','utility','无','强化','火','自身',0,0,0,99,99,1,0,'红莲之首双攻提高25%，持续三回合。'),
+    ('mother_flame_storm','烈焰风暴','magic','火','元素','火','全体',0,0,100,99,99,1,0,'红莲之首生命低于50%后解锁，攻击全体并施加2层蛇母灼烧。'),
+    ('mother_wind_barrier','风之障壁','utility','无','强化','风','全体',0,0,0,99,99,1,0,'所有存活蛇首受到的最终伤害降低25%，持续三回合。'),
+    ('mother_gale_howl','狂岚呼啸','magic','风','元素','风','全体',0,0,65,99,99,1,0,'攻击全体并立即结算一次所有持续伤害，不消耗层数与持续时间。'),
+    ('mother_rift_vortex','裂空风涡','magic','风','元素','风','全体',0,0,70,99,99,1,0,'攻击全体，并使已有蛇母中毒、灼烧、风蚀各增加1层。'),
+    ('mother_eroding_gale','卷蚀罡风','magic','风','元素','风','全体',0,0,95,99,99,1,0,'狂风之首生命低于50%后解锁，攻击全体并施加2层风蚀。'),
+    ('mother_disaster_wind','灾劫焚风','magic','风','元素','风','全体',0,0,100,99,99,1,0,'多首存活且任一首低于20%时蓄势；若未被击杀中断，下次共同攻击并按存活蛇首施加三类状态各3层。'),
+    ('uzz_skeleton_call','骷髅召唤','utility','无','召唤','暗','全体',120,0,0,99,99,1,0,'召唤一名骷髅狂战士与一名骷髅神箭手；与死灵召唤共用行动槽计时。'),
+    ('uzz_necromantic_call','死灵召唤','utility','无','召唤','暗','全体',145,0,0,99,99,1,0,'二阶段召唤一名痛苦幽魂与一名骷髅法师，完全替代骷髅召唤。'),
+    ('uzz_soul_blast','灵魂冲击','magic','暗','元素','暗','远程',75,0,118,99,99,1,0,'暗魔法单体攻击，忽略20%魔法防御。'),
+    ('uzz_dark_decay','黑暗凋零','magic','暗','元素','暗','全体',110,3,88,99,99,1,0,'暗魔法攻击全体，每名命中者随机获得恐惧、破甲、虚弱或中毒之一。'),
+    ('uzz_soul_rend','灵魂撕裂','magic','暗','元素','暗','远程',95,3,132,99,99,1,0,'忽略20%魔法防御，命中后施加虚弱2回合。'),
+    ('uzz_soul_drain','灵魂汲取','magic','暗','元素','暗','远程',100,3,96,99,99,1,0,'造成伤害并吸取目标当前魔力50%（向下取整）；自身魔力溢出部分按1:1转化为生命。'),
+    ('uzz_undead_dominion','亡灵统御','utility','无','强化','暗','自身',90,4,0,99,99,1,0,'将乌兹待扣生命伤害的40%分摊给存活普通亡灵，少于3只时立即解除。'),
+    ('uzz_death_coil','死亡缠绕','magic','暗','元素','暗','远程',120,3,90,99,99,1,0,'对残血目标追加其攻击前已损生命50%的真实伤害，并按实际扣血量治疗乌兹。'),
+    ('uzz_death_glory','死之荣耀终归于吾身!','utility','无','咏唱','暗','自身',180,0,0,99,99,1,0,'咏唱两个乌兹行动槽后召唤冰霜骨龙；硬控会打断且每场只尝试一次。'),
+    ('uzz_skeleton_slash','斩击','physical','斩击','斩击','无','近战',25,1,112,99,99,1,0,'骷髅狂战士挥刃攻击最高仇恨目标。'),
+    ('uzz_skeleton_fire_arrow','火矢','physical','刺击','刺击','火','远程',30,1,105,99,99,1,0,'骷髅神箭手优先射击已被破甲的目标。'),
+    ('uzz_fear_scream','恐惧尖啸','magic','暗','元素','暗','全体',55,3,62,99,99,1,0,'痛苦幽魂尖啸全场，每名命中者独立有18%基础概率恐惧1回合。'),
+    ('uzz_wraith_bolt','幽魂蚀击','magic','暗','元素','暗','远程',0,0,80,99,99,1,0,'痛苦幽魂在尖啸冷却时使用的暗魔法攻击。'),
+    ('uzz_mage_soul_blast','灵魂冲击·骸','magic','暗','元素','暗','远程',40,1,98,99,99,1,0,'骷髅法师的灵魂冲击，忽略20%魔法防御并优先追击虚弱目标。'),
+    ('uzz_frost_breath','寒冰吐息','magic','冰','元素','冰','全体',85,3,102,99,99,1,0,'冰霜骨龙吐息全场，命中后减速25%，持续2回合。'),
+    ('uzz_frost_armor','冰霜铠甲','utility','无','强化','冰','自身',70,4,0,99,99,1,0,'持续3次自身行动：非火伤害降低25%，自身冰伤害提高10%。'),
+    ('uzz_frost_claw','霜骨爪击','magic','冰','元素','冰','远程',0,0,95,99,99,1,0,'冰霜骨龙以寒霜魔力撕击单体目标。')
     ON DUPLICATE KEY UPDATE name=VALUES(name),category=VALUES(category),damage_type=VALUES(damage_type),skill_kind=VALUES(skill_kind),element=VALUES(element),range_type=VALUES(range_type),mana_cost=VALUES(mana_cost),cooldown_turns=VALUES(cooldown_turns),power=VALUES(power),description=VALUES(description)`);
   // 密林深处的领悟技能使用玩家端档位；怪物同名招式仍保留独立的高强度战斗数值。
   await pool.query(`INSERT INTO skill_definitions (code,name,category,damage_type,skill_kind,element,range_type,mana_cost,cooldown_turns,power,learn_cost,upgrade_cost,max_level,power_per_level,description) VALUES
@@ -3012,6 +3035,8 @@ export const initializeSchema = async (pool: Pool) => {
     ((SELECT id FROM skill_definitions WHERE code='goblin_king_stormchain'),(SELECT id FROM effect_definitions WHERE code='bind'),1,18,1,'enemy','on_hit'),
     ((SELECT id FROM skill_definitions WHERE code='habadragon_crushing_stomp'),(SELECT id FROM effect_definitions WHERE code='slow'),1,16,2,'enemy','on_hit')
     ON DUPLICATE KEY UPDATE value_override=VALUES(value_override),duration_override=VALUES(duration_override),target_scope=VALUES(target_scope),trigger_timing=VALUES(trigger_timing)`);
+  await pool.query(`DELETE se FROM skill_effects se JOIN skill_definitions s ON s.id=se.skill_id JOIN effect_definitions e ON e.id=se.effect_id
+    WHERE s.code='goblin_king_stormchain' AND e.code='bind'`);
   await pool.query(`DELETE se FROM skill_effects se JOIN skill_definitions s ON s.id=se.skill_id
     WHERE s.code IN ('gruen_fault_sunder','gruen_stoneward','gruen_riftfall','gruen_tectonic_call','gruen_corequake','valk_slag_brand','valk_chain_draw','valk_furnace_stoke','valk_anvil_sentence','valk_furnace_overdrive','threehead_venom_fang','threehead_mist_lash','threehead_rootcoil','threehead_swallow','threehead_brood_regrow','uzz_gravebrand','uzz_marrow_lash','uzz_choir_of_graves','uzz_soul_reaping','uzz_phylactery_turn','uzz_revenant_call')`);
   await pool.query(`INSERT INTO skill_effects (skill_id,effect_id,effect_level,value_override,duration_override,target_scope,trigger_timing) VALUES
@@ -3264,7 +3289,12 @@ export const initializeSchema = async (pool: Pool) => {
     ('goblin_assassin','哥布林刺客','elite',22,10,13,19,10,28,26,.70,.90,1.30,.55,2.00,1.80,JSON_ARRAY('goblin_silentthroat','goblin_shadowseam','goblin_breathsteal'),405,JSON_ARRAY(JSON_OBJECT('code','goblin_ear','chance',.90,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_shadowcloth','chance',.60,'quantity',1),JSON_OBJECT('code','goblin_whetstone','chance',.22,'quantity',1)),JSON_ARRAY('打击'),JSON_ARRAY('刺击'),JSON_OBJECT('暗',24),JSON_OBJECT('暗',12)),
     ('goblin_earthshaper','哥布林土行者','elite',22,28,15,20,10,9,14,1.80,1.00,1.45,.55,.45,.90,JSON_ARRAY('goblin_burrow','goblin_earthfang','goblin_rockfall'),445,JSON_ARRAY(JSON_OBJECT('code','goblin_ear','chance',.90,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_earth_crystal','chance',.70,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_scrap_iron','chance',.45,'quantity',1)),JSON_ARRAY('水'),JSON_ARRAY('土'),JSON_OBJECT('土',28),JSON_OBJECT('土',18)),
     ('goblin_colonel','精英·哥布林上校','elite',25,32,30,29,25,24,27,2.50,2.00,2.30,1.60,1.50,1.80,JSON_ARRAY('goblin_colonel_crushing_wave','goblin_colonel_toxic_barrage'),850,JSON_ARRAY(JSON_OBJECT('code','goblin_command_seal','chance',1,'min_quantity',1,'max_quantity',2),JSON_OBJECT('code','goblin_colonel_insignia','chance',1,'quantity',1),JSON_OBJECT('code','silver_coin','chance',.45,'min_quantity',1,'max_quantity',2)),JSON_ARRAY('打击','光'),JSON_ARRAY('刺击'),JSON_OBJECT('暗',20),JSON_OBJECT('暗',12)),
-    ('necromancer_uz','死灵法师·乌兹','boss',32,68,82,32,98,46,74,1.3,2.3,1,2.8,1.4,2,JSON_ARRAY('uzz_gravebrand','uzz_marrow_lash','uzz_choir_of_graves','uzz_soul_reaping','uzz_phylactery_turn','uzz_revenant_call'),1800,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',1,'min_quantity',160,'max_quantity',340),JSON_OBJECT('code','silver_coin','chance',.75,'min_quantity',2,'max_quantity',6)),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('暗',70),JSON_OBJECT('暗',55))
+    ('uzz_skeleton_berserker','骷髅狂战士','normal',30,23,7,27,5,15,10,1.3,.3,1.6,.2,.8,.5,JSON_ARRAY('uzz_skeleton_slash'),0,JSON_ARRAY(),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT(),JSON_OBJECT('暗',12)),
+    ('uzz_skeleton_archer','骷髅神箭手','normal',30,10,13,17,9,29,24,.6,.7,1,.4,1.7,1.4,JSON_ARRAY('uzz_skeleton_fire_arrow'),0,JSON_ARRAY(),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('火',15),JSON_OBJECT('暗',12)),
+    ('uzz_pain_wraith','痛苦幽魂','large',30,16,31,7,32,17,27,.8,1.6,.3,1.7,.8,1.4,JSON_ARRAY('uzz_fear_scream','uzz_wraith_bolt'),0,JSON_ARRAY(),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('暗',25),JSON_OBJECT('暗',22)),
+    ('uzz_skeleton_mage','骷髅法师','large',30,13,34,6,36,16,27,.6,1.9,.2,2,.7,1.4,JSON_ARRAY('uzz_mage_soul_blast'),0,JSON_ARRAY(),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('暗',25),JSON_OBJECT('暗',22)),
+    ('uzz_frost_bone_dragon','冰霜骨龙','elite',30,42,34,28,41,19,30,2.2,1.7,1.5,2.2,.9,1.5,JSON_ARRAY('uzz_frost_breath','uzz_frost_armor','uzz_frost_claw'),0,JSON_ARRAY(),JSON_ARRAY('火','光'),JSON_ARRAY('冰'),JSON_OBJECT('冰',35),JSON_OBJECT('冰',35)),
+    ('necromancer_uz','死灵法师·乌兹','boss',32,68,82,32,98,46,74,1.3,2.3,1,2.8,1.4,2,JSON_ARRAY('uzz_skeleton_call','uzz_necromantic_call','uzz_soul_blast','uzz_dark_decay','uzz_soul_rend','uzz_soul_drain','uzz_undead_dominion','uzz_death_coil','uzz_death_glory','boss_mana_charge'),1800,JSON_ARRAY(JSON_OBJECT('code','copper_coin','chance',1,'min_quantity',160,'max_quantity',340),JSON_OBJECT('code','silver_coin','chance',.75,'min_quantity',2,'max_quantity',6)),JSON_ARRAY('光'),JSON_ARRAY('暗'),JSON_OBJECT('暗',70),JSON_OBJECT('暗',55))
     ON DUPLICATE KEY UPDATE name=VALUES(name),monster_class=VALUES(monster_class),level=VALUES(level),constitution=VALUES(constitution),spirit=VALUES(spirit),strength=VALUES(strength),intelligence=VALUES(intelligence),agility=VALUES(agility),perception=VALUES(perception),constitution_growth=VALUES(constitution_growth),spirit_growth=VALUES(spirit_growth),strength_growth=VALUES(strength_growth),intelligence_growth=VALUES(intelligence_growth),agility_growth=VALUES(agility_growth),perception_growth=VALUES(perception_growth),skill_sequence=VALUES(skill_sequence),experience=VALUES(experience),drops_json=VALUES(drops_json),weakness_json=VALUES(weakness_json),resistance_json=VALUES(resistance_json),element_mastery_json=VALUES(element_mastery_json),element_resistance_json=VALUES(element_resistance_json)`);
   await pool.query(`INSERT INTO monster_templates (code,name,monster_class,level,constitution,spirit,strength,intelligence,agility,perception,constitution_growth,spirit_growth,strength_growth,intelligence_growth,agility_growth,perception_growth,skill_sequence,experience,drops_json,weakness_json,resistance_json,element_mastery_json,element_resistance_json) VALUES
     ('goblin_king','横冲直撞的哥布林国王','boss',32,18,34,12,38,17,22,1.3,2.4,.7,2.6,1,1.6,JSON_ARRAY('habadragon_royal_charge','habadragon_royal_stomp','habadragon_royal_tail_sweep','habadragon_royal_cataclysm_trample','goblin_king_thunder_edict','goblin_king_stormchain','goblin_king_regal_conduct','goblin_king_call_elites'),2200,JSON_ARRAY(JSON_OBJECT('code','goblin_command_seal','chance',1,'min_quantity',2,'max_quantity',4),JSON_OBJECT('code','goblin_colonel_insignia','chance',.30,'quantity',1),JSON_OBJECT('code','silver_coin','chance',1,'min_quantity',4,'max_quantity',8)),JSON_ARRAY('打击'),JSON_ARRAY('刺击'),JSON_OBJECT('雷',35),JSON_OBJECT('雷',20)),
@@ -3485,7 +3515,8 @@ export const initializeSchema = async (pool: Pool) => {
   await pool.query(`UPDATE skill_definitions SET target_scope='全体',range_type='近战'
     WHERE code IN ('wolfking_trample','death_knight_cleave','habadragon_royal_stomp','habadragon_royal_tail_sweep','habadragon_royal_cataclysm_trample','habadragon_crushing_stomp')`);
   await pool.query(`UPDATE skill_definitions SET target_scope='全体',range_type='远程'
-    WHERE code IN ('black_slime_wave','black_slime_bind','skeleton_quake','death_knight_prison','necromancer_storm','necromancer_grave_bind','goblin_colonel_crushing_wave','goblin_colonel_toxic_barrage','goblin_royal_static_net','goblin_king_stormchain','goblin_rockfall','goblin_player_rockfall')`);
+    WHERE code IN ('black_slime_wave','black_slime_bind','skeleton_quake','death_knight_prison','necromancer_storm','necromancer_grave_bind','goblin_colonel_crushing_wave','goblin_colonel_toxic_barrage','goblin_royal_static_net','goblin_king_stormchain','goblin_rockfall','goblin_player_rockfall','uzz_dark_decay','uzz_fear_scream','uzz_frost_breath')`);
+  await pool.query(`UPDATE skill_definitions SET target_scope='自身' WHERE code IN ('uzz_skeleton_call','uzz_necromantic_call','uzz_undead_dominion','uzz_death_glory','uzz_frost_armor')`);
   await pool.query(`UPDATE skill_definitions SET target_scope=CASE
     WHEN code IN ('aeson_earthbreak','aeson_ultimate') THEN '全体'
     WHEN code='aeson_snakebind' THEN '双体'

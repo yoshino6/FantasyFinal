@@ -9,7 +9,7 @@ import { CombatRules, readRuleState, type RuleStatus, type RuleUnit } from './co
 type CombatRow = Record<string, any>;
 type LegacyEffect = { source_key?: string | null; id: number; target_kind: string; target_id: number; code: string; effect_type: string; value: number; stacks: number; remaining_turns: number };
 const record = (value: unknown): Record<string, any> => typeof value === 'string' ? JSON.parse(value) : (value ?? {}) as Record<string, any>;
-const negative = new Set(['vulnerability', 'armor_shatter', 'magic_shatter', 'imbalance', 'slow', 'bind', 'stun', 'exposed', 'poison', 'burn', 'bleed', 'bleeding', 'alchemy_confusion', 'advanced_hunt']);
+const negative = new Set(['vulnerability', 'armor_shatter', 'magic_shatter', 'imbalance', 'slow', 'bind', 'stun', 'fear', 'uzz_weakness', 'exposed', 'poison', 'burn', 'bleed', 'bleeding', 'alchemy_confusion', 'advanced_hunt']);
 export const ruleAppraisalLevels = async (connection: PoolConnection, ids: number[]) => {
   if (!ids.length) return new Map<number, number>();
   const [rows] = await connection.execute<RowDataPacket[]>(`SELECT c.id,GREATEST(

@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { armorSetFromRows, armorSetsFor } from '../src/game/armor-set';
-import { correctedHitChance, correctedCritChance, correctedCritBonus, resolveStrike, strikeCorrections } from '../src/game/combat-math';
+import { correctedHitChance, correctedCritChance, correctedCritBonus, opposedChance, opposedCritBonus, resolveStrike, strikeCorrections } from '../src/game/combat-math';
 import { equipmentSetSummary } from '../src/game/equipment-set-summary';
 import { epicLoadoutFromRows } from '../src/game/epic-equipment.service';
 import { panelPercentKeys, calculatePanelStats } from '../src/game/panel-stat-formula';
@@ -14,6 +14,17 @@ import { CombatRules } from '../src/game/combat-rule-registry';
 const slots = ['shoulder','upper','waist','lower','feet'];
 const rows = (name: string, count: number, epic = '') => slots.slice(0,count).map(slot=>({slot,weapon_type:name,effect_json:{epicSetCode:epic}}));
 const close = (actual: number, expected: number) => assert.ok(Math.abs(actual-expected)<1e-10,`${actual} != ${expected}`);
+
+test('命中、暴击与暴伤使用指数对抗公式',()=>{
+  close(opposedChance(0,100),0);
+  close(opposedChance(50,100),1-Math.pow(.5,.5));
+  close(opposedChance(100,100),.5);
+  close(opposedChance(200,100),.75);
+  close(1+opposedCritBonus(0,100),1);
+  close(1+opposedCritBonus(50,100),1+2*(1-Math.pow(.5,.5)));
+  close(1+opposedCritBonus(100,100),2);
+  close(1+opposedCritBonus(200,100),2.5);
+});
 
 test('只统计五个防具槽：2件未激活，3/4件低档，5件覆盖低档，混穿及重复槽不凑件',()=>{
   for (const name of ['布甲','皮甲','轻甲','重甲','板甲']) {
@@ -64,8 +75,8 @@ test('基础直击真实掷骰：命中补偿、暴免、强制暴击的额外�
     const cloth={armorSet:armorSetFromRows(rows('布甲',3))},plate={armorSet:armorSetFromRows(rows('板甲',3))};
     assert.equal(strike([.65]).hit,false);assert.equal(strike([.65,.99],cloth).hit,true);
     assert.equal(strike([.1,.45]).crit,true);assert.equal(strike([.1,.45],undefined,plate).crit,false);
-    assert.equal(strike([.1],undefined,plate,true).damage,72);
-    assert.equal(strike([.1],undefined,undefined,true).damage,75);
+    assert.equal(strike([.1],undefined,plate,true).damage,94);
+    assert.equal(strike([.1],undefined,undefined,true).damage,100);
   } finally {Math.random=original;}
 });
 
@@ -82,7 +93,7 @@ test('共享战斗引擎确实读取攻守双方套装，未命中不扣血，�
   source.armorSet=null;target.armorSet=armorSetFromRows(rows('布甲',3));r.random=()=>.55;
   assert.equal(await r.strike(source,target,100,'',false,false,false,1,{skill:false}),false);
   target.armorSet=armorSetFromRows(rows('板甲',3));let rolls=[.1,.1,.5];r.random=()=>rolls.shift()??.5;
-  const before=target.hp;await r.strike(source,target,100,'',false,false,false,1,{skill:false});assert.equal(before-target.hp,70);
+  const before=target.hp;await r.strike(source,target,100,'',false,false,false,1,{skill:false});assert.equal(before-target.hp,92);
 });
 
 test('批量装备读取区分角色，空列表不发SQL',async()=>{

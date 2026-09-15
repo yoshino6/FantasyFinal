@@ -63,6 +63,13 @@ test('真实数据库：全部职业转职、任务完成、权限/战斗保护�
     await assert.rejects(service.adminTestProfession(user,'不存在的职业'),/有效的二转职业/);
     for(const p of professionTestOptions) {
       const result=await service.adminTestProfession(user,p.name);assert.equal(result.code,p.code);assert.equal(result.changed,true);
+      assert.equal(result.growth.level,30);
+      const [grown]=await c.execute<RowDataPacket[]>('SELECT level,realm_stage,skill_points FROM characters WHERE id=?',[id]);
+      assert.equal(Number(grown[0].level),30);assert.equal(Number(grown[0].realm_stage),3);
+      const [profile]=await c.execute<RowDataPacket[]>('SELECT unlocked_level,injection_count,evolution_scale FROM player_evolution_profiles WHERE character_id=?',[id]);
+      assert.equal(Number(profile[0].unlocked_level),30);assert.equal(Number(profile[0].injection_count),10);assert.equal(Number(profile[0].evolution_scale),10);
+      const [equipment]=await c.execute<RowDataPacket[]>("SELECT e.slot,i.rarity,i.required_level FROM player_equipment e JOIN item_definitions i ON i.id=e.item_id WHERE e.character_id=? AND e.slot IN ('weapon','offhand','shoulder','upper','waist','lower','feet')",[id]);
+      assert.equal(equipment.length,7);assert.ok(equipment.every(row=>row.rarity==='史诗'&&Number(row.required_level)===30));
       const [current]=await c.execute<RowDataPacket[]>('SELECT profession_code FROM player_advanced_professions WHERE character_id=?',[id]);assert.equal(current[0].profession_code,p.code);
       const [skills]=await c.execute<RowDataPacket[]>('SELECT s.code,s.category,ps.passive_linked FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=?',[id]);
       const passive=registeredAdvancedProfessionByCode(p.code)!.passive.code;

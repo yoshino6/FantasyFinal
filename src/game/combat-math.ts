@@ -1,7 +1,13 @@
 /** PvE 与 PvP 共用的基础命中、暴击与直击伤害结算。 */
 export const opposedChance = (offense: number, defense: number) => {
-  const x = Math.max(1, Number(offense)); const y = Math.max(1, Number(defense));
-  return x / (x + y);
+  const x = Math.max(0, Number(offense)); const y = Math.max(1, Number(defense));
+  return 1 - Math.pow(.5, x / y);
+};
+
+/** 暴击时的额外伤害倍率；总暴击倍率为 1 + 本值，并随暴伤/暴抗渐近至 3 倍。 */
+export const opposedCritBonus = (critDamage: number, critReduction: number) => {
+  const x = Math.max(0, Number(critDamage)); const y = Math.max(1, Number(critReduction));
+  return 2 * (1 - Math.pow(.5, x / y));
 };
 
 export type StrikeCorrections = { hitCorrectionPct?: number; evasionCorrectionPct?: number; critAvoidanceCorrectionPct?: number; critDamageCorrectionPct?: number };
@@ -43,6 +49,6 @@ export const resolveStrike = (attack: number, defense: number, accuracy: number,
   if (!forceHit && Math.random() >= hitChance) return { hit: false, crit: false, damage: 0 };
   let damage = Math.max(1, Math.floor(attack * attack / (attack + Math.max(1, defense))));
   const critical = forceCrit || Math.random() < correctedCritChance(opposedChance(crit, critResist),correction);
-  if (critical) damage = Math.max(1, Math.floor(damage * (1 + correctedCritBonus(opposedChance(critDamage, critReduction),correction))));
+  if (critical) damage = Math.max(1, Math.floor(damage * (1 + correctedCritBonus(opposedCritBonus(critDamage, critReduction),correction))));
   return { hit: true, crit: critical, damage };
 };

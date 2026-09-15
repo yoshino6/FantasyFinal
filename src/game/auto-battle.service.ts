@@ -204,7 +204,7 @@ export const pendingPartyAutoBattleActions = async (qqUserId: string) => {
         WHERE ct.session_id=cs.id AND t.code='forest_slime'
           AND EXISTS(SELECT 1 FROM player_story_progress story WHERE story.character_id=mine.character_id AND story.story_code='forest_guide' AND story.status IN ('joined','declined')))
     ORDER BY cm.character_id`, [characterId]);
-  const [targets] = await pool.execute<(RowDataPacket & { spawn_id: number; is_defeated: number; traits_json: unknown; cooldowns: unknown })[]>(`SELECT ct.spawn_id,ct.is_defeated,s.traits_json,ct.cooldowns
+  const [targets] = await pool.execute<(RowDataPacket & { id: number; spawn_id: number; current_hp: number; is_defeated: number; traits_json: unknown; cooldowns: unknown })[]>(`SELECT ct.spawn_id AS id,ct.spawn_id,ct.is_defeated,s.current_hp,s.traits_json,ct.cooldowns
     FROM combat_members mine JOIN combat_sessions cs ON cs.id=mine.session_id AND cs.state='active' AND cs.mode<>'spar'
     JOIN combat_targets ct ON ct.session_id=cs.id JOIN monster_spawns s ON s.id=ct.spawn_id
     WHERE mine.character_id=?`, [characterId]);
@@ -213,8 +213,25 @@ export const pendingPartyAutoBattleActions = async (qqUserId: string) => {
     const traits = Array.isArray(target.traits_json) ? target.traits_json : (() => { try { return JSON.parse(String(target.traits_json ?? '[]')); } catch { return []; } })();
     return Array.isArray(traits) ? traits.find((trait: any) => trait?.code === 'boss_component') as { body_spawn_id?: number; part_key?: string } | undefined : undefined;
   };
-  const aliveTargets = targets.filter(target => !Number(target.is_defeated));
+  // 保持自动战斗目标判定自包含：旧版目标测试会单独提取本函数执行，不能依赖模块外闭包。
+  const kingbeast = (target: { traits_json: unknown }) => {
+    const traits = Array.isArray(target.traits_json) ? target.traits_json : (() => { try { return JSON.parse(String(target.traits_json ?? '[]')); } catch { return []; } })();
+    return Array.isArray(traits) ? traits.find((trait: any) => trait?.code === 'kingbeast_encounter') as { groupId?: string; role?: string } | undefined : undefined;
+  };
+  const kingbeastSelectableTargets = <T extends typeof targets[number]>(rows: T[]) => rows.filter(target => {
+    if (Number(target.is_defeated)) return false;
+    const trait = kingbeast(target); if (trait?.role !== 'king') return true;
+    const cores = rows.filter(candidate => ['king', 'dragon'].includes(String(kingbeast(candidate)?.role ?? '')) && String(kingbeast(candidate)?.groupId ?? '') === String(trait.groupId ?? ''));
+    return cores.length !== 2 || cores.every(candidate => Boolean(jsonObject(candidate.cooldowns).kingbeast_phase_two));
+  });
+  const kingbeastForcedSingleTarget = <T extends typeof targets[number]>(rows: T[]) => {
+    const dragon = rows.find(target => !Number(target.is_defeated) && kingbeast(target)?.role === 'dragon');
+    return dragon && Number(jsonObject(dragon.cooldowns).kingbeast_castling_turns ?? 0) > 0 ? dragon : undefined;
+  };
+  const aliveTargets = kingbeastSelectableTargets(targets);
   const automaticTargetFor = (member: AutoCombatStateRow) => {
+    const forcedKingbeastTarget = kingbeastForcedSingleTarget(targets);
+    if (forcedKingbeastTarget) return Number(forcedKingbeastTarget.spawn_id);
     const componentRows = aliveTargets.map(target => ({ target, trait: component(target) })).filter((entry): entry is { target: typeof targets[number]; trait: { body_spawn_id?: number; part_key?: string } } => Boolean(entry.trait));
     const bodyFor = (entry: { trait: { body_spawn_id?: number } }) => aliveTargets.find(target => Number(target.spawn_id) === Number(entry.trait.body_spawn_id));
     const urgent = (key: string, predicate: (body: typeof targets[number] | undefined) => boolean) => componentRows.find(entry => entry.trait.part_key === key && predicate(bodyFor(entry)));

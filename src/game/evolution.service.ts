@@ -259,22 +259,24 @@ const drawMutation = async (connection: PoolConnection, characterId: number, cod
   return { ...blueprint, outcome: state === 'deviation' ? '形成偏差' : state === 'rare' ? '形成稀有观测' : '形成稳定变异' };
 };
 
-export const injectEvolution = async (qqUserId: string, code: InjectionCode, requestedPart?: BodyPart, requestedSymbiosisTrait?: SymbiosisTraitCode) => withTransaction(async connection => {
+const injectEvolutionOnConnection = async (connection: PoolConnection, qqUserId: string, code: InjectionCode, requestedPart?: BodyPart, requestedSymbiosisTrait?: SymbiosisTraitCode, adminTest = false) => {
   const character = await characterFor(connection, qqUserId, true); const profile = await ensureEvolutionProfile(connection, character, true);
   if (!profile) throw new Error('进化之种尚未回应你。');
   const currentCap = Number(profile.unlocked_level); const rule = injectionRules[code];
   if (!injectionAvailable(code, currentCap)) throw new Error('这支针剂不能用于当前生长结。');
-  if (Number(character.level) !== currentCap || Number(character.experience) < experienceRequiredForLevel(currentCap)) throw new Error(`先让 Lv.${currentCap} 的经验达到满值，才能注射针剂。`);
+  if (Number(character.level) !== currentCap || (!adminTest && Number(character.experience) < experienceRequiredForLevel(currentCap))) throw new Error(`先让 Lv.${currentCap} 的经验达到满值，才能注射针剂。`);
   const symbiosisTrait = code === 'symbiosis' ? profile.symbiosis_trait_code ?? requestedSymbiosisTrait ?? null : null;
   if (code === 'symbiosis' && (!symbiosisTrait || !symbiosisTraitCodes.includes(symbiosisTrait))) throw new Error('请先选择一项共生微被动。');
   let finalTraits: MutationRow[] = [];
   if (code === 'shaping') {
     const candidates = await selectableFinalTraits(connection, Number(character.id), true); const required = Math.min(3, candidates.length);
     const selectedIds = jsonNumberList(profile.final_traits_json).filter(id => candidates.some(trait => Number(trait.id) === id));
+    if (adminTest && selectedIds.length !== required) selectedIds.splice(0, selectedIds.length, ...candidates.slice(0, required).map(trait => Number(trait.id)));
     if (selectedIds.length !== required) throw new Error(required ? `请先在自我定义中选择 ${required} 项定型特征。` : '尚无稳定观测可供定型；可直接完成最后一次注射。');
+    if (adminTest) await connection.execute('UPDATE player_evolution_profiles SET final_traits_json=? WHERE character_id=?', [JSON.stringify(selectedIds), character.id]);
     finalTraits = candidates.filter(trait => selectedIds.includes(Number(trait.id)));
   }
-  if (Number(profile.injection_count) > 0) {
+  if (!adminTest && Number(profile.injection_count) > 0) {
     // 已制作的旧版针剂优先消耗，避免历史物品作废；新流程直接消耗材料后完成注射。
     if (Number((await itemQuantity(connection, Number(character.id), injectionItemCodes[code], true))?.quantity ?? 0) > 0) await consumeItem(connection, Number(character.id), injectionItemCodes[code]);
     else {
@@ -297,15 +299,41 @@ export const injectEvolution = async (qqUserId: string, code: InjectionCode, req
   ]);
   // 生长结消耗的正是当前等级已满的经验；注射解除结后，立刻按普通升级规则结算下一等级与技能点。
   await connection.execute('UPDATE characters SET level=?,experience=0,skill_points=skill_points+1 WHERE id=?', [nextLevel, character.id]);
-  await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'realm.level_up', source: { system: 'character_level', id: nextLevel, step: 'reached' }, actorRole: 'system', outcome: '升级', summary: `进化注射后升至 Lv${nextLevel}`, detail: { fromLevel: currentCap, toLevel: nextLevel, realmStage: Number(character.realm_stage), derived: true } });
+  await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'realm.level_up', source: { system: adminTest ? 'admin_profession_test' : 'character_level', id: nextLevel, step: 'reached' }, actorRole: adminTest ? 'admin' : 'system', outcome: '升级', summary: `进化注射后升至 Lv${nextLevel}`, detail: { fromLevel: currentCap, toLevel: nextLevel, realmStage: Number(character.realm_stage), derived: true, adminTest } });
   await createHeartQuestionsForLevels(connection, Number(character.id), currentCap, nextLevel, Number(character.realm_stage));
   achievementLevel(connection,Number(character.id),nextLevel);
   await recordSkillPointChange(connection, Number(character.id), 1, 'level_up', null, `进化注射后升至 Lv.${nextLevel}`);
   const [injectionEvent]=await connection.execute<ResultSetHeader>(`INSERT INTO player_events (player_id,event_type,payload)
     SELECT player_id,'evolution.injected',? FROM characters WHERE id=?`, [JSON.stringify({ code, level: currentCap, mutation: mutation?.code ?? null, finalTraits: finalTraits.map(trait => trait.mutation_code), symbiosisTrait }), character.id]);
-  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'evolution.injected',existingEventId:Number(injectionEvent.insertId),source:{system:'evolution_injection',id:nextLevel,step:'injected'},outcome:'注射',summary:`注射${injectionNames[code]}并升至 Lv${nextLevel}`,detail:{code,fromLevel:currentCap,toLevel:nextLevel,mutationCode:mutation?.code??null,finalTraits:finalTraits.map(trait=>trait.mutation_code),symbiosisTrait}});
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'evolution.injected',existingEventId:Number(injectionEvent.insertId),source:{system:adminTest?'admin_profession_test':'evolution_injection',id:nextLevel,step:'injected'},actorRole:adminTest?'admin':'player',outcome:'注射',summary:`注射${injectionNames[code]}并升至 Lv${nextLevel}`,detail:{code,fromLevel:currentCap,toLevel:nextLevel,mutationCode:mutation?.code??null,finalTraits:finalTraits.map(trait=>trait.mutation_code),symbiosisTrait,adminTest}});
   return { characterId: Number(character.id), name: character.name, code, injectionName: injectionNames[code], fromLevel: currentCap, toLevel: nextLevel, gainedSkillPoints: 1, mutation, finalTraits: finalTraits.map(trait => trait.mutation_name), symbiosisTrait: symbiosisTrait ? symbiosisTraits[symbiosisTrait] : null, pressure: clamp(Number(profile.adaptation_pressure) + rule.pressure, 0, 8), stability: clamp(Number(profile.stability) + rule.stability, 0, 100) };
-});
+};
+export const injectEvolution = (qqUserId: string, code: InjectionCode, requestedPart?: BodyPart, requestedSymbiosisTrait?: SymbiosisTraitCode) => withTransaction(connection => injectEvolutionOnConnection(connection, qqUserId, code, requestedPart, requestedSymbiosisTrait));
+
+/** 管理测试：逐道复用正式注射的随机结算，免除剧情、经验和材料门槛。 */
+export const simulateEvolutionToLevel30 = async (connection: PoolConnection, qqUserId: string) => {
+  const character = await characterFor(connection, qqUserId, true);
+  if (Number(character.level) > 30 || Number(character.realm_stage) > 3) throw new Error('测试二转只支持不高于 Lv.30、开化及以前的角色。');
+  if (Number(character.level) < 20) {
+    const gained = 20 - Number(character.level);
+    await connection.execute('UPDATE characters SET level=20,experience=0,skill_points=skill_points+? WHERE id=?', [gained, character.id]);
+    for(let level=Number(character.level)+1;level<=20;level++)await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'realm.level_up',source:{system:'admin_profession_test',id:level,step:'reached'},actorRole:'admin',outcome:'升级',summary:`管理测试模拟升至 Lv${level}`,detail:{fromLevel:level-1,toLevel:level,adminTest:true}});
+    await recordSkillPointChange(connection, Number(character.id), gained, 'level_up', null, '管理测试模拟升至 Lv.20');
+    await createHeartQuestionsForLevels(connection, Number(character.id), Math.max(10, Number(character.level)), 20, 2);
+  }
+  await connection.execute('UPDATE characters SET realm_stage=3 WHERE id=? AND realm_stage<3', [character.id]);
+  await connection.execute("INSERT INTO player_main_quest_progress (character_id,quest_code,stage) VALUES (?,'realm_barrier',4) ON DUPLICATE KEY UPDATE stage=GREATEST(stage,4)", [character.id]);
+  await connection.execute("INSERT INTO player_main_quest_progress (character_id,quest_code,stage) VALUES (?,'evolution_barrier',8) ON DUPLICATE KEY UPDATE stage=GREATEST(stage,8)", [character.id]);
+  await activateEvolutionProfile(connection, Number(character.id));
+  const [profiles] = await connection.execute<ProfileRow[]>('SELECT * FROM player_evolution_profiles WHERE character_id=? FOR UPDATE', [character.id]);
+  const cap = Number(profiles[0]?.unlocked_level ?? 20);
+  if (cap < 20 || cap > 30 || Math.max(20,Number(character.level)) !== cap) throw new Error('角色等级与已有生长结进度不一致，请先核查进化档案。');
+  for (let level = cap; level < 30; level++) {
+    const code: InjectionCode = level === 29 ? 'shaping' : level <= 23 ? (['conservative','aggressive','harmonic'] as const)[Math.floor(Math.random()*3)]! : level <= 26 ? (['conservative','aggressive','harmonic','perception','symbiosis'] as const)[Math.floor(Math.random()*5)]! : (['conservative','aggressive','harmonic','perception','symbiosis','metamorphosis'] as const)[Math.floor(Math.random()*6)]!;
+    await injectEvolutionOnConnection(connection, qqUserId, code, undefined, code === 'symbiosis' ? symbiosisTraitCodes[Math.floor(Math.random()*symbiosisTraitCodes.length)] : undefined, true);
+  }
+  return { fromLevel: Number(character.level), level: 30, injections: 30-cap };
+};
 
 const businessDate = () => {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());

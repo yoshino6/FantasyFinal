@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { skillSpecialization } from '../src/game/skill-specialization';
 import { specializationPerLevelLines, specializationTotalLines, specializationNumberText, passiveSpecializationPerLevelLine, passiveSpecializationTotalLine } from '../src/game/skill-specialization-presentation';
+import { kingbeastPhaseTransition } from '../src/game/kingbeast.config';
 import ts from 'typescript';
 import { Format } from '../node_modules/alemonjs/lib/application/format/message-format.js';
 
@@ -20,7 +21,7 @@ const loadDeclarations = (path: string, names: string[], dependencies: Record<st
   return new Function(...Object.keys(dependencies), `${compiled}\nreturn { ${names.join(',')} };`)(...Object.values(dependencies));
 };
 const presentation = loadDeclarations('../src/response/adventure.ts', [
-  'battleButtons', 'appendBattleState', 'appendCombatLog', 'battleRoundTitle', 'battleRoundHeader', 'battleFormat', 'battleOperationFormat', 'battleStartFormat', 'finalBattleFormat'
+  'battleButtons', 'appendBattleState', 'appendCombatLog', 'battleRoundTitle', 'battleRoundHeader', 'battleFormat', 'battleOperationFormat', 'battleStartFormat', 'finalBattleFormat', 'bossPhaseTransitionFormat'
 ], { Format });
 const nodes = (format: ReturnType<typeof Format.create>) => format.value.find(item => item.type === 'Markdown')!.value as any[];
 const title = (format: ReturnType<typeof Format.create>) => nodes(format).find(item => item.type === 'MD.title')?.value;
@@ -45,6 +46,41 @@ test('切磋开战、操作、回合日志与结束日志统一标题，普通�
   assert.equal(title(presentation.battleStartFormat('遭遇敌人', battle('pve'))), '战斗开始');
   assert.equal(title(presentation.battleOperationFormat('', battle('pve', 3))), '战斗<3>回合');
   assert.equal(title(presentation.finalBattleFormat('战斗<5>回合\n战斗结束。')), '战斗<5>回合');
+});
+
+test('BOSS阶段转场卡片完整展示描述、台词和阶段效果，同次连续变招合并为一条消息', () => {
+  const split = kingbeastPhaseTransition('split'); const castling = kingbeastPhaseTransition('castling');
+  const single = presentation.bossPhaseTransitionFormat([split]); const singleText = rendered(single);
+  assert.equal(title(single), 'BOSS阶段转换');
+  assert.match(singleText, /第二阶段·王座分离/);
+  assert.ok(singleText.includes(split.description));
+  assert.ok(singleText.includes('【哥布林国王】“算了，我自己来！”'));
+  assert.ok(singleText.includes(`阶段效果：${split.effect}`));
+  const chained = presentation.bossPhaseTransitionFormat([split, castling]); const chainedText = rendered(chained);
+  assert.equal(title(chained), 'BOSS连续转场');
+  assert.equal((chainedText.match(/阶段效果：/g) ?? []).length, 2);
+  assert.ok(chainedText.indexOf(split.title) < chainedText.indexOf(castling.title));
+});
+
+test('手动战斗先发送回合消息，再发送该回合的BOSS转场消息', async () => {
+  const sent: unknown[] = [];
+  const runtime = loadDeclarations('../src/response/adventure.ts', ['combatResultPresentation', 'sendCombatResult'], {
+    battleStatus: async () => ({ mode: 'pve', canAct: true }),
+    battleFormat: () => 'round', bossPhaseTransitionFormat: () => 'transition',
+    finalBattleFormat: () => 'final-round', isVictorySettlement: () => false, Format,
+    nearbyPoints: async () => ({ character: { activity_status: 'active' } }), panelButtons: () => Format.createButtonGroup(),
+    continueCombatChant: async () => null, scheduleStoryNpcBattle: () => undefined
+  });
+  const message = { send: async ({ format }: { format: unknown }) => { sent.push(format); } };
+  await runtime.sendCombatResult(message, 'user', {
+    ended: false, waiting: false, log: 'inline', manualLog: 'round-only', bossTransitions: [kingbeastPhaseTransition('split')]
+  });
+  assert.deepEqual(sent, ['round', 'transition']);
+  sent.length = 0;
+  await runtime.sendCombatResult(message, 'user', {
+    ended: true, waiting: false, log: 'inline', manualLog: 'round-only', bossTransitions: [kingbeastPhaseTransition('split')], settlement: '战斗结束。'
+  });
+  assert.deepEqual(sent.slice(0, 2), ['final-round', 'transition']);
 });
 
 test('双方血蓝与状态使用单层引用，并保留双方名称的切换目标按钮', () => {
