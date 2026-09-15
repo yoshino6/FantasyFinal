@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 import * as alemon from 'alemonjs';
 import { createConnection, type RowDataPacket, type PoolConnection } from 'mysql2/promise';
-import { professionTestOptions } from '../src/game/admin-profession-test.service';
+import { professionTestArmorSetFor, professionTestOptions } from '../src/game/admin-profession-test.service';
 import { professionTestFormat } from '../src/response/admin-profession-test';
 import { activeSkillCodesForAdvancedProfession, advancedInheritanceSkillCode, worldTreeAdvancedProfessions, registeredAdvancedProfessionByCode, isAdvancedProfessionSkillCode } from '../src/game/advanced-profession.config';
 import { initializeAdvancedBoundSkills } from '../src/database/advanced-bound-skills';
@@ -34,6 +34,13 @@ test('QQ实际转换器输出命令填入标签，避免生成不支持show的�
   assert.doesNotMatch(rendered,/<qqbot-cmd-enter\b/);
   assert.equal((rendered.match(/<qqbot-cmd-input\b/g)??[]).length,professionTestOptions.length);
   for(const p of professionTestOptions)assert.ok(rendered.includes(`text="测试二转 ${p.code}" show="[${p.name}]"`));
+});
+
+test('测试二转按战斗定位分配史诗防具套装',()=>{
+  for(const code of ['bulwark_guard','aegis_priest'])assert.equal(professionTestArmorSetFor(code,code==='bulwark_guard'?'warrior':'priest'),'mountainheart_regalia');
+  for(const code of ['war_lord','ironbreaker','spellblade','weapon_master'])assert.equal(professionTestArmorSetFor(code,code==='spellblade'?'mage':'warrior'),'valk_forge_regalia');
+  for(const code of ['nightblade','venomancer','trickster_ranger','inventor'])assert.equal(professionTestArmorSetFor(code,'rogue'),'goblin_court_hunt');
+  for(const code of ['elementalist','spirit_summoner','saint_healer','dawn_inquisitor','magical_scholar','tactician'])assert.equal(professionTestArmorSetFor(code,'mage'),'mistmother_cocoon');
 });
 
 test('真实数据库：全部职业转职、任务完成、权限/战斗保护、重复点击、失败回滚（临时角色全部回滚）',{skip:process.env.FF_PROFESSION_TEST_DB!=='1'},async()=>{

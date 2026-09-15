@@ -157,7 +157,7 @@ appGroup.use('迷宫管理', () => import('./response/admin').then(module => ({ 
 appGroup.use('重建迷宫', () => import('./response/admin').then(module => ({ default: module.rebuildDungeonHandler })))
 appGroup.use('BOSS词条说明', () => import('./response/boss-trait'))
 appGroup.use({ path: 'BOSS刷新', schema: { usage: '/BOSS刷新 <Boss代号> [首领词条]', args: [{ name: 'code', rules: [{ required: true }] }, { name: 'trait' }] } }, () => import('./response/admin').then(module => ({ default: module.bossSpawnHandler })))
-appGroup.use({ path: 'BOSS测试', schema: { usage: '/BOSS测试 <Boss代号> [首领词条]', args: [{ name: 'code', rules: [{ required: true }] }, { name: 'trait' }] } }, () => import('./response/admin').then(module => ({ default: module.bossTestHandler })))
+appGroup.use({ path: 'BOSS测试', schema: { usage: '/BOSS测试 [Boss代号] [首领词条]', args: [{ name: 'code' }, { name: 'trait' }] } }, () => import('./response/admin').then(module => ({ default: module.bossTestHandler })))
 appGroup.use('BOSS测试离开', () => import('./response/admin').then(module => ({ default: module.bossTestLeaveHandler })))
 appGroup.use('测试 神装', () => import('./response/admin').then(module => ({ default: module.ownerTestLegendaryEquipmentHandler })))
 appGroup.use('测试 解体', () => import('./response/admin').then(module => ({ default: module.ownerTestDismantleHandler })))

@@ -50,7 +50,7 @@ const adminFormat = (role: PermissionRole | null) => {
   return format;
 };
 
-const bossManagementFormat = async (isOwner = false) => {
+const bossManagementFormat = async () => {
   const events = await bossEvents(); const markdown = Format.createMarkdown();
   const groups = new Map<string, typeof events>();
   for (const event of events) {
@@ -61,22 +61,34 @@ const bossManagementFormat = async (isOwner = false) => {
     markdown.addTitle(`【${group[0].regionName}】`).addNewline().addNewline();
     for (const [index, event] of group.entries()) {
       markdown.addText(`${'①②③④⑤⑥⑦⑧⑨⑩'[index] ?? `${index + 1}.`}${event.bossName}`).addButton('[刷新]', textButton('刷新Boss', `BOSS刷新 ${event.bossCode}`)).addButton('[消灭]', textButton('消灭Boss', `BOSS消灭 ${event.bossCode}`)).addButton('[上赏]', textButton('Boss上赏', `BOSS上赏 ${event.bossCode}`));
-      if (isOwner) markdown.addButton('[测试]', textButton('测试Boss', `BOSS测试 ${event.bossCode} `));
       markdown.addNewline();
       markdown.addBlockquote(`指定词条：BOSS刷新 ${event.bossCode} 普通｜梦幻`).addNewline();
-      if (isOwner) markdown.addBlockquote(`测试词条：BOSS测试 ${event.bossCode} 普通｜梦幻（只对你与当前队伍可见）`).addNewline();
       if (event.x === null) markdown.addBlockquote('未刷新').addNewline().addNewline();
       else markdown.addText('> 当前坐标：').addButton(`(${event.x}, ${event.y}, ${event.z})`, textButton('前往Boss坐标', `前往 ${event.x} ${event.y} ${event.z}`)).addNewline().addBlockquote(`当前词条：${event.traits.join('、') || '无'}`).addNewline().addNewline();
     }
   }
-  if (isOwner) {
-    const dungeonBosses = await dungeonBossTestEvents();
-    if (dungeonBosses.length) {
-      markdown.addTitle('【地下迷宫·测试】').addNewline().addNewline();
-      for (const [index,boss] of dungeonBosses.entries()) markdown.addText(`${'①②③④⑤⑥⑦⑧⑨⑩'[index]??`${index+1}.`}${boss.bossName}`).addButton('[测试]',textButton('测试迷宫Boss',`BOSS测试 ${boss.bossCode} `)).addNewline().addBlockquote(`测试词条：BOSS测试 ${boss.bossCode} 普通｜梦幻（只对你与当前队伍可见）`).addNewline().addNewline();
+  return Format.create().addMarkdown(markdown);
+};
+
+const bossTestFormat = async () => {
+  const [surfaceEvents, dungeonBosses] = await Promise.all([bossEvents(), dungeonBossTestEvents()]);
+  const surfaceBosses = [...new Map(surfaceEvents.map(event => [event.bossCode, event])).values()];
+  const markdown = Format.createMarkdown().addTitle('BOSS测试').addNewline().addNewline()
+    .addBlockquote('所有玩家都可开启隔离测试。测试首领只对本人及当前队伍可见，不会修改角色属性或装备，也不发放经验、材料、图鉴和技能领悟。').addNewline().addNewline();
+  const appendBosses = (title: string, bosses: typeof surfaceBosses) => {
+    markdown.addBold(title).addNewline();
+    for (const [index, boss] of bosses.entries()) {
+      markdown.addText(`${'①②③④⑤⑥⑦⑧⑨⑩'[index] ?? `${index + 1}.`}${boss.bossName}`)
+        .addButton('[普通]', textButton('普通测试', `BOSS测试 ${boss.bossCode} 普通`))
+        .addButton('[梦幻]', textButton('梦幻测试', `BOSS测试 ${boss.bossCode} 梦幻`))
+        .addNewline();
     }
-  }
-  if (isOwner) markdown.addNewline().addText('> ').addButton('[离开测试场]', textButton('离开首领测试场', 'BOSS测试离开')).addNewline().addBlockquote('结束当前测试并将测试队伍送回进入前的位置。测试首领不会掉落经验、材料或图鉴收益。');
+    markdown.addNewline();
+  };
+  appendBosses('地表首领', surfaceBosses);
+  appendBosses('地下迷宫首领', dungeonBosses);
+  markdown.addText('> ').addButton('[离开测试场]', textButton('离开首领测试场', 'BOSS测试离开')).addNewline()
+    .addBlockquote('结束当前测试，并将测试队伍送回进入前的位置。');
   return Format.create().addMarkdown(markdown);
 };
 
@@ -309,14 +321,14 @@ export const allPlayersAuditHandler = async () => {
   } catch (error) { await message.send({ format: messageFormat('全服数据核查失败', error instanceof Error ? error.message : '请稍后重试。') }); }
 };
 
-export const bossManagementHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const role = await requireAdministrator(event.current.UserId); await message.send({ format: await bossManagementFormat(role === 'owner') }); } catch (error) { await message.send({ format: messageFormat('BOSS管理失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const bossManagementHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: await bossManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('BOSS管理失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const monsterManagementHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: await monsterManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('小怪管理失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const resourceManagementHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: await resourceManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('矿产管理失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const dungeonManagementHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); await message.send({ format: await dungeonManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('迷宫管理失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const rebuildDungeonHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const result = await rebuildDungeons(); await recordAdminOperation(event.current.UserId, '重建迷宫', `重建地下迷宫，撤离 ${result.moved} 名探索者`); await message.send({ format: messageFormat('地下迷宫已重建', `已强制撤离 ${result.moved} 名探索者，并重建地下迷宫。`) }); await message.send({ format: await dungeonManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('重建迷宫失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const bossSpawnHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const code = String(route.param('code')); const trait = String(route.param('trait') ?? '').trim() || undefined; const result = await adminSpawnBoss(code, trait); await recordAdminOperation(event.current.UserId, '刷新BOSS', `刷新 BOSS：${result?.bossName ?? code}${trait ? `（${trait}）` : ''}`); await message.send({ format: messageFormat('BOSS已刷新', result?.x === null ? '未能找到可用刷新坐标。' : `${result?.bossName ?? 'BOSS'}${trait ? `（指定词条：${trait}）` : ''}已刷新至 (${result?.x}, ${result?.y}, ${result?.z})。`) }); await message.send({ format: await bossManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('BOSS刷新失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
-export const bossTestHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireOwner(event.current.UserId); const code = String(route.param('code')); const trait = String(route.param('trait') ?? '').trim() || undefined; const result = await adminStartBossTest(event.current.UserId, code, trait); await recordAdminOperation(event.current.UserId, 'BOSS测试', `测试 ${result.bossName} Lv.${result.level}${trait ? `（${trait}）` : '（普通）'}，队伍：${result.participants.join('、')}`); await message.send({ format: messageFormat('首领测试已准备', `${result.bossName} Lv.${result.level}（${result.trait}）已在首领测试场 (${result.x}, ${result.y}) 生成，仅你与当前队伍可见。请在面板中移动一次以触发遭遇；战斗结束后使用“BOSS测试离开”返回。\n\n测试战斗不发放经验、材料、图鉴或技能领悟。`) }); } catch (error) { await message.send({ format: messageFormat('首领测试失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
-export const bossTestLeaveHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireOwner(event.current.UserId); const result = await adminLeaveBossTest(event.current.UserId); await recordAdminOperation(event.current.UserId, '结束BOSS测试', `结束首领测试并送回 ${result.participants} 名队员${result.combatCount ? `，强制结束 ${result.combatCount} 场战斗` : ''}`); await message.send({ format: messageFormat('已离开首领测试场', `已将 ${result.participants} 名测试队员送回进入前的位置。${result.combatCount ? `已强制结束 ${result.combatCount} 场进行中的测试战斗。` : ''}`) }); } catch (error) { await message.send({ format: messageFormat('离开测试场失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const bossTestHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const code = String(route.param('code') ?? '').trim(); if (!code) { await message.send({ format: await bossTestFormat() }); return; } const trait = String(route.param('trait') ?? '').trim() || undefined; const result = await adminStartBossTest(event.current.UserId, code, trait); const format = messageFormat('首领测试已准备', `${result.bossName} Lv.${result.level}（${result.trait}）已在首领测试场 (${result.x}, ${result.y}) 生成，仅你与当前队伍可见。点击“开始战斗”即可直接开战；战斗结束后可离开测试场。\n\n测试战斗不发放经验、材料、图鉴或技能领悟。`).addButtonGroup(Format.createButtonGroup().addRow().addButton('开始战斗', `/目标 ${result.spawnId}`, { type: 'command', autoEnter: true, style: 'blue' }).addButton('离开测试场', '/BOSS测试离开', { type: 'command', autoEnter: true })); await message.send({ format }); } catch (error) { await message.send({ format: messageFormat('首领测试失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
+export const bossTestLeaveHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await adminLeaveBossTest(event.current.UserId); await message.send({ format: messageFormat('已离开首领测试场', `已将 ${result.participants} 名测试队员送回进入前的位置。${result.combatCount ? `已强制结束 ${result.combatCount} 场进行中的测试战斗。` : ''}`) }); } catch (error) { await message.send({ format: messageFormat('离开测试场失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const ownerTestLegendaryEquipmentHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireOwner(event.current.UserId); const result = await grantOwnerLegendaryTestEquipment(event.current.UserId); await recordAdminOperation(event.current.UserId, '测试神装', `装备 Lv.${result.level} 传说 100% 测试套装（${result.count} 件）`); await message.send({ format: messageFormat('测试神装已装备', `已覆盖常规装备槽并记录原装备，获得 ${result.count} 件 Lv.${result.level}、100% 品质的传说测试装备。主手与副手均为该职业的攻击类精通武器；副词条按打造规则随机。\n\n使用“测试 解体”可移除测试神装并恢复原装备。`) }); } catch (error) { await message.send({ format: messageFormat('测试神装失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const ownerTestDismantleHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireOwner(event.current.UserId); const result = await dismantleOwnerLegendaryTestEquipment(event.current.UserId); await recordAdminOperation(event.current.UserId, '测试解体', `解体 ${result.dismantled} 件测试神装，恢复 ${result.restored} 件原装备`); await message.send({ format: messageFormat('测试神装已解体', `已移除 ${result.dismantled} 件测试装备，并恢复 ${result.restored} 件原装备。`) }); } catch (error) { await message.send({ format: messageFormat('测试解体失败', error instanceof Error ? error.message : '请稍后重试。') }); } };
 export const monsterRefreshHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await requireAdministrator(event.current.UserId); const result = await adminRefreshMonsters(String(route.param('code'))); await recordAdminOperation(event.current.UserId, '刷新小怪', `刷新地图「${result.regionName}」的小怪，替换 ${result.refreshed} 只未参战小怪`); await message.send({ format: messageFormat('小怪已刷新', `【${result.regionName}】已替换 ${result.refreshed} 只未参战小怪，并按当前规则补齐。正在战斗的小怪已保留。`) }); await message.send({ format: await monsterManagementFormat() }); } catch (error) { await message.send({ format: messageFormat('小怪刷新失败', error instanceof Error ? error.message : '请稍后重试。') }); } };

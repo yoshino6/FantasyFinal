@@ -49,7 +49,8 @@ export const createCombatRules = async (connection: PoolConnection, sessionId: s
       passiveSpecializations: Object.fromEntries(passives.filter(passive => Number(passive.character_id) === Number(row.id) && kind === 'member').map(passive => [passive.code, passiveSpecializationFactor(passive.potent_level, String(passive.tier))])),
       armorSet: kind === 'member' ? armorSets.get(Number(row.id)) : profile?.armorSet ?? (Array.isArray(traits) ? traits.find(trait => trait.code === 'advanced_mentor_build')?.build?.armorSet : undefined),
       opening: kind === 'member' && !row.npc_code ? openingEffects.get(Number(row.id)) : undefined,
-      modifiers: profile?.advancedEffect ?? {}
+      modifiers: profile?.advancedEffect ?? {},
+      bossEffects: Array.isArray(traits) ? [...(traits.find(trait => trait.code === 'boss_random_effect')?.common ?? []), ...(traits.find(trait => trait.code === 'boss_random_effect')?.exclusive ?? [])].map(String) : []
     };
   };
   const units = [...members.map(row => make(row, 'member')), ...targets.map(row => make(row, 'target'))];

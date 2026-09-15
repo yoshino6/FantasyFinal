@@ -11,6 +11,7 @@ import { isFriendRelation, recordFriendInteraction } from './social.service';
 import { monsterCombatStats } from './adventure.service';
 type DungeonMonsterTemplate = RowDataPacket & Parameters<typeof monsterCombatStats>[0] & {id:number;code:string;skill_sequence:unknown};
 import { dungeonBlueprintDrops } from './deconstructor-catalog';
+import { bossRandomEffectTrait } from './boss-random-effects.config';
 
 const DUNGEON_REGION_CODE = 'dark_forest_dungeon';
 const FLOORS = [-10, -20, -30] as const;
@@ -127,10 +128,19 @@ const refreshDungeonSmallMonsters = async (connection: Pool | PoolConnection) =>
 
 /** 兼容旧迷宫：首领身份保留在 dungeon_monsters，显示与战斗词条改用通用 Boss 词条。 */
 const migrateDungeonBossTraits = async (connection: Pool | PoolConnection) => {
-  const [rows] = await connection.execute<(RowDataPacket & { id: number })[]>(`SELECT s.id FROM dungeon_monsters dm
-    JOIN monster_spawns s ON s.id=dm.spawn_id
+  const [rows] = await connection.execute<(RowDataPacket & { id: number; code: string })[]>(`SELECT s.id,t.code FROM dungeon_monsters dm
+    JOIN monster_spawns s ON s.id=dm.spawn_id JOIN monster_templates t ON t.id=s.template_id
     WHERE (dm.is_boss=1 OR dm.is_floor_leader=1) AND JSON_UNQUOTE(JSON_EXTRACT(s.traits_json,'$[0].code'))='dungeon_boss'`);
-  for (const row of rows) await connection.execute('UPDATE monster_spawns SET traits_json=? WHERE id=?', [JSON.stringify([randomDungeonBossTrait()]), row.id]);
+  for (const row of rows) { const trait = randomDungeonBossTrait(); const effect = bossRandomEffectTrait(row.code, trait.code); await connection.execute('UPDATE monster_spawns SET traits_json=? WHERE id=?', [JSON.stringify([trait, ...(effect ? [effect] : [])]), row.id]); }
+  const [eligible] = await connection.execute<(RowDataPacket & { id: number; code: string; traits_json: unknown })[]>(`SELECT s.id,t.code,s.traits_json FROM dungeon_monsters dm
+    JOIN monster_spawns s ON s.id=dm.spawn_id JOIN monster_templates t ON t.id=s.template_id
+    WHERE (dm.is_boss=1 OR dm.is_floor_leader=1) AND s.defeated_at IS NULL
+      AND NOT JSON_CONTAINS(COALESCE(s.traits_json,JSON_ARRAY()),JSON_OBJECT('code','boss_random_effect'))`);
+  for (const row of eligible) {
+    const traits = typeof row.traits_json === 'string' ? JSON.parse(row.traits_json) : Array.isArray(row.traits_json) ? row.traits_json : [];
+    const difficulty = traits.find((entry: { code?: string }) => dungeonBossTraits.some(candidate => candidate.code === entry.code)); const effect = difficulty && bossRandomEffectTrait(row.code, difficulty.code);
+    if (effect) await connection.execute('UPDATE monster_spawns SET traits_json=? WHERE id=?', [JSON.stringify([...traits, effect]), row.id]);
+  }
 };
 
 const nextPublicForestEntrance = (occupied: Set<string>) => {
@@ -236,8 +246,8 @@ const createDungeon = async (connection: Pool | PoolConnection) => {
   }
   for (const slot of floorBossSlots) {
     const code = slot.floor === 0 ? 'black_slime' : slot.floor === 1 ? random(['skeleton_general', 'death_knight']) : 'necromancer_uz'; const boss = byCode.get(code); if (!boss) continue;
-    const trait = randomDungeonBossTrait(); const hp = monsterCombatStats({...boss,traits_json:[trait]}).hpMax;
-    const [spawn] = await connection.execute<any>('INSERT INTO monster_spawns (template_id,region_id,pos_x,pos_y,pos_z,level,constitution,spirit,strength,intelligence,agility,perception,current_hp,skill_sequence,traits_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [boss.id, dungeonRegionId, slot.x, slot.y, slot.z, boss.level, boss.constitution, boss.spirit, boss.strength, boss.intelligence, boss.agility, boss.perception, hp, skillJson(boss.skill_sequence), JSON.stringify([trait])]);
+    const trait = randomDungeonBossTrait(); const effect = bossRandomEffectTrait(code, trait.code); const traits = [trait, ...(effect ? [effect] : [])]; const hp = monsterCombatStats({...boss,traits_json:traits}).hpMax;
+    const [spawn] = await connection.execute<any>('INSERT INTO monster_spawns (template_id,region_id,pos_x,pos_y,pos_z,level,constitution,spirit,strength,intelligence,agility,perception,current_hp,skill_sequence,traits_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [boss.id, dungeonRegionId, slot.x, slot.y, slot.z, boss.level, boss.constitution, boss.spirit, boss.strength, boss.intelligence, boss.agility, boss.perception, hp, skillJson(boss.skill_sequence), JSON.stringify(traits)]);
     await connection.execute('INSERT INTO dungeon_monsters (dungeon_id,spawn_id,is_boss,is_floor_leader) VALUES (?,?,?,?)', [dungeonId, Number(spawn.insertId), slot.floor === 2 ? 1 : 0, slot.floor < 2 ? 1 : 0]);
   }
   return dungeonId;

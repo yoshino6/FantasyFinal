@@ -27,6 +27,8 @@ export type RuleUnit = {
   castSpecialization?: SkillSpecializationResult;
   passiveSpecializations?: Record<string, number>;
   participating?: boolean;
+  /** 生成时固化的首领随机效果代码；不进入普通状态列表，也不能被驱散。 */
+  bossEffects?: string[];
 };
 export type TakenDamage = { damage: number; absorbed: number };
 export type RuleHooks = {
@@ -175,7 +177,9 @@ export class CombatRules {
     if (this.passive(source, 'B08') && this.effects(target).some(effect => controls.includes(effect.code)) && this.once(source, 'listen')) pierce += 12;
     if (this.passive(source, 'J07') && this.sparLevelBand && source.level >= this.sparLevelBand[0] && source.level <= this.sparLevelBand[1] && this.once(source, 'traveller', true)) chance += 8;
     const resistance = code === 'blind' ? this.value(target, 'blind_resist') : 0;
-    const probability = tenacityContest(pierce, target.tenacity * (1 + this.value(target, 'tenacity') / 100), source.level - target.level, chance).controlChance * (this.expansionScale < 1 ? .5 : 1) * (target.boss ? bossControlChanceMultiplier : 1) * (1 - resistance / 100);
+    const randomEffectControl = target.bossEffects?.includes('steadfast_soul') ? .5 : 1;
+    const boneFormationControl = target.bossEffects?.includes('bone_formation') && this.shieldValue(target) > 0 ? .5 : 1;
+    const probability = tenacityContest(pierce, target.tenacity * (1 + this.value(target, 'tenacity') / 100), source.level - target.level, chance).controlChance * (this.expansionScale < 1 ? .5 : 1) * (target.boss ? bossControlChanceMultiplier : 1) * (1 - resistance / 100) * randomEffectControl * boneFormationControl;
     if (this.random() >= probability) { this.log.push(`　➥${combatUnitLabel(target)}抵抗了${names[code] ?? code}。`); return false; }
     if (hard.includes(code) && this.effects(target).some(effect => hard.includes(effect.code) && !canDispelCombatEffect(effect.code, 'ordinary', Boolean(effect.mechanism)))) return false;
     if (hard.includes(code)) await this.remove(target, effect => hard.includes(effect.code));
@@ -404,7 +408,8 @@ export class CombatRules {
     if (this.passive(target, 'I07') && this.once(target, 'painFocus')) target.state.memory.focus = this.turn;
     return hiddenIncoming(this, source, target, await alchemyIncoming(this,source,target,dealt,magic,skill),true,magic);
   }
-  async afterHit(source: RuleUnit, target: RuleUnit, damage: number, element: string, skill: boolean, absorbed = 0, extra = false, magic = false) {
+  async afterHit(source: RuleUnit, target: RuleUnit, damage: number, element: string, skill: boolean, absorbed = 0, extra = false, magic = false, ranged = magic, critical = false) {
+    const actualDamage = Math.min(damage, Number(target.state.memory.opening_actual_damage ?? damage));
     achievementHit(source,target,damage,element,absorbed,target.state.memory.achievementLastLoss);
     await talentAfterHit(this,source,target,Math.min(damage,Number(target.state.memory.opening_actual_damage??damage)),absorbed,element,extra,magic);
     await openingAfterHit(this,source,target,Math.min(damage,Number(target.state.memory.opening_actual_damage??damage)),skill,absorbed,extra);
@@ -414,6 +419,15 @@ export class CombatRules {
     if (this.sparLevelBand && target.side === 'target' && damage > 0 && this.elementFactor(source, target, element) > 1) source.state.memory.sparWeakness = 1;
     if (absorbed && this.passive(target, 'F07') && this.once(target, `shard${source.key}`)) { this.add(source, 'armor_shatter', 8 * this.passive(target, 'F07'), 1, target, true); this.add(source, 'magic_shatter', 8 * this.passive(target, 'F07'), 1, target, true); }
     target.state.memory.lastHitTurn = this.turn; target.state.memory.lastHitter = source.key;
+    if (actualDamage > 0 && source.bossEffects?.includes('blood_tide_recovery')) {
+      await this.restore(source, source, actualDamage * .35 * (1 - Math.min(100, this.value(source, 'advanced_healing_cut')) / 100), 0);
+    }
+    if (actualDamage > 0 && target.bossEffects?.includes('thorn_armor_retribution') && !magic && !ranged) {
+      await this.secondary(target, source, actualDamage * .35, '荆甲反噬');
+    }
+    if (actualDamage > 0 && critical && target.bossEffects?.includes('wrath_counter')) {
+      target.state.memory.bossWrath = Math.min(3, Number(target.state.memory.bossWrath ?? 0) + 1);
+    }
     const enchant = this.status(source, 'enchant'); if (enchant && !extra && damage > 0 && this.once(source, 'enchantHit')) { await this.secondary(source, target, damage * enchant.value / 100, '三相附锋', enchant.data ?? '风'); }
     if (skill && element !== '无' && element !== '奥术') {
       if (this.passive(source, 'A07') && source.state.memory.previousElement && source.state.memory.previousElement !== element && this.once(source, 'elementMp')) await this.restore(source, source, 0, source.mpMax * .03);
@@ -476,7 +490,7 @@ export class CombatRules {
     if(critical&&dealt>0)achievementBattleEvidence(source).crit=true;
     await this.hooks.strikeResolved?.(source,target,dealt);
     this.log.push(`　➥${critical ? '[暴击]' : ''}${combatUnitLabel(target)}受到 ${dealt} 点${magic ? (element === '无' ? '奥术' : element) : '物理'}伤害${absorbed ? `（护盾吸收 ${absorbed}）` : ''}。`);
-    await this.afterHit(source, target, dealt - absorbed, element, isSkill, absorbed, extra, magic); return true;
+    await this.afterHit(source, target, dealt - absorbed, element, isSkill, absorbed, extra, magic, options.ranged ?? magic, critical); return true;
   }
   async cast(source: RuleUnit, target: RuleUnit, skill: ResidentSkill, paid: number, elementChoice = '风', extra = false, expandedHit = false) {
     const expanded = !expandedHit && !extra && skill.scope === 'enemy' && ['physical', 'magic'].includes(skill.category) && await this.consume(source, 'expand');

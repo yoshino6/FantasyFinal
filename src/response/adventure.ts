@@ -9,6 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { durationText } from '../game/time-format';
 import { continueCombatChant } from '../game/adventure.service';
 import { addNpcAffinity, adjustMovementStep, battleStatus, blockedDungeonDirections, cancelResourceMining, cancelTravel, claimCombatAmbushHandoffs, combatAction, chooseTarget, completeTravel, continueForestArrival, coordinateInteraction, currentEncounter, encounterAction, explore, forceAutoBattleDefeat, forestGuideAdvance, forestGuideChoice, forestGuideProgress, huntMonster, inventory, leaveOccupiedBattle, mineResource, move, moveTo, moveToMap, moveToNearbyMonster, movementProfile, nearbyPoints, queueAmbush, requireNpcAtCurrentPosition, resourceMiningStatus, switchCombatTarget, talkToNpc, travelStatus, type CombatAmbushHandoff, type CoordinateInteractionTarget, type VictorySettlement } from '../game/adventure.service';
+import { bossRandomEffectSummary } from '../game/adventure.service';
 import { autoBattleConfig, isFullPartyAutoBattle, pendingPartyAutoBattleActions } from '../game/auto-battle.service';
 import { messageFormat, npcInteractionMarkdown } from '../game/message';
 import { homePanel, leaveHome } from '../game/home.service';
@@ -147,11 +148,15 @@ export const appendBattleState = (markdown: ReturnType<typeof Format.createMarkd
     const componentState = target.isBossComponent ? `｜${target.warning || target.passiveSummary}${target.breakSummary ? `｜击破：${target.breakSummary}` : ''}` : '';
     markdown.addText('> ').addButton(`${!battle.selectedAllyId && battle.selectedTargetId === target.id ? '▶' : ''}${hierarchy}敌方${index + 1} ${target.name}`, { data: `/切换目标 ${target.id}`, autoEnter: false }).addText(` HP ${target.hp}/${target.hpMax}${bodyState}${componentState}${target.defeated ? '（击败）' : ''}\n`);
     if (!target.isBossComponent && target.passiveSummary) markdown.addBlockquote(`被动：${target.passiveSummary}`).addNewline();
+    if (target.randomEffects?.length) markdown.addBlockquote(`高难词条：${target.randomEffects.join('｜')}`).addNewline();
     if (target.mechanicSummary) markdown.addBlockquote(`机制：${target.mechanicSummary}`).addNewline();
     if (target.statusText) markdown.addBlockquote(`状态：${target.statusText}`).addNewline();
   }
   return markdown;
 };
+const encounterRandomEffectLines = (spawns: Array<{ monster_class?: string; traits_json?: unknown }>) => [...new Set(spawns
+  .filter(spawn => spawn.monster_class === 'boss')
+  .flatMap(spawn => bossRandomEffectSummary(spawn.traits_json)))];
 const appendCombatLog = (markdown: ReturnType<typeof Format.createMarkdown>, text: string) => {
   // 效果行统一缩进至行动正文起点，并保留 #自身# / $敌方$ / &回合结算& 的战斗样式。
   for (const raw of text.trim().split(/\r?\n/)) {
@@ -1040,9 +1045,10 @@ const showMoveResult = async (message: any, qqUserId: string, result: any) => {
   if (await resolveAutoHuntEncounter(message, qqUserId, result)) return;
   const first = result.spawns[0];
   const targets = result.spawns.map((spawn: { name: string; level: number }) => `${spawn.name} Lv.${spawn.level}`).join('\n');
-  const hasBoss = result.spawns.some((spawn: { monster_class?: string }) => spawn.monster_class === 'boss');
+  const hasBoss = result.spawns.some((spawn: { monster_class?: string }) => spawn.monster_class === 'boss'); const randomEffects = encounterRandomEffectLines(result.spawns);
   const markdown = Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText(movedLocationText(result.character))
     .addNewline().addBlockquote(result.text).addNewline().addNewline().addTitle('★★★遇战★★★').addNewline().addNewline().addText(targets);
+  if (randomEffects.length) markdown.addNewline().addNewline().addTitle('高难词条').addNewline().addBlockquote(randomEffects.join('\n'));
   if (hasBoss) markdown.addNewline().addButton('[BOSS词条说明]', { data: '/BOSS词条说明', autoEnter: false });
   if (result.occupied) markdown.addNewline().addNewline().addBlockquote('当前坐标有战斗正在进行。你可以伏击等待，或先行离开。');
   await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(encounterButtons(first.id, Boolean(result.canAmbush), Boolean(result.occupied), Boolean(result.cityPursuit))) });
@@ -1050,8 +1056,9 @@ const showMoveResult = async (message: any, qqUserId: string, result: any) => {
 const showBlockedEncounter = async (message: any, qqUserId: string) => {
   const result = await currentEncounter(qqUserId); if (!result) return false;
   const first = result.spawns[0]; const targets = result.spawns.map((spawn: { name: string; level: number }) => `${spawn.name} Lv.${spawn.level}`).join('\n');
-  const hasBoss = result.spawns.some((spawn: { monster_class?: string }) => spawn.monster_class === 'boss');
+  const hasBoss = result.spawns.some((spawn: { monster_class?: string }) => spawn.monster_class === 'boss'); const randomEffects = encounterRandomEffectLines(result.spawns);
   const markdown = Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText(movedLocationText(result.character)).addNewline().addBlockquote(result.text).addNewline().addNewline().addTitle('★★★遇战★★★').addNewline().addNewline().addText(targets);
+  if (randomEffects.length) markdown.addNewline().addNewline().addTitle('高难词条').addNewline().addBlockquote(randomEffects.join('\n'));
   if (hasBoss) markdown.addNewline().addButton('[BOSS词条说明]', { data: '/BOSS词条说明', autoEnter: false });
   if (result.occupied) markdown.addNewline().addNewline().addBlockquote('当前坐标有战斗正在进行。你可以伏击等待，或先行离开。');
   await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(encounterButtons(first.id, Boolean(result.canAmbush), Boolean(result.occupied), Boolean(result.cityPursuit))) }); return true;

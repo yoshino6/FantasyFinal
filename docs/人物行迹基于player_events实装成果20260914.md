@@ -20,7 +20,7 @@
 
 | 有效业务结果 | 结算服务 | 事件类型／来源唯一键 | 积分与角色口径 | 状态 |
 | --- | --- | --- | --- | --- |
-| 角色创建、姓名／性别变更、冒险者登记、职业选择、逐级升级、问心暂缓／作答、境界突破、进化之种觉醒 | `character.service`、`adventure.service`、`heart-question.service`、`evolution.service`、`main-quest.service` | 角色 ID／等级／问心票 ID／突破阶段 | 升级和问心属于派生零积分；职业选择有暂定积分 | 已接入所列路径 |
+| 角色创建、姓名／性别变更、冒险者登记、职业选择、逐级升级、Lv.11～Lv.20 问心补票／暂缓／作答、境界突破、进化之种觉醒 | `character.service`、`adventure.service`、`heart-question.service`、`evolution.service`、`main-quest.service` | 角色 ID／等级／问心票 ID／突破阶段 | 升级和问心属于派生零积分；职业选择有暂定积分 | 已接入所列路径 |
 | 悬赏接取、完成目标、领取、放弃 | `bounty.service` | 悬赏实例 UUID + 阶段 | 完成目标有暂定积分；其余零积分 | 已接入 |
 | 失踪少女主线接取、唯薇安线索、购买装置、密林发现、决战及完成；进化线索、噶研究室、试炼完成；境界瓶颈线索 | `main-quest.service` | 角色 ID + 主线阶段，购买详情含 200 铜币和装置 | 阶段零积分，完成有暂定积分；未变化的阶段不重复记 | 已接入所列阶段 |
 | 正式 PvE 战斗胜／败／撤离、PvP 结算、普通 NPC 切磋结算 | `adventure.service`、`pvp.service`、`npc-sparring.service` | 战斗 session ID + 参与角色 | 管理测试／异常修复归系统或管理员；组队缺可靠个人贡献时零积分 | 已接入主要结算路径 |

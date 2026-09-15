@@ -1,7 +1,7 @@
 import { achievementLevel } from './achievement-hooks';
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
-import { experienceRequiredForLevel } from './constants';
+import { experienceRequiredForLevel, realmLevelCap } from './constants';
 import type { DerivedStats } from './types';
 import { recordSkillPointChange } from './skill-point-ledger.service';
 import { createHeartQuestionsForLevels } from './heart-question.service';
@@ -174,8 +174,9 @@ export const repairEvolutionProgress = async (connection: EvolutionConnection, c
     FROM characters c WHERE c.id=? LIMIT 1 FOR UPDATE`, [characterId]);
   const character = rows[0]; if (!character) return { corrected: false, level: 0, profile: null as ProfileRow | null };
   const profile = await ensureEvolutionProfile(connection, character, true);
-  const legalLevel = profile ? clamp(Number(profile.unlocked_level), 20, 30) : Number(character.realm_stage) < 3 ? 20 : Number(character.level);
-  if (profile && Number(profile.unlocked_level) !== legalLevel) await connection.execute('UPDATE player_evolution_profiles SET unlocked_level=?,updated_at=NOW() WHERE character_id=?', [legalLevel, character.id]);
+  const evolutionCap = profile ? clamp(Number(profile.unlocked_level), 20, 30) : Number.MAX_SAFE_INTEGER;
+  const legalLevel = Math.min(realmLevelCap(Number(character.realm_stage)), evolutionCap);
+  if (profile && Number(profile.unlocked_level) !== evolutionCap) await connection.execute('UPDATE player_evolution_profiles SET unlocked_level=?,updated_at=NOW() WHERE character_id=?', [evolutionCap, character.id]);
   if (Number(character.level) <= legalLevel) return { corrected: false, level: Number(character.level), profile };
   await connection.execute('UPDATE characters SET level=?,experience=0 WHERE id=?', [legalLevel, character.id]);
   return { corrected: true, level: legalLevel, profile };
@@ -313,13 +314,15 @@ export const injectEvolution = (qqUserId: string, code: InjectionCode, requested
 /** 管理测试：逐道复用正式注射的随机结算，免除剧情、经验和材料门槛。 */
 export const simulateEvolutionToLevel30 = async (connection: PoolConnection, qqUserId: string) => {
   const character = await characterFor(connection, qqUserId, true);
-  if (Number(character.level) > 30 || Number(character.realm_stage) > 3) throw new Error('测试二转只支持不高于 Lv.30、开化及以前的角色。');
-  if (Number(character.level) < 20) {
-    const gained = 20 - Number(character.level);
+  const repaired = await repairEvolutionProgress(connection, Number(character.id));
+  const startingLevel = repaired.corrected ? Number(repaired.level) : Number(character.level);
+  if (startingLevel > 30 || Number(character.realm_stage) > 3) throw new Error('测试二转只支持不高于 Lv.30、开化及以前的角色。');
+  if (startingLevel < 20) {
+    const gained = 20 - startingLevel;
     await connection.execute('UPDATE characters SET level=20,experience=0,skill_points=skill_points+? WHERE id=?', [gained, character.id]);
-    for(let level=Number(character.level)+1;level<=20;level++)await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'realm.level_up',source:{system:'admin_profession_test',id:level,step:'reached'},actorRole:'admin',outcome:'升级',summary:`管理测试模拟升至 Lv${level}`,detail:{fromLevel:level-1,toLevel:level,adminTest:true}});
+    for(let level=startingLevel+1;level<=20;level++)await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'realm.level_up',source:{system:'admin_profession_test',id:level,step:'reached'},actorRole:'admin',outcome:'升级',summary:`管理测试模拟升至 Lv${level}`,detail:{fromLevel:level-1,toLevel:level,adminTest:true}});
     await recordSkillPointChange(connection, Number(character.id), gained, 'level_up', null, '管理测试模拟升至 Lv.20');
-    await createHeartQuestionsForLevels(connection, Number(character.id), Math.max(10, Number(character.level)), 20, 2);
+    await createHeartQuestionsForLevels(connection, Number(character.id), Math.max(10, startingLevel), 20, 2);
   }
   await connection.execute('UPDATE characters SET realm_stage=3 WHERE id=? AND realm_stage<3', [character.id]);
   await connection.execute("INSERT INTO player_main_quest_progress (character_id,quest_code,stage) VALUES (?,'realm_barrier',4) ON DUPLICATE KEY UPDATE stage=GREATEST(stage,4)", [character.id]);
@@ -327,12 +330,13 @@ export const simulateEvolutionToLevel30 = async (connection: PoolConnection, qqU
   await activateEvolutionProfile(connection, Number(character.id));
   const [profiles] = await connection.execute<ProfileRow[]>('SELECT * FROM player_evolution_profiles WHERE character_id=? FOR UPDATE', [character.id]);
   const cap = Number(profiles[0]?.unlocked_level ?? 20);
-  if (cap < 20 || cap > 30 || Math.max(20,Number(character.level)) !== cap) throw new Error('角色等级与已有生长结进度不一致，请先核查进化档案。');
+  if (cap < 20 || cap > 30 || Math.max(20,startingLevel) !== cap) throw new Error('角色等级与已有生长结进度不一致，请先核查进化档案。');
   for (let level = cap; level < 30; level++) {
     const code: InjectionCode = level === 29 ? 'shaping' : level <= 23 ? (['conservative','aggressive','harmonic'] as const)[Math.floor(Math.random()*3)]! : level <= 26 ? (['conservative','aggressive','harmonic','perception','symbiosis'] as const)[Math.floor(Math.random()*5)]! : (['conservative','aggressive','harmonic','perception','symbiosis','metamorphosis'] as const)[Math.floor(Math.random()*6)]!;
     await injectEvolutionOnConnection(connection, qqUserId, code, undefined, code === 'symbiosis' ? symbiosisTraitCodes[Math.floor(Math.random()*symbiosisTraitCodes.length)] : undefined, true);
   }
-  return { fromLevel: Number(character.level), level: 30, injections: 30-cap };
+  await connection.execute('UPDATE characters SET experience=0 WHERE id=? AND level=30', [character.id]);
+  return { fromLevel: startingLevel, level: 30, injections: 30-cap };
 };
 
 const businessDate = () => {

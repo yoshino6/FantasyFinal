@@ -26,11 +26,18 @@ const object = (value: unknown): Record<string,unknown> => {
 const baseCodes: Record<string,string> = { '战士':'warrior','法师':'mage','盗贼':'rogue','牧师':'priest' };
 const slotNames: Record<string,string> = { '头肩':'shoulder','上装':'upper','腰部':'waist','下装':'lower','脚部':'feet' };
 const equipmentProfiles: Record<string,{set:string;weapons:string[]}> = {
-  warrior:{set:'mountainheart_regalia',weapons:['epic_zhenling_longsword','epic_mountaingate_shield']},
+  warrior:{set:'valk_forge_regalia',weapons:['epic_zhenling_longsword','epic_mountaingate_shield']},
   mage:{set:'mistmother_cocoon',weapons:['epic_mistcrown_staff','epic_threehead_grimoire']},
   rogue:{set:'goblin_court_hunt',weapons:['epic_court_hunter_dagger','epic_vanguard_fistblade']},
   priest:{set:'mistmother_cocoon',weapons:['epic_threehead_grimoire','epic_marshmoon_orb']}
 };
+const advancedArmorProfiles: Record<string,string> = {
+  bulwark_guard:'mountainheart_regalia',aegis_priest:'mountainheart_regalia',
+  war_lord:'valk_forge_regalia',ironbreaker:'valk_forge_regalia',spellblade:'valk_forge_regalia',weapon_master:'valk_forge_regalia',
+  nightblade:'goblin_court_hunt',venomancer:'goblin_court_hunt',trickster_ranger:'goblin_court_hunt',inventor:'goblin_court_hunt',
+  elementalist:'mistmother_cocoon',spirit_summoner:'mistmother_cocoon',saint_healer:'mistmother_cocoon',dawn_inquisitor:'mistmother_cocoon',magical_scholar:'mistmother_cocoon',tactician:'mistmother_cocoon'
+};
+export const professionTestArmorSetFor = (advancedCode: string, base: string) => advancedArmorProfiles[advancedCode]??(equipmentProfiles[base]??equipmentProfiles.warrior!).set;
 const ensureFirstProfession = async (connection: PoolConnection, characterId: number, preferred: string) => {
   const [characters]=await connection.execute<RowDataPacket[]>('SELECT profession_code FROM characters WHERE id=? FOR UPDATE',[characterId]);
   if(characters[0]?.profession_code){await connection.execute('UPDATE characters SET adventurer_registered=1 WHERE id=?',[characterId]);return String(characters[0].profession_code);}
@@ -41,9 +48,10 @@ const ensureFirstProfession = async (connection: PoolConnection, characterId: nu
   for(const skill of skills)await connection.execute('INSERT IGNORE INTO player_skills (character_id,skill_id) SELECT ?,id FROM skill_definitions WHERE code=?',[characterId,skill]);
   return preferred;
 };
-const equipEpicTestSet = async (connection: PoolConnection, characterId: number, base: string) => {
+const equipEpicTestSet = async (connection: PoolConnection, characterId: number, base: string, advancedCode: string) => {
   const profile=equipmentProfiles[base]??equipmentProfiles.warrior!;
-  const recipes=[...epicForgeRecipes.filter(recipe=>recipe.setCode===profile.set),...profile.weapons.map(code=>epicForgeRecipes.find(recipe=>recipe.code===code))].filter((recipe):recipe is (typeof epicForgeRecipes)[number]=>Boolean(recipe));
+  const armorSet=professionTestArmorSetFor(advancedCode,base);
+  const recipes=[...epicForgeRecipes.filter(recipe=>recipe.setCode===armorSet),...profile.weapons.map(code=>epicForgeRecipes.find(recipe=>recipe.code===code))].filter((recipe):recipe is (typeof epicForgeRecipes)[number]=>Boolean(recipe));
   if(recipes.length!==7)throw new Error('职业史诗套装配方尚未备齐。');
   const equipped:string[]=[];
   for(const [index,recipe] of recipes.entries()){
@@ -57,9 +65,12 @@ const equipEpicTestSet = async (connection: PoolConnection, characterId: number,
   }
   return equipped;
 };
-const hasEpicTestSet = async (connection: PoolConnection, characterId: number) => {
-  const [rows]=await connection.execute<RowDataPacket[]>("SELECT COUNT(*) AS count FROM player_equipment e JOIN item_definitions i ON i.id=e.item_id WHERE e.character_id=? AND e.slot IN ('weapon','offhand','shoulder','upper','waist','lower','feet') AND i.obtain_source='管理测试' AND i.rarity='史诗' AND i.required_level=30",[characterId]);
-  return Number(rows[0]?.count??0)===7;
+const hasEpicTestSet = async (connection: PoolConnection, characterId: number, base: string, advancedCode: string) => {
+  const profile=equipmentProfiles[base]??equipmentProfiles.warrior!;
+  const expected=new Set([...epicForgeRecipes.filter(recipe=>recipe.setCode===professionTestArmorSetFor(advancedCode,base)).map(recipe=>recipe.code),...profile.weapons]);
+  const [rows]=await connection.execute<RowDataPacket[]>("SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json FROM player_equipment e JOIN item_definitions i ON i.id=e.item_id LEFT JOIN player_item_instances ii ON ii.id=e.instance_id AND ii.character_id=e.character_id WHERE e.character_id=? AND e.slot IN ('weapon','offhand','shoulder','upper','waist','lower','feet') AND i.obtain_source='管理测试' AND i.rarity='史诗' AND i.required_level=30",[characterId]);
+  const equipped=new Set(rows.map(row=>String(object(row.effect_json).epicEquipmentCode??'')));
+  return expected.size===7&&equipped.size===7&&[...expected].every(code=>equipped.has(code));
 };
 
 /** 仅供已鉴权的管理测试入口调用。任务、技能、面板与审计由调用者放在同一事务。 */
@@ -100,7 +111,8 @@ const applyTestProfession = async (connection: PoolConnection, characterId: numb
   for(const skill of skills)await connection.execute('INSERT IGNORE INTO player_skills (character_id,skill_id,level,passive_linked) VALUES (?,?,1,0)',[characterId,skill.id]);
   await connection.execute('DELETE FROM player_hidden_action_drafts WHERE character_id=?',[characterId]);
   const answeredHeartQuestions=await answerTestHeartQuestions(connection,characterId);
-  const equipment=changed||!await hasEpicTestSet(connection,characterId)?await equipEpicTestSet(connection,characterId,normal?baseCodes[normal.baseProfession]??base:base):[];
+  const equipmentBase=normal?baseCodes[normal.baseProfession]??base:base;
+  const equipment=changed||!await hasEpicTestSet(connection,characterId,equipmentBase,option.code)?await equipEpicTestSet(connection,characterId,equipmentBase,option.code):[];
   if(option.code==='weapon_master') {
     const [main]=await connection.execute<RowDataPacket[]>("SELECT e.instance_id FROM player_equipment e JOIN player_item_instances ii ON ii.id=e.instance_id AND ii.character_id=e.character_id JOIN item_definitions i ON i.id=ii.item_id WHERE e.character_id=? AND e.slot='weapon' AND i.item_category='武器' AND i.required_level<=30 AND ii.market_listing_id IS NULL LIMIT 1",[characterId]);
     if(main[0])await connection.execute('INSERT INTO player_hidden_profession_loadouts (character_id,profession_code,config_json) VALUES (?,?,?) ON DUPLICATE KEY UPDATE config_json=VALUES(config_json)',[characterId,option.code,JSON.stringify({weapons:[Number(main[0].instance_id)]})]);

@@ -1,6 +1,6 @@
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { randomUUID } from 'node:crypto';
-import { getPool, withTransaction } from '../database/pool';
+import { withTransaction } from '../database/pool';
 import { playerGrowthShares } from './growth-rules';
 import { attributes, type Allocation, type AttributeKey } from './types';
 import { heartCards, greatHeartCopy, normalHeartCopy, type HeartCard } from './heart-question-content';
@@ -63,13 +63,15 @@ export const heartAttributeCorrection = async (connection: Db, characterId: numb
 };
 
 export const createHeartQuestionsForLevels = async (connection: PoolConnection, characterId: number, fromLevel: number, toLevel: number, realmStage: number) => {
-  if (realmStage < 2 || toLevel <= fromLevel) return;
+  const firstLevel = Math.max(11, fromLevel + 1);
+  const lastLevel = Math.min(20, toLevel);
+  if (realmStage < 2 || lastLevel < firstLevel) return;
   await ensureHeartGrowth(connection, characterId);
   const [recent] = await connection.execute<(RowDataPacket & { event_code: string })[]>('SELECT event_code FROM character_heart_questions WHERE character_id=? ORDER BY id DESC LIMIT 20', [characterId]);
   const excluded = new Set(recent.map(row => row.event_code));
   const [active] = await connection.execute<RowDataPacket[]>("SELECT id FROM character_heart_questions WHERE character_id=? AND status='active' LIMIT 1", [characterId]);
   let activate = !active.length;
-  for (let level = fromLevel + 1; level <= toLevel; level++) {
+  for (let level = firstLevel; level <= lastLevel; level++) {
     const [sameLevel] = await connection.execute<RowDataPacket[]>('SELECT id FROM character_heart_questions WHERE character_id=? AND to_level=?', [characterId, level]);
     if (sameLevel.length) continue;
     const candidates = heartCards.filter(card => !excluded.has(card.code));
@@ -80,22 +82,50 @@ export const createHeartQuestionsForLevels = async (connection: PoolConnection, 
   }
 };
 
-export const activeHeartQuestion = async (userId: string): Promise<HeartTicket | null> => {
-  const pool = await getPool();
-  const [rows] = await pool.execute<HeartTicketRow[]>(`SELECT q.* FROM character_heart_questions q JOIN characters c ON c.id=q.character_id JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? AND q.status='active' ORDER BY q.id LIMIT 1`, [userId]);
-  return rows[0] ? ticketView(rows[0]) : null;
+/** 题库换版时只刷新尚未作答的快照；已回答票保留玩家当时实际看到的内容。 */
+const refreshPendingHeartQuestionSnapshots = async (connection: PoolConnection, characterId: number) => {
+  const [rows] = await connection.execute<(RowDataPacket & { id: number; event_code: string; event_snapshot: string })[]>("SELECT id,event_code,event_snapshot FROM character_heart_questions WHERE character_id=? AND status IN ('active','queued','deferred') FOR UPDATE", [characterId]);
+  const currentCards = new Map(heartCards.map(card => [card.code, card]));
+  for (const row of rows) {
+    const card = currentCards.get(row.event_code);
+    if (!card) continue;
+    let version = 0;
+    try {
+      const snapshot = typeof row.event_snapshot === 'string' ? JSON.parse(row.event_snapshot) : row.event_snapshot;
+      version = Number((snapshot as { version?: number } | null)?.version ?? 0);
+    } catch { version = 0; }
+    if (version === card.version) continue;
+    await connection.execute('UPDATE character_heart_questions SET event_snapshot=? WHERE id=?', [JSON.stringify(card), Number(row.id)]);
+  }
 };
 
-export const pendingHeartQuestionCount = async (userId: string) => {
-  const pool = await getPool();
-  const [rows] = await pool.execute<(RowDataPacket & { count: number })[]>(`SELECT COUNT(*) AS count FROM character_heart_questions q JOIN characters c ON c.id=q.character_id JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? AND q.status IN ('active','queued','deferred')`, [userId]);
-  return Number(rows[0]?.count ?? 0);
+/** 为问心功能上线前已达到 Lv.11 的角色补齐 Lv.11～Lv.20 升级票；每级唯一，重复调用不会重复出题。 */
+export const ensureHeartQuestionsForCurrentLevel = async (connection: PoolConnection, userId: string) => {
+  const [rows] = await connection.execute<(RowDataPacket & { id: number; level: number; realm_stage: number })[]>('SELECT c.id,c.level,c.realm_stage FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE', [userId]);
+  const character = rows[0];
+  if (!character) return null;
+  if (Number(character.realm_stage) >= 2 && Number(character.level) > 10) {
+    await createHeartQuestionsForLevels(connection, Number(character.id), 10, Number(character.level), Number(character.realm_stage));
+    await refreshPendingHeartQuestionSnapshots(connection, Number(character.id));
+  }
+  return character;
 };
+
+export const activeHeartQuestion = async (userId: string): Promise<HeartTicket | null> => withTransaction(async connection => {
+  await ensureHeartQuestionsForCurrentLevel(connection, userId);
+  const [rows] = await connection.execute<HeartTicketRow[]>(`SELECT q.* FROM character_heart_questions q JOIN characters c ON c.id=q.character_id JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? AND q.status='active' ORDER BY q.to_level,q.id LIMIT 1`, [userId]);
+  return rows[0] ? ticketView(rows[0]) : null;
+});
+
+export const pendingHeartQuestionCount = async (userId: string) => withTransaction(async connection => {
+  await ensureHeartQuestionsForCurrentLevel(connection, userId);
+  const [rows] = await connection.execute<(RowDataPacket & { count: number })[]>(`SELECT COUNT(*) AS count FROM character_heart_questions q JOIN characters c ON c.id=q.character_id JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? AND q.status IN ('active','queued','deferred')`, [userId]);
+  return Number(rows[0]?.count ?? 0);
+});
 
 export const openHeartQuestion = async (userId: string): Promise<HeartTicket | null> => withTransaction(async connection => {
-  const [rows] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE', [userId]);
-  const characterId = Number(rows[0]?.id ?? 0); if (!characterId) return null;
-  const [tickets] = await connection.execute<HeartTicketRow[]>("SELECT * FROM character_heart_questions WHERE character_id=? AND status IN ('active','queued','deferred') ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END,id LIMIT 1 FOR UPDATE", [characterId]);
+  const character = await ensureHeartQuestionsForCurrentLevel(connection, userId); if (!character) return null;
+  const [tickets] = await connection.execute<HeartTicketRow[]>("SELECT * FROM character_heart_questions WHERE character_id=? AND status IN ('active','queued','deferred') ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END,to_level,id LIMIT 1 FOR UPDATE", [character.id]);
   const ticket = tickets[0]; if (!ticket) return null;
   if (ticket.status !== 'active') await connection.execute("UPDATE character_heart_questions SET status='active' WHERE id=?", [ticket.id]);
   return { ...ticketView(ticket), status: 'active' };
@@ -103,11 +133,10 @@ export const openHeartQuestion = async (userId: string): Promise<HeartTicket | n
 
 /** 连升多级时按顺序追问尚未展示的题，不重新强制弹出主动跳过的旧题。 */
 export const openQueuedHeartQuestion = async (userId: string): Promise<HeartTicket | null> => withTransaction(async connection => {
-  const [rows] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1 FOR UPDATE', [userId]);
-  const characterId = Number(rows[0]?.id ?? 0); if (!characterId) return null;
-  const [active] = await connection.execute<HeartTicketRow[]>("SELECT * FROM character_heart_questions WHERE character_id=? AND status='active' ORDER BY id LIMIT 1 FOR UPDATE", [characterId]);
+  const character = await ensureHeartQuestionsForCurrentLevel(connection, userId); if (!character) return null;
+  const [active] = await connection.execute<HeartTicketRow[]>("SELECT * FROM character_heart_questions WHERE character_id=? AND status='active' ORDER BY to_level,id LIMIT 1 FOR UPDATE", [character.id]);
   if (active[0]) return ticketView(active[0]);
-  const [tickets] = await connection.execute<HeartTicketRow[]>("SELECT * FROM character_heart_questions WHERE character_id=? AND status='queued' ORDER BY id LIMIT 1 FOR UPDATE", [characterId]);
+  const [tickets] = await connection.execute<HeartTicketRow[]>("SELECT * FROM character_heart_questions WHERE character_id=? AND status='queued' ORDER BY to_level,id LIMIT 1 FOR UPDATE", [character.id]);
   const ticket = tickets[0]; if (!ticket) return null;
   await connection.execute("UPDATE character_heart_questions SET status='active' WHERE id=?", [ticket.id]);
   return { ...ticketView(ticket), status: 'active' };

@@ -36,8 +36,8 @@ test('先点击其他功能只重发待开始页并引导打开面板；相似�
   }
 });
 
-test('菜单、状态、注销与管理员指令优先于开局剧情状态',async()=>{
-  for(const key of ['菜单','状态','注销账户','确认注销 123456','确认注销账户 123456','管理','世界生态管理','管理员邮件 发送']){
+test('菜单、状态、注销、公开测试与管理员指令优先于开局剧情状态',async()=>{
+  for(const key of ['菜单','状态','注销账户','确认注销 123456','确认注销账户 123456','BOSS测试','BOSS测试离开','管理','世界生态管理','管理员邮件 发送']){
     let next=0,checked=0;
     const middleware=load('src/middleware/opening.ts',{alemonjs:{useEvent:()=>[{current:{UserId:'u'}}],useRoute:()=>[{matched:true,key}]},
       '../game/opening-message':message,'../game/use-game-message':{useGameMessage:()=>[{send:async()=>{throw Error('不应重发剧情');}}]},
