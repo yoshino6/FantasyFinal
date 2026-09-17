@@ -94,6 +94,7 @@ const addAdvancedBattleButton = (row: ReturnType<typeof Format.createButtonGroup
 });
 const battleButtons = (battle: Awaited<ReturnType<typeof battleStatus>>) => {
   const buttons = Format.createButtonGroup().addRow().addButton('普攻', '/攻击', { type: 'command', autoEnter: true, style: battle.canAct ? 'blue' : undefined });
+  if(battle.canLeafAnchor)buttons.addButton('重新锚定','/航路锚定',{type:'command',autoEnter:false,style:battle.canAct?'blue':undefined});
   for (let slot = 1; slot <= 4; slot++) buttons.addButton('技能' + '①②③④'[slot - 1], '/技能 ' + slot, { type: 'command', autoEnter: true, style: battle.canAct && battle.readySkillSlots.includes(slot) ? 'blue' : undefined });
   if (battle.advancedSkills?.length) {
     let row = buttons.addRow();
@@ -147,10 +148,11 @@ export const appendBattleState = (markdown: ReturnType<typeof Format.createMarkd
     const bodyState = !target.isBossComponent && target.livingComponentCount ? `｜部位减伤 ${target.bodyDamageReductionPct}%` : '';
     const componentState = target.isBossComponent ? `｜${target.warning || target.passiveSummary}${target.breakSummary ? `｜击破：${target.breakSummary}` : ''}` : '';
     markdown.addText('> ').addButton(`${!battle.selectedAllyId && battle.selectedTargetId === target.id ? '▶' : ''}${hierarchy}敌方${index + 1} ${target.name}`, { data: `/切换目标 ${target.id}`, autoEnter: false }).addText(` HP ${target.hp}/${target.hpMax}${bodyState}${componentState}${target.defeated ? '（击败）' : ''}\n`);
-    if (!target.isBossComponent && target.passiveSummary) markdown.addBlockquote(`被动：${target.passiveSummary}`).addNewline();
-    if (target.randomEffects?.length) markdown.addBlockquote(`高难词条：${target.randomEffects.join('｜')}`).addNewline();
-    if (target.mechanicSummary) markdown.addBlockquote(`机制：${target.mechanicSummary}`).addNewline();
+    if (!target.hideBossMechanics && !target.isBossComponent && target.passiveSummary) markdown.addBlockquote(`被动：${target.passiveSummary}`).addNewline();
+    if (!target.hideBossMechanics && target.randomEffects?.length) markdown.addBlockquote(`高难词条：${target.randomEffects.join('｜')}`).addNewline();
+    if (!target.hideBossMechanics && target.mechanicSummary) markdown.addBlockquote(`机制：${target.mechanicSummary}`).addNewline();
     if (target.statusText) markdown.addBlockquote(`状态：${target.statusText}`).addNewline();
+    if (target.encounterStatus) markdown.addBlockquote(target.encounterStatus).addNewline();
   }
   return markdown;
 };
@@ -210,13 +212,12 @@ const finalBattleFormat = (log: string) => {
   return Format.create().addMarkdown(markdown);
 };
 export const bossPhaseTransitionFormat = (transitions: BossPhaseTransition[]) => {
-  const markdown = Format.createMarkdown().addTitle(transitions.length > 1 ? 'BOSS连续转场' : 'BOSS阶段转换').addNewline().addNewline();
+  const markdown = Format.createMarkdown().addTitle(transitions.some(event => event.kind === 'chant') ? 'BOSS战场异动' : transitions.length > 1 ? 'BOSS连续转场' : 'BOSS阶段转换').addNewline().addNewline();
   for (const [index, transition] of transitions.entries()) {
     if (index) markdown.addNewline().addText('————————————').addNewline().addNewline();
     markdown.addBold(`【${transition.title}】`).addNewline().addNewline()
       .addText(transition.description).addNewline().addNewline();
     for (const line of transition.dialogue) markdown.addBlockquote(`【${line.speaker}】“${line.text}”`).addNewline();
-    markdown.addNewline().addBold(`阶段效果：${transition.effect}`).addNewline();
   }
   return Format.create().addMarkdown(markdown);
 };
@@ -322,7 +323,7 @@ const unimplementedBuildingFormat = (building: { code: string; name: string; des
 const travelFormat = (title: string, regionName: string, x: number, y: number, total: number, remaining: number, activityType: 'move' | 'hunt' = 'move', destinationName?: string, z?: number) => {
   const hunting = activityType === 'hunt';
   return Format.create()
-    .addMarkdown(Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText(`${hunting ? title : `${title}${regionName}${destinationName ? `·${destinationName}` : ''}（${x}, ${y}, ${z}）`}\n预计耗时${durationText(total)}\n当前剩余${durationText(remaining)}`))
+    .addMarkdown(Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText(`${hunting ? title : `${title}${regionName}${destinationName ? `·${destinationName}` : ''}（${x}, ${y}, ${z}）`}\n预计耗时${durationText(total)}\n本轮剩余${durationText(remaining)}`))
     .addButtonGroup(Format.createButtonGroup().addRow().addButton('刷新', '/刷新行动', { type: 'command', autoEnter: true, style: 'blue' }).addButton(hunting ? '取消寻怪' : '取消移动', hunting ? '/取消寻怪' : '/取消移动', { type: 'command', autoEnter: true, style: 'blue' }));
 };
 const travelBlockedFormat = (title: string, travel: NonNullable<Awaited<ReturnType<typeof travelStatus>>>) => {
@@ -345,8 +346,8 @@ const showMiningBlocked = async (message: any, qqUserId: string, title: string) 
   const mining = await resourceMiningStatus(qqUserId);
   if (!mining) return false;
   const markdown = Format.createMarkdown().addTitle(title).addNewline().addNewline()
-    .addText('你正在开采').addNewline().addBlockquote(`【${mining.kind === '植被' ? '植被' : '锻材'}】${mining.name}`).addNewline()
-    .addText(`预计耗时${durationText(mining.seconds)}`).addNewline().addText(`当前剩余${durationText(mining.remaining)}`);
+    .addText('你正在连续开采，同坐标资源采尽后停止').addNewline().addBlockquote(`【${mining.kind === '植被' ? '植被' : '锻材'}】${mining.name}`).addNewline()
+    .addText(`每轮耗时${durationText(mining.seconds)}`).addNewline().addText(`本轮剩余${durationText(mining.remaining)}`);
   await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('刷新开采', '/刷新开采', { type: 'command', autoEnter: true, style: 'blue' }).addButton('取消开采', '/取消开采', { type: 'command', autoEnter: true, style: 'blue' })) });
   return true;
 };
@@ -428,7 +429,7 @@ const scheduleStoryNpcBattle = (message: any, qqUserId: string) => {
       const battle = await battleStatus(qqUserId);
       if (battle.canAct) return;
       const result = await combatAction(qqUserId, 'attack');
-      await sendCombatResult(message, qqUserId, result, { transitionMode: 'inline' });
+      await sendCombatResult(message, qqUserId, result);
       if (!result.ended && !result.waiting) scheduleStoryNpcBattle(message, qqUserId);
     } catch (error) {
       // 非剧情队伍的倒下角色不会继续推进；其余错误保留在日志中便于定位。
@@ -440,12 +441,12 @@ const scheduleStoryNpcBattle = (message: any, qqUserId: string) => {
 type CombatResultPresentation = { log: string; manualLog?: string; bossTransitions?: BossPhaseTransition[] };
 const combatResultPresentation = (result: { log: string }) => result as CombatResultPresentation;
 const hasBossPhaseTransitions = (result: { log: string }) => Boolean(combatResultPresentation(result).bossTransitions?.length);
-const sendCombatResult = async (message: any, qqUserId: string, result: Awaited<ReturnType<typeof combatAction>>, options: { omitFinalLog?: boolean; transitionMode?: 'separate' | 'inline' } = {}) => {
-  const presentation = combatResultPresentation(result); const separateTransitions = options.transitionMode !== 'inline';
+export const sendCombatResult = async (message: any, qqUserId: string, result: Awaited<ReturnType<typeof combatAction>>, options: { omitFinalLog?: boolean } = {}) => {
+  const presentation = combatResultPresentation(result);
   const sendBossTransitions = async () => {
-    if (separateTransitions && presentation.bossTransitions?.length) await message.send({ format: bossPhaseTransitionFormat(presentation.bossTransitions) });
+    if (presentation.bossTransitions?.length) await message.send({ format: bossPhaseTransitionFormat(presentation.bossTransitions) });
   };
-  const displayedLog = separateTransitions ? presentation.manualLog ?? result.log : result.log;
+  const displayedLog = presentation.manualLog ?? result.log;
   if (result.ended) {
     if (!options.omitFinalLog) await message.send({ format: finalBattleFormat(displayedLog) });
     await sendBossTransitions();
@@ -541,8 +542,9 @@ const resolveFullAutoBattle = async (qqUserId: string) => {
   for (let round = 0; round < 100; round += 1) {
     const result = await resolvePartyAutoBattleActions(qqUserId);
     if (!result) return { result: null, log: logs.join('\n\n') };
-    if (result.log) logs.push(result.log);
-    if (result.ended || result.waiting) return { result, log: logs.join('\n\n') };
+    if (result.log) logs.push(combatResultPresentation(result).manualLog ?? result.log);
+    // 转场/吟唱是分批边界：先发截至触发回合的正文，再额外提示，不能静默越过。
+    if (result.ended || result.waiting || hasBossPhaseTransitions(result)) return { result, log: logs.join('\n\n') };
     // 分批让出事件循环，避免长战斗连续排队时延迟其他玩家的消息处理。
     if ((round + 1) % 10 === 0) await new Promise<void>(resolve => setImmediate(resolve));
   }
@@ -569,8 +571,8 @@ const scheduleAutoBattle = (message: any, qqUserId: string, omitted = false) => 
           const preserved = await resolveRemainingAutoBattle(qqUserId, result);
           if (!preserved) { stopAutoBattle(qqUserId); return; }
           const preservesTransition = hasBossPhaseTransitions(preserved);
-          if (preserved.ended) await sendCombatResult(message, qqUserId, preserved, { omitFinalLog: !preservesTransition, transitionMode: 'inline' });
-          else if (preservesTransition) await sendCombatResult(message, qqUserId, preserved, { transitionMode: 'inline' });
+          if (preserved.ended) await sendCombatResult(message, qqUserId, preserved, { omitFinalLog: !preservesTransition });
+          else if (preservesTransition) await sendCombatResult(message, qqUserId, preserved);
           if (preserved.ended || preserved.waiting) { stopAutoBattle(qqUserId); return; }
           advance();
           return;
@@ -579,15 +581,15 @@ const scheduleAutoBattle = (message: any, qqUserId: string, omitted = false) => 
         if (!result.ended && !result.waiting && visibleRounds >= AUTO_BATTLE_VISIBLE_ROUND_LIMIT) {
           await message.send({ format: messageFormat('战斗过长，已省略', '后续回合战斗已省略，正在计算战斗结果。') });
           const finalResult = await resolveRemainingAutoBattle(qqUserId, result);
-          if (finalResult?.ended) await sendCombatResult(message, qqUserId, finalResult, { omitFinalLog: !hasBossPhaseTransitions(finalResult), transitionMode: 'inline' });
+          if (finalResult?.ended) await sendCombatResult(message, qqUserId, finalResult, { omitFinalLog: !hasBossPhaseTransitions(finalResult) });
           else if (finalResult && !finalResult.waiting) {
-            await sendCombatResult(message, qqUserId, finalResult, { transitionMode: 'inline' });
+            await sendCombatResult(message, qqUserId, finalResult);
             scheduleAutoBattle(message, qqUserId, true);
           }
           else stopAutoBattle(qqUserId);
           return;
         }
-        await sendCombatResult(message, qqUserId, result, { transitionMode: 'inline' });
+        await sendCombatResult(message, qqUserId, result);
         if (!result.ended && !result.waiting) autoBattleVisibleRounds.set(qqUserId, visibleRounds + 1);
         if (result.ended || result.waiting) { stopAutoBattle(qqUserId); return; }
         advance();
@@ -607,13 +609,17 @@ const startAutoBattle = async (message: any, qqUserId: string, openingText = '')
     const full = await resolveFullAutoBattle(qqUserId);
     const fullLog = [openingText, full.log].filter(Boolean).join('\n\n');
     if (fullLog) await message.send({ format: fullAutoBattleFormat(fullLog) });
-    if (full.result?.ended) await sendCombatResult(message, qqUserId, full.result, { omitFinalLog: true, transitionMode: 'inline' });
-    else if (full.result && !full.result.waiting) scheduleAutoBattle(message, qqUserId, true);
+    if (full.result?.ended) await sendCombatResult(message, qqUserId, full.result, { omitFinalLog: true });
+    else if (full.result && !full.result.waiting) {
+      const transitions = combatResultPresentation(full.result).bossTransitions;
+      if (transitions?.length) await message.send({ format: bossPhaseTransitionFormat(transitions) });
+      scheduleAutoBattle(message, qqUserId, true);
+    }
     return Boolean(full.result);
   }
   const result = await resolvePartyAutoBattleActions(qqUserId);
   if (!result) return false;
-  await sendCombatResult(message, qqUserId, result, { transitionMode: 'inline' });
+  await sendCombatResult(message, qqUserId, result);
   if (!result.ended && !result.waiting) scheduleAutoBattle(message, qqUserId);
   return true;
 };
@@ -1159,6 +1165,9 @@ export const buildingHandler = (action: 'enter' | 'ignore' | 'leave' | 'area') =
       const nearby = await nearbyPoints(event.current.UserId);
       await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return;
     }
+    if (['worldtree_skill_shop','leaf_skill_shop'].includes(code) && action==='enter') {
+      await message.send({format:await(await import('./folio-shop')).folioShopFormat(event.current.UserId,code)});return;
+    }
     if (code === 'bookshop') {
       if (action === 'enter') { const { bookshopHandler } = await import('./bookshop'); await bookshopHandler(); return; }
       const panel = await movementPanel(event.current.UserId, action === 'leave' ? '你离开百味书屋，身后仍传来轻柔的翻页声。' : '你暂时没有进入百味书屋。');
@@ -1227,7 +1236,7 @@ export const buildingHandler = (action: 'enter' | 'ignore' | 'leave' | 'area') =
     await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) });
   } catch (error) { await fail(message, error, '建筑操作失败'); }
 };
-export const guildRegistrationHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const context=await (await import('../game/guild-context')).requireCurrentGuild(event.current.UserId); const registered = await registerAdventurer(event.current.UserId); if (!registered) { await message.send({ format: await guildFrontDeskFormat(event.current.UserId, '莫妮卡轻轻摇头：“您的冒险者身份已经登记在册了。晋升考核将在满足条件后开放。”') }); return; } const markdown = Format.createMarkdown().addTitle('冒险家 注册').addNewline().addNewline().addBlockquote('你将手轻放在水晶球上，顿时散发出一阵耀眼的白光。').addNewline().addBlockquote(context.code==='world_tree'?'维萝扶稳水晶球，将一张漆黑的卡片贴近光晕。银线顺着卡面舒展开来，她用指腹抚平卡角，又轻声核对了一遍你的名字。':`${context.code==='baina_town'?'莫妮卡':context.hub.host}将一张通体漆黑卡片靠近球体，光芒汇聚成一道银线注入，卡片逐渐被染成银白。`).addNewline().addBlockquote('随后一行行异世界文字在卡面上依次浮现——').addNewline().addNewline().addText('获得【冒险者 卡片】').addNewline().addText('已获得一次地图兑换机会，可到公会集结区兑换已开放的 Lv.30 及以下地图。').addNewline().addText('你随时可以发送 ').addButton('/卡片', { data: '/卡片', autoEnter: false }).addText(' 查看。').addNewline().addText('你已察觉到自身属性，发送 ').addButton('/角色', { data: '/角色', autoEnter: false }).addText(' 查看。'); await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('前往集结区', context.code==='baina_town'?'/建筑区域 guild_counter 集结区':'/初行公会 集结区', { type: 'command', autoEnter: false, style: 'blue' }).addButton('返回前台', context.code==='baina_town'?'/建筑区域 guild_counter 前台':'/初行公会 前台', { type: 'command', autoEnter: false, style: 'blue' })) }); } catch (error) { await fail(message, error, '注册失败'); } };
+export const guildRegistrationHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const context=await (await import('../game/guild-context')).requireCurrentGuild(event.current.UserId); const registered = await registerAdventurer(event.current.UserId); if (!registered) { await message.send({ format: await guildFrontDeskFormat(event.current.UserId, '莫妮卡轻轻摇头：“您的冒险者身份已经登记在册了。晋升考核将在满足条件后开放。”') }); return; } const markdown = Format.createMarkdown().addTitle('冒险家 注册').addNewline().addNewline().addBlockquote('你将手轻放在水晶球上，顿时散发出一阵耀眼的白光。').addNewline().addBlockquote(context.code==='world_tree'?'维萝扶稳水晶球，将一张漆黑的卡片贴近光晕。银线顺着卡面舒展开来，她用指腹抚平卡角，又轻声核对了一遍你的名字。':`${context.code==='baina_town'?'莫妮卡':context.hub.host}将一张通体漆黑卡片靠近球体，光芒汇聚成一道银线注入，卡片逐渐被染成银白。`).addNewline().addBlockquote('随后一行行异世界文字在卡面上依次浮现——').addNewline().addNewline().addText('获得【冒险者 卡片】').addNewline().addText('已补齐世界树、草原环带、幽暗密林与百纳镇的保底通行地图；另有一次免费自选额度，可到公会集结区领取已开放的 Lv.30 及以下地图。').addNewline().addText('你随时可以发送 ').addButton('/卡片', { data: '/卡片', autoEnter: false }).addText(' 查看。').addNewline().addText('你已察觉到自身属性，发送 ').addButton('/角色', { data: '/角色', autoEnter: false }).addText(' 查看。'); await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('前往集结区', context.code==='baina_town'?'/建筑区域 guild_counter 集结区':'/初行公会 集结区', { type: 'command', autoEnter: false, style: 'blue' }).addButton('返回前台', context.code==='baina_town'?'/建筑区域 guild_counter 前台':'/初行公会 前台', { type: 'command', autoEnter: false, style: 'blue' })) }); } catch (error) { await fail(message, error, '注册失败'); } };
 export const professionHandler = (action: 'select' | 'detail' | 'choose') => async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await (await import('../game/guild-context')).requireCurrentGuild(event.current.UserId); if (action === 'select') { await message.send({ format: await professionSelectFormat(event.current.UserId) }); return; } const name = String(route.param('name')); if (action === 'detail') { await message.send({ format: await professionDetailFormat(event.current.UserId, name) }); return; } const code = professionCodeByName[name]; if (!code) throw new Error('未知职业。'); const result = await chooseProfession(event.current.UserId, code); await message.send({ format: await guildFrontDeskFormat(event.current.UserId, `登记员郑重地在档案上盖下印记。“恭喜您成为一名${name}。愿您始终记得最初踏上旅途的理由。”\n\n技能点已重置：返还 ${result.reset.restoredPoints} 点，当前可分配 ${result.reset.availablePoints} 点。${result.weapon ? `\n\n已领取【${result.weapon.name}】（装备编号 ${result.weapon.id}），可在装备页面穿戴。` : ''}`) }); } catch (error) { await fail(message, error, '职业操作失败'); } };
 export const guildChatHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const context=await (await import('../game/guild-context')).requireCurrentGuild(event.current.UserId); if(context.code==='world_tree'){ const text=await (await import('../game/opening-guild.service')).openingGuildAction(event.current.UserId,'chat','root_guild_clerk'); await message.send({format:await guildFrontDeskFormat(event.current.UserId,text,true)}); return; } if(context.code!=='baina_town')throw new Error('请在当地公会的人物交谈处与接待员交谈。'); await requireNpcAtCurrentPosition(event.current.UserId, 'guild_counter'); const { affinity } = await addNpcAffinity(event.current.UserId, 'guild_counter', 'chat'); await message.send({ format: await guildFrontDeskFormat(event.current.UserId, npcChatDialogue('guild_counter', affinity), true) }); } catch (error) { await fail(message, error, '闲聊失败'); } };
 export const guildBarrierHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await requireNpcAtCurrentPosition(event.current.UserId, 'guild_counter'); const { advanceRealmBarrier } = await import('../game/main-quest.service'); await advanceRealmBarrier(event.current.UserId, 'guild'); const { barrierAdviceFormat } = await import('./alchemist'); await message.send({ format: barrierAdviceFormat(true) }); } catch (error) { await fail(message, error, '无法询问'); } };
@@ -1347,10 +1356,10 @@ export const npcEncounterHandler = (action: 'talk' | 'ignore') => async () => {
     await message.send({ format: patrolMeeting ?? await npcInteractionFormat(event.current.UserId, { code, name: npc.name }, text, true) });
   } catch (error) { await fail(message, error, '对话失败'); }
 };
-const miningFormat = (kind: '矿脉' | '植被', name: string, seconds: number, remaining: number) => Format.create().addMarkdown(Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText('正在开采').addNewline().addBlockquote(`【${kind === '植被' ? '植被' : '锻材'}】${name}`).addNewline().addText(`预计耗时${durationText(seconds)}`).addNewline().addText(`当前剩余${durationText(remaining)}`)).addButtonGroup(Format.createButtonGroup().addRow().addButton('刷新开采', '/刷新开采', { type: 'command', autoEnter: true, style: 'blue' }).addButton('取消开采', '/取消开采', { type: 'command', autoEnter: true }).addRow().addButton('角色', '/角色', { type: 'command', autoEnter: true }).addButton('装备', '/装备', { type: 'command', autoEnter: true }).addButton('背包', '/背包', { type: 'command', autoEnter: true }).addButton('技能', '/技能列表', { type: 'command', autoEnter: true }).addButton('队伍', '/队伍', { type: 'command', autoEnter: true }));
-export const mineResourceHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const result = await mineResource(event.current.UserId, Number(route.param('id'))); if (result.state === 'completed') { const panel = await movementPanel(event.current.UserId, `资源开采完成，获得【${result.kind === '植被' ? '植被' : '锻材'}】${result.name}×${result.quantity}。`); const nearby = await nearbyPoints(event.current.UserId); await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return; } await message.send({ format: miningFormat(result.kind, result.name, result.seconds || (await resourceMiningStatus(event.current.UserId))?.seconds || 0, result.remaining) }); } catch (error) { await fail(message, error, '开采失败'); } };
-export const refreshMiningHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const mining = await resourceMiningStatus(event.current.UserId); if (!mining) throw new Error('当前没有正在进行的资源开采。'); const result = await mineResource(event.current.UserId, mining.resourceId); if (result.state === 'completed') { const panel = await movementPanel(event.current.UserId, `资源开采完成，获得【${result.kind === '植被' ? '植被' : '锻材'}】${result.name}×${result.quantity}。`); const nearby = await nearbyPoints(event.current.UserId); await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return; } await message.send({ format: miningFormat(result.kind, result.name, mining.seconds, result.remaining) }); } catch (error) { await fail(message, error, '开采状态不可用'); } };
-export const cancelMiningHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { await cancelResourceMining(event.current.UserId); const panel = await movementPanel(event.current.UserId, '你收起工具，中止了本次资源开采。'); const nearby = await nearbyPoints(event.current.UserId); await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); } catch (error) { await fail(message, error, '取消开采失败'); } };
+const miningFormat = (kind: '矿脉' | '植被', name: string, seconds: number, remaining: number, rewardText = '') => Format.create().addMarkdown(Format.createMarkdown().addTitle('行动').addNewline().addNewline().addText('正在连续开采，同坐标资源采尽后停止').addNewline().addText(rewardText ? `本次结算：${rewardText}\n` : '').addBlockquote(`【${kind === '植被' ? '植被' : '锻材'}】${name}`).addNewline().addText(`每轮耗时${durationText(seconds)}`).addNewline().addText(`本轮剩余${durationText(remaining)}`)).addButtonGroup(Format.createButtonGroup().addRow().addButton('刷新开采', '/刷新开采', { type: 'command', autoEnter: true, style: 'blue' }).addButton('取消开采', '/取消开采', { type: 'command', autoEnter: true }).addRow().addButton('角色', '/角色', { type: 'command', autoEnter: true }).addButton('装备', '/装备', { type: 'command', autoEnter: true }).addButton('背包', '/背包', { type: 'command', autoEnter: true }).addButton('技能', '/技能列表', { type: 'command', autoEnter: true }).addButton('队伍', '/队伍', { type: 'command', autoEnter: true }));
+export const mineResourceHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const result = await mineResource(event.current.UserId, Number(route.param('id'))); if (result.state === 'completed') { const panel = await movementPanel(event.current.UserId, `连续开采结束，获得${result.rewardText || '无'}。`); const nearby = await nearbyPoints(event.current.UserId); await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return; } await message.send({ format: miningFormat(result.kind, result.name, result.seconds || (await resourceMiningStatus(event.current.UserId))?.seconds || 0, result.remaining, result.rewardText) }); } catch (error) { await fail(message, error, '开采失败'); } };
+export const refreshMiningHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const mining = await resourceMiningStatus(event.current.UserId); if (!mining) throw new Error('当前没有正在进行的资源开采。'); const result = await mineResource(event.current.UserId, mining.resourceId); if (result.state === 'completed') { const panel = await movementPanel(event.current.UserId, `连续开采结束，获得${result.rewardText || '无'}。`); const nearby = await nearbyPoints(event.current.UserId); await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return; } await message.send({ format: miningFormat(result.kind, result.name, result.seconds, result.remaining, result.rewardText) }); } catch (error) { await fail(message, error, '开采状态不可用'); } };
+export const cancelMiningHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await cancelResourceMining(event.current.UserId); const panel = await movementPanel(event.current.UserId, `你收起工具，中止连续开采。${result.rewardText ? `已完成的轮次结算：${result.rewardText}。` : '没有新增已完成的轮次。'}未满时长的轮次不产出材料。`); const nearby = await nearbyPoints(event.current.UserId); await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); } catch (error) { await fail(message, error, '取消开采失败'); } };
 export const moveHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await leaveHomeForMovement(message, event.current.UserId); await showMoveResult(message, event.current.UserId, await move(event.current.UserId, String(route.param('direction')))); } catch (error) { if (error instanceof Error && error.message.includes('当前格子存在敌对生物') && await showBlockedEncounter(message, event.current.UserId)) return; if (isForestGuideLocked(error)) { await storyLockedMessage(message, '无法移动'); return; } if (await showOngoingActivity(message, event.current.UserId, '无法移动')) return; await fail(message, error, '无法移动'); } };
 export const goToHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await leaveHomeForMovement(message, event.current.UserId); const result = await moveTo(event.current.UserId, Number(route.param('x')), Number(route.param('y')), Number(route.param('z'))); if (result.kind === 'travel') { await message.send({ format: travelFormat('开始前往', result.regionName, result.x, result.y, result.seconds, result.remaining, 'move', result.destinationName, result.z) }); scheduleTravelCompletion(message, event.current.UserId, result.remaining); return; } await showMoveResult(message, event.current.UserId, result); } catch (error) { if (error instanceof Error && error.message.includes('当前格子存在敌对生物') && await showBlockedEncounter(message, event.current.UserId)) return; if (isForestGuideLocked(error)) { await storyLockedMessage(message, '无法前往该位置'); return; } if (await showOngoingActivity(message, event.current.UserId, '无法前往该位置')) return; await fail(message, error, '无法前往该位置'); } };
 export const goToMapHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await leaveHomeForMovement(message, event.current.UserId); const result = await moveToMap(event.current.UserId, String(route.param('code'))); if (result.kind === 'travel') { await message.send({ format: travelFormat('开始前往', result.regionName, result.x, result.y, result.seconds, result.remaining, 'move', result.destinationName, result.z) }); scheduleTravelCompletion(message, event.current.UserId, result.remaining); return; } await showMoveResult(message, event.current.UserId, result); } catch (error) { if (error instanceof Error && error.message.includes('当前格子存在敌对生物') && await showBlockedEncounter(message, event.current.UserId)) return; if (isForestGuideLocked(error)) { await storyLockedMessage(message, '无法前往地图'); return; } if (await showOngoingActivity(message, event.current.UserId, '无法前往地图')) return; await fail(message, error, '无法前往地图'); } };
@@ -1490,6 +1499,7 @@ const actionHandler = (action: 'attack' | 'skill' | 'item' | 'escape', advancedS
   try { pveBattle = await battleStatus(event.current.UserId); } catch { /* 当前没有怪物战斗时再尝试 PVP。 */ }
   if (pveBattle) {
     const skillId = advancedSkill ? advancedSkillIdFor(pveBattle, skillRequest) : undefined;
+    if(action==='skill'&&!advancedSkill&&pveBattle.canAct){const panel=await(await import('./folio-target')).folioTargetFormat(event.current.UserId,Number(slot));if(panel){stopAutoBattle(event.current.UserId);await message.send({format:panel});return;}}
     stopAutoBattle(event.current.UserId);
     const hidden = pveBattle.advancedSkills.find(s => s.id === skillId && isHiddenSkill(s.code));
     if (hidden) { await message.send({ format: await (await import('./hidden-combat')).hiddenCombatFormat(event.current.UserId, hidden.code) }); return; }

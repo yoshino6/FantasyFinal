@@ -1,0 +1,8 @@
+TYPE=TRIGGERS
+triggers='CREATE DEFINER=`root`@`localhost` TRIGGER instance_binding_insert_v1 BEFORE INSERT ON player_item_instances FOR EACH ROW BEGIN\n    IF EXISTS(SELECT 1 FROM item_definitions WHERE id=NEW.item_id AND (is_tradeable=0 OR item_category IN (\'任务\',\'剧情\') OR JSON_EXTRACT(effect_json,\'$.personalOnly\')=true)) THEN SET NEW.bound_kind=\'personal\'; SET NEW.bound_reason=\'personal_item\'; SET NEW.bound_at=NOW(); END IF;\n  END' 'CREATE DEFINER=`root`@`localhost` TRIGGER instance_transfer_binding_v1 BEFORE UPDATE ON player_item_instances FOR EACH ROW BEGIN\n    IF OLD.character_id<>NEW.character_id THEN\n      IF OLD.bound_kind<>\'none\' THEN SIGNAL SQLSTATE \'45000\' SET MESSAGE_TEXT=\'bound item cannot transfer\'; END IF;\n      SET NEW.bound_kind=\'trade\'; SET NEW.bound_at=NOW(); SET NEW.bound_reason=\'traded\';\n    END IF;\n  END' 'CREATE DEFINER=`root`@`localhost` TRIGGER instance_escrow_immutable_v1 BEFORE UPDATE ON player_item_instances FOR EACH ROW BEGIN\n    IF OLD.market_listing_id IS NOT NULL AND NEW.market_listing_id IS NOT NULL AND\n      (NOT(OLD.quality<=>NEW.quality) OR NOT(OLD.durability<=>NEW.durability) OR NOT(OLD.effect_json<=>NEW.effect_json) OR NOT(OLD.forge_primary_json<=>NEW.forge_primary_json) OR OLD.character_id<>NEW.character_id)\n    THEN SIGNAL SQLSTATE \'45000\' SET MESSAGE_TEXT=\'item is in market escrow\'; END IF;\n  END'
+sql_modes=1436549160 1436549160 1436549160
+definers='root@localhost' 'root@localhost' 'root@localhost'
+client_cs_names='utf8mb4' 'utf8mb4' 'utf8mb4'
+connection_cl_names='utf8mb4_general_ci' 'utf8mb4_general_ci' 'utf8mb4_general_ci'
+db_cl_names='utf8mb4_unicode_ci' 'utf8mb4_unicode_ci' 'utf8mb4_unicode_ci'
+created=178956591431 178956591431 178956591464

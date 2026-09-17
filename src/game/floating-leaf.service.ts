@@ -119,14 +119,14 @@ export const floatingRescueStart = async (user: string) => withTransaction(async
   }
   if (!free) throw new Error('暂时找不到合适的调查落点，请稍后再试。');
   await c.execute('INSERT INTO player_goblin_king_quest (character_id,stage,goblin_kills,region_id,pos_x,pos_y,pos_z,encounter_id) VALUES (?,3,0,?,?,?,0,?) ON DUPLICATE KEY UPDATE stage=3,goblin_kills=0,region_id=VALUES(region_id),pos_x=VALUES(pos_x),pos_y=VALUES(pos_y),pos_z=0,encounter_id=VALUES(encounter_id),boss_spawn_id=NULL,completed_at=NULL', [character.id, deep.id, x, y, `main-goblin-king-${character.id}-${Date.now()}`]);
-  await grantOpeningItem(c, character.id, 'map_dark_forest_deep');
+  await (await import('./progression-map.service')).ensureProgressionMaps(c, character.id);
   const [treeMap] = await c.execute<RowDataPacket[]>("SELECT 1 FROM player_inventory p JOIN item_definitions i ON i.id=p.item_id WHERE p.character_id=? AND i.code='map_world_tree' AND p.quantity>0", [character.id]);
   if (!treeMap.length) await grantOpeningItem(c, character.id, 'map_world_tree');
   const [tree] = await c.execute<(RowDataPacket & { id: number })[]>("SELECT id FROM map_regions WHERE code='world_tree' AND is_enabled=1 LIMIT 1");
   if (!tree[0]) throw new Error('安全接驳暂时停航。');
   await c.execute('UPDATE characters SET current_region_id=?,pos_x=0,pos_y=0,pos_z=0 WHERE id=?', [tree[0].id, character.id]);
   await recordCharacterOperation(c,{characterId:Number(character.id),kind:'quest.floating_rescue_accepted',source:{system:'floating_rescue',id:character.id,step:'accepted'},outcome:'接取',summary:'接取浮叶镇失踪者救援',detail:{questCode:'goblin_king',targetRegionId:Number(deep.id),targetX:x,targetY:y}});
-  return '我接下委托。菲萝缇先把三名孩子的画像和失踪前的货单交给我，又在密林深处的地图边沿画出商道。她送我乘有护栏的接驳舱落到世界树，确认这趟安全落点与返程联络都能用。临关舱门，她又追出来补一句：“别只顾着找人，也记得自己要回来。”我把先前的世界树地图和她新画的密林图收进包里，沿着标出的路向南出发。\n\n**【获得地图】幽暗密林深处。**';
+  return '我接下委托。菲萝缇先把三名孩子的画像和失踪前的货单交给我，又在密林深处的地图边沿画出商道。她送我乘有护栏的接驳舱落到世界树，确认这趟安全落点与返程联络都能用。临关舱门，她又追出来补一句：“别只顾着找人，也记得自己要回来。”我把先前的世界树地图和她新画的密林图收进包里，沿着标出的路向南出发。\n\n**【通行地图】已核对并补齐世界树、草原环带、幽暗密林、百纳镇与密林深处地图，不消耗登记额度。仓库已有的地图请取回背包。**';
 });
 
 export const floatingRescueReturn = async (user: string) => withTransaction(async c => {

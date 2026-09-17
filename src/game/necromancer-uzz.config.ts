@@ -22,8 +22,7 @@ export const uzzPhaseTwoTransition = {
 
 export const uzzPhaseTwoTransitionLog = () => [
   `$阶段转换·${uzzPhaseTwoTransition.title}$${uzzPhaseTwoTransition.description}`,
-  ...uzzPhaseTwoTransition.dialogue.map(line => `$${line.speaker}$“${line.text}”`),
-  `➤ ${uzzPhaseTwoTransition.effect}`
+  ...uzzPhaseTwoTransition.dialogue.map(line => `$${line.speaker}$“${line.text}”`)
 ].join('\n');
 
 export const uzzPhaseTwoTransitionDue = (phaseTwoLocked: boolean, currentHp: number, maxHp: number) => !phaseTwoLocked && currentHp / Math.max(1, maxHp) < .5;
@@ -68,7 +67,7 @@ export const uzzRotationSkill = (phaseTwo: boolean, cursor: number) => {
 
 /** 亡灵体质的三个乘区；光属性物理会同时乘物理与光属性倍率。 */
 export const uzzUndeadConstitutionMultiplier = (magic: boolean, element: string) => {
-  if (magic) return element === '光' ? 1.5 : .5;
+  if (magic) return element === '光' ? 1.5 : .65;
   return 1.25 * (element === '光' ? 1.5 : 1);
 };
 

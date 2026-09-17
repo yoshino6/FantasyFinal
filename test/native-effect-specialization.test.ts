@@ -61,8 +61,8 @@ test('治疗专精在封顶前结算且只影响本次原生治疗量', async ()
   assert.equal(f.ally.hp, 9900); // 函数只返回原始治疗量，由调用者封顶并触发装备。
 });
 test('威力描述与最终配置一致', () => {
-  assert.equal(balancedSkillDescription('ironbreaker_steel_flash', '造成245%物理伤害。'), '造成195%物理伤害。');
-  assert.equal(balancedSkillDescription('spellblade_starfire_duel', '造成225%魔法伤害。'), '造成185%魔法伤害。');
+  assert.equal(balancedSkillDescription('ironbreaker_steel_flash', '造成245%物理伤害。'), '造成225%物理伤害。');
+  assert.equal(balancedSkillDescription('spellblade_starfire_duel', '造成225%魔法伤害。'), '造成205%魔法伤害。');
 });
 test('梦魇被动兼容仅清理自己的旧主动快捷栏，不重置学习和自动设置', async () => {
   const calls: string[] = [];

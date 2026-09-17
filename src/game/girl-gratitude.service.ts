@@ -77,6 +77,7 @@ export const teleportToWorldTree = (qqUserId: string) => withTransaction(async c
   await requireAt(connection, character, gateCode);
   const [regions] = await connection.execute<(RowDataPacket & { id: number; pos_x: number; pos_y: number; pos_z: number })[]>("SELECT r.id,n.pos_x,n.pos_y,n.pos_z FROM map_regions r JOIN map_npcs n ON n.region_id=r.id AND n.code='world_tree_gate' WHERE r.code='world_tree' AND r.is_enabled=1 AND r.is_owner_only=0 LIMIT 1 FOR UPDATE");
   const destination=regions[0];if (!destination) throw new Error('世界树界门暂未开放。');
+  await (await import('./progression-map.service')).ensureMapRegions(connection,character.id,['world_tree']);
   await connection.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=?,pos_z=? WHERE id=?', [destination.id,destination.pos_x,destination.pos_y,destination.pos_z, character.id]);
   await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'travel.world_gate_used',source:{system:'world_gate_travel',id:randomUUID(),step:'to_world_tree'},outcome:'抵达',summary:'通过界门抵达世界树',detail:{destinationRegionId:Number(destination.id)}});
   const [leaf] = await connection.execute<RowDataPacket[]>("SELECT 1 FROM player_opening_stories WHERE character_id=? AND route_code='M01' AND destination_code='floating_leaf_town' LIMIT 1", [character.id]);
@@ -92,6 +93,7 @@ export const returnToBainaTown = (qqUserId: string) => withTransaction(async con
   await requireAt(connection, character, worldTreeGateCode);
   const [regions] = await connection.execute<(RowDataPacket & { id: number; pos_x: number; pos_y: number; pos_z: number })[]>("SELECT r.id,n.pos_x,n.pos_y,n.pos_z FROM map_regions r JOIN map_npcs n ON n.region_id=r.id AND n.code='world_gate' WHERE r.code='baina_town' AND r.is_enabled=1 AND r.is_owner_only=0 LIMIT 1 FOR UPDATE");
   const destination=regions[0];if (!destination) throw new Error('百纳镇界门暂未开放。');
+  await (await import('./progression-map.service')).ensureMapRegions(connection,character.id,['baina_town']);
   await connection.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=?,pos_z=? WHERE id=?', [destination.id,destination.pos_x,destination.pos_y,destination.pos_z, character.id]);
   await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'travel.world_gate_used',source:{system:'world_gate_travel',id:randomUUID(),step:'to_baina_town'},outcome:'抵达',summary:'通过界门返回百纳镇',detail:{destinationRegionId:Number(destination.id)}});
   return '叶脉光纹在环形门中层层展开。短暂的失重感掠过身体，等脚步重新落稳时，百纳镇界门驿站的石砖已在脚下。';

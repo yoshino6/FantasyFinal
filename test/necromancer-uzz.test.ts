@@ -26,7 +26,7 @@ test('二阶段转场仅在首次低于50%生命时触发', () => {
 });
 
 test('亡灵体质、凛冬领域和叠加减速使用设计倍率', () => {
-  assert.equal(uzzUndeadConstitutionMultiplier(true, '暗'), .5);
+  assert.equal(uzzUndeadConstitutionMultiplier(true, '暗'), .65);
   assert.equal(uzzUndeadConstitutionMultiplier(true, '光'), 1.5);
   assert.equal(uzzUndeadConstitutionMultiplier(false, '无'), 1.25);
   assert.equal(uzzUndeadConstitutionMultiplier(false, '光'), 1.875);

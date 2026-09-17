@@ -11,7 +11,8 @@ export const guildSkillCodes = codes([
   'A03','A04','A06','A07','B04','B05','B08','C02','C06','C08','D03','D07','E04','E05','E08',
   'F02','F07','G03','G04','G08','H04','H08','I02','I03','J02','J05'
 ]);
-export const bookshopSkillCodes = codes(['A05','B06','C04','D04','E03','F05','G05','H02','I05','K05']);
+export const retiredBookshopSkillCodes = codes(['A05','B06','C04','D04','E03','F05','G05','H02','I05','K05']);
+export const bookshopSkillCodes: string[] = [];
 export const libraryFreeSkillCodes = codes(['C05','C07','F06','F08','G02','H07','J03','J07','K04','K07']);
 
 const distributed = [...guildSkillCodes, ...bookshopSkillCodes, ...libraryFreeSkillCodes];

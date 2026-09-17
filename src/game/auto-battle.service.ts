@@ -10,7 +10,7 @@ type ActionRow = RowDataPacket & { sequence_no: number; skill_id: number | null;
 const recordAutoConfiguration=async(connection:PoolConnection,characterId:number,mode:AutoBattleMode,summary:string,detail:Record<string,unknown>)=>recordCharacterOperation(connection,{characterId,kind:'combat.auto_config_changed',source:{system:'auto_battle_config',id:randomUUID(),step:'changed'},outcome:'调整',summary,detail:{mode,...detail}});
 type SettingRow = RowDataPacket & { enabled: number; default_encounter_action?: 'battle' | 'persuade'; auto_potion_enabled: number; hp_threshold: number; hp_item_id: number | null; hp_item_name: string | null; mp_threshold: number; mp_item_id: number | null; mp_item_name: string | null };
 type AutoCombatStateRow = RowDataPacket & { character_id: number; qq_user_id?: string; enabled: number; auto_potion_enabled: number; hp_threshold: number; hp_item_id: number | null; mp_threshold: number; mp_item_id: number | null; turn_no: number; current_hp: number; current_mp: number; hp_max: number; mp_max: number; selected_target_id?: number | null; cooldowns?: unknown };
-type AutoCombatAction = { type: 'attack' } | { type: 'skill'; skillId: number } | { type: 'item'; itemId: number };
+type AutoCombatAction = { type: 'attack' | 'defend' } | { type: 'skill'; skillId: number } | { type: 'item'; itemId: number };
 export type AutoBattleMode = 'pve' | 'pvp';
 const autoTables = (mode: AutoBattleMode) => mode === 'pvp'
   ? { settings: 'player_pvp_auto_battle_settings', actions: 'player_pvp_auto_battle_actions', quick: 'player_pvp_auto_battle_quick_setup' }
@@ -172,8 +172,8 @@ const configuredAutoAction = async (pool: Awaited<ReturnType<typeof getPool>>, s
 export const nextAutoBattleAction = async (qqUserId: string) => {
   const characterId = await characterIdFor(qqUserId); const pool = await getPool();
   const [settings] = await pool.execute<AutoCombatStateRow[]>(`SELECT s.*,cs.turn_no,cm.current_hp,cm.current_mp,c.hp_max,c.mp_max
-    FROM player_auto_battle_settings s JOIN combat_members cm ON cm.character_id=s.character_id JOIN combat_sessions cs ON cs.id=cm.session_id AND cs.state='active' AND cs.mode<>'spar' JOIN characters c ON c.id=cm.character_id WHERE s.character_id=? LIMIT 1`, [characterId]);
-  const [storyBattle] = await pool.execute<RowDataPacket[]>(`SELECT 1 FROM combat_members cm JOIN combat_sessions cs ON cs.id=cm.session_id AND cs.state='active' AND cs.mode<>'spar'
+    FROM player_auto_battle_settings s JOIN combat_members cm ON cm.character_id=s.character_id JOIN combat_sessions cs ON cs.id=cm.session_id AND cs.state='active' AND cs.mode<>'spar' AND NOT EXISTS(SELECT 1 FROM player_leaf_route_battles lb WHERE lb.session_id=cs.id AND lb.state='active' AND lb.wave=1 AND lb.anchor_used=0) JOIN characters c ON c.id=cm.character_id WHERE s.character_id=? LIMIT 1`, [characterId]);
+  const [storyBattle] = await pool.execute<RowDataPacket[]>(`SELECT 1 FROM combat_members cm JOIN combat_sessions cs ON cs.id=cm.session_id AND cs.state='active' AND cs.mode<>'spar' AND NOT EXISTS(SELECT 1 FROM player_leaf_route_battles lb WHERE lb.session_id=cs.id AND lb.state='active' AND lb.wave=1 AND lb.anchor_used=0)
     JOIN combat_targets ct ON ct.session_id=cs.id JOIN monster_spawns s ON s.id=ct.spawn_id JOIN monster_templates t ON t.id=s.template_id
     JOIN player_story_progress sp ON sp.character_id=cm.character_id AND sp.story_code='forest_guide' AND sp.status IN ('joined','declined')
     WHERE cm.character_id=? AND t.code='forest_slime' LIMIT 1`, [characterId]);
@@ -191,7 +191,7 @@ export const pendingPartyAutoBattleActions = async (qqUserId: string) => {
   const [members] = await pool.execute<AutoCombatStateRow[]>(`SELECT cm.character_id,p.qq_user_id,cs.turn_no,cm.current_hp,cm.current_mp,cm.selected_target_id,cm.cooldowns,c.hp_max,c.mp_max,
       settings.enabled,settings.auto_potion_enabled,settings.hp_threshold,settings.hp_item_id,settings.mp_threshold,settings.mp_item_id
     FROM combat_members mine
-    JOIN combat_sessions cs ON cs.id=mine.session_id AND cs.state='active' AND cs.mode<>'spar'
+    JOIN combat_sessions cs ON cs.id=mine.session_id AND cs.state='active' AND cs.mode<>'spar' AND NOT EXISTS(SELECT 1 FROM player_leaf_route_battles lb WHERE lb.session_id=cs.id AND lb.state='active' AND lb.wave=1 AND lb.anchor_used=0)
     JOIN combat_members cm ON cm.session_id=cs.id
     JOIN characters c ON c.id=cm.character_id
     JOIN players p ON p.id=c.player_id
@@ -205,7 +205,7 @@ export const pendingPartyAutoBattleActions = async (qqUserId: string) => {
           AND EXISTS(SELECT 1 FROM player_story_progress story WHERE story.character_id=mine.character_id AND story.story_code='forest_guide' AND story.status IN ('joined','declined')))
     ORDER BY cm.character_id`, [characterId]);
   const [targets] = await pool.execute<(RowDataPacket & { id: number; spawn_id: number; current_hp: number; is_defeated: number; traits_json: unknown; cooldowns: unknown })[]>(`SELECT ct.spawn_id AS id,ct.spawn_id,ct.is_defeated,s.current_hp,s.traits_json,ct.cooldowns
-    FROM combat_members mine JOIN combat_sessions cs ON cs.id=mine.session_id AND cs.state='active' AND cs.mode<>'spar'
+    FROM combat_members mine JOIN combat_sessions cs ON cs.id=mine.session_id AND cs.state='active' AND cs.mode<>'spar' AND NOT EXISTS(SELECT 1 FROM player_leaf_route_battles lb WHERE lb.session_id=cs.id AND lb.state='active' AND lb.wave=1 AND lb.anchor_used=0)
     JOIN combat_targets ct ON ct.session_id=cs.id JOIN monster_spawns s ON s.id=ct.spawn_id
     WHERE mine.character_id=?`, [characterId]);
   const jsonObject = (value: unknown) => { if (!value) return {} as Record<string, unknown>; try { return typeof value === 'string' ? JSON.parse(value) : value as Record<string, unknown>; } catch { return {} as Record<string, unknown>; } };
@@ -249,6 +249,42 @@ export const pendingPartyAutoBattleActions = async (qqUserId: string) => {
   const actions = await Promise.all(members.map(async member => {
     return { qqUserId: member.qq_user_id!, action: await configuredAutoAction(pool, member), targetId: automaticTargetFor(member) };
   }));
+  const regionalTarget = aliveTargets.find(target => Boolean(jsonObject(target.cooldowns).regional_encounter_v2));
+  if (regionalTarget) {
+    const { readRegionalState } = await import('./regional-boss-v2');
+    const { planRegionalAuto, regionalActionKind } = await import('./regional-boss-auto');
+    const state = readRegionalState(jsonObject(regionalTarget.cooldowns));
+    if (state) {
+      const [party] = await pool.execute<RowDataPacket[]>(`SELECT cm.character_id,cm.current_hp,cm.current_mp,cm.cooldowns,cm.pending_action,c.hp_max,c.speed,cs.turn_no
+        FROM combat_members mine JOIN combat_sessions cs ON cs.id=mine.session_id AND cs.state='active'
+        JOIN combat_members cm ON cm.session_id=cs.id JOIN characters c ON c.id=cm.character_id
+        WHERE mine.character_id=? AND cm.is_defeated=0 ORDER BY c.speed DESC,cm.character_id`, [characterId]);
+      const [legacy] = await pool.execute<RowDataPacket[]>(`SELECT ce.target_id,e.code,ce.value FROM combat_members mine
+        JOIN combat_status_effects ce ON ce.session_id=mine.session_id AND ce.target_kind='member'
+        JOIN effect_definitions e ON e.id=ce.effect_id WHERE mine.character_id=? AND ce.remaining_turns>0`, [characterId]);
+      const profiles = await Promise.all(party.map(async row => {
+        const cd = jsonObject(row.cooldowns); const rule = readRuleState(cd.__rules);
+        const statuses = [...rule.statuses.filter(effect => effect.until >= Number(row.turn_no)), ...legacy.filter(effect => Number(effect.target_id) === Number(row.character_id))];
+        const [skills] = await pool.execute<RowDataPacket[]>('SELECT s.id,s.code,s.category,s.power,s.mana_cost,ps.quick_slot FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE ps.character_id=? AND s.category IN (\'physical\',\'magic\',\'utility\') ORDER BY s.mana_cost,s.id', [row.character_id]);
+        const silence = statuses.some(effect => effect.code === 'silence');
+        const ready = skills.filter(skill => !silence && Number(skill.mana_cost) <= Number(row.current_mp) && !Number(cd[String(skill.code)] ?? 0));
+        const index = members.findIndex(member => Number(member.character_id) === Number(row.character_id));
+        let preferred = index >= 0 ? actions[index]!.action : { type: 'attack' as const };
+        const preferredSkillId = preferred.type === 'skill' ? preferred.skillId : 0;
+        if (preferred.type === 'skill' && !ready.some(skill => Number(skill.id) === preferredSkillId)) preferred = { type: 'attack' };
+        const selected = preferred.type === 'skill' ? skills.find(skill => Number(skill.id) === preferred.skillId) : undefined;
+        const pending = jsonObject(row.pending_action); const pendingSkill = skills.find(skill => pending.skillId ? Number(skill.id) === Number(pending.skillId) : Number(skill.quick_slot) === Number(pending.slot));
+        return { key: `member:${row.character_id}`, hp: Number(row.current_hp), hpMax: Number(row.hp_max),
+          shield: statuses.filter(effect => ['shield', 'life_shield'].includes(String(effect.code))).reduce((sum, effect) => sum + Number(effect.value), 0),
+          controlled: statuses.some(effect => ['stun', 'sleep', 'fear', 'petrify', 'charm', 'alchemy_stun', 'hidden_freeze', 'hidden_stun'].includes(String(effect.code))),
+          automatic: index >= 0, preferred, preferredDamaging: selected ? Number(selected.power) > 0 && selected.category !== 'utility' : true,
+          skill: ready[0] ? { id: Number(ready[0].id), damaging: Number(ready[0].power) > 0 && ready[0].category !== 'utility' } : undefined,
+          committed: pending.type ? regionalActionKind({ type: String(pending.type) }, pendingSkill ? Number(pendingSkill.power) > 0 && pendingSkill.category !== 'utility' : true) : undefined };
+      }));
+      const planned = planRegionalAuto(state, profiles, Number(party[0]?.turn_no ?? 1));
+      for (const [index, member] of members.entries()) { const action = planned.get(`member:${member.character_id}`); if (action) actions[index]!.action = action; actions[index]!.targetId = Number(regionalTarget.spawn_id); }
+    }
+  }
   return actions;
 };
 
@@ -260,7 +296,7 @@ export const isFullPartyAutoBattle = async (qqUserId: string) => {
       SUM(CASE WHEN cm.is_defeated=0 AND c.npc_code IS NULL AND COALESCE(settings.enabled,0)=1 THEN 1 ELSE 0 END) AS automated_count,
       MAX(CASE WHEN t.code='forest_slime' AND story.story_code IS NOT NULL THEN 1 ELSE 0 END) AS story_battle
     FROM combat_members mine
-    JOIN combat_sessions cs ON cs.id=mine.session_id AND cs.state='active' AND cs.mode<>'spar'
+    JOIN combat_sessions cs ON cs.id=mine.session_id AND cs.state='active' AND cs.mode<>'spar' AND NOT EXISTS(SELECT 1 FROM player_leaf_route_battles lb WHERE lb.session_id=cs.id AND lb.state='active' AND lb.wave=1 AND lb.anchor_used=0)
     JOIN combat_members cm ON cm.session_id=cs.id
     JOIN characters c ON c.id=cm.character_id
     LEFT JOIN player_auto_battle_settings settings ON settings.character_id=cm.character_id

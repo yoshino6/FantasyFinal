@@ -63,7 +63,7 @@ export type AdvancedProfessionView = {
   activeQuest: Quest | null;
   completedCode: string | null;
   retrainRemainingSeconds: number;
-  ridgeCore: number;
+  materialQuantity: number;
 };
 
 export const advancedProfessionView = async (qqUserId: string, mentorCode?: string): Promise<AdvancedProfessionView> => {
@@ -73,12 +73,12 @@ export const advancedProfessionView = async (qqUserId: string, mentorCode?: stri
   assertAtMentor(character, profession);
   const [activeQuests] = await pool.execute<Quest[]>('SELECT profession_code,stage,story_kills,proof_kills,completed_at FROM player_advanced_profession_quests WHERE character_id=? AND stage IN (1,2,3) ORDER BY stage DESC,profession_code ASC', [character.id]);
   const [done] = await pool.execute<CompletedProfession[]>('SELECT profession_code,completed_at FROM player_advanced_professions WHERE character_id=? LIMIT 1', [character.id]);
-  const [cores] = await pool.execute<(RowDataPacket & { quantity: number })[]>('SELECT pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.code=\'ridge_core\' LIMIT 1', [character.id]);
+  const [cores] = await pool.execute<(RowDataPacket & { quantity: number })[]>('SELECT pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.code=? LIMIT 1', [character.id, profession.route.materialCode]);
   const activeQuest = activeQuests[0] ?? null;
   const retrainRemainingSeconds = done[0]
     ? Math.max(0, Math.ceil((new Date(done[0].completed_at).getTime() + advancedProfessionRetrainCooldownMs - Date.now()) / 1000))
     : 0;
-  return { profession, character, active: activeQuest?.profession_code === profession.code ? activeQuest : null, activeQuest, completedCode: done[0]?.profession_code ?? null, retrainRemainingSeconds, ridgeCore: Number(cores[0]?.quantity ?? 0) };
+  return { profession, character, active: activeQuest?.profession_code === profession.code ? activeQuest : null, activeQuest, completedCode: done[0]?.profession_code ?? null, retrainRemainingSeconds, materialQuantity: Number(cores[0]?.quantity ?? 0) };
 };
 
 /** 接受新导师任务不会立刻替换当前职业；真正的二转替换仍在击败新导师后发生。 */
@@ -97,7 +97,7 @@ export const beginAdvancedProfession = async (qqUserId: string, code: string, re
   const [activeQuests] = await connection.execute<Quest[]>('SELECT profession_code,stage,story_kills,proof_kills,completed_at FROM player_advanced_profession_quests WHERE character_id=? AND stage IN (1,2,3) FOR UPDATE', [character.id]);
   const currentQuest = activeQuests.find(quest => quest.profession_code === profession.code);
   const otherQuest = activeQuests.find(quest => quest.profession_code !== profession.code);
-  if (currentQuest && !otherQuest) return profession;
+  if (currentQuest && !otherQuest) { await (await import('./progression-map.service')).ensureProgressionMaps(connection,Number(character.id)); return profession; }
   if (otherQuest && !replaceActiveQuest) {
     const activeProfession = advancedProfessionByCode(otherQuest.profession_code);
     throw new Error(`你正在进行【${activeProfession?.name ?? otherQuest.profession_code}】的二转任务。确认中断当前进度后，才能开启新的试炼。`);
@@ -105,6 +105,7 @@ export const beginAdvancedProfession = async (qqUserId: string, code: string, re
   if (otherQuest) { await connection.execute('DELETE FROM player_advanced_profession_quests WHERE character_id=? AND stage IN (1,2,3)', [character.id]); await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'profession.advanced_quest_abandoned',source:{system:'advanced_profession_quest',id:randomUUID(),step:'abandoned'},outcome:'中断',summary:`中断${advancedProfessionByCode(otherQuest.profession_code)?.name??otherQuest.profession_code}试炼`,detail:{professionCode:otherQuest.profession_code,stage:Number(otherQuest.stage)}}); }
   await connection.execute(`INSERT INTO player_advanced_profession_quests (character_id,profession_code,stage,story_kills,proof_kills)
     VALUES (?,?,1,0,0) ON DUPLICATE KEY UPDATE stage=1,story_kills=0,proof_kills=0,completed_at=NULL`, [character.id, profession.code]);
+  await (await import('./progression-map.service')).ensureProgressionMaps(connection,Number(character.id));
   await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'profession.advanced_quest_accepted',source:{system:'advanced_profession_quest',id:randomUUID(),step:'accepted'},outcome:'接取',summary:`接取${profession.name}试炼`,detail:{professionCode:profession.code,replacedProfessionCode:otherQuest?.profession_code??null}});
   return profession;
 });
@@ -125,12 +126,12 @@ export const submitAdvancedProfessionProof = async (qqUserId: string, code: stri
   const [rows] = await connection.execute<Quest[]>('SELECT profession_code,stage,story_kills,proof_kills,completed_at FROM player_advanced_profession_quests WHERE character_id=? AND profession_code=? FOR UPDATE', [character.id, code]);
   const quest = rows[0]; if (!quest || Number(quest.stage) !== 2) throw new Error('当前不能提交第二段凭证。');
   if (Number(quest.proof_kills) < profession.second.requiredKills) throw new Error(`还需完成 ${profession.second.requiredKills - Number(quest.proof_kills)} 次【${profession.second.targetText}】战斗。`);
-  const [cores] = await connection.execute<(RowDataPacket & { item_id: number; quantity: number })[]>('SELECT pi.item_id,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.code=\'ridge_core\' FOR UPDATE', [character.id]);
-  if (Number(cores[0]?.quantity ?? 0) < profession.second.materialCount) throw new Error(`还需 ${profession.second.materialCount - Number(cores[0]?.quantity ?? 0)} 个【岩脊核心】。`);
+  const [cores] = await connection.execute<(RowDataPacket & { item_id: number; quantity: number })[]>('SELECT pi.item_id,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.code=? FOR UPDATE', [character.id, profession.route.materialCode]);
+  if (Number(cores[0]?.quantity ?? 0) < profession.second.materialCount) throw new Error(`还需 ${profession.second.materialCount - Number(cores[0]?.quantity ?? 0)} 个【${profession.route.materialName}】。`);
   await connection.execute('UPDATE player_inventory SET quantity=quantity-? WHERE character_id=? AND item_id=?', [profession.second.materialCount, character.id, cores[0].item_id]);
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity<=0', [character.id, cores[0].item_id]);
   await connection.execute('UPDATE player_advanced_profession_quests SET stage=3 WHERE character_id=? AND profession_code=?', [character.id, code]);
-  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'profession.advanced_quest_stage',source:{system:'advanced_profession_quest',id:randomUUID(),step:'stage_3'},outcome:'推进',summary:`提交${profession.name}试炼凭证`,detail:{professionCode:code,stage:3,proofKills:Number(quest.proof_kills),consumedCore:profession.second.materialCount}});return profession;
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'profession.advanced_quest_stage',source:{system:'advanced_profession_quest',id:randomUUID(),step:'stage_3'},outcome:'推进',summary:`提交${profession.name}试炼凭证`,detail:{professionCode:code,stage:3,proofKills:Number(quest.proof_kills),materialCode:profession.route.materialCode,consumedMaterial:profession.second.materialCount}});return profession;
 });
 
 export const beginAdvancedProfessionTrial = async (qqUserId: string, code: string) => withTransaction(async connection => {

@@ -11,6 +11,7 @@ export type KingbeastDamageKind = 'physical' | 'magic' | 'untyped';
 
 export type KingbeastPhaseTransitionCode = 'split' | 'castling' | 'enrage_king' | 'enrage_dragon';
 export type BossPhaseTransition = {
+  kind?: 'phase' | 'chant';
   code: string;
   title: string;
   description: string;
@@ -53,8 +54,7 @@ export const kingbeastPhaseTransition = (code: KingbeastPhaseTransitionCode): Ki
 
 export const kingbeastPhaseTransitionLog = (transition: KingbeastPhaseTransition) => [
   `$阶段转换·${transition.title}$${transition.description}`,
-  ...transition.dialogue.map(line => `$${line.speaker}$“${line.text}”`),
-  `➤ ${transition.effect}`
+  ...transition.dialogue.map(line => `$${line.speaker}$“${line.text}”`)
 ].join('\n');
 
 export const withoutKingbeastPhaseTransitionLogs = (logs: string[], transitionLogs: ReadonlySet<string>) => logs.filter(line => !transitionLogs.has(line) && !line.startsWith('$阶段转换·'));
@@ -91,6 +91,19 @@ export const kingbeastEncounter = (unit: KingbeastUnit) => arrayValue(unit.trait
 
 export const kingbeastUnitRole = (unit: KingbeastUnit) => String(kingbeastEncounter(unit)?.role ?? '');
 export const kingbeastGroupId = (unit: KingbeastUnit) => String(kingbeastEncounter(unit)?.groupId ?? '');
+/** 地图只暴露一个王龙入口；不要用于战斗原始目标或群攻结算。 */
+export const kingbeastMapTargets = <T extends KingbeastUnit & { name: string }>(units: T[]): T[] => {
+  const seen = new Set<string>();
+  return units.flatMap(unit => {
+    const group = kingbeastGroupId(unit);
+    if (group && ['guard', 'spearman'].includes(kingbeastUnitRole(unit))) return [];
+    if (!group || !isKingbeastPrimaryCore(unit)) return [unit];
+    if (seen.has(group)) return [];
+    seen.add(group);
+    const representative = units.find(other => kingbeastGroupId(other) === group && kingbeastUnitRole(other) === 'dragon') ?? unit;
+    return [{ ...representative, name: '哥布林国王＆哈巴龙' }];
+  });
+};
 export const isKingbeastPrimaryCore = (unit: KingbeastUnit) => ['king', 'dragon'].includes(kingbeastUnitRole(unit));
 export const isLivingKingbeastUnit = (unit: KingbeastUnit) => !Boolean(unit.is_defeated) && Number(unit.current_hp ?? 1) > 0;
 export const kingbeastCooldowns = (unit: KingbeastUnit) => objectValue(unit.cooldowns);
@@ -148,7 +161,7 @@ export const kingbeastPassiveDamageMultiplier = (unit: KingbeastUnit, damageKind
 };
 
 export const kingbeastCoreDamageMultiplier = (unit: KingbeastUnit, symbiosis: boolean, damageKind: KingbeastDamageKind = 'untyped') => isKingbeastPrimaryCore(unit)
-  ? (symbiosis ? .67 : 1) * (kingbeastUnitRole(unit) === 'dragon' && Number(kingbeastCooldowns(unit).kingbeast_castling_turns ?? 0) > 0 ? .80 : 1) * kingbeastPassiveDamageMultiplier(unit, damageKind)
+  ? (symbiosis ? (arrayValue(unit.traits_json).map(objectValue).some(trait => trait.code === 'main_quest_goblin_king') ? .67 : .75) : 1) * (kingbeastUnitRole(unit) === 'dragon' && Number(kingbeastCooldowns(unit).kingbeast_castling_turns ?? 0) > 0 ? .80 : 1) * kingbeastPassiveDamageMultiplier(unit, damageKind)
   : 1;
 
 export const kingbeastTransition = <T extends KingbeastUnit>(units: T[]) => {
@@ -174,7 +187,7 @@ export const kingbeastPanelSummary = (units: KingbeastUnit[], turn: number, last
   states.push('核心被动：哈巴龙「硬皮」物理-30%／魔法+30%；国王「雷铸王袍」魔法-30%／物理+30%');
   states.push(`王庭存活：雷矛侍卫${spears}｜王庭盾卫${guards}`);
   states.push(remaining ? `援军最迟${remaining}回合后抵达` : '王庭征召待触发');
-  if (kingbeastSymbiosisActive(units)) states.push('矛盾共生：双侍卫受抑，王座双核心最终伤害-33%');
+  if (kingbeastSymbiosisActive(units)) states.push(`矛盾共生：双侍卫受抑，王座双核心承伤-${units.some(unit => arrayValue(unit.traits_json).map(objectValue).some(trait => trait.code === 'main_quest_goblin_king')) ? 33 : 25}%`);
   const dragon = units.find(unit => kingbeastUnitRole(unit) === 'dragon');
   if (dragon && Number(kingbeastCooldowns(dragon).kingbeast_castling_turns ?? 0) > 0) states.push(`王车易位：强制攻击哈巴龙，剩余${Number(kingbeastCooldowns(dragon).kingbeast_castling_turns)}次哈巴龙行动`);
   const livingCore = units.find(unit => isKingbeastPrimaryCore(unit) && isLivingKingbeastUnit(unit) && Boolean(kingbeastCooldowns(unit).royal_beast_enrage));

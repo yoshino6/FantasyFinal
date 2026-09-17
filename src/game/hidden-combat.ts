@@ -1,7 +1,7 @@
 import { talentCanPaySkill, talentPaySkill, talentCommitAction } from './talent-combat';
 import { correctedHitChance, opposedChance, strikeCorrections } from './combat-math';
 import type { CombatRules, RuleStatus, RuleUnit } from './combat-rule-registry';
-import { hiddenSkill } from './hidden-profession.config';
+import { hiddenSkill, hiddenWeaponAttackPower } from './hidden-profession.config';
 import { hiddenMix, rollHiddenMix } from './hidden-particles';
 import { inventorCapability, inventorProjection } from './hidden-device-protocol';
 import type { ActiveDeviceSkill } from './device.service';
@@ -242,19 +242,20 @@ export const executeHiddenCombat = async (r: CombatRules, u: RuleUnit, code: str
   } else if (code === 'hidden_weapon_guard') hiddenShield(r, u, ally, Math.min(.2 * ally.hpMax, (.08 * ally.hpMax + .3 * (u.defense + u.magicDefense)) * support), 2, { guard: true });
   else if (definition.profession === 'weapon_master') {
     const chosen = weapons as HiddenWeapon[], aoe = code === 'hidden_weapon_finale';
-    const power = code === 'hidden_weapon_strike' ? 125 : aoe ? [0,145,95,75][chosen.length] : [0,165,110,90][chosen.length];
+    const power = hiddenWeaponAttackPower(code, chosen.length);
     let effective = false; const seenTypes=new Set<string>();
     for (let index = 0; index < chosen.length; index++) {
       const weapon = chosen[index], firstType=!seenTypes.has(weapon.type), magic = ['法杖','法书','魔导书','法球','staff','book','orb'].includes(weapon.type), a = magic ? u.magic : u.attack, b = magic ? weapon.magic : weapon.attack;
       seenTypes.add(weapon.type);
       const ratio = (.8 * a + .2 * Math.min(b, a)) / Math.max(1, a);
       const targets = aoe ? r.enemies(u) : [enemy?.hp ? enemy : r.enemies(u)[0]].filter(Boolean) as RuleUnit[];
-      for (const target of targets) {
+      const hitTarget = async (target: RuleUnit) => {
         const traitAllowed=firstType&&(!aoe||index===0&&target===targets[0]);
         const hit = await r.strike(u, target, power * ratio, weapon.element, magic, index > 0, false, 1, { skill: true, single: !aoe, hitPenalty: traitAllowed&&['匕首','dagger'].includes(weapon.type) ? -10 : 0, finalMultiplier: traitAllowed&&['法杖','staff'].includes(weapon.type) ? 1.05 : 1 });
         effective ||= hit;
         if (hit && traitAllowed) await weaponTrait(r, u, target, weapon, potency);
-      }
+      };
+      if (aoe) await r.areaDamage(targets, hitTarget); else for (const target of targets) await hitTarget(target);
     }
     if (effective && code === 'hidden_weapon_strike') { gainHiddenResource(u, r.turn, 20 + (state.lastType && state.lastType !== chosen[0].type ? 10 : 0)); state.lastType = chosen[0].type; }
     if (effective && code === 'hidden_weapon_combo') inherit(r, u);

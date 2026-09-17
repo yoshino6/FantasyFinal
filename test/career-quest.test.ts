@@ -7,6 +7,8 @@ import { advancedProfessionByCode, worldTreeAdvancedProfessions } from '../src/g
 
 // 执行实际服务/任务栏声明，注入只读数据库替身，避免启动机器人或初始化真实数据库。
 const loadDeclarations = (path: string, names: string[], dependencies: Record<string, unknown>) => {
+  const priorRequire=dependencies.require as ((path:string)=>unknown)|undefined;
+  dependencies={...dependencies,require:(module:string)=>module==='./progression-map.service'?{repairProgressionMaps:async()=>({granted:[],stored:[],unavailable:[]}),ensureProgressionMaps:async()=>({granted:[],stored:[],unavailable:[]})}:priorRequire?priorRequire(module):assert.fail(`意外加载：${module}`)};
   const file = ts.createSourceFile(path, readFileSync(new URL(path, import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
   const declarations = file.statements.filter(statement => ts.isVariableStatement(statement)
     && statement.declarationList.declarations.some(declaration => names.includes(declaration.name.getText(file))));
@@ -24,10 +26,12 @@ const setup = (overrides: Record<string, unknown> = {}) => {
     active: null as null | { profession_code: string; stage: number; story_kills: number; proof_kills: number },
     completed: null as null | { profession_code: string },
     goblinQuest: null as null | { stage: number; goblin_kills: number; region_id: number | null; pos_x: number | null; pos_y: number | null; pos_z: number | null; encounter_id: string | null; boss_spawn_id: number | null },
-    cores: 0
+    cores: 0,
+    inventoryQueries: [] as unknown[][]
   };
-  const pool = { execute: async (sql: string) => {
+  const pool = { execute: async (sql: string, args: unknown[] = []) => {
     assert.match(sql.trim(), /^SELECT\b/, '查看指引不允许写入状态');
+    if(sql.startsWith('SELECT r.code FROM characters'))return [[{code:state.character.region_code}]];
     if (sql.includes('FROM characters c')) return [[state.character]];
     if (sql.includes('FROM map_npcs n')) return [[state.guild]];
     if (sql.includes('FROM player_advanced_profession_quests')) {
@@ -36,11 +40,11 @@ const setup = (overrides: Record<string, unknown> = {}) => {
     }
     if (sql.includes('FROM player_advanced_professions')) return [state.completed ? [state.completed] : []];
     if (sql.includes('FROM player_goblin_king_quest')) return [state.goblinQuest ? [state.goblinQuest] : []];
-    if (sql.includes('FROM player_inventory')) return [[{ quantity: state.cores }]];
+    if (sql.includes('FROM player_inventory')) { state.inventoryQueries.push(args); return [[{ quantity: state.cores }]]; }
     throw new Error(`意外查询：${sql}`);
   } };
   const career = loadDeclarations('../src/game/career-quest.service.ts', ['careerCharacterFor', 'guildCareerQuestFor', 'guildCareerMainQuest', 'advancedProfessionMainQuest'], { getPool: async () => pool, advancedProfessionByCode, worldTreeAdvancedProfessions, openingHubs });
-  const main = loadDeclarations('../src/game/main-quest.service.ts', ['currentMainQuest'], {
+  const main = loadDeclarations('../src/game/main-quest.service.ts', ['currentMainQuest','currentMainQuestAfterMapRepair'], {
     getPool: async () => pool, guildCareerMainQuest: career.guildCareerMainQuest,
     openingMainQuest: async () => null,
     floatingStoryMainQuest: async () => null,
@@ -53,6 +57,27 @@ const setup = (overrides: Record<string, unknown> = {}) => {
   });
   return { state, ...career, ...main };
 };
+
+test('十二导师的主线导航和凭证查询随四区配置切换，完成后返回各自导师', async () => {
+  for (const p of worldTreeAdvancedProfessions) {
+    const service = setup({region_code: 'world_tree'});
+    service.state.active = {profession_code:p.code,stage:1,story_kills:0,proof_kills:0};
+    let quest = await service.advancedProfessionMainQuest('player');
+    assert.ok(quest.description.includes(p.route.name));
+    assert.equal(quest.action.command, `/前往 ${p.route.x} ${p.route.y} 0`);
+    service.state.active.stage = 2;
+    quest = await service.advancedProfessionMainQuest('player');
+    assert.ok(quest.description.includes(p.route.materialName));
+    assert.deepEqual(service.state.inventoryQueries.at(-1), [7, p.route.materialCode]);
+    service.state.character.region_code = p.route.regionCode;
+    assert.equal((await service.advancedProfessionMainQuest('player')).action.command, '/寻怪');
+    service.state.active.proof_kills = p.second.requiredKills;
+    service.state.cores = p.second.materialCount;
+    assert.equal((await service.advancedProfessionMainQuest('player')).action.command, `/前往 ${p.mentor.x} ${p.mentor.y} 0`);
+    service.state.active.stage = 3;
+    assert.equal((await service.advancedProfessionMainQuest('player')).action.command, `/前往 ${p.mentor.x} ${p.mentor.y} 0`);
+  }
+});
 
 test('森林战斗后直到梨子喵带路完成，指引先继续剧情', async () => {
   for (const forest_status of ['awaiting_arrival', 'arrival_story', 'guild_story']) {
@@ -101,6 +126,17 @@ test('第一次向糖水屋老板请教即可开始天空粉尘调查', async ()
   const progress = await service.advanceRealmBarrier('player', 'alchemist');
   assert.deepEqual(progress, { previous: 0, stage: 2 });
   assert.equal(writes[0][2], 2);
+});
+
+test('高处城镇的地表主线与二转先指向安全接驳',async()=>{
+  for(const region_code of ['floating_leaf_town','frost_dragon_inn']){
+    const service=setup({region_code,level:10,realm_stage:1,experience:1000,barrier_stage:0});
+    assert.equal((await service.currentMainQuest('player')).action.command,'/初行公会 接驳');
+    service.state.character.level=25;
+    assert.equal((await service.advancedProfessionMainQuest('player')).action.command,'/初行公会 接驳');
+    service.state.completed={profession_code:worldTreeAdvancedProfessions[0]!.code};
+    assert.equal(await service.advancedProfessionMainQuest('player'),null);
+  }
 });
 
 test('突破后升至十一级，再接回梨子喵失踪与哥布林国王主线', async () => {

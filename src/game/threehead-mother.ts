@@ -1,4 +1,5 @@
 import { tenacityContest } from './combat-math';
+import { aoeSkillPower } from './aoe-damage.config';
 import { combatUnitLabel } from './combat-unit-label';
 import type { CombatRules, RuleStatus, RuleUnit } from './combat-rule-registry';
 
@@ -64,15 +65,16 @@ export const threeheadMotherPanelSummary = (target: { cooldowns?: unknown; curre
   const unlocked = Number(target.current_hp ?? 0) / Math.max(1, Number(target.hp_max ?? 1)) <= .5;
   const share = alive >= 3 ? '单体50/25/25，群攻各承受50%' : alive === 2 ? '单体70/30，群攻各承受70%' : '独首35%减伤；每3次实际行动引爆DOT';
   const disaster = Number(cooldowns.mother_disaster_ready_turn ?? 0) > 0 ? `｜灾劫焚风蓄势至第${Number(cooldowns.mother_disaster_ready_turn)}回合，击杀参与蛇首可中断` : '';
-  return `庞大身躯：实际闪避修正-50%，实际命中修正+50%｜血肉并痛：${share}｜下次技能槽${next}${next === 4 ? (unlocked ? '（变招已解锁）' : '（使用锁定替代技）') : ''}${disaster}`;
+  return `庞大身躯：实际闪避修正-50%，实际命中修正+50%｜血肉并痛：${share}｜风蚀每层增幅25%｜引爆消耗三种灾蚀各1层｜击杀蛇首清除全队对应灾蚀｜独首只附加自身灾蚀｜下次技能槽${next}${next === 4 ? (unlocked ? '（变招已解锁）' : '（使用锁定替代技）') : ''}${disaster}`;
 };
 
 const dotCodes = ['mother_poison', 'mother_burn', 'mother_wind_erosion'] as const;
 type MotherDot = typeof dotCodes[number];
 const dotName: Record<MotherDot, string> = { mother_poison: '中毒', mother_burn: '灼烧', mother_wind_erosion: '风蚀' };
+const roleDot: Record<ThreeheadRole, MotherDot> = { venom: 'mother_poison', flame: 'mother_burn', gale: 'mother_wind_erosion' };
 
 export const addThreeheadDot = (rules: CombatRules, source: RuleUnit, target: RuleUnit, code: MotherDot, stacks: number) => {
-  const existing = rules.status(target, code); const effect = rules.add(target, code, code === 'mother_poison' ? 6 : code === 'mother_burn' ? 3 : 100, 3, source, true, existing?.data ?? JSON.stringify({ appliedTurn: rules.turn }));
+  const existing = rules.status(target, code); const effect = rules.add(target, code, code === 'mother_poison' ? 6 : code === 'mother_burn' ? 3 : 25, 3, source, true, existing?.data ?? JSON.stringify({ appliedTurn: rules.turn }));
   effect.until = Math.max(effect.until, rules.turn + 3);
   effect.stacks = Math.min(5, (existing?.stacks ?? 0) + Math.max(1, stacks));
   return effect;
@@ -100,20 +102,22 @@ export const settleThreeheadDots = async (rules: CombatRules, targets: RuleUnit[
     if (!active.length && (!immediate || !legacyDots.length)) continue;
     const eligible = (effect?: RuleStatus) => immediate || Boolean(effect && Number(JSON.parse(effect.data || '{}').appliedTurn ?? 0) < rules.turn);
     if (!immediate && !active.some(eligible)) continue;
-    const hp = target.hp, hpMax = target.hpMax; const wind = eligible(effects.mother_wind_erosion) ? effects.mother_wind_erosion?.stacks ?? 0 : 0; const factor = 1 + wind;
+    const hp = target.hp, hpMax = target.hpMax; const wind = eligible(effects.mother_wind_erosion) ? effects.mother_wind_erosion?.stacks ?? 0 : 0; const factor = 1 + wind * .25;
     const burn = Math.floor(hpMax * .03 * (eligible(effects.mother_burn) ? effects.mother_burn?.stacks ?? 0 : 0) * factor);
     const poison = Math.floor(Math.max(0, hpMax - hp) * .06 * (eligible(effects.mother_poison) ? effects.mother_poison?.stacks ?? 0 : 0) * factor);
     // 旧状态管线会自行结算常规 DOT；自然跳伤这里只补足风蚀额外倍数，立即结算则完整复制本次 DOT。
     const legacyDotBase = Math.floor(legacyDots.reduce((sum, effect) => sum + hpMax * effect.value * effect.stacks / 100, 0));
-    const legacyDot = immediate ? legacyDotBase * factor : legacyDotBase * wind;
-    const damage = Math.max(0, burn + poison + legacyDot); if (!damage) continue;
+    const legacyDot = Math.floor(immediate ? legacyDotBase * factor : legacyDotBase * (factor - 1));
+    const damage = Math.max(0, burn + poison + legacyDot);
+    if (immediate) await rules.removeLayers(target, effect => dotCodes.includes(effect.code as MotherDot), 1);
+    if (!damage) continue;
     const owner = rules.units.find(unit => unit.key === (effects.mother_burn ?? effects.mother_poison)?.source);
     const result = await rules.takeHit(target, damage, 1, true, owner, true);
-    rules.log.push(`　&持续灾蚀&${combatUnitLabel(target)}受到 ${result.damage} 点伤害（蛇母灼烧${burn}、蛇母中毒${poison}、其他DOT补算${legacyDot}、风蚀倍率×${factor}；不消耗层数）。`);
+    rules.log.push(`　&持续灾蚀&${combatUnitLabel(target)}受到 ${result.damage} 点伤害（蛇母灼烧${burn}、蛇母中毒${poison}、其他DOT补算${legacyDot}、风蚀倍率×${factor}；${immediate ? '消耗三种灾蚀各1层' : '自然跳伤不消耗层数'}）。`);
   }
 };
 
-const reductionFactor = (rules: CombatRules, head: RuleUnit, solo: boolean) => 1 - Math.min(80, (rules.status(head, 'mother_wind_barrier') ? 25 : 0) + (solo ? 35 : 0)) / 100;
+const reductionFactor = (rules: CombatRules, head: RuleUnit, solo: boolean) => (rules.status(head, 'mother_wind_barrier') ? .75 : 1) * (solo ? .65 : 1);
 
 /** 三首共享受击规则。secondary 为持续/反射/机制伤害，只吃减伤而不触发血肉分摊。 */
 export const installThreeheadMotherDamage = (rules: CombatRules) => {
@@ -140,16 +144,25 @@ export const installThreeheadMotherDamage = (rules: CombatRules) => {
   };
   rules.hooks.afterDamage = async (unit, damage, shieldBroken, originalShield, source) => {
     await previousAfter?.(unit, damage, shieldBroken, originalShield, source);
-    if (source?.side !== 'member' || source.hp <= 0 || !threeheadMotherRole(unit) || heads().filter(head => head.hp > 0).length !== 1) return;
+    for (const fallen of heads().filter(head => head.hp <= 0 && !head.state.memory.motherDeathRelief)) {
+      fallen.state.memory.motherDeathRelief = 1;
+      const code = roleDot[threeheadMotherRole(fallen)!];
+      for (const member of rules.units.filter(candidate => candidate.side === 'member')) await rules.remove(member, effect => effect.code === code);
+      if (threeheadMotherRole(fallen) === 'gale') for (const head of heads()) await rules.remove(head, effect => effect.code === 'mother_wind_barrier');
+      rules.log.push(`　&断首解灾&${fallen.name}倒下，全队${dotName[code]}被清除${threeheadMotherRole(fallen) === 'gale' ? '，风之障壁消散' : ''}。`);
+    }
+    if (source?.side !== 'member' || source.hp <= 0 || unit.hp <= 0 || !threeheadMotherRole(unit) || heads().filter(head => head.hp > 0).length !== 1) return;
     const action = Number(source.state.memory.achievementAction ?? 0); const stamp = `${rules.turn}:${action}`;
     if (source.state.memory.motherSoloRecoil === stamp) return; source.state.memory.motherSoloRecoil = stamp;
-    for (const code of dotCodes) addThreeheadDot(rules, unit, source, code, 1);
-    rules.log.push(`　&血脉同源&${combatUnitLabel(source)}因攻击独存蛇首，获得中毒、灼烧、风蚀各1层。`);
+    const code = roleDot[threeheadMotherRole(unit)!];
+    addThreeheadDot(rules, unit, source, code, 1);
+    rules.log.push(`　&血脉同源&${combatUnitLabel(source)}因攻击独存蛇首，获得${dotName[code]}1层。`);
   };
 };
 
-const attack = async (rules: CombatRules, source: RuleUnit, targets: RuleUnit[], power: number, element: string, magic: boolean, single: boolean, onHit?: (target: RuleUnit) => void) => {
-  const hit = async (target: RuleUnit) => { const landed = await rules.strike(source, target, power, element, magic, false, false, 1, { skill: true, single }); if (landed) { onHit?.(target); if (rules.allies(source).filter(unit => threeheadMotherRole(unit)).length === 1) for (const code of dotCodes) addThreeheadDot(rules, source, target, code, 1); } };
+const attack = async (rules: CombatRules, source: RuleUnit, targets: RuleUnit[], power: number | string, element: string, magic: boolean, single: boolean, onHit?: (target: RuleUnit) => void) => {
+  const referencePower = typeof power === 'string' ? aoeSkillPower(power, 100) : power;
+  const hit = async (target: RuleUnit) => { const landed = await rules.strike(source, target, referencePower, element, magic, false, false, 1, { skill: true, single }); if (landed) { onHit?.(target); if (rules.allies(source).filter(unit => threeheadMotherRole(unit)).length === 1) addThreeheadDot(rules, source, target, roleDot[threeheadMotherRole(source)!], 1); } };
   if (single) await hit(targets[0]); else await rules.areaDamage(targets, hit);
 };
 
@@ -157,7 +170,7 @@ const activateSolo = async (rules: CombatRules, head: RuleUnit) => {
   if (Number(head.cooldowns.mother_solo_active ?? 0)) return;
   head.cooldowns.mother_solo_active = 1; head.cooldowns.mother_slot = 0; head.cooldowns.mother_solo_actions = 0;
   await rules.remove(head, effect => effect.debuff);
-  rules.log.push(`&独劫焚身·血脉同源&【${head.name}】清除普通控制与减益，进入独首狂暴：全伤害减免35%。`);
+  rules.log.push(`&独劫焚身·血脉同源&【${head.name}】挣脱身上的束缚，断颈处的血光汇入最后的蛇首，发出震耳欲聋的狂啸。`);
 };
 
 export const prepareThreeheadMotherTurn = async (rules: CombatRules, head: RuleUnit) => {
@@ -179,7 +192,7 @@ export const executeThreeheadMotherTurn = async (rules: CombatRules, head: RuleU
       rules.log.push('&灾劫中断&参与共鸣的蛇首已经死亡，「灾劫焚风」永久失效。');
     } else if (rules.turn >= Number(ready.mother_disaster_ready_turn)) {
       rules.log.push(`➤【三首蛇母】共同释放「灾劫焚风」`);
-      await attack(rules, head, enemies, 100, '风', true, false, target => {
+      await attack(rules, head, enemies, 'mother_disaster_wind', '风', true, false, target => {
         if (living.some(unit => threeheadMotherRole(unit) === 'venom')) addThreeheadDot(rules, head, target, 'mother_poison', 3);
         if (living.some(unit => threeheadMotherRole(unit) === 'flame')) addThreeheadDot(rules, head, target, 'mother_burn', 3);
         if (living.some(unit => threeheadMotherRole(unit) === 'gale')) addThreeheadDot(rules, head, target, 'mother_wind_erosion', 3);
@@ -192,29 +205,29 @@ export const executeThreeheadMotherTurn = async (rules: CombatRules, head: RuleU
   if (!ready && living.length >= 2 && !shared.some(cooldowns => Number(cooldowns.mother_disaster_used ?? 0)) && living.some(unit => unit.hp / unit.hpMax <= .20)) {
     const participants = living.map(unit => unit.key).join(',');
     for (const cooldowns of shared) { cooldowns.mother_disaster_used = 1; cooldowns.mother_disaster_ready_turn = rules.turn + 2; cooldowns.mother_disaster_participants = participants; }
-    rules.log.push('&灾劫预兆&三首开始共鸣；玩家拥有一整轮行动窗口。期间击杀任意参与蛇首可永久中断「灾劫焚风」。');
+    rules.log.push('&灾劫预兆&尚存的蛇首同时昂起，毒雾与灼热的狂风开始共鸣。毁灭性的力量正在汇聚——「灾劫焚风」即将降临。');
   }
   const slot = Number(head.cooldowns.mother_slot ?? 0) % 4 + 1; head.cooldowns.mother_slot = slot;
   const unlocked = head.hp / head.hpMax <= .50; const marked = enemies.find(unit => Number(unit.state.memory.motherVenomMarkTurn ?? 0) === rules.turn) ?? defaultVictim;
   const title = (name: string) => rules.log.push(`➤【${head.name}】释放技能「${name}」`);
   if (role === 'venom') {
-    if (slot === 1) { title('瘟疫吐息'); await attack(rules, head, enemies, 75, '木', true, false, target => { tryAddThreeheadDot(rules, head, target, 'mother_poison', 1, 35); }); }
+    if (slot === 1) { title('瘟疫吐息'); await attack(rules, head, enemies, 'mother_plague_breath', '木', true, false, target => { tryAddThreeheadDot(rules, head, target, 'mother_poison', 1, 35); }); }
     else if (slot === 2) { title('腐毒獠牙'); await attack(rules, head, [defaultVictim], 130, '木', false, true, target => { addThreeheadDot(rules, head, target, 'mother_poison', 3); target.state.memory.motherVenomMarkTurn = rules.turn; }); }
     else if (slot === 3) { title('腐败菌群'); for (const target of enemies) { rules.add(target, 'armor_shatter', 20, 3, head, true); rules.add(target, 'magic_shatter', 20, 3, head, true); tryAddThreeheadDot(rules, head, target, 'mother_poison', 1, 100); } rules.log.push('　&腐败菌群&无命中判定；全体双防-20%，中毒仍需通过韧性对抗。'); }
     else if (unlocked) { title('催眠吐息'); for (const target of enemies) await rules.control(head, target, 'sleep', 35, 1, false); }
     else { title('毒首撕咬'); await attack(rules, head, [defaultVictim], 115, '木', false, true); }
   } else if (role === 'flame') {
-    if (slot === 1) { title('炎息洪流'); await attack(rules, head, enemies, 80, '火', true, false, target => { tryAddThreeheadDot(rules, head, target, 'mother_burn', 1, 35); }); }
+    if (slot === 1) { title('炎息洪流'); await attack(rules, head, enemies, 'mother_flame_torrent', '火', true, false, target => { tryAddThreeheadDot(rules, head, target, 'mother_burn', 1, 35); }); }
     else if (slot === 2) { title('烈炎噬咬'); await attack(rules, head, [marked], 140, '火', false, true, target => { addThreeheadDot(rules, head, target, 'mother_burn', 3); }); }
     else if (slot === 3) { title('炎怒嘶吼'); rules.add(head, 'attack', 25, 3, head); rules.add(head, 'magic', 25, 3, head); }
-    else if (unlocked) { title('烈焰风暴'); await attack(rules, head, enemies, 100, '火', true, false, target => addThreeheadDot(rules, head, target, 'mother_burn', 2)); }
+    else if (unlocked) { title('烈焰风暴'); await attack(rules, head, enemies, 'mother_flame_storm', '火', true, false, target => addThreeheadDot(rules, head, target, 'mother_burn', 2)); }
     else { title('红莲撕咬'); await attack(rules, head, [defaultVictim], 120, '火', false, true); }
   } else {
     if (slot === 1) { title('风之障壁'); for (const ally of living) rules.add(ally, 'mother_wind_barrier', 25, 3, head); }
-    else if (slot === 2) { title('狂岚呼啸'); await attack(rules, head, enemies, 65, '风', true, false); await settleThreeheadDots(rules, enemies, true); }
-    else if (slot === 3) { title('裂空风涡'); await attack(rules, head, enemies, 70, '风', true, false, target => increaseThreeheadDots(rules, target, 1)); }
-    else if (unlocked) { title('卷蚀罡风'); await attack(rules, head, enemies, 95, '风', true, false, target => addThreeheadDot(rules, head, target, 'mother_wind_erosion', 2)); }
-    else { title('裂空风涡'); await attack(rules, head, enemies, 70, '风', true, false, target => increaseThreeheadDots(rules, target, 1)); }
+    else if (slot === 2) { title('狂岚呼啸'); await attack(rules, head, enemies, 'mother_gale_howl', '风', true, false); await settleThreeheadDots(rules, enemies, true); }
+    else if (slot === 3) { title('裂空风涡'); await attack(rules, head, enemies, 'mother_rift_vortex', '风', true, false, target => increaseThreeheadDots(rules, target, 1)); }
+    else if (unlocked) { title('卷蚀罡风'); await attack(rules, head, enemies, 'mother_eroding_gale', '风', true, false, target => addThreeheadDot(rules, head, target, 'mother_wind_erosion', 2)); }
+    else { title('裂空风涡'); await attack(rules, head, enemies, 'mother_rift_vortex', '风', true, false, target => increaseThreeheadDots(rules, target, 1)); }
   }
   if (living.length === 1) {
     head.cooldowns.mother_solo_actions = Number(head.cooldowns.mother_solo_actions ?? 0) + 1;

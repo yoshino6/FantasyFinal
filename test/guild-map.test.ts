@@ -48,6 +48,8 @@ test('集结区只使用免费登记额度，旧贡献兑换指令无法购买�
     return [[]];
   } };
   const mocks: Record<string, any> = {
+    'node:crypto': { randomUUID: () => 'test-service-use' },
+    './character-operation.service': { recordCharacterOperation: async () => {} },
     '../database/pool': { withTransaction: (work: any) => work(connection) },
     './opening.service': { openingCharacter: async () => ({ id: 1, adventurer_registered: 1 }), grantOpeningItem: async (_connection: any, _id: number, item: string) => grants.push(item) },
     './guild-context': { requireGuildService: async () => ({ code: 'baina_town' }) },

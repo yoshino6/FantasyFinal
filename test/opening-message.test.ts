@@ -263,7 +263,7 @@ test('四地大厅统一五行九键，第四行后勤与休息，服务归入�
   const converted=(format:any)=>converter.createButtonsData(format.value.find((v:any)=>v.type==='BT.group').value);
   const labels=(format:any)=>converted(format).rows.map((r:any)=>r.buttons.map((b:any)=>[b.render_data.label,b.render_data.style,b.action.type,b.action.enter]));
   let hub:keyof typeof openingHubs='world_tree';
-  const guild=load('src/response/opening-guild.ts',{alemonjs:{Format},'../game/opening-world.config':{openingHubs},'../game/opening-guild.config':{rootGuildPeople,guildLessons},'../game/opening-guild.service':{openingGuildView:async()=>({hub:openingHubs[hub],code:hub,at:true,inside:true,place:{},services:[{code:'meal',uses:3},{code:'repair',uses:1},{code:'supplies',uses:150}],maps:[],world:{leaf_route_open:1}})}});
+  const guild=load('src/response/opening-guild.ts',{alemonjs:{Format},'../game/opening-world.config':{openingHubs},'../game/opening-guild.config':{rootGuildPeople,guildLessons},'../game/opening-guild.service':{openingGuildView:async()=>({hub:openingHubs[hub],code:hub,at:true,inside:true,place:{},services:[{code:'meal',uses:3},{code:'repair',uses:1},{code:'supplies',uses:150}],maps:[],mapRepair:{granted:[],stored:[],unavailable:[]},world:{leaf_route_open:1}})}});
   for(hub of Object.keys(openingHubs) as (keyof typeof openingHubs)[])for(const area of ['大厅','次页']){
     const page=await guild.openingGuildFormat('u',area);
     assert.deepEqual(labels(page),labels(baina));

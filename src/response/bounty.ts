@@ -136,6 +136,8 @@ export const taskFormat = async (qqUserId: string, category?: TaskCategory, page
   const currentPage = Math.min(Math.max(1, page), totalPages);
   const items = filtered.slice((currentPage - 1) * 5, currentPage * 5);
   const markdown = Format.createMarkdown().addTitle('任务栏').addNewline().addNewline();
+  const leafRoute=await(await import('../game/leaf-route.service')).leafRouteView(qqUserId);
+  if(leafRoute.started&&!leafRoute.claimed)markdown.addText('【航务支线】'+leafRoute.scene.title+'（'+leafRoute.stage+'/12）\n').addButton('继续浮叶航路',{data:'/浮叶航路',autoEnter:false}).addNewline().addNewline();
   if (category || normalizedKeyword) markdown.addText(`${category ? `分类：${category}` : '分类：全部'}${normalizedKeyword ? `｜搜索：${normalizedKeyword}` : ''}\n\n`);
   if (!items.length) markdown.addText(normalizedKeyword ? '没有找到符合条件的任务。' : category ? `当前没有${category}任务。` : '当前没有已接受的任务。');
   for (const [index, task] of items.entries()) {

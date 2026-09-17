@@ -111,6 +111,7 @@ export const keepsakeAction=async(user:string,code:string,action:string,value=''
     const hub=openingHubs[destination as OpeningHubCode];
     const [world]=await c.execute<RowDataPacket[]>('SELECT leaf_route_open FROM opening_world WHERE id=1');
     if(destination==='floating_leaf_town'&&!world[0]?.leaf_route_open)throw new Error('浮叶航路尚未开放，次数已为你保留。');
+    if(destination==='floating_leaf_town')await(await import('./leaf-route.service')).assertLeafPermit(c,Number(character.id));
     const [points]=await c.execute<RowDataPacket[]>('SELECT r.id,n.pos_x,n.pos_y,n.pos_z FROM map_regions r JOIN map_npcs n ON n.region_id=r.id WHERE r.code=? AND n.code=? AND r.is_enabled=1 AND r.is_owner_only=0',[destination,hub.guild]);
     if(!points[0])throw new Error('目的地暂时停航，本次不扣次数。');
     const p=points[0];await c.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=?,pos_z=? WHERE id=?',[p.id,p.pos_x,p.pos_y,p.pos_z,id]);

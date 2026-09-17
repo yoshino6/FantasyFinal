@@ -10,6 +10,7 @@ import { advancedProfessionActiveSkillCodes, worldTreeAdvancedProfessions } from
 import { spiritSummonerActiveSkillCodes, spiritSummonerPassiveDescription } from '../game/spirit-summoner.config';
 import { blindBoxBlueprints, constructionRecipes, constructionValueByCode, deviceCodes, workshopBlueprints } from '../game/deconstructor-catalog';
 import { regionalBossComponentDefinitions } from '../game/regional-boss-components.config';
+import { regionalV2Resistance, regionalV2Skills, regionalV2SkillProfiles } from '../game/regional-boss-v2.config';
 import { initializeResidentSkills } from './resident-skills';
 import { initializeCombatSkillBalance } from './combat-skill-balance';
 import { migrateEquipmentVitalAffixes } from './equipment-vital-affixes';
@@ -1254,6 +1255,14 @@ const seedWorldSurfaceContent = async (pool: Pool) => {
     }
   }
   // 多部位 Boss 的部位仅能在战斗开始时由本体临时生成；不进入地图怪物池，也没有奖励。
+  for (const [code, resistance] of Object.entries(regionalV2Resistance)) await pool.execute('UPDATE monster_templates SET element_resistance_json=? WHERE code=?', [JSON.stringify(resistance), code]);
+  for (const [code, name, category, element] of regionalV2Skills) {
+    const profile = regionalV2SkillProfiles[name];
+    await pool.execute(`INSERT INTO skill_definitions (code,name,category,damage_type,skill_kind,element,range_type,target_scope,mana_cost,cooldown_turns,power,learn_cost,max_level,description)
+      VALUES (?,?,?,?,?,?,?,?,0,0,?,99,1,?) ON DUPLICATE KEY UPDATE name=VALUES(name),category=VALUES(category),damage_type=VALUES(damage_type),element=VALUES(element),target_scope=VALUES(target_scope),power=VALUES(power),description=VALUES(description)`,
+    [code, name, category, category === 'physical' ? '打击' : element, category === 'utility' ? '强化' : category === 'magic' ? '元素' : '武技', element, '远程', profile && profile.ratio < 1 ? '全体' : '单体', profile?.power ?? 0, `区域首领专属招式「${name}」。随本场状态进入对应工序，群攻按防御后比例结算。`]);
+  }
+  // 旧部位模板仅保留给已开始的兼容会话；V2 不再生成，不物理删除历史模板。
   // 真实 HP 与战斗属性会从本体最终面板派生，此处的基础属性只用于模板完整性和鉴识耐性。
   for (const component of regionalBossComponentDefinitions) {
     await pool.execute(`INSERT INTO monster_templates
@@ -2694,15 +2703,7 @@ export const initializeSchema = async (pool: Pool) => {
     WHERE r.code='dark_forest'
     ON DUPLICATE KEY UPDATE spawn_weight=VALUES(spawn_weight)`);
   await pool.query(`DELETE p FROM map_monster_pools p JOIN map_regions r ON r.id=p.region_id JOIN monster_templates t ON t.id=p.monster_template_id WHERE r.code='dark_forest_deep' AND t.code NOT IN ('goblin_vanguard','goblin_warrior','goblin_archer','goblin_bomber','goblin_daredevil','goblin_drummer','goblin_shieldbearer','goblin_trapper','goblin_priest','goblin_mage','goblin_assassin','goblin_earthshaper','goblin_colonel','goblin_king')`);
-  await pool.query(`INSERT INTO map_monster_pools (region_id,monster_template_id,spawn_weight)
-    SELECT r.id,t.id,CASE t.code
-      WHEN 'goblin_vanguard' THEN 22 WHEN 'goblin_warrior' THEN 18 WHEN 'goblin_archer' THEN 16 WHEN 'goblin_bomber' THEN 10
-      WHEN 'goblin_daredevil' THEN 9 WHEN 'goblin_drummer' THEN 8 WHEN 'goblin_shieldbearer' THEN 7 WHEN 'goblin_trapper' THEN 6
-      WHEN 'goblin_priest' THEN 5 WHEN 'goblin_mage' THEN 4 WHEN 'goblin_assassin' THEN 3 WHEN 'goblin_earthshaper' THEN 2
-      WHEN 'goblin_colonel' THEN 0 ELSE 0 END
-    FROM map_regions r JOIN monster_templates t ON t.code IN ('goblin_vanguard','goblin_warrior','goblin_archer','goblin_bomber','goblin_daredevil','goblin_drummer','goblin_shieldbearer','goblin_trapper','goblin_priest','goblin_mage','goblin_assassin','goblin_earthshaper','goblin_colonel')
-    WHERE r.code='dark_forest_deep'
-    ON DUPLICATE KEY UPDATE spawn_weight=VALUES(spawn_weight)`);  await pool.query(`INSERT INTO map_resource_pools (region_id,item_id,spawn_density)
+  await pool.query(`INSERT INTO map_resource_pools (region_id,item_id,spawn_density)
     SELECT r.id,i.id,CASE i.code WHEN 'living_wood' THEN 0.01000 WHEN 'meteor_iron' THEN 0.00100 WHEN 'star_copper' THEN 0.00010 WHEN 'moon_silver' THEN 0.00001 END
     FROM map_regions r JOIN item_definitions i ON i.code IN ('living_wood','meteor_iron','star_copper','moon_silver')
     WHERE r.code='dark_forest'
@@ -2927,9 +2928,9 @@ export const initializeSchema = async (pool: Pool) => {
     ('mother_fire_roar','炎怒嘶吼','utility','无','强化','火','自身',0,0,0,99,99,1,0,'红莲之首双攻提高25%，持续三回合。'),
     ('mother_flame_storm','烈焰风暴','magic','火','元素','火','全体',0,0,100,99,99,1,0,'红莲之首生命低于50%后解锁，攻击全体并施加2层蛇母灼烧。'),
     ('mother_wind_barrier','风之障壁','utility','无','强化','风','全体',0,0,0,99,99,1,0,'所有存活蛇首受到的最终伤害降低25%，持续三回合。'),
-    ('mother_gale_howl','狂岚呼啸','magic','风','元素','风','全体',0,0,65,99,99,1,0,'攻击全体并立即结算一次所有持续伤害，不消耗层数与持续时间。'),
+    ('mother_gale_howl','狂岚呼啸','magic','风','元素','风','全体',0,0,65,99,99,1,0,'攻击全体并立即结算一次持续伤害，随后消耗蛇母中毒、灼烧、风蚀各1层；持续时间不变。'),
     ('mother_rift_vortex','裂空风涡','magic','风','元素','风','全体',0,0,70,99,99,1,0,'攻击全体，并使已有蛇母中毒、灼烧、风蚀各增加1层。'),
-    ('mother_eroding_gale','卷蚀罡风','magic','风','元素','风','全体',0,0,95,99,99,1,0,'狂风之首生命低于50%后解锁，攻击全体并施加2层风蚀。'),
+    ('mother_eroding_gale','卷蚀罡风','magic','风','元素','风','全体',0,0,95,99,99,1,0,'狂风之首生命低于50%后解锁，攻击全体并施加2层风蚀；每层使持续伤害增幅25%，最多5层。'),
     ('mother_disaster_wind','灾劫焚风','magic','风','元素','风','全体',0,0,100,99,99,1,0,'多首存活且任一首低于20%时蓄势；若未被击杀中断，下次共同攻击并按存活蛇首施加三类状态各3层。'),
     ('uzz_skeleton_call','骷髅召唤','utility','无','召唤','暗','全体',120,0,0,99,99,1,0,'召唤一名骷髅狂战士与一名骷髅神箭手；与死灵召唤共用行动槽计时。'),
     ('uzz_necromantic_call','死灵召唤','utility','无','召唤','暗','全体',145,0,0,99,99,1,0,'二阶段召唤一名痛苦幽魂与一名骷髅法师，完全替代骷髅召唤。'),
@@ -2954,13 +2955,13 @@ export const initializeSchema = async (pool: Pool) => {
     ('goblin_player_crossrush','交错突刺','physical','刺击','刺击','无','近战',90,2,116,2,1,5,10,'以交错步法发动突刺，并短暂扰乱目标站姿。'),
     ('goblin_player_sawtooth','裂甲战斩','physical','斩击','斩击','无','近战',90,2,116,2,1,5,10,'以凌厉战斩撕开目标防线。'),
     ('goblin_player_forest_bolt','穿风箭','physical','刺击','刺击','无','远程',90,2,116,2,1,5,10,'借风势射出一支穿刺箭，暴露目标破绽。'),
-    ('goblin_player_volatile_flask','爆燃术','magic','火','元素','火','全体',160,3,126,2,1,5,10,'向敌阵投出不稳定的火焰弹，引发火属性爆燃。'),
+    ('goblin_player_volatile_flask','爆燃术','magic','火','元素','火','全体',160,3,76,2,1,5,10,'向敌阵投出不稳定的火焰弹，引发火属性爆燃。'),
     ('goblin_player_bloodrush','血怒冲锋','physical','刺击','刺击','无','近战',160,3,126,2,1,5,10,'燃起血性发起冲锋，命中后短暂提升自身攻势。'),
     ('goblin_player_spiked_net','倒刺束网','physical','打击','打击','无','远程',160,3,126,2,1,5,10,'抛出带倒刺的束网打击并禁锢目标。'),
     ('goblin_player_bone_prayer','暗影祷言','magic','暗','元素','暗','远程',90,2,116,2,1,5,10,'以暗属性祷言动摇目标防守。'),
     ('goblin_player_soulscorch','魂焰烙印','magic','火','元素','火','远程',210,4,134,2,1,5,10,'以魂焰灼烧目标，留下持续的灼伤。'),
     ('goblin_player_silentthroat','影袭处决','physical','刺击','刺击','无','近战',160,3,126,2,1,5,10,'从死角刺向要害，使目标短暂陷入脆弱。'),
-    ('goblin_player_rockfall','崩岩术','magic','土','元素','土','全体',260,5,112,2,1,5,10,'唤起根脉下的岩层崩落，对敌阵造成土属性范围伤害。')
+    ('goblin_player_rockfall','崩岩术','magic','土','元素','土','全体',260,5,90,2,1,5,10,'唤起根脉下的岩层崩落，对敌阵造成土属性范围伤害。')
     ON DUPLICATE KEY UPDATE name=VALUES(name),category=VALUES(category),damage_type=VALUES(damage_type),skill_kind=VALUES(skill_kind),element=VALUES(element),range_type=VALUES(range_type),mana_cost=VALUES(mana_cost),cooldown_turns=VALUES(cooldown_turns),power=VALUES(power),learn_cost=VALUES(learn_cost),upgrade_cost=VALUES(upgrade_cost),max_level=VALUES(max_level),power_per_level=VALUES(power_per_level),description=VALUES(description)`);
   // 玩家技能不再限制主手或副手的武器类型；已有角色同步清除旧的适配武器要求。
   await pool.query("UPDATE skill_definitions SET required_weapon_type=NULL WHERE category IN ('physical','magic','utility')");
@@ -3089,9 +3090,10 @@ export const initializeSchema = async (pool: Pool) => {
       WHEN code IN ('shield_counter','thunder_lance') THEN 110
       WHEN code IN ('arcane_bolt','bite_slash','charge','thorn_stab','mist_step_slash','sanctified_bolt','sweeping_slash','wind_blade') THEN 110
       WHEN code IN ('heavy_strike','armor_break','fireball','toxic_edge','bloodletting','shell_breaker','spore_bolt','echo_shock','vine_bolt','moonlight_bolt','guard_break','arcane_shackle','ember_burst','piercing_thrust','goblin_player_crossrush','goblin_player_sawtooth','goblin_player_forest_bolt','goblin_player_bone_prayer') THEN 120
-      WHEN code IN ('frost_bind','goblin_player_volatile_flask','goblin_player_bloodrush','goblin_player_spiked_net','goblin_player_silentthroat') THEN 130
+      WHEN code='goblin_player_volatile_flask' THEN 76
+      WHEN code IN ('frost_bind','goblin_player_bloodrush','goblin_player_spiked_net','goblin_player_silentthroat') THEN 130
       WHEN code='goblin_player_soulscorch' THEN 140
-      WHEN code='goblin_player_rockfall' THEN 112
+      WHEN code='goblin_player_rockfall' THEN 90
       ELSE power
     END
     WHERE code IN ('heavy_strike','armor_break','arcane_bolt','fireball','toxic_edge','frost_bind','bloodletting','jump_strike','bite_slash','charge','shell_breaker','spore_bolt','echo_shock','thorn_stab','mist_step_slash','vine_bolt','moonlight_bolt','war_cry','purifying_light','warrior_taunt','shield_counter','guard_break','arcane_shackle','ember_burst','healing_prayer','blessing_aegis','mana_benediction','sanctified_bolt','sweeping_slash','piercing_thrust','wind_blade','thunder_lance','goblin_player_crossrush','goblin_player_sawtooth','goblin_player_forest_bolt','goblin_player_volatile_flask','goblin_player_bloodrush','goblin_player_spiked_net','goblin_player_bone_prayer','goblin_player_soulscorch','goblin_player_silentthroat','goblin_player_rockfall')`);
@@ -3436,6 +3438,16 @@ export const initializeSchema = async (pool: Pool) => {
       SET c.current_region_id=forest.id,c.pos_x=0,c.pos_y=-60,c.pos_z=0 WHERE dungeon.code='dark_forest_dungeon'`);
   }
   await seedWorldSurfaceContent(pool);
+  // 新建库时必须先创建哥布林模板，再写区域刷新池，否则首轮初始化只有剧情 Boss、没有练级怪。
+  await pool.query(`INSERT INTO map_monster_pools (region_id,monster_template_id,spawn_weight)
+    SELECT r.id,t.id,CASE t.code
+      WHEN 'goblin_vanguard' THEN 22 WHEN 'goblin_warrior' THEN 18 WHEN 'goblin_archer' THEN 16 WHEN 'goblin_bomber' THEN 10
+      WHEN 'goblin_daredevil' THEN 9 WHEN 'goblin_drummer' THEN 8 WHEN 'goblin_shieldbearer' THEN 7 WHEN 'goblin_trapper' THEN 6
+      WHEN 'goblin_priest' THEN 5 WHEN 'goblin_mage' THEN 4 WHEN 'goblin_assassin' THEN 3 WHEN 'goblin_earthshaper' THEN 2
+      WHEN 'goblin_colonel' THEN 0 ELSE 0 END
+    FROM map_regions r JOIN monster_templates t ON t.code IN ('goblin_vanguard','goblin_warrior','goblin_archer','goblin_bomber','goblin_daredevil','goblin_drummer','goblin_shieldbearer','goblin_trapper','goblin_priest','goblin_mage','goblin_assassin','goblin_earthshaper','goblin_colonel')
+    WHERE r.code='dark_forest_deep'
+    ON DUPLICATE KEY UPDATE spawn_weight=VALUES(spawn_weight)`);
   // 怪物经验按品阶定基数，之后每跨 10 级按 1.2 倍累乘，避免等级导致的线性经验差距过大。
   await pool.query(`UPDATE monster_templates
     SET experience=ROUND((CASE monster_class
@@ -3604,33 +3616,33 @@ export const initializeSchema = async (pool: Pool) => {
     ('bulwark_shieldwall_advance','盾墙推进','physical','中位','打击','打击','无','近战','单体',110,2,115,99,99,1,0,'以盾墙压向目标，造成115%物理伤害，并使自身获得12%伤害减免2回合。'),
     ('bulwark_vicarious_guard','代偿守护','utility','中位','无','防护','无','自身','自身',190,3,0,99,99,1,0,'为生命比例最低的队友施加2回合守护：其首次受到的单体伤害有35%转移给你；自身同时获得2回合20%伤害减免，按转移前伤害获得守势，单次最多30。'),
     ('bulwark_immovable_mountain','不动如山','utility','中位','无','防护','无','自身','自身',300,4,0,99,99,1,0,'稳住架势，自身获得35%伤害减免2回合。'),
-    ('bulwark_bastion_judgment','壁垒裁决','physical','中位','斩击','斩击','无','近战','全体',650,7,145,99,99,1,0,'以壁垒之势横扫全体敌人，造成145%物理伤害。'),
-    ('warlord_quake_command','震地号令','physical','中位','打击','打击','无','近战','全体',110,2,105,99,99,1,0,'震地号令冲击全体敌人，造成105%物理伤害并降低20%速度2回合。'),
+    ('bulwark_bastion_judgment','壁垒裁决','physical','中位','斩击','斩击','无','近战','全体',650,7,105,99,99,1,0,'以壁垒之势横扫全体敌人，造成105%物理伤害。'),
+    ('warlord_quake_command','震地号令','physical','中位','打击','打击','无','近战','全体',110,2,80,99,99,1,0,'震地号令冲击全体敌人，造成80%物理伤害并降低20%速度2回合。'),
     ('warlord_break_formation','破阵军令','physical','中位','刺击','刺击','无','近战','单体',190,3,130,99,99,1,0,'以军令直取阵眼，造成130%物理伤害并使目标易伤12% 2回合。'),
     ('warlord_triumph_banner','凯旋战旗','utility','中位','无','祝福','无','自身','全体',300,4,0,99,99,1,0,'展开凯旋战旗，使全队物理与魔法攻击提高10%，持续2回合。'),
-    ('warlord_hundred_battle_sweep','百战横扫','physical','中位','斩击','斩击','无','近战','全体',650,7,170,99,99,1,0,'以百战之势横扫全体敌人，造成170%物理伤害。'),
+    ('warlord_hundred_battle_sweep','百战横扫','physical','中位','斩击','斩击','无','近战','全体',650,7,105,99,99,1,0,'以百战之势横扫全体敌人，造成105%物理伤害。'),
     ('ironbreaker_armor_rend','裂甲斩','physical','中位','斩击','斩击','无','近战','单体',110,2,150,99,99,1,0,'劈开护甲，造成150%物理伤害并降低目标防御15% 2回合。'),
     ('ironbreaker_breaking_pursuit','断势追斩','physical','中位','斩击','斩击','无','近战','单体',110,2,135,99,99,1,0,'顺着破绽追斩，造成135%物理伤害，并使自身暴击提高15% 2回合。'),
     ('ironbreaker_gap_execution','绝隙处决','physical','中位','斩击','斩击','无','近战','单体',300,4,185,99,99,1,0,'瞄准防线空隙处决，造成185%物理伤害并令目标易伤15% 2回合。'),
     ('ironbreaker_steel_flash','断钢一闪','physical','中位','斩击','斩击','无','近战','单体',650,8,245,99,99,1,0,'以一闪断开钢铁防线，造成245%物理伤害。'),
     ('elementalist_cinderfrost_cycle','炽霜交替','magic','中位','魔法','元素','火','远程','单体',60,1,125,99,99,1,0,'以炽火与霜息交替轰击，造成125%魔法伤害并留下火或冰印记4回合。'),
-    ('elementalist_storm_chain','雷暴导链','magic','中位','魔法','元素','雷','远程','全体',190,3,105,99,99,1,0,'引出连锁雷暴，对全体敌人造成105%雷系魔法伤害并留下雷印记4回合。'),
+    ('elementalist_storm_chain','雷暴导链','magic','中位','魔法','元素','雷','远程','全体',190,3,80,99,99,1,0,'引出连锁雷暴，对全体敌人造成80%雷系魔法伤害并留下雷印记4回合。'),
     ('elementalist_fourfold_resonance','四相共鸣','magic','中位','魔法','元素','风','远程','单体',300,4,150,99,99,1,0,'汇聚火、冰、风、雷的共鸣，造成150%风系魔法伤害并刷新元素印记、加入风印记。'),
-    ('elementalist_sky_sequence','天穹序列','magic','中位','魔法','元素','风','远程','全体',650,7,145,99,99,1,0,'展开天穹序列，对全体敌人造成145%魔法伤害并引爆全部元素印记。'),
+    ('elementalist_sky_sequence','天穹序列','magic','中位','魔法','元素','风','远程','全体',650,7,100,99,99,1,0,'展开天穹序列，对全体敌人造成100%魔法伤害并引爆全部元素印记。'),
     ('summoner_contract_spirit','契约灵体','utility','中位','无','灵契','无','自身','自身',300,4,0,99,99,1,0,'唤起场上所有存活灵体的契约回响，使其持续时间延长1回合。'),
     ('summoner_spirit_tether','灵线牵引','utility','中位','无','灵契','无','自身','自身',110,2,0,99,99,1,0,'牵引场上存活灵体立刻各行动一次。'),
     ('summoner_returning_veil','返魂帷幕','utility','中位','无','灵契','无','自身','全体',300,4,0,99,99,1,0,'以返魂帷幕护住全队，获得10%伤害减免2回合，并净化可净化异常。'),
-    ('summoner_star_pact','群星契约','utility','中位','无','灵契','无','自身','自身',650,7,0,99,99,1,0,'消耗100灵契，需场上至少1只存活契灵。全部存活契灵超载3次行动，完成第3次超载行动后退场。'),
+    ('summoner_star_pact','群星契约','utility','中位','无','灵契','无','自身','自身',650,7,0,99,99,1,0,'消耗100灵契，需场上至少1只存活契灵。全部存活契灵超载3次行动；攻击灵改为50%魔攻系数的范围攻击，完成第3次超载行动后退场。'),
     ('spellblade_arcane_thrust','秘法突刺','magic','中位','魔法','能量','能量','近战','单体',60,1,120,99,99,1,0,'战斗法师的物理技能以物攻+魔攻×35%为攻击基础，且不超过实际魔攻；以近身秘法突刺造成120%魔法伤害。'),
     ('spellblade_phase_guard','相位格挡','utility','中位','无','能量','能量','自身','自身',190,3,0,99,99,1,0,'错开来袭轨迹，自身获得25%伤害减免与20%速度，持续1回合。'),
-    ('spellblade_spellbreak_whirl','破法回旋','magic','中位','魔法','能量','能量','近战','全体',190,3,120,99,99,1,0,'旋开破法刃环，对全体敌人造成120%魔法伤害并施加易伤10% 2回合。'),
+    ('spellblade_spellbreak_whirl','破法回旋','magic','中位','魔法','能量','能量','近战','全体',190,3,80,99,99,1,0,'旋开破法刃环，对全体敌人造成80%魔法伤害并施加易伤10% 2回合。'),
     ('spellblade_starfire_duel','星火决斗','magic','中位','魔法','元素','火','近战','单体',650,7,210,99,99,1,0,'以星火锁定决斗目标，造成210%魔法伤害，并获得20%伤害减免2回合。'),
     ('nightblade_shadow_mark','暗影标定','physical','中位','刺击','刺击','暗','近战','单体',110,2,105,99,99,1,0,'以暗影标定目标，造成105%物理伤害并施加追猎3回合；施法者下一次攻击伤害提高20%。'),
     ('nightblade_gap_stab','背隙连刺','physical','中位','刺击','刺击','无','近战','单体',60,1,125,99,99,1,0,'沿破绽连刺，造成125%物理伤害，并提高自身暴击15% 2回合。'),
     ('nightblade_crescent_throat','残月割喉','physical','中位','刺击','刺击','暗','近战','单体',300,4,175,99,99,1,0,'以残月般的利刃割喉，造成175%物理伤害并施加2回合40%降疗，使受到的治疗量降低40%。'),
     ('nightblade_silent_finale','无声终章','physical','中位','刺击','刺击','暗','近战','单体',650,8,230,99,99,1,0,'在无声中完成终结，造成230%物理伤害，并获得50%伤害减免1回合。'),
     ('venomancer_serpent_kiss','蛇吻','physical','中位','刺击','刺击','暗','近战','单体',60,1,105,99,99,1,0,'以毒刃刺入目标，造成105%物理伤害并施加3回合剧毒。普通目标每层每回合损失5%最大生命、最多5层；首领每层最多1.5%、最多3层有效。'),
-    ('venomancer_corrosion_mist','腐蚀雾','magic','中位','魔法','元素','暗','远程','全体',190,3,90,99,99,1,0,'释放腐蚀雾，对全体敌人造成90%魔法伤害，并使物理与魔法防御各降低8% 2回合；已中毒目标额外叠加一层剧毒。'),
+    ('venomancer_corrosion_mist','腐蚀雾','magic','中位','魔法','元素','暗','远程','全体',190,3,75,99,99,1,0,'释放腐蚀雾，对全体敌人造成75%魔法伤害，并使物理与魔法防御各降低8% 2回合；已中毒目标额外叠加一层剧毒。'),
     ('venomancer_venom_burst','毒血引爆','magic','中位','魔法','元素','暗','远程','单体',300,4,165,99,99,1,0,'引爆渗入伤口的毒血，造成165%魔法伤害并结算剩余剧毒总伤害的60%（首领40%，单次最多首领最大生命的6%），再保留一层剧毒1回合。'),
     ('venomancer_thousand_throat','万毒封喉','magic','中位','魔法','元素','暗','远程','单体',650,7,160,99,99,1,0,'以万毒封住要害，造成160%魔法伤害，叠满3层剧毒并施加2回合60%降疗（首领30%）。'),
     ('ranger_grapple_trap','钩索陷阱','physical','中位','刺击','刺击','无','远程','单体',190,3,80,99,99,1,0,'布下钩索陷阱，造成80%物理伤害，并以50%基础概率束缚目标1回合。'),
@@ -3648,7 +3660,7 @@ export const initializeSchema = async (pool: Pool) => {
     ('dawn_morning_mark','晨星烙印','magic','中位','魔法','元素','光','远程','单体',60,1,125,99,99,1,0,'以晨星烙印照向目标，造成125%光魔法伤害并施加易伤20% 2回合。'),
     ('dawn_exorcism_word','驱邪裁词','magic','中位','魔法','元素','光','远程','单体',190,3,135,99,99,1,0,'以驱邪裁词轰击目标，造成135%光魔法伤害并降低其20%速度2回合。'),
     ('dawn_judgment_litany','审判连祷','magic','中位','魔法','元素','光','远程','单体',300,4,165,99,99,1,0,'以审判连祷裁定目标，造成165%光魔法伤害并施加易伤25% 2回合。'),
-    ('dawn_daybreak_decree','破晓宣告','magic','中位','魔法','元素','光','远程','全体',650,7,150,99,99,1,0,'宣告破晓，对全体敌人造成150%光魔法伤害。')
+    ('dawn_daybreak_decree','破晓宣告','magic','中位','魔法','元素','光','远程','全体',650,7,100,99,99,1,0,'宣告破晓，对全体敌人造成100%光魔法伤害。')
     ON DUPLICATE KEY UPDATE name=VALUES(name),category=VALUES(category),tier=VALUES(tier),damage_type=VALUES(damage_type),skill_kind=VALUES(skill_kind),element=VALUES(element),range_type=VALUES(range_type),target_scope=VALUES(target_scope),mana_cost=VALUES(mana_cost),cooldown_turns=VALUES(cooldown_turns),power=VALUES(power),learn_cost=VALUES(learn_cost),upgrade_cost=VALUES(upgrade_cost),max_level=VALUES(max_level),power_per_level=VALUES(power_per_level),description=VALUES(description)`);
   // 旧版岩印记在重启时原地迁移为雷印记，确保现有数据库与正在持续的效果记录一并切换。
   await pool.query(`UPDATE effect_definitions SET code='element_mark_thunder',name='雷印记',description='持续4回合；可由天穹序列引爆为破障。' WHERE code='element_mark_earth'`);
@@ -3771,6 +3783,9 @@ export const initializeSchema = async (pool: Pool) => {
   await (await import('./achievements')).seedAchievementProfiles(pool);
   await migrateEquipmentVitalAffixes(pool, recalculateCharacterStats);
   await (await import('./skill-access')).initializeSkillAccess(pool);
+  await (await import('./active-folio-skills')).initializeActiveFolioSkills(pool);
+  await (await import('./leaf-route')).initializeLeafRoute(pool);
   await refreshShopStocks(pool);
   await (await import('./finance')).initializeFinance(pool);
+  await (await import('./map-descriptions')).initializeMapDescriptions(pool);
 };

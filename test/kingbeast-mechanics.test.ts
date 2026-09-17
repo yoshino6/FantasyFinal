@@ -53,7 +53,7 @@ test('共生、永久狂暴与王车易位使用设计中的乘算倍率', () =>
   assert.deepEqual(kingbeastCombatMultipliers(unit(3, 'guard', { kingbeast_symbiosis: 1 })), { attack: 1, defense: .75, accuracy: 1, speed: 1, tenacity: 1 });
   assert.deepEqual(kingbeastCombatMultipliers(unit(4, 'spearman', { kingbeast_symbiosis: 1 })), { attack: .75, defense: 1, accuracy: 1, speed: 1, tenacity: 1 });
   assert.deepEqual(kingbeastCombatMultipliers(unit(1, 'king', { royal_beast_enrage: 1, kingbeast_castling_attack: 1 })), { attack: 1.56, defense: 1, accuracy: 1.2, speed: 1.15, tenacity: 1.3 });
-  assert.equal(kingbeastCoreDamageMultiplier(unit(2, 'dragon', { kingbeast_castling_turns: 3 }), true), .536);
+  assert.ok(Math.abs(kingbeastCoreDamageMultiplier(unit(2, 'dragon', { kingbeast_castling_turns: 3 }), true) - .6) < 1e-10);
 });
 
 test('王旗电令按5回合冷却提供2次各自行动的30%命中与速度强化', () => {
@@ -67,8 +67,8 @@ test('哈巴龙硬皮与国王雷铸王袍形成互补物魔承伤，并与阶�
   assert.equal(kingbeastPassiveDamageMultiplier(dragon, 'magic'), 1.30);
   assert.equal(kingbeastPassiveDamageMultiplier(king, 'physical'), 1.30);
   assert.equal(kingbeastPassiveDamageMultiplier(king, 'magic'), .70);
-  assert.equal(kingbeastCoreDamageMultiplier(dragon, true, 'physical'), .3752);
-  assert.equal(kingbeastCoreDamageMultiplier(king, true, 'magic'), .469);
+  assert.ok(Math.abs(kingbeastCoreDamageMultiplier(dragon, true, 'physical') - .42) < 1e-10);
+  assert.ok(Math.abs(kingbeastCoreDamageMultiplier(king, true, 'magic') - .525) < 1e-10);
   assert.match(kingbeastPassiveSummary(dragon), /硬皮/);
   assert.match(kingbeastPassiveSummary(king), /雷铸王袍/);
 });

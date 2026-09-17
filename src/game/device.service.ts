@@ -5,6 +5,7 @@ import { assertCombatLoadoutMutable } from './combat-loadout-lock.service';
 import { randomUUID } from 'node:crypto';
 import { recordCharacterOperation } from './character-operation.service';
 import type { InventorCapability } from './hidden-device-protocol';
+import { aoeDescription, aoeSkillPower } from './aoe-damage.config';
 
 export type DeviceTargetScope = 'self' | 'ally' | 'enemy' | 'all_allies' | 'all_enemies' | 'any';
 export type ActiveDeviceSkill = { code: string; name: string; description: string; energyCost: number; cooldownTurns: number; targetScope: DeviceTargetScope; power?: number; effect?: string; inventor?: InventorCapability };
@@ -30,6 +31,10 @@ export const activeDeviceDefinitions: ActiveDeviceDefinition[] = [
     { code: 'reactor_thermal_share', name: '热能转供', description: '友方伤害提高 20%，持续 2 回合；若为解构师，其异械各恢复 10 点充能。', energyCost: 50, cooldownTurns: 0, targetScope: 'ally', effect: 'reactor_thermal_share' }
   ] }
 ];
+for (const definition of activeDeviceDefinitions) for (const skill of definition.skills) {
+  skill.description = aoeDescription(`device_${skill.code}`, skill.description);
+  if (skill.power !== undefined) skill.power = aoeSkillPower(`device_${skill.code}`, skill.power);
+}
 export const activeDeviceDefinitionByCode = new Map(activeDeviceDefinitions.map(definition => [definition.code, definition]));
 export const activeDeviceSkillByCode = new Map(activeDeviceDefinitions.flatMap(definition => definition.skills.map(skill => [skill.code, { ...skill, deviceCode: definition.code }] as const)));
 

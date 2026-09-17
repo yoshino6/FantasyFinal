@@ -34,6 +34,7 @@ export const hasMappedTravelRoute = (areas: MappedTravelArea[], owned: ReadonlyS
 };
 
 export const assertMappedTravelRoute = async (connection: PoolConnection, characterId: number, partyId: number | undefined, start: Point, target: Point, targetRegionId: number) => {
+  await(await import('./leaf-route.service')).assertLeafDestination(connection,characterId,targetRegionId,partyId);
   const [members] = partyId
     ? await connection.execute<(RowDataPacket & { character_id: number })[]>('SELECT character_id FROM party_members WHERE party_id=?', [partyId])
     : [[{ character_id: characterId }]];
@@ -50,8 +51,11 @@ export const assertMappedTravelRoute = async (connection: PoolConnection, charac
     held.get(regionId)!.add(Number(map.character_id));
   }
   const owned = new Set([...held].filter(([, holders]) => holders.size === memberIds.length).map(([regionId]) => regionId));
-  if (!owned.has(targetRegionId)) throw new Error('尚未持有目标坐标所在区域的地图，无法前往。');
+  // 试航只开放镇内走动，临时票不生成可交易地图，也不替代永久许可。
+  const[trial]=await connection.execute<RowDataPacket[]>(`SELECT q.character_id FROM player_leaf_route_progress q JOIN characters c ON c.id=q.character_id JOIN map_regions r ON r.id=c.current_region_id WHERE q.stage IN (11,12) AND r.code='floating_leaf_town' AND r.id=? AND c.id IN (${memberIds.map(()=>'?').join(',')})`,[targetRegionId,...memberIds]);
+  if(trial.length===memberIds.length)owned.add(targetRegionId);
+  if (!owned.has(targetRegionId)) throw new Error('尚未持有目标坐标所在区域的地图，无法前往。请打开主线任务补领本阶段通行地图；地图在家园仓库时需先取回背包，其他地图可到公会商店购买。');
   const [areas] = await connection.execute<(RowDataPacket & MappedTravelArea)[]>(`SELECT a.*,r.danger_level,r.is_enabled,r.is_owner_only FROM map_region_areas a
     JOIN map_regions r ON r.id=a.region_id WHERE ? BETWEEN a.min_z AND a.max_z ORDER BY r.danger_level DESC`, [start.z]);
-  if (!hasMappedTravelRoute(areas, owned, start, target, targetRegionId)) throw new Error('起点与目标之间缺少连续有效的地图，无法使用前往；可以先获取沿途地图，或从界门传送。');
+  if (!hasMappedTravelRoute(areas, owned, start, target, targetRegionId)) throw new Error('起点与目标之间缺少连续有效的地图，无法使用前往；请打开主线任务补领本阶段地图，其他沿途地图可到公会商店购买，也可以从界门传送。');
 };

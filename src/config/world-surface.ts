@@ -1,3 +1,5 @@
+import { regionalV2Rotation } from '../game/regional-boss-v2.config';
+
 export type WorldSurfaceRegion = {
   code: string;
   name: string;
@@ -38,7 +40,7 @@ export const worldSurfaceRegions: WorldSurfaceRegion[] = [
 ];
 
 const group = (regionCode: string, materialCode: string, entries: Array<[string, string, number, WorldSurfaceMonster['monsterClass'], string[], string, string, string?]>): WorldSurfaceMonster[] =>
-  entries.map(([code, name, level, monsterClass, skillCodes, weakness, resistance, element]) => ({ code, name, regionCode, level, monsterClass, skillCodes, materialCode, weakness, resistance, element }));
+  entries.map(([code, name, level, monsterClass, skillCodes, weakness, resistance, element]) => ({ code, name, regionCode, level, monsterClass, skillCodes: regionalV2Rotation[code] ?? skillCodes, materialCode, weakness, resistance, element }));
 
 export const worldSurfaceMonsters: WorldSurfaceMonster[] = [
   ...group('worldtree_meadow', 'root_heart', [

@@ -264,7 +264,7 @@ test('真实冒险适配器：独立克隆库中的交涉、开战先手、结�
         }
       } finally { rules.weightedRecipient = originalRecipient; talent.talentDropPack = originalPack; }
     });
-    await t.test('哥布林国王避战后原班倒地随从复活，召唤物和已结算目标不复活', async () => {
+    await t.test('哥布林国王避战后倒地龙复活，旧随从退场，召唤物和已结算目标不复活', async () => {
       await c.execute("UPDATE characters SET current_region_id=?,pos_x=0,pos_y=0,pos_z=0,activity_status='active' WHERE id=?", [chars[0].current_region_id, id]);
       const groupId = `kingbeast-test-${randomUUID()}`;
       const court = async (code: string, role: string, extra: object[] = []) => {
@@ -274,16 +274,18 @@ test('真实冒险适配器：独立克隆库中的交涉、开战先手、结�
         return monsterId;
       };
       const king = await court('goblin_king', 'king'); const guard = await court('goblin_royal_guard', 'guard');
+      const dragon = await court('habadragon', 'dragon', [{ code: 'boss_test' }]);
+      await c.execute('UPDATE monster_spawns SET current_hp=0,defeated_at=NOW() WHERE id=?', [dragon]);
       const summoned = await court('goblin_royal_spearman', 'spearman', [{ code: 'summoned', name: '召唤' }]);
       const rewarded = await court('goblin_royal_guard', 'guard');
       const other = await spawn();
       await c.execute(`UPDATE monster_spawns SET current_hp=0,defeated_at=NOW() WHERE id IN (?,?,?,?)`, [guard, summoned, rewarded, other]);
       await c.execute("INSERT INTO monster_reward_settlements (spawn_id,channel,session_id) VALUES (?,'combat',?)", [rewarded, randomUUID()]);
       await game.encounterAction(user, king, 'avoid');
-      const [rows] = await c.execute<RowDataPacket[]>(`SELECT id,current_hp,defeated_at FROM monster_spawns WHERE id IN (?,?,?,?)`, [guard, summoned, rewarded, other]);
+      const [rows] = await c.execute<RowDataPacket[]>(`SELECT id,current_hp,defeated_at FROM monster_spawns WHERE id IN (?,?,?,?,?)`, [dragon, guard, summoned, rewarded, other]);
       const byId = new Map(rows.map(row => [Number(row.id), row]));
-      assert.equal(byId.get(guard)?.defeated_at, null); assert.ok(Number(byId.get(guard)?.current_hp) > 0);
-      for (const monsterId of [summoned, rewarded, other]) assert.ok(byId.get(monsterId)?.defeated_at);
+      assert.equal(byId.get(dragon)?.defeated_at, null); assert.ok(Number(byId.get(dragon)?.current_hp) > 0);
+      for (const monsterId of [guard, summoned, rewarded, other]) assert.ok(byId.get(monsterId)?.defeated_at);
     });
   } finally {
     if (/^ff_neg_game_[a-f0-9]{32}$/.test(name) && name !== db.database) await c.query(`DROP DATABASE IF EXISTS \`${name}\``);

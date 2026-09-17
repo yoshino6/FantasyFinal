@@ -30,7 +30,7 @@ export const advancedMentorFormat = async (qqUserId: string, mentorCode: string)
 
 /** 任务只呈现当前可执行的一步，避免提前剧透未开启的流程。 */
 export const advancedProfessionDetailFormat = async (qqUserId: string, mentorCode: string) => {
-  const view = await advancedProfessionView(qqUserId, mentorCode); const { profession, active, activeQuest, completedCode, retrainRemainingSeconds, ridgeCore } = view;
+  const view = await advancedProfessionView(qqUserId, mentorCode); const { profession, active, activeQuest, completedCode, retrainRemainingSeconds, materialQuantity } = view;
   const stage = Number(active?.stage ?? 0); const completed = completedCode === profession.code;
   const activeProfession = activeQuest ? advancedProfessionByCode(activeQuest.profession_code) : undefined;
   const currentProfession = registeredAdvancedProfessionByCode(completedCode ?? '');
@@ -55,11 +55,11 @@ export const advancedProfessionDetailFormat = async (qqUserId: string, mentorCod
   } else if (stage === 1) {
     if (currentProfession) markdown.addBlockquote(`重新二转进行中：在击败导师前，你仍以【${currentProfession.name}】的职业、技能与被动战斗。`).addNewline().addNewline();
     markdown.addText(`当前试炼：${profession.first.title}`).addNewline().addNewline().addBlockquote(profession.first.story).addNewline().addNewline()
-      .addText(`目标：在岩脊山麓击败【${profession.first.targetText}】 ${Number(active.story_kills)}/${profession.first.requiredKills} 次。`);
+      .addText(`目标：在${profession.route.name}击败【${profession.first.targetText}】 ${Number(active.story_kills)}/${profession.first.requiredKills} 次。`).addNewline().addNewline().addBlockquote(`导师为你核对${profession.route.name}及沿途地图。已开放且缺少的地图直接补入背包，不扣登记额度或贡献点；仓库已有的请取回。`);
     buttons.addRow().addButton('提交 第一段见闻', `/推进二转 ${profession.code}`, { type: 'command', autoEnter: true, style: 'blue' });
   } else if (stage === 2) {
     markdown.addText(`当前试炼：${profession.second.title}`).addNewline().addNewline().addBlockquote(profession.second.story).addNewline().addNewline()
-      .addText(`目标：击败【${profession.second.targetText}】 ${Number(active.proof_kills)}/${profession.second.requiredKills} 次；提交岩脊核心 ${ridgeCore}/${profession.second.materialCount}。`);
+      .addText(`目标：在${profession.route.name}击败【${profession.second.targetText}】 ${Number(active.proof_kills)}/${profession.second.requiredKills} 次；提交${profession.route.materialName} ${materialQuantity}/${profession.second.materialCount}。`);
     buttons.addRow().addButton('提交 第二段凭证', `/提交二转凭证 ${profession.code}`, { type: 'command', autoEnter: true, style: 'blue' });
   } else if (stage === 3) {
     markdown.addText('当前试炼：导师试炼').addNewline().addNewline().addBlockquote(profession.trial.description).addNewline().addNewline()

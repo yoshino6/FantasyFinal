@@ -1,11 +1,14 @@
+import { folioSkillByCode } from './active-folio-skills.config';
 /** 域民百技内容表；基础/下位/中位专精上限10/20/40，机制次数不随专精成长。 */
 export type ResidentSkill = {
   id: string; code: string; name: string; category: 'physical' | 'magic' | 'utility' | 'passive';
   tier: '基础' | '下位' | '中位'; mana: number; cooldown: number; chant: number;
   scope: 'self' | 'ally' | 'enemy' | 'allies' | 'enemies'; element: string; power: number; description: string; damageType: string; ranged: boolean;
 };
+/** 万象扩散的副目标保留原技能60%伤害；主目标仍按100%结算。 */
+export const residentExpansionSecondaryScale = .6;
 export const residentSkills: readonly ResidentSkill[] = [
-  {"id":"A01","code":"resident_a01","name":"万象扩散","category":"utility","tier":"中位","mana":200,"cooldown":4,"chant":0,"scope":"self","element":"无","power":0,"description":"3回合内下一次单体攻击技能扩散至敌方全体；副目标伤害65%、附带控制成功率减半。仅消耗一次施法资源，不能扩散额外行动。","damageType":"奥术","ranged":false},
+  {"id":"A01","code":"resident_a01","name":"万象扩散","category":"utility","tier":"中位","mana":200,"cooldown":4,"chant":0,"scope":"self","element":"无","power":0,"description":"3回合内下一次单体攻击技能扩散至敌方全体；副目标伤害60%、附带控制成功率减半。仅消耗一次施法资源，不能扩散额外行动。","damageType":"奥术","ranged":false},
   {"id":"A02","code":"resident_a02","name":"三相附锋","category":"utility","tier":"中位","mana":220,"cooldown":4,"chant":0,"scope":"ally","element":"无","power":0,"description":"为选定友方附加风、雷或火。3回合内，每回合首次直接命中额外造成该次直击50%的对应元素伤害，最多3次；附伤不触发状态、追击或专精。","damageType":"奥术","ranged":true},
   {"id":"A03","code":"resident_a03","name":"风切回环","category":"magic","tier":"下位","mana":110,"cooldown":2,"chant":0,"scope":"enemy","element":"风","power":105,"description":"对单体造成 105% 风伤；目标带减速、目盲或恐惧时额外 +25% 技能威力。","damageType":"风","ranged":true},
   {"id":"A04","code":"resident_a04","name":"雷鸣导体","category":"magic","tier":"下位","mana":180,"cooldown":3,"chant":0,"scope":"enemy","element":"雷","power":100,"description":"对单体造成 100% 雷伤并施加【导电】2 回合；下一次风/雷直接伤害额外 +20%，随后移除导电。","damageType":"雷","ranged":true},
@@ -47,7 +50,7 @@ export const residentSkills: readonly ResidentSkill[] = [
   {"id":"E08","code":"resident_e08","name":"净化余烬","category":"passive","tier":"下位","mana":0,"cooldown":0,"chant":0,"scope":"self","element":"无","power":0,"description":"成功驱散敌方增益或清除友方减益后，自身下一次攻击技能 +12% 伤害；每回合一次。","damageType":"奥术","ranged":false},
   {"id":"F01","code":"resident_f01","name":"法镜返照","category":"utility","tier":"中位","mana":225,"cooldown":4,"chant":0,"scope":"ally","element":"无","power":0,"description":"为选定友方反射下一次魔法直击的75%，自身仍承受伤害。窗口3回合，仅一次；反射不触发吸血、专精或追击，不能反射二次伤害。","damageType":"奥术","ranged":false},
   {"id":"F02","code":"resident_f02","name":"铁门半开","category":"utility","tier":"下位","mana":143,"cooldown":3,"chant":0,"scope":"ally","element":"无","power":0,"description":"为选定友方提供3回合24%物理减伤；期间被近战命中时，使攻击者减速20%1回合。未选择友方时给自己。","damageType":"奥术","ranged":false},
-  {"id":"F03","code":"resident_f03","name":"余火护幕","category":"utility","tier":"中位","mana":192,"cooldown":4,"chant":0,"scope":"ally","element":"无","power":0,"description":"为选定友方提供相当于其最大HP14%的护盾，持续3回合。盾破后以受护者魔攻对敌方全体结算55%火魔法威力；反击不触发连锁。","damageType":"奥术","ranged":false},
+  {"id":"F03","code":"resident_f03","name":"余火护幕","category":"utility","tier":"中位","mana":192,"cooldown":4,"chant":0,"scope":"ally","element":"无","power":0,"description":"为选定友方提供相当于其最大HP14%的护盾，持续3回合。盾破后以受护者49%魔攻威力对敌方全体造成火魔法伤害；反击不触发连锁。","damageType":"奥术","ranged":false},
   {"id":"F04","code":"resident_f04","name":"借伤誓约","category":"utility","tier":"中位","mana":225,"cooldown":4,"chant":0,"scope":"ally","element":"无","power":0,"description":"指定友方首次受到的单体直接伤害有 30% 转移给自己；自己得到 2 回合 15% 减伤。","damageType":"奥术","ranged":true},
   {"id":"F05","code":"resident_f05","name":"相位假身","category":"utility","tier":"中位","mana":225,"cooldown":4,"chant":0,"scope":"ally","element":"无","power":0,"description":"为选定友方提供3回合相位假身：下一次直伤降低60%后移除；若规避量超过受护者最大HP10%，恢复其最大MP10%。未选择友方时给自己。回蓝不随专精增长。","damageType":"奥术","ranged":false},
   {"id":"F06","code":"resident_f06","name":"反冲铆钉","category":"physical","tier":"基础","mana":44,"cooldown":1,"chant":0,"scope":"enemy","element":"无","power":80,"description":"造成 80% 打击伤害；自身有护盾时额外造成护盾当前值 20% 的伤害，随后护盾减少同等数值。","damageType":"打击","ranged":false},
@@ -110,5 +113,6 @@ export const residentSkills: readonly ResidentSkill[] = [
   {"id":"M07","code":"resident_m07","name":"临界传薪","category":"passive","tier":"中位","mana":0,"cooldown":0,"chant":0,"scope":"self","element":"无","power":0,"description":"自身首次被击败前，若有友方存活，则给全体友方施加 1 回合 20% 减伤和 15% 伤害；每场一次。","damageType":"奥术","ranged":false},
   {"id":"M08","code":"resident_m08","name":"无界演算","category":"passive","tier":"中位","mana":0,"cooldown":0,"chant":0,"scope":"self","element":"无","power":0,"description":"每场战斗开始时，从尚未链接的魔潮暴走、法枯壁、负印收束、独行校正、伤口狂意、不熄余烬中随机演算一种，获得其40%数值效果2回合；不复制行动、免死或控制。","damageType":"奥术","ranged":false},
 ];
-export const residentSkillByCode = (code: string) => residentSkills.find(skill => skill.code === code || skill.id === code);
+// 复用规则技能执行入口，但商店技能不并入residentSkills，避免污染切磋抽取池。
+export const residentSkillByCode = (code: string) => residentSkills.find(skill => skill.code === code || skill.id === code) ?? folioSkillByCode(code);
 export const residentPassiveFamily = (code: string) => residentSkillByCode(code)?.category === 'passive' ? code.slice(0, -2) : undefined;

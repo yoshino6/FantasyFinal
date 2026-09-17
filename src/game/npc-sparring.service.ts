@@ -85,6 +85,8 @@ export const sparInsightChance = (result: 'victory' | 'defeat' | 'escaped' | 'ti
 };
 
 export const finishNpcSparring = async (connection: PoolConnection, sessionId: string, result: 'victory' | 'defeat' | 'escaped' | 'timeout') => {
+  const leaf=await(await import('./leaf-route-battle.service')).finishLeafRouteBattle(connection,sessionId,result);
+  if(leaf)return leaf;
   const worldtree=await(await import('./worldtree-witness.service')).finishAesonDuel(connection,sessionId,result);
   if(worldtree)return worldtree;
   const lamplight=await(await import('./lamplight-battle.service')).finishLamplightBattle(connection,sessionId,result);

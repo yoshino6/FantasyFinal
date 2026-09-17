@@ -1,4 +1,5 @@
 import { combatUnitLabel } from './combat-unit-label';
+import { aoeSkillPower } from './aoe-damage.config';
 import { tenacityContest } from './combat-math';
 import type { AutomatonState } from './automaton';
 import { automatonPanel } from './automaton';
@@ -179,7 +180,8 @@ export const actAutomaton=async(rules:CombatRules,p:AutomatonCombatant)=>{
       if(id==='S029'&&enemy.hp/enemy.hpMax<.25)bonus*=1.25;
       const last=self.state.memory.lastAttackType,current=magic?'magic':'physical';if(skill&&equipped(p,'S009')&&last&&last!==current)bonus*=1.25;
       if(equipped(p,'N024')&&self.state.memory.element===element&&Number(self.state.memory.elementCount)>=2)bonus*=1.2;
-      const didHit=await rules.strike(self,enemy,(id==='S031'&&enemy!==target?2.1:power)*100,element,magic,false,false,1,{skill:Boolean(skill),single:area===1,penetration:Math.min(50,penetration+(skill&&enemy===target&&equipped(p,'S012')?20:0)),hitPenalty:-(id==='N016'?8:id==='N054'?15:id==='N057'?25:0)-(skill&&equipped(p,'S006')?10:0),finalMultiplier:bonus,shieldMultiplier:id==='N006'?1.4:1});
+      const areaCode = `automaton_${id}`;
+      const didHit=await rules.strike(self,enemy,aoeSkillPower(areaCode,power*100,id === 'S031' && enemy !== target),element,magic,false,false,1,{skill:Boolean(skill),single:area===1,penetration:Math.min(50,penetration+(skill&&enemy===target&&equipped(p,'S012')?20:0)),hitPenalty:-(id==='N016'?8:id==='N054'?15:id==='N057'?25:0)-(skill&&equipped(p,'S006')?10:0),finalMultiplier:bonus,shieldMultiplier:id==='N006'?1.4:1});
       hit ||= didHit;const dealt=hpBefore-enemy.hp;totalHpDamage+=dealt;p.battle.threat[enemy.key]=(p.battle.threat[enemy.key]??0)+dealt+(shieldBefore-rules.shieldValue(enemy));
       if(id==='N030')p.battle.threat[enemy.key]!+=2*dealt;
 

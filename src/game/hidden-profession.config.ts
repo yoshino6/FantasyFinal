@@ -14,6 +14,12 @@ export const hiddenProfessions = [
 export const hiddenProfession = (code: string) => hiddenProfessions.find(p => p.code === code || p.name === code || p.npc === code);
 const skill = (profession: HiddenProfessionCode, suffix: string, name: string, button: string, mana: number, resource: number, cooldown: number, power: number, description: string, tier: HiddenSkill['tier'] = '中位'): HiddenSkill =>
   ({ code: 'hidden_' + suffix, name, button, profession, tier, mana, resource, cooldown, power, description });
+/** 御器攻击实际分段威力；归宗按每段直接威力计算防御。 */
+export const hiddenWeaponAttackPower = (code: string, weaponCount: number) => code === 'hidden_weapon_strike'
+  ? 125
+  : code === 'hidden_weapon_finale'
+    ? [0, 124, 83, 68][weaponCount] ?? 0
+    : [0, 165, 110, 90][weaponCount] ?? 0;
 export const hiddenSkills: HiddenSkill[] = [
   skill('magical_scholar','mix','粒子调配','调配',90,0,1,100,'选择2～4颗粒子，首颗为主材。按数量、类别、范围计算MP和冷却；失败友伤35%，异常不额外减弱。'),
   skill('magical_scholar','catalyst','双路催化','催化',110,0,2,0,'选择稳定或激发，调整下一次调配或奇釜的结果概率，保留后续2个完整回合。'),
@@ -22,7 +28,7 @@ export const hiddenSkills: HiddenSkill[] = [
   skill('weapon_master','weapon_strike','离手御击','御击',60,0,1,125,'选择阵内一器125%器具攻击；有效命中+20器鸣，异型御击再+10。','下位'),
   skill('weapon_master','weapon_guard','回环护阵','护阵',150,0,3,0,'友方生命盾=8%最大生命+施法者双防30%，上限20%目标生命；首次吸收敌伤给施法者20器鸣。'),
   skill('weapon_master','weapon_combo','三器合锋','合锋',240,50,4,165,'选择1/2/3器，分别165%/每器110%/每器90%；各段独立结算防御与器性。'),
-  skill('weapon_master','weapon_finale','万器归宗','归宗',400,100,6,145,'全敌1/2/3器分别145%/每器95%/每器75%；只触发一次主位器性。'),
+  skill('weapon_master','weapon_finale','万器归宗','归宗',400,100,6,124,'全敌1/2/3器威力分别124%/每器83%/每器68%；各段直接计算防御，只触发一次主位器性。'),
   skill('inventor','overclock','异械超频','超频',90,0,2,0,'同一行动内启动1台异械，支付原生成本；伤害/治疗/盾最终×1.20，普通状态×1.10。'),
   skill('inventor','transfer','能源转供','转供',110,0,3,0,'兼容异械付40能量、收30；接收者补足能量后本次立即启动，仍支付完整原生费用。'),
   skill('inventor','synergy','双机协同','协同',220,50,4,100,'同次驱动两台不同异械，分别支付原生成本；伤害/治疗/盾投影90%，遵守能力与次数预算。'),

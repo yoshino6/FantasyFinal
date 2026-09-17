@@ -11,6 +11,7 @@ import { consumeInventory } from './inventory-binding';
 import { staminaMaxForRealm } from './constants';
 import { repairClaimedOpeningPack, grantOpeningProfessionWeapon } from './opening-pack.service';
 import { ensureRegistrationMapExchange, guildMapCatalog } from './guild-map.service';
+import { ensureProgressionMaps, ensureMapRegions, progressionMapReceipt } from './progression-map.service';
 
 const parse=(v:unknown):Record<string,any>=>typeof v==='string'?JSON.parse(v):(v??{}) as Record<string,any>;
 export const grantOpeningService=async(c:PoolConnection,id:number,code:string,uses:number)=>{
@@ -21,8 +22,9 @@ const useService=async(c:PoolConnection,id:number,code:string)=>{
   if(!result.affectedRows)throw new Error('这项免费服务已经使用完了。');
   await recordCharacterOperation(c,{characterId:id,kind:'opening.guild_service_used',source:{system:'opening_guild_service',id:randomUUID(),step:'used'},outcome:'核销',summary:`使用公会初行服务「${code}」`,detail:{serviceCode:code,usesConsumed:1}});
 };
-export const openingGuildView=async(user:string)=>{
-  const pool=await getPool();const character=await openingCharacter(pool,user);
+export const openingGuildView=async(user:string)=>withTransaction(async pool=>{
+  const character=await openingCharacter(pool,user,true);
+  const mapRepair=await ensureProgressionMaps(pool,Number(character.id));
   if(character.adventurer_registered)await ensureRegistrationMapExchange(pool,Number(character.id));
   let destination=String(character.region_code) as OpeningHubCode;
   if(!openingHubs[destination]){const[story]=await pool.execute<RowDataPacket[]>('SELECT destination_code FROM player_opening_stories WHERE character_id=?',[character.id]);destination=(story[0]?.destination_code??'world_tree') as OpeningHubCode;}
@@ -34,8 +36,8 @@ export const openingGuildView=async(user:string)=>{
   const[services]=await pool.execute<RowDataPacket[]>('SELECT code,uses FROM player_opening_services WHERE character_id=? AND uses>0',[character.id]);
   const world=await openingWorldFor(pool);
   const maps=await guildMapCatalog(pool);
-  return{hub,code:destination,at,inside:at&&(visits.length>0||destination==='baina_town'),place,services,maps,registered:Boolean(character.adventurer_registered),world};
-};
+  return{hub,code:destination,at,inside:at&&(visits.length>0||destination==='baina_town'),place,services,maps,registered:Boolean(character.adventurer_registered),world,mapRepair};
+});
 export const enterOpeningGuild=async(user:string,inside=true)=>withTransaction(async c=>{
   const character=await openingCharacter(c,user,true);await assertOpeningFree(c,Number(character.id));const context=await guildContextFor(c,Number(character.id));
   if(!inside){const [left]=await c.execute<any>('DELETE FROM player_opening_visits WHERE character_id=?',[character.id]);if(left.affectedRows)await recordCharacterOperation(c,{characterId:Number(character.id),kind:'opening.guild_left',source:{system:'opening_guild_visit',id:randomUUID(),step:'left'},outcome:'离开',summary:'离开初行公会',detail:{buildingCode:context.hub.guild}});return;}
@@ -50,6 +52,10 @@ export const enterOpeningGuild=async(user:string,inside=true)=>withTransaction(a
 export const openingGuildAction=async(user:string,action:string,value='')=>withTransaction(async c=>{
   const character=await openingCharacter(c,user,true);const id=Number(character.id);const context=await requireGuildService(c,id);
   if(character.adventurer_registered)await ensureRegistrationMapExchange(c,id);
+  if(action==='map_reclaim'){
+    if(!character.adventurer_registered)throw new Error('完成冒险者注册后，才能领取保底通行地图。');
+    return progressionMapReceipt(await ensureProgressionMaps(c,id));
+  }
   await repairClaimedOpeningPack(c,id);
   if(action==='pack')return '接引员核对了你当时选择的路线，缺少的礼包物品和服务额度已经补齐；此前领过的部分不会重复发放。';
   if(action==='profession_weapon'){
@@ -121,6 +127,7 @@ export const openingKeepsakes=async(user:string)=>{
 };
 export const openingTransport=async(user:string,destination:string)=>withTransaction(async c=>{
   const character=await openingCharacter(c,user,true);const context=await requireGuildService(c,Number(character.id));const target=openingHubs[destination as OpeningHubCode];
+  if(destination==='floating_leaf_town')await(await import('./leaf-route.service')).assertLeafPermit(c,Number(character.id));
   if(context.code==='floating_leaf_town')await(await import('./floating-leaf.service')).assertFloatingTourFreeAction(c,Number(character.id));
   if(context.code==='world_tree')await(await import('./worldtree-witness.service')).assertWorldtreeTourFreeAction(c,Number(character.id));
   const special=['floating_leaf_town','frost_dragon_inn'];
@@ -129,6 +136,7 @@ export const openingTransport=async(user:string,destination:string)=>withTransac
   const[places]=await c.execute<RowDataPacket[]>('SELECT r.id,n.pos_x,n.pos_y,n.pos_z FROM map_regions r JOIN map_npcs n ON n.region_id=r.id WHERE r.code=? AND n.code=? AND r.is_enabled=1 AND r.is_owner_only=0',[destination,target.guild]);
   if(!places[0])throw new Error('目的地暂时停航，请留在当前安全城镇。');
   const point=places[0];await c.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=?,pos_z=? WHERE id=?',[point.id,point.pos_x,point.pos_y,point.pos_z,character.id]);await c.execute('DELETE FROM player_opening_visits WHERE character_id=?',[character.id]);
+  await ensureMapRegions(c,Number(character.id),[destination]);
   await recordCharacterOperation(c,{characterId:Number(character.id),kind:'travel.guild_transport',source:{system:'guild_transport',id:randomUUID(),step:'arrived'},outcome:'抵达',summary:`乘公会接驳舱抵达${target.name}`,detail:{destinationCode:destination,destinationRegionId:Number(point.id)}});
   return `公会工作人员打开有护栏的接驳舱，确认行李安放妥当后启动线路。途中无需穿过野怪领地。\n\n舱门再次打开时，${target.name}的公会入口已经在眼前。`;
 });

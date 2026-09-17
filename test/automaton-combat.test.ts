@@ -22,6 +22,17 @@ test('全部 88 个主动与大招可独立结算，全部被动可装配',async
     assert(Number.isFinite(pet.unit.hp)&&Number.isFinite(pet.unit.mp),skill.id);
   }
 });
+test('三目标横扫使用78直接威力，只有一个敌人也不提高威力',async()=>{
+  for (const defense of [100, 1000, 10000]) {
+    const area=fixture(['N007']), single=fixture();
+    area.enemy.defense=single.enemy.defense=defense;
+    area.pet.battle.manual='N007';
+    await actAutomaton(area.rules,area.pet);
+    await single.rules.strike(single.pet.unit,single.enemy,78,'无',false,false,false,1,{skill:true,single:true});
+    assert.equal(100000-area.enemy.hp,100000-single.enemy.hp);
+  }
+});
+
 test('持续伤害每轮一次、每具机巧最多两种，不因额外行动重复结算',async()=>{
   const {rules,pet,enemy}=fixture(['N073','N074','N078']);
   for(const id of ['N073','N074','N078']){pet.battle.pet.equipped=[id];await actAutomaton(rules,pet);}

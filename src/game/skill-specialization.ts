@@ -1,3 +1,5 @@
+import { aoeSkillPower } from './aoe-damage.config';
+import { folioHasGrowth } from './active-folio-skills.config';
 import { talentByCode } from './talent.config';
 /** 主动专精每级固定倍率连乘，各方向按自身等级独立计费。 */
 export type Specialization = 'overcharge' | 'instant' | 'efficient' | 'potent';
@@ -44,7 +46,7 @@ export const skillSpecialization = (base: SpecializationBase, levels: SkillSpeci
   const manaFactor = manaPenaltyFactor * efficientFactor;
   const rawMana = Math.max(0, finite(base.mana_cost));
   return {
-    power: finite(base.power) * powerFactor,
+    power: aoeSkillPower(base.code, finite(base.power)) * powerFactor,
     // 原本有消耗的技能至少1MP；只在组合完所有专精后取整。
     mana: resourceTransfer ? 500 : rawMana > 0 ? Math.max(1, Math.ceil(rawMana * manaFactor - 1e-9)) : 0,
     cooldown: specializeTime(base.cooldown_turns, timeChange),
@@ -65,7 +67,7 @@ export const specializationOptions = (base: SpecializationBase, hasOrdinaryEffec
   if (['passive', 'bound'].includes(base.category) || base.code === 'appraisal' || base.code === 'machine_echo') return [];
   const options: Specialization[] = [];
   if (base.power > 0) options.push('overcharge');
-  if (base.code.startsWith('hidden_') && !['hidden_catalyst','hidden_overclock','hidden_transfer','hidden_debug','hidden_finale'].includes(base.code) || supportGrowth.has(base.code) || ordinaryGrowth.has(base.code) || controlGrowth.has(base.code) || hasOrdinaryEffect) options.push('potent');
+  if (folioHasGrowth(base.code) || base.code.startsWith('hidden_') && !['hidden_catalyst','hidden_overclock','hidden_transfer','hidden_debug','hidden_finale'].includes(base.code) || supportGrowth.has(base.code) || ordinaryGrowth.has(base.code) || controlGrowth.has(base.code) || hasOrdinaryEffect) options.push('potent');
   if (base.cooldown_turns > 0 || Number(base.chant_turns) > 0) options.push('instant');
   if (base.mana_cost > 0) options.push('efficient');
   return options;

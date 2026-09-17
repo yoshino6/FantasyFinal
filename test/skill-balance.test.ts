@@ -2,8 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { skillSpecialization, specializationMaximum, specializationOptions, specializeEffectValue, specializeEffectDuration, specializeControlChance, specializeTime, manaTransferCost } from '../src/game/skill-specialization';
 import { canDispelCombatEffect } from '../src/game/combat-dispel-policy';
-import { residentSkills, residentSkillByCode } from '../src/game/resident-skill.config';
+import { residentExpansionSecondaryScale, residentSkills, residentSkillByCode } from '../src/game/resident-skill.config';
 import { nativeSkillBalance } from '../src/game/combat-skill-balance.config';
+import { hiddenSkill, hiddenWeaponAttackPower } from '../src/game/hidden-profession.config';
+import { spiritEmberAttackScale } from '../src/game/advanced-resource.config';
+import { aoeDamageProfiles } from '../src/game/aoe-damage.config';
 import { passiveSpecializationFactor, residentScalablePassives } from '../src/game/passive-specialization';
 import { CombatRules, emptyRuleState, type RuleUnit } from '../src/game/combat-rule-registry';
 import { initializeCombatSkillBalance } from '../src/database/combat-skill-balance';
@@ -16,6 +19,18 @@ const fixture = (random = () => .01) => {
 };
 const cast = (f: ReturnType<typeof fixture>, id: string, target = f.target) => f.rules.cast(f.source, target, residentSkillByCode(id)!, residentSkillByCode(id)!.mana);
 const base = { code: 'test', tier: '中位', category: 'magic', power: 150, mana_cost: 300, cooldown_turns: 5, chant_turns: 1 };
+
+test('群攻使用直接威力，独立扩散机制保持原规则', () => {
+  for (const skill of nativeSkillBalance.filter(skill => skill.scope === '全体' && skill.power > 0)) {
+    assert.equal(skill.power, aoeDamageProfiles[skill.code]?.power, skill.code);
+  }
+  assert.equal(hiddenSkill('hidden_weapon_finale')!.power, 124);
+  for (const count of [1, 2, 3]) assert.equal(hiddenWeaponAttackPower('hidden_weapon_finale', count), Math.round(hiddenWeaponAttackPower('hidden_weapon_combo', count) * .75));
+  assert.equal(residentSkills.filter(skill => skill.scope === 'enemies' && skill.power > 0).length, 0);
+  assert.equal(residentExpansionSecondaryScale, .6);
+  assert.equal(spiritEmberAttackScale(false), .82);
+  assert.equal(spiritEmberAttackScale(true), .82);
+});
 
 test('零值时间以1为基数，累计整回合才生效，无等阶上限', () => {
   assert.equal(specializeTime(0, .99), 0); assert.equal(specializeTime(0, 1), 1);

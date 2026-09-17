@@ -48,18 +48,56 @@ test('切磋开战、操作、回合日志与结束日志统一标题，普通�
   assert.equal(title(presentation.finalBattleFormat('战斗<5>回合\n战斗结束。')), '战斗<5>回合');
 });
 
-test('BOSS阶段转场卡片完整展示描述、台词和阶段效果，同次连续变招合并为一条消息', () => {
+test('BOSS阶段转场只展示描述和台词，不揭示阶段数值机制', () => {
   const split = kingbeastPhaseTransition('split'); const castling = kingbeastPhaseTransition('castling');
   const single = presentation.bossPhaseTransitionFormat([split]); const singleText = rendered(single);
   assert.equal(title(single), 'BOSS阶段转换');
   assert.match(singleText, /第二阶段·王座分离/);
   assert.ok(singleText.includes(split.description));
   assert.ok(singleText.includes('【哥布林国王】“算了，我自己来！”'));
-  assert.ok(singleText.includes(`阶段效果：${split.effect}`));
+  assert.ok(!singleText.includes(split.effect));
   const chained = presentation.bossPhaseTransitionFormat([split, castling]); const chainedText = rendered(chained);
   assert.equal(title(chained), 'BOSS连续转场');
-  assert.equal((chainedText.match(/阶段效果：/g) ?? []).length, 2);
+  assert.equal((chainedText.match(/阶段效果：/g) ?? []).length, 0);
   assert.ok(chainedText.indexOf(split.title) < chainedText.indexOf(castling.title));
+});
+
+test('探索型BOSS面板隐藏被动、机制和高难词条，保留当前状态', () => {
+  const current = battle('pve');
+  Object.assign(current.targets[0]!, { hideBossMechanics: true, passiveSummary: '共生规则', mechanicSummary: '下一技能槽', randomEffects: ['难度规则'] });
+  const text = rendered(presentation.battleOperationFormat('', current));
+  assert.doesNotMatch(text, /共生规则|下一技能槽|难度规则/);
+  assert.match(text, /目盲/);
+  Object.assign(current.targets[0]!, { hideBossMechanics: false });
+  const normal = rendered(presentation.battleOperationFormat('', current));
+  assert.match(normal, /共生规则/);
+});
+
+test('全自动战斗在关键提示轮停止批量推进，正文不重复包含转场', async () => {
+  let calls = 0;
+  const result = { ended: false, waiting: false, log: '回合加转场', manualLog: '触发回合', bossTransitions: [kingbeastPhaseTransition('split')] };
+  const runtime = loadDeclarations('../src/response/adventure.ts', ['combatResultPresentation', 'hasBossPhaseTransitions', 'resolveFullAutoBattle'], {
+    resolvePartyAutoBattleActions: async () => { calls++; return result; }
+  });
+  const full = await runtime.resolveFullAutoBattle('user');
+  assert.equal(calls, 1);
+  assert.equal(full.log, '触发回合');
+  assert.equal(full.result, result);
+});
+
+test('全自动先发送截至触发回合的正文，再发送转场，最后继续调度', async () => {
+  const sent: unknown[] = [];
+  const result = { ended: false, waiting: false, log: '正文', bossTransitions: [kingbeastPhaseTransition('split')] };
+  const runtime = loadDeclarations('../src/response/adventure.ts', ['combatResultPresentation', 'startAutoBattle'], {
+    withoutAutomatonInteractions: (message: unknown) => message,
+    isFullPartyAutoBattle: async () => true,
+    resolveFullAutoBattle: async () => ({ result, log: '触发回合' }),
+    fullAutoBattleFormat: (text: string) => text,
+    bossPhaseTransitionFormat: () => '转场',
+    scheduleAutoBattle: () => sent.push('继续')
+  });
+  await runtime.startAutoBattle({ send: async ({ format }: { format: unknown }) => sent.push(format) }, 'user');
+  assert.deepEqual(sent, ['触发回合', '转场', '继续']);
 });
 
 test('手动战斗先发送回合消息，再发送该回合的BOSS转场消息', async () => {
@@ -110,7 +148,8 @@ test('切磋操作按钮不出现道具，认输与友方瞄准在重开面板�
 
 test('空名称切磋内部标记不会被丢弃，实体化保留域民真名和快照属性', () => {
   const service = loadDeclarations('../src/game/adventure.service.ts', ['jsonObject', 'jsonArray', 'traitList', 'monsterCombatStats', 'materializeMonster'], {
-    isBossComponent: () => false, kingbeastRole: () => ''
+    isBossComponent: () => false, kingbeastRole: () => '', threeheadMotherStoredStats: () => undefined,
+    monsterIdentityCode: () => '', isRegionalV2: () => false
   });
   const traits = [{ code: 'npc_sparring', name: '', profile: { name: '漠北', stats: { hpMax: 1234, mpMax: 567, physicalAttack: 89, speed: 30 } } }];
   for (const traits_json of [traits, JSON.stringify(traits)]) {
@@ -162,6 +201,7 @@ const showSkill = async (overrides: Record<string, unknown> = {}) => {
   };
   const { skillDetailHandler } = loadDeclarations('../src/response/skill-list.ts', ['categoryNames', 'effectValueText', 'effectDescription', 'appendSkillEffectDetails', 'skillDetailHandler'], {
     Format, skillDetail: async () => skill,
+    talentByCode: new Map(), useTalentDetailMessage: () => ({}), folioSkillByCode: () => undefined, folioEffectPreview: () => [],
     balancedSkillDescription: (_code: string, text: string) => text,
     specializationPerLevelLines, specializationTotalLines, specializationNumberText, passiveSpecializationPerLevelLine, passiveSpecializationTotalLine,
     useEvent: () => [{ current: { UserId: 'test' } }], useRoute: () => [{ param: () => 1 }],

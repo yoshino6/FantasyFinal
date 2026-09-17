@@ -1,3 +1,4 @@
+import { aoeDamageProfiles, aoeDescription } from '../game/aoe-damage.config';
 import type { Pool, RowDataPacket } from 'mysql2/promise';
 import { nativeSkillBalance, balancedSkillDescription } from '../game/combat-skill-balance.config';
 
@@ -9,6 +10,12 @@ export const initializeCombatSkillBalance = async (pool: Pool) => {
     tier=?,mana_cost=?,base_mana_cost=CASE WHEN COALESCE(?,category)='physical' THEN ?/0.4 ELSE ? END,
     cooldown_turns=?,chant_turns=?,power=?,category=COALESCE(?,category),name=COALESCE(?,name),target_scope=COALESCE(?,target_scope),description=COALESCE(?,description)
     WHERE code=?`, [skill.tier, skill.mana, skill.category ?? null, skill.mana, skill.mana, skill.cooldown, skill.chant, skill.power, skill.category ?? null, skill.name ?? null, skill.scope ?? null, skill.description ?? (currentDescriptions.has(skill.code) ? balancedSkillDescription(skill.code, currentDescriptions.get(skill.code)!) : null), skill.code]);
+  // 覆盖未进入历史平衡表的独立Boss技能；重复初始化不会再次折扣威力。
+  const nativeCodes = new Set(nativeSkillBalance.map(skill => skill.code));
+  for (const [code, area] of Object.entries(aoeDamageProfiles)) if (!nativeCodes.has(code) && currentDescriptions.has(code)) {
+    await pool.execute("UPDATE skill_definitions SET power=?,target_scope='全体',description=? WHERE code=?",
+      [area.power, aoeDescription(code, currentDescriptions.get(code) ?? ''), code]);
+  }
   await pool.query("UPDATE skill_effects se JOIN skill_definitions s ON s.id=se.skill_id JOIN effect_definitions e ON e.id=se.effect_id SET se.value_override=60 WHERE s.code='shield_counter' AND e.code='shield_counter'");
   await pool.query("UPDATE skill_definitions SET skill_kind='奥术',damage_type='奥术',element=CASE WHEN element='能量' THEN '无' ELSE element END WHERE category='magic' AND (skill_kind='能量' OR element IN ('能量','无','无属性','') OR damage_type IN ('能量','奥术'))");
 };

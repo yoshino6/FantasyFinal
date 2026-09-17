@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { initializeSkillAccess } from '../src/database/skill-access';
-import { bookshopSkillCodes, guildContributionPrice, guildContributionReward, guildContributionSalePrice, guildSkillBookContributionPrice, guildSkillCodes, libraryFreeSkillCodes, tierLearningCost } from '../src/game/skill-access.config';
+import { bookshopSkillCodes, retiredBookshopSkillCodes, guildContributionPrice, guildContributionReward, guildContributionSalePrice, guildSkillBookContributionPrice, guildSkillCodes, libraryFreeSkillCodes, tierLearningCost } from '../src/game/skill-access.config';
 import { residentSkillByCode, residentSkills } from '../src/game/resident-skill.config';
 import { discoverLibrarySkillInTransaction } from '../src/game/library-skills.service';
 import { skillAllocationPlan } from '../src/game/skill-point-ledger.service';
 
-test('104 域民技能按 26/10/10 分流，免费馆藏全为基础且互不重叠', () => {
+test('104 域民技能保留公会26、馆藏10，书屋旧10本只下架不删定义', () => {
   assert.equal(residentSkills.length, 104);
-  assert.deepEqual([guildSkillCodes.length, bookshopSkillCodes.length, libraryFreeSkillCodes.length], [26, 10, 10]);
+  assert.deepEqual([guildSkillCodes.length, bookshopSkillCodes.length, libraryFreeSkillCodes.length], [26, 0, 10]);
+  assert.equal(retiredBookshopSkillCodes.length, 10);
+  assert.ok(retiredBookshopSkillCodes.every(code => residentSkillByCode(code)));
   const all = [...guildSkillCodes, ...bookshopSkillCodes, ...libraryFreeSkillCodes];
   assert.equal(new Set(all).size, all.length);
   assert.ok(libraryFreeSkillCodes.every(code => residentSkillByCode(code)?.tier === '基础'));
@@ -18,13 +20,13 @@ test('104 域民技能按 26/10/10 分流，免费馆藏全为基础且互不重
   assert.equal(guildContributionSalePrice(9), 0);
 });
 
-test('渠道初始化幂等写入 36 本技能书和阶位学习价，不动玩家 SP', async () => {
+test('旧渠道初始化写入公会26本，不让下架的书屋10本返架，不动玩家 SP', async () => {
   const statements: Array<{ sql: string; args: unknown[] }> = [];
   const pool = { query: async (sql: string) => { statements.push({ sql, args: [] }); return [[]]; }, execute: async (sql: string, args: unknown[] = []) => { statements.push({ sql, args }); return [[]]; } };
   await initializeSkillAccess(pool as never);
-  assert.equal(statements.filter(item => item.sql.startsWith('INSERT INTO item_definitions')).length, 36);
+  assert.equal(statements.filter(item => item.sql.startsWith('INSERT INTO item_definitions')).length, 26);
   assert.equal(statements.filter(item => item.sql.startsWith('INSERT INTO guild_shop_items')).length, 26);
-  assert.equal(statements.filter(item => item.sql.startsWith('INSERT INTO bookshop_items')).length, 10);
+  assert.equal(statements.filter(item => item.sql.startsWith('INSERT INTO bookshop_items')).length, 0);
   for (const offer of statements.filter(item => item.sql.startsWith('INSERT INTO guild_shop_items'))) {
     const code = String(offer.args[1]).replace(/^skill_book_/, '');
     assert.equal(offer.args[0], guildSkillBookContributionPrice(residentSkillByCode(code)!.tier, code)! * 10);

@@ -32,6 +32,8 @@ test('前往服务校验目标地图和全队共有的沿途地图', async () =>
   const areas = [area(1, 0, 0, 0, 0, 99), area(2, 1, 1, 0, 0), area(3, 2, 2, 0, 0, 99)];
   let maps = [{ character_id: 1, region_id: 3 }, { character_id: 2, region_id: 3 }];
   const connection = { execute: async (sql: string) => {
+    if (sql === 'SELECT code FROM map_regions WHERE id=?') return [[{ code: 'world_tree' }]];
+    if (sql.includes('FROM player_leaf_route_progress')) return [[]];
     if (sql.includes('FROM party_members')) return [[{ character_id: 1 }, { character_id: 2 }]];
     if (sql.includes('FROM player_inventory')) return [maps];
     if (sql.includes('FROM map_region_areas')) return [areas];

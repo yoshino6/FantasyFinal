@@ -25,12 +25,17 @@ import { grantOpeningAutomaton } from '../src/game/automaton.service';
 import { encumbrance } from '../src/game/encumbrance';
 import { initializeOpening } from '../src/database/opening';
 import { initializeOpeningChests } from '../src/database/opening-chests';
+import { auditOpeningProgression } from './helpers/opening-map-progression';
+import * as forestArrival from '../src/game/forest-arrival-content';
+import * as storyParty from '../src/game/story-party';
+import { monsterCombatStats } from '../src/game/adventure.service';
 
 // 使用实际 SQL 与部署库结构/静态配置的隔离副本；不复制玩家、故事或世界归属数据。
 // 完整数值重算和开化进度用固定替身，其余注册、故事、奖励、开箱、入会和凭物交接运行源码。
-test('隔离MySQL：四条新路线与四条旧存档路线的二十个分支，关闭改道、保护与重试', {skip:process.env.FF_OPENING_DB_TEST!=='1'},async t=>{
+test('隔离MySQL：七条新路线17个选择与旧C02的3个选择，地图进度、剧情队伍及重试', {skip:process.env.FF_OPENING_DB_TEST!=='1'},async t=>{
   const {parse}=createRequire(import.meta.url)('yaml'),config=parse(readFileSync('alemon.config.yaml','utf8'));
-  const db=config.FantasyFinal?.database??config.mysql,temporary=`ff_opening_journey_${randomUUID().replaceAll('-','')}`;
+  const mapAudit=process.env.FF_MAP_AUDIT_DB_TEST==='1';
+  const db=mapAudit?{host:'127.0.0.1',port:33317,user:'root',password:'',database:'ff_map_audit'}:config.FantasyFinal?.database??config.mysql,temporary=`ff_opening_journey_${randomUUID().replaceAll('-','')}`;
   const quoted=(s:string)=>'`'+s.replaceAll('`','``')+'`';
   const c=await createConnection({host:db.host,port:Number(db.port??3306),user:db.user,password:db.password,charset:'utf8mb4',connectTimeout:8000});let created=false;
   const tables=['players','characters','registration_sessions','registration_scene_records','character_hidden_attributes','player_skill_point_ledger','game_data_migrations',
@@ -41,10 +46,14 @@ test('隔离MySQL：四条新路线与四条旧存档路线的二十个分支，
   const summaries:any[]=[];
   try{
     await c.query(`CREATE DATABASE ${quoted(temporary)} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);created=true;
+    const [sourceTables]=await c.execute<RowDataPacket[]>('SELECT TABLE_NAME AS name FROM information_schema.TABLES WHERE TABLE_SCHEMA=?',[db.database]);
+    for(const table of sourceTables)if(!tables.includes(String(table.name)))tables.push(String(table.name));
     for(const table of tables)await c.query(`CREATE TABLE ${quoted(temporary)}.${quoted(table)} LIKE ${quoted(db.database)}.${quoted(table)}`);
     await c.query(`USE ${quoted(temporary)}`);
     for(const table of ['map_regions','map_region_areas','map_npcs','map_monster_pools','monster_templates','item_definitions','skill_definitions','profession_definitions','guild_restaurant_menu'])await c.query(`INSERT INTO ${quoted(table)} SELECT * FROM ${quoted(db.database)}.${quoted(table)}`);
+    await c.query(`INSERT INTO characters SELECT * FROM ${quoted(db.database)}.characters WHERE npc_code IN ('npc_forest_warrior','npc_forest_mage','npc_forest_priest')`);
     await initializeOpening(c as any);await initializeOpeningChests(c as any);
+    if(mapAudit)await c.execute("UPDATE map_regions SET is_enabled=1,is_owner_only=0 WHERE code IN ('world_tree','worldtree_meadow','dark_forest','dark_forest_deep','baina_town','floating_leaf_town','frost_dragon_inn','gravelwind_shore','ridge_foothills','eternal_arena')");
     const database={getPool:async()=>c,withTransaction:async(fn:any)=>{await c.beginTransaction();try{const value=await fn(c);await c.commit();return value;}catch(error){await c.rollback();throw error;}}};
     let random=()=>.5;
     const deps:Record<string,any>={'alemonjs':{},'node:crypto':{randomUUID},'../database/pool':database,'./talent.config':talentConfig,'./constants':constants,'./types':{attributes},
@@ -54,16 +63,22 @@ test('隔离MySQL：四条新路线与四条旧存档路线的二十个分支，
       './achievement-state':{updateAchievementState:async()=>{}},'./achievement-events':{recordAchievement:()=>{},takeAchievementEvents:()=>[]},
       './achievement.service':{achievementStatBonus:async()=>({}),flushAchievements:async()=>{}},
       './achievement-hooks':{achievementLevel:async()=>{}},
+      './character-operation.service':{recordCharacterOperation:async()=>{}},
+      './heart-question.service':{createHeartQuestionsForLevels:async()=>{},ensureHeartGrowth:async()=>{},heartGrowthAdjustment:async()=>({})},
+      './forest-arrival-content':forestArrival,
+      './story-party':storyParty,
+      './negotiation.service':{assertNoNegotiation:async()=>{}},
       './evolution.service':{repairEvolutionProgress:async()=>({corrected:false})}};
     const load=(file:string,names?:string[])=>{
       const ast=ts.createSourceFile(file,readFileSync(file,'utf8'),ts.ScriptTarget.Latest,true);
       const input=names?ast.statements.filter(s=>ts.isImportDeclaration(s)||ts.isVariableStatement(s)&&s.declarationList.declarations.some(d=>names.includes(d.name.getText(ast)))).map(s=>s.getText(ast)).join('\n')+'\n'+names.map(name=>`export {${name}};`).join('\n'):ast.text;
       const code=ts.transpileModule(input,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
-      const module={exports:{} as any};new Function('require','module','exports','recalculateCharacterStats',code)((name:string)=>new Proxy({},{get:(_target,key)=>deps[name]?.[key]}),module,module.exports,deps['./character.service']?.recalculateCharacterStats);return module.exports;
+      const module={exports:{} as any};new Function('require','module','exports','recalculateCharacterStats','monsterCombatStats',code)((name:string)=>new Proxy({},{get:(_target,key)=>deps[name]?.[key]}),module,module.exports,deps['./character.service']?.recalculateCharacterStats,monsterCombatStats);return module.exports;
     };
     deps['./adventure.service']=load('src/game/adventure.service.ts',['awardRealmExperience']);
     deps['./character.service']={recalculateCharacterStats:async()=>{},effectiveCharacterAttributes:async()=>Object.fromEntries(attributes.map(a=>[a,100]))};
     const story=deps['./opening.service']=load('src/game/opening.service.ts');
+    deps['./progression-map.service']=load('src/game/progression-map.service.ts');
     const guild=deps['./opening-guild.service']=load('src/game/opening-guild.service.ts');
     deps['./guild-context']=load('src/game/guild-context.ts');
     deps['./opening-progress.service']=load('src/game/opening-progress.service.ts');
@@ -100,7 +115,9 @@ test('隔离MySQL：四条新路线与四条旧存档路线的二十个分支，
       }
       const opening=await story.openingStatus(user);assert.equal(opening.route,routeCode);assert.equal(opening.state,'armed');
       const [skills]=await c.execute<RowDataPacket[]>('SELECT s.code,p.level FROM player_skills p JOIN skill_definitions s ON s.id=p.skill_id WHERE p.character_id=?',[character.id]);
-      assert.ok(skills.some(s=>s.code==='appraisal'&&s.level===1));assert.ok(skills.some(s=>s.code==='talent_combat_03'));assert.equal(character.skill_points,1);
+      assert.ok(skills.some(s=>s.code==='appraisal'&&s.level===1));
+      const [blessings]=await c.execute<RowDataPacket[]>('SELECT code FROM player_blessings WHERE character_id=?',[character.id]);
+      assert.ok(blessings.some(s=>s.code==='talent_combat_03'));assert.equal(character.skill_points,1);
       assert.equal(await registration.chooseGift(user,'A02'),null);
       return{user,id:Number(character.id),route,origin:character.current_region_id};
     };
@@ -121,7 +138,33 @@ test('隔离MySQL：四条新路线与四条旧存档路线的二十个分支，
       for(const route of content.openingRoutes)for(const branch of route.choices){
         const run=await prepare(route.code);let view=await toBranchEnd(run,branch.code);
         await assert.rejects(state.assertOpeningFree(c as any,run.id),/初行剧情/);
-        view=await endBranch(run,view);assert.equal(view.state,'arrival',route.code+branch.code);
+        view=await endBranch(run,view);
+        if(route.code==='F03'){
+          assert.ok(view.forestBattleChoice);
+          const forest=load('src/game/adventure.service.ts',['heartCorrections','characterFor','ensureActionAvailable','random','level32BossCodes','randomMonsterBaseAttributes','stringList','forestGuideChoice','grantTownMap','recordForestGuideStage','continueForestArrival','partyList','partyInfo','createParty','leaveParty','joinParty','transferPartyLeader','renameParty']);
+          await forest.forestGuideChoice(run.user,view.forestBattleChoice);
+          await story.completeOpeningForestBattleStart(run.user);
+          const party=await forest.partyInfo(run.user);assert.equal(party.story,true);assert.equal(party.members.length,3);
+          assert.ok(!(await forest.partyList()).some((p:any)=>p.id===party.id));
+          await assert.rejects(forest.leaveParty(run.user),/主线剧情队伍/);
+          await assert.rejects(forest.transferPartyLeader(run.user,0),/主线剧情队伍/);
+          await assert.rejects(forest.renameParty(run.user,'绕过主线'),/主线剧情队伍/);
+          const [outsiders]=await c.execute<RowDataPacket[]>('SELECT p.qq_user_id FROM players p JOIN characters ch ON ch.player_id=p.id WHERE ch.id<>? AND ch.adventurer_registered=1 LIMIT 1',[run.id]);
+          const outsider=String(outsiders[0].qq_user_id);
+          await assert.rejects(forest.joinParty(outsider,party.id),/主线剧情队伍/);
+          await assert.rejects(forest.joinParty(outsider,run.user),/主线剧情队伍/);
+          const ordinary=await forest.createParty(outsider,'正常玩家队伍');assert.ok((await forest.partyList()).some((p:any)=>p.id===ordinary));await forest.leaveParty(outsider);
+          // An old erroneous exit can leave only the NPC members; these must also stay private.
+          await c.execute('DELETE FROM party_members WHERE party_id=? AND character_id=?',[party.id,run.id]);
+          assert.ok(!(await forest.partyList()).some((p:any)=>p.id===party.id));
+          await c.execute('INSERT INTO party_members(party_id,character_id) VALUES (?,?)',[party.id,run.id]);
+          // Simulated forest-slime victory feeds the actual nine-page town/guild continuation.
+          await c.execute("UPDATE player_story_progress SET status='awaiting_arrival',stage=6 WHERE character_id=? AND story_code='forest_guide'",[run.id]);
+          await assert.rejects(forest.leaveParty(run.user),/主线剧情队伍/);
+          for(let page=0;page<11;page++){const arrived=await forest.continueForestArrival(run.user);if(arrived.completed)break;assert.ok(page<10);}
+          assert.equal(await forest.partyInfo(run.user),null);
+          view=await story.openingStatus(run.user);
+        }else assert.equal(view.state,'arrival',route.code+branch.code);
         const after=await story.openingCharacter(c,run.user),hubs=await state.openingSafeHubs(c as any);
         const hub=hubs.find(h=>h.id===after.current_region_id)!;assert.ok(hub,route.code+branch.code);
         assert.deepEqual([after.pos_x,after.pos_y,after.pos_z],[hub.pos_x,hub.pos_y,hub.pos_z]);assert.equal(after.current_hp,after.hp_max);assert.equal(after.current_mp,after.mp_max);assert.equal(after.stamina,120);
@@ -138,9 +181,30 @@ test('隔离MySQL：四条新路线与四条旧存档路线的二十个分支，
         const [rewards]=await c.execute<RowDataPacket[]>('SELECT code,uses FROM player_opening_services WHERE character_id=? ORDER BY code',[run.id]);
         const beforeReplay=JSON.stringify(rewards);await story.advanceOpening(run.user,view.revision-1,'next');
         const [replayed]=await c.execute<RowDataPacket[]>('SELECT code,uses FROM player_opening_services WHERE character_id=? ORDER BY code',[run.id]);assert.equal(JSON.stringify(replayed),beforeReplay);
-        summaries.push({route:route.code,branch:branch.code,birth:route.region,destination:hub.code,level:final.level,next:'/职业选择'});
+        const progression=mapAudit?await auditOpeningProgression({c,deps,load,run,story,guild,registration}):undefined;
+        summaries.push({route:route.code,branch:branch.code,birth:route.region,destination:hub.code,level:final.level,next:'/职业选择',progression});
       }
       assert.equal(summaries.length,20);
+    });
+    await t.test('地图补领并发只发一次，写入失败整批回滚，不改已耗尽的登记额度',async()=>{
+      const [characters]=await c.query<RowDataPacket[]>('SELECT id FROM characters WHERE adventurer_registered=1 AND player_id IS NOT NULL ORDER BY id LIMIT 1');
+      assert.ok(characters[0]);const id=Number(characters[0].id);
+      const [items]=await c.query<RowDataPacket[]>("SELECT id FROM item_definitions WHERE code='map_worldtree_meadow'");const itemId=Number(items[0].id);
+      await c.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=?',[id,itemId]);
+      const second=await createConnection({host:db.host,port:Number(db.port??3306),user:db.user,password:db.password,database:temporary,charset:'utf8mb4'});
+      try{
+        await c.beginTransaction();await second.beginTransaction();
+        const results=await Promise.all([c,second].map(async connection=>{const result=await deps['./progression-map.service'].ensureProgressionMaps(connection,id);await connection.commit();return result;}));
+        assert.equal(results.flatMap(r=>r.granted).filter(name=>name.includes('草原')).length,1);
+        const [owned]=await c.execute<RowDataPacket[]>('SELECT quantity,personal_bound_quantity FROM player_inventory WHERE character_id=? AND item_id=?',[id,itemId]);
+        assert.equal(Number(owned[0].quantity),1);assert.equal(Number(owned[0].personal_bound_quantity),1);
+      }finally{await second.rollback();await second.end();await c.rollback();}
+      await c.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=?',[id,itemId]);
+      await c.beginTransaction();
+      const faulty={execute:(sql:string,params:any[])=>{if(sql.startsWith('INSERT IGNORE INTO player_item_codex'))throw new Error('simulated codex write failure');return c.execute(sql,params);}};
+      await assert.rejects(deps['./progression-map.service'].ensureMapRegions(faulty,id,['worldtree_meadow']),/simulated codex/);await c.rollback();
+      const [stock]=await c.execute<RowDataPacket[]>('SELECT quantity FROM player_inventory WHERE character_id=? AND item_id=?',[id,itemId]);assert.equal(stock.length,0);
+      await deps['./progression-map.service'].repairProgressionMaps((await c.query<RowDataPacket[]>(`SELECT p.qq_user_id FROM players p JOIN characters ch ON ch.player_id=p.id WHERE ch.id=${id}`))[0][0].qq_user_id);
     });
     await t.test('新宝箱100只整批开箱，承载不足不扣箱不改封存结果，重试不重发装备',async()=>{
       for(const [code] of chestConfig.openingThemeChests){
@@ -172,7 +236,7 @@ test('隔离MySQL：四条新路线与四条旧存档路线的二十个分支，
       const run=await prepare('F01'),first=await story.advanceOpening(run.user,0,'next');assert.equal(first.state,'armed');
       assert.match(first.text,/首次移动或寻怪/);
       const second=await story.advanceOpening(run.user,0,'next');assert.deepEqual(JSON.parse(JSON.stringify(second)),JSON.parse(JSON.stringify(first)));
-      const started=await story.beginOpening(run.user,'move');assert.equal(started?.state,'reading');
+      const started=await story.beginOpening(run.user,'move');assert.equal(started?.state,run.route.pages.length>1?'reading':'choice');
     });
     await t.test('旧存档最后阅读页直接显示选项，旧继续按钮与选择重试均可恢复消息',async()=>{
       const run=await prepare('F03');
@@ -180,7 +244,7 @@ test('隔离MySQL：四条新路线与四条旧存档路线的二十个分支，
       const current=await story.openingStatus(run.user);assert.equal(current.state,'choice');assert.ok(current.choices.length>=2);
       const continued=await story.advanceOpening(run.user,current.revision,'next');assert.deepEqual(continued,current);
       const chosen=await story.advanceOpening(run.user,current.revision,'A');assert.equal(chosen.state,'branch');assert.equal(chosen.branch,'A');
-      assert.deepEqual(await story.advanceOpening(run.user,current.revision,'A'),JSON.parse(JSON.stringify(chosen)));
+      assert.deepEqual(JSON.parse(JSON.stringify(await story.advanceOpening(run.user,current.revision,'A'))),JSON.parse(JSON.stringify(chosen)));
     });
     await t.test('目标关闭或公会坐标非法时改道，全部关闭时不扣草药、不发奖并保留保护',async()=>{
       const run=await prepare('F02'),view=await toBranchEnd(run,'B');
@@ -211,7 +275,8 @@ test('隔离MySQL：四条新路线与四条旧存档路线的二十个分支，
       const [sessions]=await c.execute<RowDataPacket[]>('SELECT s.stage FROM registration_sessions s JOIN players p ON p.id=s.player_id WHERE p.qq_user_id=?',[user]);assert.equal(sessions[0].stage,'choice');
 
     });
-    mkdirSync('.data/opening-audit-20260908',{recursive:true});writeFileSync('.data/opening-audit-20260908/journeys.json',JSON.stringify({checkedAt:new Date().toISOString(),scope:'actual registration/story/reward SQL; derived-stat and evolution-profile substitutes',journeys:summaries},null,2));
+    const output=mapAudit?'.data/map-progression-audit':'.data/opening-audit-20260908';
+    mkdirSync(output,{recursive:true});writeFileSync(`${output}/journeys.json`,JSON.stringify({checkedAt:new Date().toISOString(),scope:mapAudit?'Actual opening branches, map inventory, route validation, quest transitions, XP and evolution injections; simulated victories, loot and gathering; no combat difficulty proof':'actual registration/story/reward SQL; derived-stat and evolution-profile substitutes',journeys:summaries},null,2));
   }finally{
     if(created){assert.match(temporary,/^ff_opening_journey_[a-f0-9]{32}$/);await c.query(`DROP DATABASE ${quoted(temporary)}`);}
     await c.end();

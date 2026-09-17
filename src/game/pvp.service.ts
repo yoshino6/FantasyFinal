@@ -1,4 +1,7 @@
+import { folioSkillByCode } from './active-folio-skills.config';
+import { folioEndTurn, resolveFolioStrike, validateFolioCast } from './folio-combat';
 import { playerGrowthShares } from './growth-rules';
+import { aoeSkillPower } from './aoe-damage.config';
 import { heartGrowthAdjustment } from './heart-question.service';
 import { recordCharacterOperation } from './character-operation.service';
 import { armorSetsFor } from './armor-set';
@@ -22,7 +25,7 @@ import { getPool, withTransaction } from '../database/pool';
 import { detentionMessage } from './time-format';
 import { isInHome } from './home.service';
 import { isFriendRelation } from './social.service';
-import { directDamageVariance, resolveStrike, strikeCorrections } from './combat-math';
+import { directDamageVariance, strikeCorrections } from './combat-math';
 import { createPvpCombatRules } from './pvp-combat-rule-adapter';
 import { ruleStatusSummary, maskRuleBattleLog, readRuleState } from './combat-rule-registry';
 import { residentSkillByCode } from './resident-skill.config';
@@ -478,7 +481,7 @@ const resolveAction = async (connection: PoolConnection, actor: PvpCharacter, ta
     }
     if (action.skill.effect === 'reactor_overcharge') actor.current_hp = Math.max(1, Number(actor.current_hp) - Math.floor(Number(actor.current_hp) * .15));
     const magic = action.skill.effect === 'frost_pulse' || action.skill.effect === 'reactor_overcharge';
-    const pseudo: PvpAction = { type: 'skill', id: 0, code: `device_${action.skill.code}`, name: `${action.deviceName}·${action.skill.name}`, category: magic ? 'magic' : 'physical', requiredWeaponType: null, manaCost: 0, power: Number(action.skill.power ?? 100), cooldown: 0 };
+    const pseudo: PvpAction = { type: 'skill', id: 0, code: `device_${action.skill.code}`, name: `${action.deviceName}·${action.skill.name}`, category: magic ? 'magic' : 'physical', requiredWeaponType: null, manaCost: 0, power: aoeSkillPower(`device_${action.skill.code}`, Number(action.skill.power ?? 100)), cooldown: 0 };
     const result = await resolveAction(connection, actor, target, pseudo, sessionId, targetCooldowns, actorCooldowns, actorDevices, targetDevices, context);
     if (!result.defeated && action.skill.effect === 'shock_pile' && Math.random() < .65) targetCooldowns!.device_stun = 2;
     if (!result.defeated && action.skill.effect === 'frost_pulse') targetCooldowns!.device_slow = 2;
@@ -539,7 +542,7 @@ const resolveAction = async (connection: PoolConnection, actor: PvpCharacter, ta
   const critRate = Math.max(Number(actor.crit_rate_bp), Number(actorCooldowns?.device_precision_aim ?? 0) > 0 ? 10000 : 0, !magic && actorDevices.has('critical_glove') ? 10000 : 0);
   const setup = sourceUnit && targetUnit ? await context!.rule.attackSetup(sourceUnit, targetUnit, Boolean(magic), Boolean(skill)) : { forceHit: false, powerFactor: 1, hitBonus: 0, hitFactor: 1 };
   const armorSets = sourceUnit && targetUnit ? undefined : await armorSetsFor(connection,[Number(actor.id),Number(target.id)]);
-  const strike = resolveStrike(attack * (skill ? skill.power / 100 : 1) * (1 + (deviceDamageBonus + battleCryBonus) / 100), defense, accuracy, evasion*(1+(targetUnit?context!.rule.value(targetUnit,'evasion')-context!.rule.value(targetUnit,'evasion_down'):0)/100), critRate*(1+(sourceUnit?context!.rule.value(sourceUnit,'crit_bonus'):0)/100), Number(target.crit_resist_bp), Number(actor.crit_damage_bp), Number(target.crit_damage_reduction_bp), setup.forceHit, false, 0, setup.hitBonus * 100, setup.hitFactor, strikeCorrections(sourceUnit ?? {armorSet:armorSets?.get(Number(actor.id))},targetUnit ?? {armorSet:armorSets?.get(Number(target.id))}));
+  const strike = resolveFolioStrike(context?.rule, sourceUnit, targetUnit, Boolean(magic), attack * (skill ? skill.power / 100 : 1) * (1 + (deviceDamageBonus + battleCryBonus) / 100), defense, accuracy, evasion*(1+(targetUnit?context!.rule.value(targetUnit,'evasion')-context!.rule.value(targetUnit,'evasion_down'):0)/100), critRate*(1+(sourceUnit?context!.rule.value(sourceUnit,'crit_bonus'):0)/100), Number(target.crit_resist_bp), Number(actor.crit_damage_bp), Number(target.crit_damage_reduction_bp), setup.forceHit, false, 0, setup.hitBonus * 100, setup.hitFactor, strikeCorrections(sourceUnit ?? {armorSet:armorSets?.get(Number(actor.id))},targetUnit ?? {armorSet:armorSets?.get(Number(target.id))}));
   if (!strike.hit) { await recordPvpAttack(connection, actor, target, label, 0, 'miss'); return { text: `【${actor.name}】${label}，但【${target.name}】闪避了攻击。`, defeated: false }; }
   const exposed = Number(targetCooldowns?.device_exposed ?? 0) > 0 ? .15 : 0; const barrier = Number(targetCooldowns?.device_barrier ?? 0) > 0 ? .15 : 0; const phase = Number(targetCooldowns?.device_phase_decoy ?? 0) > 0 ? .8 : 0;
   if (phase) delete targetCooldowns!.device_phase_decoy;
@@ -862,6 +865,8 @@ export const pvpCombatAction = async (qqUserId: string, type: 'attack' | 'skill'
     if (action.type === 'skill') {
       const resident = residentSkillByCode(action.code);
       if (resident && ['D01', 'C06', 'F04', 'I04'].includes(resident.id)) { if (turn.automatic) { log.push('➤【' + unit.name + '】缺少可支援队友，放弃本次辅助。'); continue; } throw new Error('这项技能需要另一名存活友方，不能在单挑中使用。'); }
+      const folio=folioSkillByCode(action.code);
+      if(folio&&!casting)validateFolioCast(context.rule,unit,['ally','allies','self'].includes(folio.scope)?unit:target,folio);
       const paid = casting?.paid ?? action.manaCost;
       const cooldown = casting?.cooldown ?? action.cooldown + (unit.state.memory.debtSkill === action.code ? 2 : 0);
       if (!casting) { unit.mp -= paid; await context.rule.paid(unit, paid, { category: action.category, cooldown }); delete unit.state.memory.debtSkill; }
@@ -904,7 +909,7 @@ export const pvpCombatAction = async (qqUserId: string, type: 'attack' | 'skill'
   if (awaitingBonus) { attackerCooldowns.__bonusPhase = 1; log.push('【' + attacker.name + '】获得额外行动，请选择一次普攻或技能。'); }
   else {
     delete attackerCooldowns.__bonusPhase;
-    if(!ended) { await alchemyEndTurn(context.rule); await hiddenEndTurn(context.rule); }
+    if(!ended) { await alchemyEndTurn(context.rule); await hiddenEndTurn(context.rule); await folioEndTurn(context.rule); }
     context.rule.end();
     if(!ended&&(Number(attacker.current_hp)<=0||Number(defender.current_hp)<=0)){
       const winner=Number(attacker.current_hp)<=0?defender:attacker;const loser=winner===attacker?defender:attacker;winner.current_hp=Math.max(1,Number(winner.current_hp));

@@ -1,4 +1,6 @@
 import { achievementBattleContribution, achievementBattleEvidence, achievementHit } from './achievement-combat';
+import { folioSkillByCode } from './active-folio-skills.config';
+import { castFolioSkill, folioStatusNames, folioStat, folioValue, folioCorrection } from './folio-combat';
 import { hiddenBeforeAction, hiddenIncoming, hiddenBeforeDamage, hiddenAbsorbed, hiddenAfterHit, hiddenHealingFactor, hiddenNames, hiddenDamageSource } from './hidden-combat';
 import { combatUnitLabel } from './combat-unit-label';
 import { alchemyIncoming, alchemyAfterHit, alchemySaveLife, alchemyHealingFactor, alchemyStatusNames } from './alchemy-combat';
@@ -7,7 +9,7 @@ import { nativeSkillBalanceByCode } from './combat-skill-balance.config';
 import { residentScalablePassives } from './passive-specialization';
 import { canDispelCombatEffect, isHardControlEffect, type DispelAuthority } from './combat-dispel-policy';
 import { specializeEffectValue, specializeEffectDuration, specializeControlChance, type SkillSpecializationResult } from './skill-specialization';
-import { residentSkillByCode, residentSkills, type ResidentSkill } from './resident-skill.config';
+import { residentExpansionSecondaryScale, residentSkillByCode, residentSkills, type ResidentSkill } from './resident-skill.config';
 import { talentBurnEffects, talentRecordEnemyDamage, talentOpeningShield, talentState, hasTalent, talentDirectFactor, talentIncomingFactor, talentHpDamage, talentReceiveHealing, talentSpellHealing, talentSupport, talentAttackAttempt, talentAfterHit, type TalentBattleState } from './talent-combat';
 
 export type RuleStatus = { code: string; value: number; until: number; source: string; debuff: boolean; stacks: number; legacyId?: number; data?: string; mechanism?: string };
@@ -62,6 +64,7 @@ const opposite: Record<string, string> = { attack: 'attack_down', attack_down: '
 Object.assign(names, { speed: '疾行', accuracy: '精准', accuracy_down: '失准', reduction: '减伤', physical_reduction: '物理减伤', magic_reduction: '魔法减伤', defense: '护甲', magic_defense: '魔防', attack: '物攻强化', magic: '魔攻强化', attack_down: '物攻衰减', magic_down: '魔攻衰减', mana_discount: '法潮节流', mana_tax: '施法负担', next_damage: '蓄势', damage: '增伤', conductive: '导电', refraction: '折光', expand: '万象扩散', extra_lock: '时隙锁定', extra_block: '行动封锁', forge: '临锻回火', roots: '根系共鸣', echo: '援护回响', command: '协同号令', flank: '双锋夹角', beat: '共鸣节拍', taunted: '嘲讽', phase: '相位假身', false_shadow: '灯下假影', transfer: '借伤誓约', feign: '绝境佯死', aim: '猎人量距', blade_line: '咒刃引线', swap_magic: '低项魔攻', swap_physical: '高项物攻', shadow_mark: '影缝标记', indexed: '识破增益', false_compass: '谎言罗盘', blind_resist: '抗目盲', ember_screen: '余火护幕', iron_gate: '铁门半开', crit_bonus: '同仇刻印', fire_vulnerable: '畏火' });
 Object.assign(names, { mother_poison: '蛇母中毒', mother_burn: '蛇母灼烧', mother_wind_erosion: '风蚀', mother_wind_barrier: '风之障壁' });
 Object.assign(names, alchemyStatusNames, hiddenNames);
+Object.assign(names, folioStatusNames);
 export const displayedRuleName = (state: RuleState, code: string, actual: string, turn: number, ownView: boolean) => {
   const illusion = ownView ? state.statuses.find(e => e.code === 'false_compass' && e.until >= turn) : undefined;
   if (illusion?.data?.startsWith(`${code}|`)) return illusion.data.split('|')[1] + '？';
@@ -222,7 +225,7 @@ export class CombatRules {
     }
     return areaHit ? target : taunter ?? target;
   }
-  speed(unit: RuleUnit) { return unit.speed * (1 + (this.value(unit, 'speed') - this.value(unit, 'slow')) / 100); }
+  speed(unit: RuleUnit) { return folioStat(unit,'speed',unit.speed,this.turn) * (1 + (this.value(unit, 'speed') - this.value(unit, 'slow')) / 100); }
   manaCost(unit: RuleUnit, base: number) {
     return openingManaCost(unit, ruleManaCost(unit.state, unit.passives, base, this.turn));
   }
@@ -239,7 +242,7 @@ export class CombatRules {
     let healing = (equipment ? (1 + Number(source.modifiers?.healingBonusPct ?? 0) / 100) * (1 + Number(target.modifiers?.healingReceivedPct ?? 0) / 100) : 1) * (1 + (this.partyCount(target) === 1 ? this.passive(target, 'H08') * .2 : 0));
     if (source.mp / source.mpMax < .25) healing *= 1 - this.passive(source, 'D08') * .25;
     if (target.hp / target.hpMax < .25) healing *= 1 - this.passive(target, 'I08') * .2;
-    return healing * alchemyHealingFactor(this, target) * hiddenHealingFactor(this, target) * talentReceiveHealing(source, target);
+    return healing * (1-folioValue(source,'healing_down',this.turn)/100) * alchemyHealingFactor(this, target) * hiddenHealingFactor(this, target) * talentReceiveHealing(source, target);
   }
   async restore(source: RuleUnit, target: RuleUnit, hp: number, mp = 0, echo = false, maxHealing = Infinity) {
     if (target.hp <= 0 || target.participating === false) return;
@@ -359,7 +362,7 @@ export class CombatRules {
     }
     if (shield && !this.status(target, 'shield') && this.status(target, 'ember_screen')) {
       await this.consume(target, 'ember_screen');
-      await this.areaDamage(this.enemies(target), enemy => this.secondary(target, enemy, (target.magic * .55) ** 2 / (target.magic * .55 + enemy.magicDefense), '余火护幕', '火', true));
+      await this.areaDamage(this.enemies(target), enemy => this.secondary(target, enemy, (target.magic * .49) ** 2 / (target.magic * .49 + Math.max(1, enemy.magicDefense)), '余火护幕', '火', true));
     }
     if (shield && !this.status(target, 'shield') && this.passive(target, 'K08') && this.once(target, 'spare') && this.random() < .35) this.reduceCooldown(target, true);
     await alchemySaveLife(this,target);
@@ -465,19 +468,24 @@ export class CombatRules {
     if (this.status(target, 'false_shadow')) await this.control(target, source, 'blind', 100, 1, false);
   }
   async strike(source: RuleUnit, original: RuleUnit, power: number, element: string, magic: boolean, extra = false, forceHit = false, secondaryScale = 1,
-    options: { skill?: boolean; redirected?: boolean; single?: boolean; damageType?: string; ranged?: boolean; hitPenalty?: number; accuracyMultiplier?: number; specializedPower?: boolean; penetration?: number; finalMultiplier?: number; shieldMultiplier?: number; damageCap?: number; deferFraction?: number; onResolved?: (amount: number) => void } = {}) {
+    options: { skill?: boolean; redirected?: boolean; single?: boolean; damageType?: string; ranged?: boolean; hitPenalty?: number; accuracyMultiplier?: number; accuracyFlat?: number; hitCorrection?: number; specializedPower?: boolean; penetration?: number; finalMultiplier?: number; shieldMultiplier?: number; damageCap?: number; deferFraction?: number; onResolved?: (amount: number) => void } = {}) {
     const isSkill = options.skill !== false;
     // 群攻不能逐个被嘲讽重定向为同一本体；魅惑和混乱的友伤规则仍保留。
     const target = options.redirected ? original : this.redirect(source, original, true, options.single === false); if (target.hp <= 0||target.participating===false) return false;
     let attack = magic ? source.magic : source.attack;
     if (this.passive(source, 'G01')) attack = Math.max(source.magic, source.attack);
     const swap = isSkill && this.status(source, magic ? 'swap_magic' : 'swap_physical'); if (swap) { attack = magic ? Math.min(source.magic, source.attack) : Math.max(source.magic, source.attack); await this.consume(source, swap.code); }
+    attack = folioStat(source,magic?'magic':'attack',attack,this.turn);
     if (this.passive(source, 'G08') && !source.weaponsDifferent) attack *= 1 + .05 * this.passive(source, 'G08');
     attack *= 1 + (this.statBonus(source, [magic ? 'magic' : 'attack', 'battle_cry', 'power_surge']) - this.value(source, magic ? 'magic_down' : 'attack_down') - this.value(source, 'uzz_weakness')) / 100;
-    const defense = (magic ? target.magicDefense : target.defense) * (1 - clamp(this.value(target, magic ? 'magic_shatter' : 'armor_shatter') + (!magic ? this.value(target, 'vulnerability') : 0), 0, 80) / 100) * (1 + this.value(target, magic ? 'magic_defense' : 'defense') / 100) * (1 - clamp(options.penetration ?? 0, 0, 50) / 100);
+    const defense = folioStat(target,magic?'magic_defense':'defense',magic?target.magicDefense:target.defense,this.turn) * (1 - clamp(this.value(target, magic ? 'magic_shatter' : 'armor_shatter') + (!magic ? this.value(target, 'vulnerability') : 0), 0, 80) / 100) * (1 + this.value(target, magic ? 'magic_defense' : 'defense') / 100) * (1 - clamp(options.penetration ?? 0, 0, 50) / 100);
     const setup = await this.attackSetup(source, target, magic, isSkill, options.ranged ?? magic);
-    let hit = opposedChance(source.accuracy * (options.accuracyMultiplier ?? 1) * (1 + (this.statBonus(source, ['accuracy', 'precision']) - this.value(source, 'accuracy_down') - this.value(source, 'imbalance')) / 100 + (source.weaponsDifferent ? .08 * this.passive(source, 'G08') : 0)), target.evasion * (1 + this.value(target,'evasion') / 100 + (target.weaponsDifferent ? .08 * this.passive(target, 'G08') : 0)) * (1 - Math.min(90, this.value(target, 'bind') + this.value(target, 'evasion_down')) / 100));
+    let hit = opposedChance((folioStat(source,'accuracy',source.accuracy,this.turn)+(options.accuracyFlat??0)) * (options.accuracyMultiplier ?? 1) * (1 + (this.statBonus(source, ['accuracy', 'precision']) - this.value(source, 'accuracy_down') - this.value(source, 'imbalance')) / 100 + (source.weaponsDifferent ? .08 * this.passive(source, 'G08') : 0)), folioStat(target,'evasion',target.evasion,this.turn) * (1 + this.value(target,'evasion') / 100 + (target.weaponsDifferent ? .08 * this.passive(target, 'G08') : 0)) * (1 - Math.min(90, this.value(target, 'bind') + this.value(target, 'evasion_down')) / 100));
     const correction = strikeCorrections(source,target);
+    const folioHit=Math.max(folioCorrection(source,target,this.turn),options.hitCorrection??0);
+    correction.hitCorrectionPct=100*(1-(1-(correction.hitCorrectionPct??0)/100)*(1-folioHit/100));
+    hit*=1-folioValue(source,'hit_down',this.turn)/100;
+    await this.consume(source,'folio_accuracy');
     hit = correctedHitChance(clamp((hit + setup.hitBonus - Number(options.hitPenalty ?? 0) / 100) * setup.hitFactor,Number(source.modifiers?.minimumHitRatePct ?? 1)/100,1),correction);
     if (!(forceHit || setup.forceHit) && this.random() >= hit) { this.log.push(`　➥${combatUnitLabel(target)}闪避了攻击。`); await this.missed(source, target); return false; }
     const critical = this.random() < correctedCritChance(opposedChance(source.crit * (1 + this.value(source, 'crit_bonus') / 100), target.critResist),correction);
@@ -493,17 +501,20 @@ export class CombatRules {
     await this.afterHit(source, target, dealt - absorbed, element, isSkill, absorbed, extra, magic, options.ranged ?? magic, critical); return true;
   }
   async cast(source: RuleUnit, target: RuleUnit, skill: ResidentSkill, paid: number, elementChoice = '风', extra = false, expandedHit = false) {
-    const expanded = !expandedHit && !extra && skill.scope === 'enemy' && ['physical', 'magic'].includes(skill.category) && await this.consume(source, 'expand');
+    const folio=folioSkillByCode(skill.code);
+    const expanded = !expandedHit && !extra && (!folio||folio.targetCount===1) && skill.scope === 'enemy' && ['physical', 'magic'].includes(skill.category) && await this.consume(source, 'expand');
     if (expanded) {
       const previousScale = this.expansionScale;
       try {
         await this.areaDamage([target, ...this.enemies(source).filter(unit => unit.key !== target.key)], async other => {
-          this.expansionScale = other.key === target.key ? previousScale : .65;
+          this.expansionScale = other.key === target.key ? previousScale : residentExpansionSecondaryScale;
+          if(folio)source.state.memory.folioTargets=other.key;
           await this.cast(source, other, skill, other.key === target.key ? paid : 0, elementChoice, other.key === target.key ? extra : true, true);
         });
       } finally { this.expansionScale = previousScale; }
       return;
     }
+    if(folio) return castFolioSkill(this,source,target,folio,extra);
     const id = skill.id; const friends = this.allies(source); const enemies = this.enemies(source);
     const others = friends.filter(friend => friend.key !== source.key);
     const defaultAlly = skill.id === 'D01' ? [...others].sort((a, b) => a.mp / a.mpMax - b.mp / b.mpMax)[0] : ['C06', 'F04', 'I04', 'H03'].includes(skill.id) ? this.lowest(others) : source;

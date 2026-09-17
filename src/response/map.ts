@@ -7,28 +7,13 @@ import { messageFormat } from '../game/message';
 import type { RowDataPacket } from 'mysql2/promise';
 import { durationText } from '../game/time-format';
 import { markerName, sortMapMarkers } from '../game/map-marker.service';
+import { mapRegionDescriptions } from '../game/map-description.config';
 
 type OwnedMap = RowDataPacket & { code: string; name: string; description: string; region_code: string | null; region_name: string | null; region_description: string | null; region_danger: number | null; is_current_region: number | null };
 type MapTarget = RowDataPacket & { code: string; name: string; x: number; y: number; z: number; siteType?: string | null };
 
 const displayName = (map: OwnedMap) => (map.region_name ?? map.name).replace(/^地图[·・：:\s]*/, '');
-const regionOverview: Record<string, string> = {
-  world_tree: '根桥、祭坛与万叶联市环抱巨树，是通往各地的世界中心。',
-  baina_town: '各族旅人聚居的边境镇，工坊、公会与居所沿石板街展开。',
-  dark_forest: '常年薄雾覆盖的初始林地，猎户小屋与野兽踪迹藏在古树间。',
-  dark_forest_deep: '古林与遗迹吞没天光，哥布林与更凶险的生物盘踞其中。',
-  worldtree_meadow: '环抱世界树的草原风铃清亮，是踏入广阔世界的第一段旅途。',
-  morningdew_riverbank: '晨露河雾贴着浅滩流动，浮桥、信使与水路补给在此交汇。',
-  gravelwind_shore: '潮池与裸露石脊交错，盐雾会把远处礁石映成陌生的门。',
-  ridge_foothills: '碎岩坡通向峡谷矿道，回风与山兽共同守着山口。',
-  rediron_pass: '赤铁裂隙涌出热风，炉道、灰雨与避烬所彼此相连。',
-  mistalgae_marsh: '浮岛和雾藻每日移位，湿地的安全路从不与昨日相同。',
-  fallenstar_swamp: '星泥在浊水下闪烁，熟悉的芦苇也会投下错误影子。',
-  frostcrown_plateau: '雪线无声延伸，极光会将旅人的影子分成不止一个。',
-  thundercliff: '雷云压着断崖，悬桥与避风墙守住险峻的行路。',
-  eclipse_ruins: '破碎石柱切开光影，月井低鸣着未完的古老审判。'
-};
-const overviewFor = (map: OwnedMap) => regionOverview[map.region_code ?? ''] ?? map.region_description ?? map.description;
+const overviewFor = (map: OwnedMap) => mapRegionDescriptions[map.region_code ?? ''] ?? map.region_description ?? map.description;
 const mapNavigationOrder = ['world_tree', 'worldtree_meadow', 'morningdew_riverbank', 'gravelwind_shore', 'baina_town', 'dark_forest', 'dark_forest_deep', 'ridge_foothills', 'rediron_pass', 'mistalgae_marsh', 'fallenstar_swamp', 'frostcrown_plateau', 'thundercliff', 'eclipse_ruins'];
 const compareByDanger = (left: OwnedMap, right: OwnedMap) => {
   const leftOrder = mapNavigationOrder.indexOf(left.region_code ?? ''); const rightOrder = mapNavigationOrder.indexOf(right.region_code ?? '');

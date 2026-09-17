@@ -5,6 +5,7 @@ import { enterOpeningGuild, openingGuildView, openingGuildAction, openingKeepsak
 import { rootGuildPeople, guildLessons } from '../game/opening-guild.config';
 import { nearbyPoints } from '../game/adventure.service';
 import { openingHubs } from '../game/opening-world.config';
+import { progressionMapReceipt } from '../game/progression-map.service';
 
 export const openingGuildServiceFormat=(text:string)=>{
   const markdown=Format.createMarkdown().addTitle('公会交接').addNewline().addNewline();
@@ -38,10 +39,10 @@ export const openingGuildFormat=async(user:string,area='大厅')=>{
     buttons.addRow();add('返回委托板','/初行公会 委托板');
   }else if(area==='集结区'){
     md.addBlockquote((view.code==='world_tree'?'长桌上铺着地图，归来的冒险者擦去靴边的泥水，给空椅让出位置。有人将下一次出发的时刻写在纸上，招呼还在寻找同伴的旅人过来看看。':`你来到${view.hub.guildName}的集结区。有人摊开地图招呼同伴，有人对照队伍名册核实人数。桌边留出一处空位，供新来的冒险者写下打算前往的地方。`).replace(/\r?\n/g,'\n> '));
-    md.addNewline().addText('完成冒险者注册后，可在这里用一次登记额度兑换已开放的 Lv.30 及以下地图；更多地图可到公会商店购买。');
+    md.addNewline().addText('注册后保底领取世界树、草原环带、幽暗密林与百纳镇通行地图，不扣自选额度。另有一次登记额度可兑换已开放的 Lv.30 及以下地图；更多地图可到公会商店购买。');
     buttons.addRow();add('我的队伍','/队伍');add('寻找队伍','/队伍列表');
     buttons.addRow();add('创建队伍','/组队 创建');add('加入队伍','/组队 加入 ',false);
-    buttons.addRow();add('兑换地图','/初行公会 地图',false);
+    buttons.addRow();add('领取地图','/初行公会 地图',false);add('补领通行地图','/初行服务 map_reclaim',false);
     buttons.addRow();add('返回大厅','/初行公会');
   }else if(area==='后勤区'){
     md.addBlockquote('你沿侧廊来到后勤区。工台上摆着待检的工具，兽栏里备好了清水，接驳值守正核对出发名单。工匠抬手示意你避开地上的木屑，把通道让给运送补给的人。');
@@ -49,6 +50,7 @@ export const openingGuildFormat=async(user:string,area='大厅')=>{
     buttons.addRow();add('安全接驳','/初行公会 接驳');
     buttons.addRow();add('返回大厅','/初行公会');
   }else if(area==='委托板'){
+    buttons.addRow();add('浮叶航路·访客委托','/浮叶航路',false);
     md.addBlockquote((view.code==='world_tree'?'砾秋把被风卷起的委托单压平：“先看要求，再看报酬。初行的交接记录也放在这里，需要复习的，可以借旁边的教具。”':'委托单按日期钉在木框上，已完成的记录收在一旁。办事员留出一块干净桌面，供新来的冒险者核对初行奖励、练习旅途常识。').replace(/\r?\n/g,'\n> '));
     buttons.addRow();add('查看委托','/任务分类 委托');add('主线任务','/任务分类 主线');
     buttons.addRow();add('初行交接','/初行公会 礼包');add('入门教学','/初行公会 教学');
@@ -58,6 +60,9 @@ export const openingGuildFormat=async(user:string,area='大厅')=>{
     md.addBlockquote('鉴物员展开各地公会共用的地图目录，把已知的魔物踪迹标在路旁：“先看清这段路通向哪里，再决定什么时候出发。”')
       .addNewline().addNewline().addText(`地图兑换额度：${(credits.registration_map_exchange??0)+(credits.map_exchange??0)} 张（低危地图／安全城镇）。`).addNewline()
       .addText('按常规魔物分级：低危 Lv.30 及以下｜中危 Lv.31～50｜高危 Lv.51 及以上；区域 Boss 等级另列。');
+    md.addNewline().addNewline().addText('保底路线：世界树—草原环带—幽暗密林—百纳镇。救援与二转试炼会补齐任务所需地图，不消耗自选额度。浮叶镇、霜龙客舍请先乘安全接驳到世界树。');
+    if(view.mapRepair.granted.length||view.mapRepair.stored.length||view.mapRepair.unavailable.length)md.addNewline().addNewline().addText(progressionMapReceipt(view.mapRepair));
+    md.addNewline().addButton('[补领通行地图]',{data:'/初行服务 map_reclaim',autoEnter:false});
     for(const map of view.maps){
       const level=map.minLevel===null||map.maxLevel===null?'等级待勘测':map.minLevel===map.maxLevel?`Lv.${map.maxLevel}`:`Lv.${map.minLevel}～${map.maxLevel}`;
       md.addNewline().addNewline().addText(`【${map.regionName}】${map.risk}${map.safeTown?'':` · 常规魔物 ${level}${map.bossLevel===null?'':` · 区域 Boss Lv.${map.bossLevel}`}`}`).addNewline()
@@ -124,7 +129,7 @@ export const openingGuildHandler=(mode:'view'|'enter'|'leave'|'service'|'keepsak
       }
       await message.send({format:openingGuildServiceFormat(text)});
       if(action==='meal'){await(await import('./guild-restaurant')).default();return;}
-      const serviceAreas:Record<string,string>={pack:'礼包',profession_weapon:'礼包',map_exchange:'地图',craft_practice:'工艺',recover:'休息区',heal_companion:'兽栏'};
+      const serviceAreas:Record<string,string>={pack:'礼包',profession_weapon:'礼包',map_exchange:'地图',map_reclaim:'地图',craft_practice:'工艺',recover:'休息区',heal_companion:'兽栏'};
       const lessonAreas:Record<string,string>={contract:'兽栏',craft:'工艺',map:'地图'};
       returnArea=action==='lesson'?(lessonAreas[value]??'教学'):(serviceAreas[action]??'大厅');
     }

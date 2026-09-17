@@ -508,11 +508,13 @@ export const registerAdventurer = async (qqUserId: string) => withTransaction(as
   if (!rows[0]) throw new Error('请先完成转生。');
   if (rows[0].adventurer_registered) {
     await (await import('./guild-map.service')).ensureRegistrationMapExchange(connection, Number(rows[0].id));
+    await (await import('./progression-map.service')).ensureProgressionMaps(connection, Number(rows[0].id));
     return false;
   }
   await (await import('./guild-context')).requireGuildService(connection,Number(rows[0].id));
   await connection.execute('UPDATE characters SET adventurer_registered=1 WHERE id=?', [rows[0].id]);
   await (await import('./guild-map.service')).ensureRegistrationMapExchange(connection, Number(rows[0].id));
+  await (await import('./progression-map.service')).ensureProgressionMaps(connection, Number(rows[0].id));
   recordAchievement(connection, Number(rows[0].id), ['ACH_A02']);
   const [card] = await connection.execute<(RowDataPacket & { id: number })[]>('SELECT id FROM item_definitions WHERE code=\'adventurer_card\' LIMIT 1', []);
   if (card[0]) await connection.execute('INSERT INTO player_inventory (character_id,item_id,quantity) VALUES (?,?,1) ON DUPLICATE KEY UPDATE quantity=quantity+1,acquired_at=NOW()', [rows[0].id, card[0].id]);
