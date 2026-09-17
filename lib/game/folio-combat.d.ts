@@ -1,0 +1,20 @@
+import type { CombatRules, RuleStatus, RuleUnit } from './combat-rule-registry';
+import type { FolioSkill } from './active-folio-skills.config';
+import { resolveStrike } from './combat-math';
+export declare const resolveFolioStrike: (rules: CombatRules | undefined, source: RuleUnit | undefined, target: RuleUnit | undefined, magic: boolean, ...args: Parameters<typeof resolveStrike>) => {
+    hit: boolean;
+    crit: boolean;
+    damage: number;
+};
+export declare const folioStatusNames: Record<string, string>;
+export declare const folioValue: (unit: RuleUnit, code: string, turn: number) => number;
+export declare const folioStat: (unit: RuleUnit, stat: "attack" | "magic" | "defense" | "magic_defense" | "accuracy" | "evasion" | "speed", base: number, turn: number) => number;
+export declare const folioCorrection: (source: RuleUnit, target: RuleUnit, turn: number) => number;
+export declare const folioDuration: (source: RuleUnit, turns: number) => number;
+export declare const folioBenefit: (source: RuleUnit, value: number, cap: number) => number;
+export declare const addFolioStatus: (rules: CombatRules, source: RuleUnit, target: RuleUnit, code: string, value: number, turns: number, debuff?: boolean, data?: string) => RuleStatus;
+export declare const folioCleanseCandidates: (rules: CombatRules, target: RuleUnit, dotOnly?: boolean) => RuleStatus[];
+export declare const folioTargets: (rules: CombatRules, source: RuleUnit, target: RuleUnit, skill: FolioSkill, keys?: string[]) => RuleUnit[];
+export declare const validateFolioCast: (rules: CombatRules, source: RuleUnit, target: RuleUnit, skill: FolioSkill, keys?: string[]) => RuleUnit[];
+export declare const castFolioSkill: (rules: CombatRules, source: RuleUnit, target: RuleUnit, skill: FolioSkill, extra?: boolean) => Promise<void>;
+export declare const folioEndTurn: (rules: CombatRules) => Promise<void>;

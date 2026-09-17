@@ -38,7 +38,7 @@ export declare const uzzNextSummonSlot: (lastSummonSlot: number, lastClearSlot?:
 export declare const uzzSummonDue: (currentSlot: number, lastSummonSlot: number, lastClearSlot?: number) => boolean;
 export declare const uzzRotationSkill: (phaseTwo: boolean, cursor: number) => {
     slot: number;
-    code: "uzz_soul_blast" | "uzz_dark_decay" | "uzz_soul_rend" | "uzz_soul_drain";
+    code: "uzz_dark_decay" | "uzz_soul_blast" | "uzz_soul_rend" | "uzz_soul_drain";
 };
 export declare const uzzUndeadConstitutionMultiplier: (magic: boolean, element: string) => number;
 export declare const uzzDomainMagicMultiplier: (magic: boolean, element: string) => 1 | 0.75;

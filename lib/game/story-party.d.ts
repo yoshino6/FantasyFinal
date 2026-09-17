@@ -1,0 +1,4 @@
+import type { Pool, PoolConnection } from 'mysql2/promise';
+export declare const forestStoryPartyCondition = "EXISTS (\n  SELECT 1 FROM party_members story_pm JOIN characters story_member ON story_member.id=story_pm.character_id\n  LEFT JOIN player_story_progress story_progress ON story_progress.character_id=story_member.id AND story_progress.story_code='forest_guide'\n  WHERE story_pm.party_id=p.id AND (story_member.npc_code REGEXP '^npc_forest_(warrior|mage|priest)(_[0-9]+)?$'\n    OR story_progress.status IN ('joined','declined','awaiting_arrival','arrival_story','guild_story'))\n)";
+export declare const isForestStoryParty: (connection: Pool | PoolConnection, partyId: string) => Promise<boolean>;
+export declare const assertPartyNotStory: (connection: Pool | PoolConnection, partyId: string) => Promise<void>;

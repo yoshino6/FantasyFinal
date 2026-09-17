@@ -111,6 +111,7 @@ export declare const hiddenProfession: (code: string) => {
     readonly inheritance: "留下一手";
     readonly role: "公开信息、保护预案与行动次序";
 } | undefined;
+export declare const hiddenWeaponAttackPower: (code: string, weaponCount: number) => number;
 export declare const hiddenSkills: HiddenSkill[];
 export declare const hiddenSkill: (code: string) => HiddenSkill | undefined;
 export declare const isHiddenSkill: (code: string) => boolean;

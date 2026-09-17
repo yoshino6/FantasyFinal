@@ -1,3 +1,4 @@
+import { type AdvancedProfessionRoute } from './advanced-profession-routes.config';
 export type AdvancedProfession = {
     code: string;
     name: string;
@@ -16,6 +17,7 @@ export type AdvancedProfession = {
         description: string;
         effect: Record<string, number>;
     };
+    route: AdvancedProfessionRoute;
     first: {
         title: string;
         story: string;

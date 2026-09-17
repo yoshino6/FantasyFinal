@@ -12,6 +12,10 @@ type LegacyEffect = {
     stacks: number;
     remaining_turns: number;
 };
+export declare const legacyEffectIsDebuff: (effect: {
+    code: string;
+    effect_type: string;
+}) => boolean;
 export declare const ruleAppraisalLevels: (connection: PoolConnection, ids: number[]) => Promise<Map<number, number>>;
 export declare const createCombatRules: (connection: PoolConnection, sessionId: string, turn: number, members: CombatRow[], targets: CombatRow[], statsForTarget: (target: any) => Record<string, number>, effects: () => LegacyEffect[], log: string[], weather: string, absorb: (kind: "member" | "target", id: number, hpMax: number, amount: number) => Promise<{
     absorbed: number;

@@ -1,0 +1,44 @@
+import type { Pool, PoolConnection } from 'mysql2/promise';
+export declare const folioShopNames: Record<string, string>;
+type Db = Pool | PoolConnection;
+export declare const ownedSkillBook: (db: Db, characterId: number, code: string) => Promise<boolean>;
+export declare const folioShopCatalog: (user: string, shop: string, page?: number, filter?: string, tier?: string) => Promise<{
+    shop: string;
+    name: string;
+    items: {
+        known: boolean;
+        owned: boolean;
+        id: string;
+        code: string;
+        name: string;
+        category: "physical" | "magic" | "utility" | "passive";
+        tier: "\u57FA\u7840" | "\u4E0B\u4F4D" | "\u4E2D\u4F4D";
+        mana: number;
+        cooldown: number;
+        chant: number;
+        scope: "self" | "ally" | "enemy" | "allies" | "enemies";
+        element: string;
+        power: number;
+        description: string;
+        damageType: string;
+        ranged: boolean;
+        learnLevel: number;
+        targetCount: number;
+        parts: number[];
+        shop: string;
+        price: number;
+    }[];
+    page: number;
+    pages: number;
+    filter: string;
+    tier: string;
+    level: number;
+    copper: number;
+}>;
+export declare const buyFolioBook: (user: string, code: string, confirmed?: boolean, useVoucher?: boolean) => Promise<{
+    name: string;
+    itemId: number;
+    price: number;
+    discount: number;
+}>;
+export {};

@@ -9,6 +9,7 @@ export type KingbeastUnit = {
 export type KingbeastDamageKind = 'physical' | 'magic' | 'untyped';
 export type KingbeastPhaseTransitionCode = 'split' | 'castling' | 'enrage_king' | 'enrage_dragon';
 export type BossPhaseTransition = {
+    kind?: 'phase' | 'chant';
     code: string;
     title: string;
     description: string;
@@ -28,6 +29,9 @@ export declare const bossPhaseTransitionLogsAfterRound: (logs: string[], transit
 export declare const kingbeastEncounter: (unit: KingbeastUnit) => Record<string, unknown> | undefined;
 export declare const kingbeastUnitRole: (unit: KingbeastUnit) => string;
 export declare const kingbeastGroupId: (unit: KingbeastUnit) => string;
+export declare const kingbeastMapTargets: <T extends KingbeastUnit & {
+    name: string;
+}>(units: T[]) => T[];
 export declare const isKingbeastPrimaryCore: (unit: KingbeastUnit) => boolean;
 export declare const isLivingKingbeastUnit: (unit: KingbeastUnit) => boolean;
 export declare const kingbeastCooldowns: (unit: KingbeastUnit) => Record<string, unknown>;

@@ -96,8 +96,9 @@ type SpawnRow = RowDataPacket & MonsterAttributes & {
     element_resistance_json?: unknown;
 };
 type PendingAction = {
+    folioTargets?: string[];
     hidden?: HiddenChoice;
-    type: 'attack' | 'skill' | 'item' | 'escape' | 'device' | 'device_charge' | 'defend';
+    type: 'attack' | 'skill' | 'item' | 'escape' | 'device' | 'device_charge' | 'defend' | 'anchor';
     chantRelease?: boolean;
     slot?: number;
     skillId?: number;
@@ -594,6 +595,7 @@ export declare const upgradeAppraisal: (qqUserId: string, direction: "range" | "
 export declare const partyInfo: (qqUserId: string) => Promise<{
     id: string;
     name: string;
+    story: boolean;
     leaderId: number;
     ownId: number;
     leader: {
@@ -1625,6 +1627,7 @@ export declare const moveTo: (qqUserId: string, x: number, y: number, z: number,
     z: number;
     seconds: number;
     remaining: number;
+    rewardText: string;
 }>;
 export declare const moveToNearbyMonster: (qqUserId: string, spawnId: number) => Promise<{
     canAmbush: boolean;
@@ -2471,6 +2474,7 @@ export declare const moveToMap: (qqUserId: string, mapCode: string) => Promise<{
     z: number;
     seconds: number;
     remaining: number;
+    rewardText: string;
 }>;
 export declare const huntMonster: (qqUserId: string) => Promise<{
     kind: "hunt";
@@ -2479,6 +2483,7 @@ export declare const huntMonster: (qqUserId: string) => Promise<{
     y: number;
     seconds: number;
     remaining: number;
+    rewardText: string;
 }>;
 export declare const travelStatus: (qqUserId: string) => Promise<{
     x: number;
@@ -4429,28 +4434,46 @@ type ResourceMiningStatus = {
     finished: boolean;
 };
 export declare const resourceMiningStatus: (qqUserId: string) => Promise<ResourceMiningStatus | null>;
-export declare const cancelResourceMining: (qqUserId: string) => Promise<void>;
-export declare const mineResource: (qqUserId: string, resourceId: number) => Promise<{
+export declare const cancelResourceMining: (qqUserId: string) => Promise<{
+    state: "completed";
+    name: string;
+    kind: "矿脉" | "植被";
+    quantity: number;
+    rewardText: string;
+    seconds?: undefined;
+    remaining?: undefined;
+} | {
     state: "mining";
     name: string;
     kind: "矿脉" | "植被";
     seconds: number;
     remaining: number;
+    rewardText: string;
     quantity?: undefined;
-} | {
+}>;
+export declare const mineResource: (qqUserId: string, resourceId: number) => Promise<{
     state: "completed";
     name: string;
     kind: "矿脉" | "植被";
     quantity: number;
+    rewardText: string;
     seconds?: undefined;
     remaining?: undefined;
+} | {
+    state: "mining";
+    name: string;
+    kind: "矿脉" | "植被";
+    seconds: number;
+    remaining: number;
+    rewardText: string;
+    quantity?: undefined;
 } | {
     state: "started";
     name: string;
     kind: "矿脉" | "植被";
     seconds: number;
     remaining: number;
-    quantity?: undefined;
+    rewardText: string;
 }>;
 export declare const forestGuideChoice: (qqUserId: string, choice: "join" | "depart") => Promise<{
     spawnId: number;
@@ -4545,6 +4568,7 @@ export declare const battleStatus: (qqUserId: string) => Promise<{
     talentNote: string;
     canEnchant: boolean;
     enchantElement: string;
+    canLeafAnchor: boolean;
     negotiation: {
         spawnId: number;
         sessionId: string;
@@ -4647,6 +4671,8 @@ export declare const battleStatus: (qqUserId: string) => Promise<{
         remainingTurns: number;
     }[];
     targets: {
+        hideBossMechanics: boolean;
+        encounterStatus: string | null;
         statusText: string;
         id: number;
         name: string;
@@ -4731,6 +4757,12 @@ export declare const combatAction: (qqUserId: string, action: Exclude<PendingAct
     waiting: boolean;
     log: string;
 } | {
+    log: string;
+    manualLog: string;
+    bossTransitions: BossPhaseTransition[];
+    ended: boolean;
+    waiting: boolean;
+} | {
     settlement: string;
     log: string;
     manualLog: string;
@@ -4738,6 +4770,34 @@ export declare const combatAction: (qqUserId: string, action: Exclude<PendingAct
     ended: boolean;
     waiting: boolean;
 } | {
+    settlement: VictorySettlement;
+    ambushSessionId: string;
+    log: string;
+    manualLog: string;
+    bossTransitions: BossPhaseTransition[];
+    ended: boolean;
+    waiting: boolean;
+} | {
+    settlement: string;
+    ambushSessionId: string | undefined;
+    log: string;
+    manualLog: string;
+    bossTransitions: BossPhaseTransition[];
+    ended: boolean;
+    waiting: boolean;
+}>;
+export declare const submitFolioActionInTransaction: (connection: PoolConnection, user: string, slot: number) => Promise<{
+    ended: boolean;
+    waiting: boolean;
+    log: string;
+} | {
+    log: string;
+    manualLog: string;
+    bossTransitions: BossPhaseTransition[];
+    ended: boolean;
+    waiting: boolean;
+} | {
+    settlement: string;
     log: string;
     manualLog: string;
     bossTransitions: BossPhaseTransition[];

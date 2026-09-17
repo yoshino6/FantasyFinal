@@ -60,6 +60,11 @@ export declare const openingGuildView: (user: string) => Promise<{
     }[];
     registered: boolean;
     world: RowDataPacket;
+    mapRepair: {
+        granted: string[];
+        stored: string[];
+        unavailable: string[];
+    };
 }>;
 export declare const enterOpeningGuild: (user: string, inside?: boolean) => Promise<void>;
 export declare const openingGuildAction: (user: string, action: string, value?: string) => Promise<string>;

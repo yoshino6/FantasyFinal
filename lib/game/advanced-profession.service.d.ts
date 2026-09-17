@@ -25,7 +25,7 @@ export type AdvancedProfessionView = {
     activeQuest: Quest | null;
     completedCode: string | null;
     retrainRemainingSeconds: number;
-    ridgeCore: number;
+    materialQuantity: number;
 };
 export declare const advancedProfessionView: (qqUserId: string, mentorCode?: string) => Promise<AdvancedProfessionView>;
 export declare const beginAdvancedProfession: (qqUserId: string, code: string, replaceActiveQuest?: boolean) => Promise<AdvancedProfession>;
@@ -60,6 +60,7 @@ export declare const completeAdvancedProfessionTrial: (connection: PoolConnectio
         description: string;
         effect: Record<string, number>;
     };
+    route: import("./advanced-profession-routes.config").AdvancedProfessionRoute;
     first: {
         title: string;
         story: string;

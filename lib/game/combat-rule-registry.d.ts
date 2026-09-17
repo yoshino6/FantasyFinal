@@ -183,6 +183,8 @@ export declare class CombatRules {
         ranged?: boolean;
         hitPenalty?: number;
         accuracyMultiplier?: number;
+        accuracyFlat?: number;
+        hitCorrection?: number;
         specializedPower?: boolean;
         penetration?: number;
         finalMultiplier?: number;

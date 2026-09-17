@@ -1,4 +1,5 @@
 export declare const guildSkillCodes: string[];
+export declare const retiredBookshopSkillCodes: string[];
 export declare const bookshopSkillCodes: string[];
 export declare const libraryFreeSkillCodes: string[];
 export declare const tierLearningCost: (tier: string, fallback: number) => number;

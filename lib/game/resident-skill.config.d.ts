@@ -14,6 +14,7 @@ export type ResidentSkill = {
     damageType: string;
     ranged: boolean;
 };
+export declare const residentExpansionSecondaryScale = 0.6;
 export declare const residentSkills: readonly ResidentSkill[];
 export declare const residentSkillByCode: (code: string) => ResidentSkill | undefined;
 export declare const residentPassiveFamily: (code: string) => string | undefined;

@@ -11,7 +11,7 @@ type SettingRow = RowDataPacket & {
     mp_item_name: string | null;
 };
 type AutoCombatAction = {
-    type: 'attack';
+    type: 'attack' | 'defend';
 } | {
     type: 'skill';
     skillId: number;
