@@ -6,9 +6,22 @@ export { chooseWeighted } from './opening-route-draw';
 import { pointBelongsToRegion, validWorldSitePoint, type WorldArea } from './world-site-geometry';
 
 export type OpeningConnection = Pick<PoolConnection, 'execute'>;
-export const assertOpeningFree = async (connection: OpeningConnection, characterId: number) => {
+export const assertOpeningFree = async (connection: OpeningConnection, characterId: number, forestSpawnId?: number) => {
   const [rows] = await connection.execute<RowDataPacket[]>("SELECT state FROM player_opening_stories WHERE character_id=? AND state<>'completed' LIMIT 1", [characterId]);
-  if (rows.length) throw new Error('眼前的初行剧情尚未结束。请使用 /继续剧情 作出选择并完成安全交接。');
+  if (!rows.length) return;
+  // F03 必须先建立真实战斗，才能结算初行。仅放行已确认分支的本地史莱姆目标。
+  if (Number.isSafeInteger(forestSpawnId) && Number(forestSpawnId) > 0) {
+    const [pending] = await connection.execute<RowDataPacket[]>(`SELECT o.character_id FROM player_opening_stories o
+      JOIN player_story_progress p ON p.character_id=o.character_id AND p.story_code='forest_guide'
+      JOIN characters c ON c.id=o.character_id
+      JOIN monster_spawns s ON s.id=? AND s.region_id=c.current_region_id AND s.pos_x=c.pos_x AND s.pos_y=c.pos_y AND s.pos_z=c.pos_z AND s.defeated_at IS NULL
+      JOIN monster_templates t ON t.id=s.template_id AND t.code='forest_slime'
+      WHERE o.character_id=? AND o.route_code='F03' AND o.state='branch' AND p.stage=5
+        AND ((o.branch_code='A' AND p.status='joined' AND JSON_UNQUOTE(JSON_EXTRACT(o.flags_json,'$.forestBattlePending'))='join')
+          OR (o.branch_code='B' AND p.status='declined' AND JSON_UNQUOTE(JSON_EXTRACT(o.flags_json,'$.forestBattlePending'))='depart')) LIMIT 1`, [Number(forestSpawnId), characterId]);
+    if (pending.length) return;
+  }
+  throw new Error('眼前的初行剧情尚未结束。请使用 /继续剧情 完成当前故事。');
 };
 export const openingWorldFor = async (connection: OpeningConnection, lock = false) => {
   const [rows] = await connection.execute<RowDataPacket[]>(`SELECT * FROM opening_world WHERE id=1${lock ? ' FOR UPDATE' : ''}`);

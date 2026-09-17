@@ -27,11 +27,11 @@ test('临时蛇首读取入场属性快照，不按无词条模板重复派生�
   assert.deepEqual(threeheadMotherStoredStats({ cooldowns: JSON.stringify({ mother_head_role: 'flame', mother_head_stats: snapshot }) }), snapshot);
 });
 
-test('三首存活时单体按50/25/25分摊，双首按70/30分摊', async () => {
+test('三首存活时单体按60/20/20分摊，双首按70/30分摊', async () => {
   const { heads, rules } = fixture(); await rules.takeHit(heads[0], 1000);
-  assert.deepEqual(heads.map(head => head.hp), [9500, 9750, 9750]);
+  assert.deepEqual(heads.map(head => head.hp), [9400, 9800, 9800]);
   heads[2].hp = 0; await rules.takeHit(heads[0], 1000);
-  assert.deepEqual(heads.slice(0, 2).map(head => head.hp), [8800, 9450]);
+  assert.deepEqual(heads.slice(0, 2).map(head => head.hp), [8700, 9500]);
 });
 
 test('群攻按存活数量缩放且使用批次快照，独立伤害不参与血肉分摊', async () => {

@@ -1,3 +1,5 @@
+const rejectRetiredWorkshop = ():void => { throw new Error('此旧版执行指令已停用，请重新从锻造面板预览并确认。'); };
+import { armorWorkshopNames, lowForgeMaterials, allocateLowMaterials } from './equipment-workshop-rules';
 import { forgeAchievementFacts } from './achievement-production';
 import { achievementSecondaryLevel } from './achievement-hooks';
 import { recordAchievement } from './achievement-events';
@@ -40,14 +42,14 @@ export const armorClassEffectText = (subtype: string | null | undefined, slot?: 
 export const forgeFee = (requirements: ReadonlyArray<{ code: string; quantity: number }>) => Math.max(1, Math.ceil(requirements.reduce((sum, requirement) => sum + (forgeMaterialValue[requirement.code] ?? purifiedCraftMaterialValue(requirement.code)) * requirement.quantity, 0) * .025));
 const jsonRecord = (value: unknown): Record<string, unknown> => { if (!value) return {}; if (typeof value !== 'string') return value as Record<string, unknown>; try { return JSON.parse(value) as Record<string, unknown>; } catch { return {}; } };
 const fusionLimit = (weapon: Pick<WeaponRow, 'rarity' | 'required_level'>) => Math.floor(Math.max(0, Number(weapon.required_level)) / 10) + (rarityBonus[weapon.rarity] ?? 0);
-const characterIdFor = async (connection: PoolConnection | Awaited<ReturnType<typeof getPool>>, qqUserId: string, lock = false) => {
+export const characterIdFor = async (connection: PoolConnection | Awaited<ReturnType<typeof getPool>>, qqUserId: string, lock = false) => {
   const [rows] = await connection.execute<(RowDataPacket & { id: number })[]>(`SELECT c.id FROM characters c JOIN players p ON p.id=c.player_id WHERE p.qq_user_id=? LIMIT 1${lock ? ' FOR UPDATE' : ''}`, [qqUserId]);
   if (!rows[0]) throw new Error('请先注册角色。');
   return Number(rows[0].id);
 };
 const proficiencyRequired = secondaryProfessionProficiencyRequired;
 const blacksmithBonus = secondaryProfessionBonus;
-const blacksmithProgressFor = async (connection: PoolConnection | Awaited<ReturnType<typeof getPool>>, characterId: number, lock = false) => {
+export const blacksmithProgressFor = async (connection: PoolConnection | Awaited<ReturnType<typeof getPool>>, characterId: number, lock = false) => {
   const shop=await shopProgressFor(connection,characterId,'blacksmith');if(shop)return {...shop,isBlacksmith:false};
   const [characters] = await connection.execute<(RowDataPacket & { secondary_profession_code: string | null })[]>(`SELECT secondary_profession_code FROM characters WHERE id=?${lock ? ' FOR UPDATE' : ''}`, [characterId]);
   if (characters[0]?.secondary_profession_code !== 'blacksmith') throw new Error('请从锻造师副职业或铁匠铺服务入口进行操作。');
@@ -57,7 +59,7 @@ const blacksmithProgressFor = async (connection: PoolConnection | Awaited<Return
   const proficiency = Number(rows[0]?.proficiency ?? 0);
   return { isBlacksmith: true, level, proficiency, required: proficiencyRequired(level), bonus: blacksmithBonus(level) };
 };
-const addBlacksmithProficiency = async (connection: PoolConnection, characterId: number, gained = 1) => {
+export const addBlacksmithProficiency = async (connection: PoolConnection, characterId: number, gained = 1) => {
   const current = await blacksmithProgressFor(connection, characterId, true);
   if (!current.isBlacksmith) return current;
   let level = current.level;
@@ -149,6 +151,8 @@ const refinementGain = (minimum: number, maximum: number, quality: number) => {
   return candidates[weights.findIndex(weight => (roll -= weight) <= 0)] ?? min;
 };
 export const refineWeapon = async (qqUserId: string, instanceId: number, materialId: number) => withTransaction(async connection => {
+  rejectRetiredWorkshop();
+
   const characterId = await characterIdFor(connection, qqUserId, true);
   await assertHiddenInstanceMutable(connection, characterId, instanceId);
   const profession = await blacksmithProgressFor(connection, characterId, true);
@@ -174,6 +178,8 @@ export const refineWeapon = async (qqUserId: string, instanceId: number, materia
   return { name: weapon.name, material: material.name, oldQuality: quality, newQuality, gain, failed: false, great, progress };
 });
 export const fuseWeapon = async (qqUserId: string, instanceId: number, materialId: number) => withTransaction(async connection => {
+  rejectRetiredWorkshop();
+
   const characterId = await characterIdFor(connection, qqUserId, true);
   await assertHiddenInstanceMutable(connection, characterId, instanceId);
   const profession = await blacksmithProgressFor(connection, characterId, true);
@@ -228,9 +234,9 @@ export const fuseWeapon = async (qqUserId: string, instanceId: number, materialI
 
 const forgeContribution = (code: string) => ({ living_wood: 15, meteor_iron: 25, star_copper: 35, moon_silver: 45, sun_gold: 60, beast_meat: 3, beast_bone: 7, beast_hide: 7, beast_tendon: 8, beast_core: 20, magic_wool: 15, magic_tusk: 18, magic_scale: 18, magic_claw: 18, magic_heartcore: 20, magic_blood: 16, magic_eye: 16, magic_horn: 16, refined_beast_bone: 32, refined_beast_hide: 32, refined_beast_tendon: 34, refined_beast_core: 52, refined_magic_wool: 46, refined_magic_tusk: 48, refined_magic_scale: 48, refined_magic_claw: 50, refined_magic_heartcore: 52, wood_element_dust: 12, metal_element_dust: 12, water_element_dust: 12, ice_element_dust: 12, dark_element_dust: 12, fire_element_dust: 12, thunder_element_dust: 12, light_element_dust: 12, riot_aura: 30, goblin_scrap_iron: 32, goblin_whetstone: 42, goblin_bowstring: 38, goblin_blast_core: 48, goblin_drumhide: 40, goblin_shadowcloth: 46, goblin_totem_shard: 52, goblin_earth_crystal: 54, goblin_command_seal: 78, goblin_colonel_insignia: 120 }[code] ?? 5);
 /** Lv.25 起的主材按装备构造分配到四个 Lv.30 地图的区域锻材。 */
-const tierForgeMaterial = (category: string, subtype: string | null | undefined, level: number) => {
+export const tierForgeMaterial = (category: string, subtype: string | null | undefined, level: number) => {
   if (level <= 20) return 'living_wood';
-  if (category === '武器') {
+  if (category === '武器' || category === '副手') {
     if (subtype === '匕首') return 'duskvein_crystal';
     if (subtype === '法杖' || subtype === '法书' || subtype === '法球') return 'marsh_heart';
     if (subtype === '拳刃') return 'fire_crystal';
@@ -244,10 +250,10 @@ const tierForgeMaterial = (category: string, subtype: string | null | undefined,
 const weaponCraftMaterial = (subtype: string | null | undefined, equipmentLevel: number) => subtype === '匕首' ? purifiedCraftMaterialCode('gel_skin', equipmentLevel) : subtype === '法杖' || subtype === '法书' || subtype === '法球' ? purifiedCraftMaterialCode('hair', equipmentLevel) : subtype === '盾牌' ? purifiedCraftMaterialCode('shell', equipmentLevel) : purifiedCraftMaterialCode('bone', equipmentLevel);
 /** 同一 20 级循环使用同一套材料；循环内每提升 5 级，需求数量增加 20%。 */
 const normalForgeQuantity = (baseQuantity: number, level: number) => Math.ceil(baseQuantity * (1 + (((level - 5) % 20 + 20) % 20) / 5 * .2));
-const forgeRequirements = (category: string, subtype: string | null | undefined, level: number): ForgeRequirement[] => {
+export const forgeRequirements = (category: string, subtype: string | null | undefined, level: number): ForgeRequirement[] => {
   const base = tierForgeMaterial(category, subtype, level);
   if (![5, 10, 15, 20, 25, 30].includes(level)) throw new Error('当前仅开放每 5 级一档、至 Lv.30 的常规打造。');
-  if (category === '武器') {
+  if (category === '武器' || category === '副手') {
     return [{ code: base, quantity: normalForgeQuantity(10, level) }, { code: weaponCraftMaterial(subtype, level), quantity: normalForgeQuantity(3, level) }];
   }
   const armorType = ['轻甲', '皮甲', '重甲', '布甲', '板甲'].includes(subtype ?? '') ? subtype! : '轻甲';
@@ -376,7 +382,7 @@ const forgeProficiencyGain = (category: string, level: number, rarity: string) =
   const base = Math.max(1, level) * (category === '武器' ? 2 : 1);
   return Math.round(base * (1 + (rarityBonusPct[rarity] ?? 0) / 100));
 };
-const equipmentKind = (category: string, subtype?: string | null): '武器' | '防具' => (category === '武器' || category === '副手') && subtype !== '盾牌' ? '武器' : '防具';
+export const equipmentKind = (category: string, subtype?: string | null): '武器' | '防具' => (category === '武器' || category === '副手') && subtype !== '盾牌' ? '武器' : '防具';
 const randomAffixKeys = ['hpMax', 'mpMax', 'physicalAttack', 'magicAttack', 'physicalDefense', 'magicDefense', 'accuracy', 'evasion', 'critRateBp', 'critDamageBp', 'critResistBp', 'critDamageReductionBp', 'tenacity', 'tenacityPierce', 'speed'];
 type WeightedAffix = { key: string; weight: number };
 const randomSecondaryAffixWeight = (key: string) => {
@@ -384,7 +390,7 @@ const randomSecondaryAffixWeight = (key: string) => {
   const element = key.split('_')[1];
   return element === '光' || element === '暗' ? .25 : .5;
 };
-const randomSecondaryAffixPool = (category: string, subtype: string, level: number, rarity: string) => {
+export const randomSecondaryAffixPool = (category: string, subtype: string, level: number, rarity: string) => {
   const kind = equipmentKind(category, subtype); const primary = new Set(forgePrimaryKeys(category, subtype));
   const keys = [...randomAffixKeys, ...['水', '火', '土', '木', '风', '冰', '雷', '光', '暗'].map(element => `${kind === '武器' ? 'elementMastery' : 'elementResistance'}_${element}`)];
   return keys.filter(key => {
@@ -392,19 +398,19 @@ const randomSecondaryAffixPool = (category: string, subtype: string, level: numb
     return !primary.has(key) && !incompatibleAttack && forgedAffixCap(kind, key, level, rarity) > 0;
   }).map(key => ({ key, weight: randomSecondaryAffixWeight(key) }));
 };
-const pickRandomSecondaryAffix = (pool: WeightedAffix[]) => {
+export const pickRandomSecondaryAffix = (pool: WeightedAffix[]) => {
   let roll = Math.random() * pool.reduce((total, entry) => total + entry.weight, 0);
   const index = pool.findIndex(entry => (roll -= entry.weight) < 0);
   return pool.splice(index < 0 ? pool.length - 1 : index, 1)[0]!.key;
 };
-const randomForgeValue = (upper: number) => Math.round(Math.max(.01, upper * normalForgeFactor()) * 100) / 100;
+export const randomForgeValue = (upper: number) => Math.round(Math.max(.01, upper * normalForgeFactor()) * 100) / 100;
 const randomWeaponPrimary = (value: number) => Math.round(value * (.9 + Math.random() * .2) * 100) / 100;
 // 品质与词条数值、稀有度均独立；每件装备在 0%～100% 间均匀随机，可通过精炼逐步提升。
 const randomForgeQuality = () => Math.round(Math.random() * 1000) / 10;
 /** 史诗图纸保证稀有度，但锻造品质仍受火候影响：以约 62% 为中心截断正态分布。 */
 const randomEpicForgeQuality = () => Math.round(Math.max(0, Math.min(100, normalForgeBaseFactor() * 100)) * 10) / 10;
 // Lv.5 起每 5 级提升 1%，Lv.50 封顶 10%。
-const specialAffixChance = (level: number) => Math.max(.01, Math.min(.1, Math.floor(Math.max(1, Number(level)) / 5) / 100));
+export const specialAffixChance = (level: number) => Math.max(.01, Math.min(.1, Math.floor(Math.max(1, Number(level)) / 5) / 100));
 /** 主人测试装备也走正式锻造的副词条池、上限与正态分布规则。 */
 export const legendaryTestForgeDraft = (category: string, subtype: string, level: number) => {
   const rarity = '传说'; const kind = equipmentKind(category, subtype); const primaryKeys = forgePrimaryKeys(category, subtype);
@@ -417,7 +423,7 @@ export const legendaryTestForgeDraft = (category: string, subtype: string, level
   if (category === '武器' && subtype !== '盾牌' && Math.random() < specialAffixChance(level)) effect.damageBonusPct = Math.round(randomForgeValue(5) * 10) / 10;
   if ((category !== '武器' || subtype === '盾牌') && Math.random() < specialAffixChance(level)) effect.damageReductionPct = Math.round(randomForgeValue(5) * 10) / 10;
   capForgeEffect(effect, category, subtype, level, rarity);
-  return { rarity, name: forgeName(subtype, level, effect), effect, primaryKeys };
+  return { rarity, name: forgeName(subtype, level, effect, tierForgeMaterial(category, subtype, level), category, rarity), effect, primaryKeys };
 };
 export const forgeEquipmentCapsFor = (category: string, subtype: string | null | undefined, level: number, rarity: string, primaryKeys: readonly string[]) => {
   const caps = forgedEquipmentCaps(equipmentKind(category, subtype), level, rarity, primaryKeys, category);
@@ -443,19 +449,21 @@ const capAdditionalEquipmentEffect = (effect: Record<string, unknown>, category:
   for (const [key, cap] of Object.entries(caps)) if (key in effect) effect[key] = Math.round(Math.max(0, Math.min(cap, Number(effect[key] ?? 0))) * 100) / 100;
   return effect;
 };
-const secondaryAffixCount = (rarity: string) => ({ '普通': 0, '优秀': 1, '精良': 2, '稀有': 3, '传说': 4, '史诗': 4 }[rarity] ?? 0);
+export const secondaryAffixCount = (rarity: string) => ({ '普通': 0, '优秀': 1, '精良': 2, '稀有': 3, '传说': 4, '史诗': 4 }[rarity] ?? 0);
 /** 常规成品名称明确保留主锻材系谱，避免 Lv.25/30 仍沿用旧的泛等级名。 */
-const forgeMaterialTitle = (materialCode: string | undefined, level: number) => materialCode === 'living_wood' ? '活纹'
+const forgeMaterialTitle = (materialCode: string | undefined, level: number) => materialCode === 'root_heart' ? '根灵' : materialCode === 'river_shell' ? '河纹' : materialCode === 'tide_shell' ? '潮纹' : materialCode === 'living_wood' ? '活纹'
   : materialCode === 'ridge_core' ? '岩脊'
     : materialCode === 'fire_crystal' ? '赤晶'
       : materialCode === 'marsh_heart' ? '雾沼'
         : materialCode === 'duskvein_crystal' ? '幽纹'
           : level <= 10 ? '灵木' : level <= 20 ? '玄铁' : level <= 30 ? '陨星' : level <= 40 ? '皓月' : '日曜';
-const forgeName = (subtype: string, level: number, effect: Record<string, number>, materialCode?: string) => {
+export const forgeName = (subtype: string, level: number, effect: Record<string, number>, materialCode?: string, category = '武器', rarity = '普通', budgetLevel = level) => {
   const affixes: Array<[string, string]> = [['physicalAttack', '锋利'], ['magicAttack', '灵辉'], ['physicalDefense', '坚固'], ['magicDefense', '秘护'], ['hpMax', '生机'], ['mpMax', '澄明'], ['accuracy', '精准'], ['evasion', '轻盈'], ['tenacityPierce', '破势'], ['speed', '迅捷'], ['critRateBp', '致命']];
-  const affix = [...affixes].sort(([left], [right]) => Number(effect[right] ?? 0) - Number(effect[left] ?? 0))[0]?.[1] ?? '匠制';
+  const caps = forgeEquipmentCapsFor(category, subtype, budgetLevel, rarity, forgePrimaryKeys(category, subtype));
+  const affix = [...affixes].filter(([key]) => Number(effect[key]) > 0 && !forgePrimaryKeys(category,subtype).includes(key)).sort(([left], [right]) => Number(effect[right] ?? 0)/Math.max(.01, caps[right]??1) - Number(effect[left] ?? 0)/Math.max(.01, caps[left]??1))[0]?.[1] ?? '匠制';
   const tier = forgeMaterialTitle(materialCode, level);
-  return `${affix}·${tier}${subtype}`;
+  const slot = ['头肩','上装','腰部','下装','脚部'].indexOf(category);
+  return `${affix}·${tier}${armorWorkshopNames[subtype]?.[slot] ?? subtype}`;
 };
 export const forgeState = async (qqUserId: string) => {
   const pool = await getPool(); const characterId = await characterIdFor(pool, qqUserId);
@@ -463,7 +471,8 @@ export const forgeState = async (qqUserId: string) => {
   const [sessions] = await pool.execute<(RowDataPacket & { equipment_category: string | null; subtype: string | null; target_level: number | null; entry_source: ForgeEntrySource })[]>('SELECT equipment_category,subtype,target_level,entry_source FROM player_forge_sessions WHERE character_id=?', [characterId]);
   const [materials] = await pool.execute<(MaterialRow & { code: string })[]>(`SELECT i.id,i.code,i.name,i.item_category,pi.quantity,COALESCE(fm.quantity,0) AS selected_quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id LEFT JOIN player_forge_materials fm ON fm.character_id=pi.character_id AND fm.item_id=pi.item_id WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type='material' AND i.item_category<>'货币' ORDER BY i.item_category,i.name`, [characterId]);
   const level = sessions[0]?.target_level === null || !sessions[0] ? null : Number(sessions[0].target_level);
-  const requirements = (level && sessions[0]?.equipment_category ? forgeRequirements(sessions[0].equipment_category, sessions[0]?.subtype, level) : []).map(requirement => ({ ...requirement, name: forgeMaterialName(requirement.code) }));
+  let requirements = (level && sessions[0]?.equipment_category ? forgeRequirements(sessions[0].equipment_category, sessions[0]?.subtype, level) : []).map(requirement => ({ ...requirement, name: forgeMaterialName(requirement.code) }));
+  if(requirements[0]?.code==='living_wood'){const {result,remaining}=allocateLowMaterials(materials.map(m=>({code:m.code,quantity:Number(m.quantity),selected:Number(m.selected_quantity??0)})),requirements[0].quantity);requirements=remaining?[{...requirements[0],name:'低级主材（活纹木胚、根心、河壳、潮壳可混用）'},...requirements.slice(1)]:[...result.map(r=>({...r,name:materials.find(m=>m.code===r.code)!.name})),...requirements.slice(1)];}
   const requiredCodes = new Set(requirements.map(item => item.code));
   const selected = materials.filter(item => !requiredCodes.has(item.code) && Number((item as any).selected_quantity) > 0).map(item => ({ id: Number(item.id), name: item.name, quantity: Number((item as any).selected_quantity), contribution: forgeContribution(item.code) }));
   return { category: sessions[0]?.equipment_category ?? null, subtype: sessions[0]?.subtype ?? null, level, source: sessions[0]?.entry_source ?? 'blacksmith' as ForgeEntrySource, materials: materials.map(item => ({ id: Number(item.id), name: item.name, code: item.code, category: item.item_category, quantity: Number(item.quantity), selected: requiredCodes.has(item.code) ? 0 : Number((item as any).selected_quantity ?? 0), contribution: forgeContribution(item.code), supported: requiredCodes.has(item.code) || Boolean(forgeMaterialProfiles[item.code]) })), selected, requirements, minimumAuxiliary: 0, success: 100, progress };
@@ -472,14 +481,15 @@ export const resetForgeSession = async (qqUserId: string, source: ForgeEntrySour
 export const selectForgeCategory = async (qqUserId: string, category: string) => withTransaction(async connection => { if (!forgeCategories.has(category)) throw new Error('该装备部位暂不支持打造。'); const characterId = await characterIdFor(connection, qqUserId, true); await connection.execute('INSERT INTO player_forge_sessions (character_id,equipment_category,subtype,target_level) VALUES (?,?,NULL,NULL) ON DUPLICATE KEY UPDATE equipment_category=VALUES(equipment_category),subtype=NULL,target_level=NULL', [characterId, category]); await connection.execute('DELETE FROM player_forge_materials WHERE character_id=?', [characterId]); return category; });
 export const selectForgeSubtype = async (qqUserId: string, subtype: string) => withTransaction(async connection => { const characterId = await characterIdFor(connection, qqUserId, true); const [rows] = await connection.execute<(RowDataPacket & { equipment_category: string | null })[]>('SELECT equipment_category FROM player_forge_sessions WHERE character_id=? FOR UPDATE', [characterId]); const category = rows[0]?.equipment_category; if (!category) throw new Error('请先选择打造部位。'); if (category === '武器' ? !weaponTypes.has(subtype) : !armorTypes.has(subtype)) throw new Error('该装备类型不可用。'); await connection.execute('UPDATE player_forge_sessions SET subtype=?,target_level=NULL WHERE character_id=?', [subtype, characterId]); return subtype; });
 export const selectForgeLevel = async (qqUserId: string, level: number) => withTransaction(async connection => { if (![5, 10, 15, 20, 25, 30].includes(level)) throw new Error('当前仅开放 Lv.5–30、每 5 级一档的常规打造。'); const characterId = await characterIdFor(connection, qqUserId, true); const [rows] = await connection.execute<(RowDataPacket & { subtype: string | null })[]>('SELECT subtype FROM player_forge_sessions WHERE character_id=? FOR UPDATE', [characterId]); if (!rows[0]?.subtype) throw new Error('请先选择装备类型。'); await connection.execute('UPDATE player_forge_sessions SET target_level=? WHERE character_id=?', [level, characterId]); await connection.execute('DELETE FROM player_forge_materials WHERE character_id=?', [characterId]); return level; });
-export const addForgeMaterial = async (qqUserId: string, itemId: number, quantity = 1) => withTransaction(async connection => { if (!Number.isInteger(quantity) || quantity < 1) throw new Error('放入数量必须是正整数。'); const characterId = await characterIdFor(connection, qqUserId, true); const [items] = await connection.execute<(MaterialRow & { code: string })[]>(`SELECT i.id,i.code,i.name,i.item_category,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.id=? AND pi.quantity>0 AND i.item_type='material' AND i.item_category<>'货币' FOR UPDATE`, [characterId, itemId]); const item = items[0]; if (!item) throw new Error('请选择背包中的材料。'); if (!forgeMaterialProfiles[item.code]) throw new Error(`材料【${item.name}】尚未配置锻造倾向，不能作为辅材。`); const [selected] = await connection.execute<(RowDataPacket & { quantity: number })[]>('SELECT quantity FROM player_forge_materials WHERE character_id=? AND item_id=? FOR UPDATE', [characterId, itemId]); if (Number(selected[0]?.quantity ?? 0) + quantity > Number(item.quantity)) throw new Error(`材料数量不足，最多还能放入 ${Math.max(0, Number(item.quantity) - Number(selected[0]?.quantity ?? 0))} 份。`); await connection.execute('INSERT INTO player_forge_materials (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity)', [characterId, itemId, quantity]); return { name: item.name, quantity }; });
+export const addForgeMaterial = async (qqUserId: string, itemId: number, quantity = 1) => withTransaction(async connection => { if (!Number.isInteger(quantity) || quantity < 1) throw new Error('放入数量必须是正整数。'); const characterId = await characterIdFor(connection, qqUserId, true); const [items] = await connection.execute<(MaterialRow & { code: string })[]>(`SELECT i.id,i.code,i.name,i.item_category,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.id=? AND pi.quantity>0 AND i.item_type='material' AND i.item_category<>'货币' FOR UPDATE`, [characterId, itemId]); const item = items[0]; if (!item) throw new Error('请选择背包中的材料。'); if (!(lowForgeMaterials as readonly string[]).includes(item.code)) throw new Error('这里只能指定低级通用主材，提纯辅材按配方消耗。'); const [selected] = await connection.execute<(RowDataPacket & { quantity: number })[]>('SELECT quantity FROM player_forge_materials WHERE character_id=? AND item_id=? FOR UPDATE', [characterId, itemId]); if (Number(selected[0]?.quantity ?? 0) + quantity > Number(item.quantity)) throw new Error(`材料数量不足，最多还能放入 ${Math.max(0, Number(item.quantity) - Number(selected[0]?.quantity ?? 0))} 份。`); await connection.execute('INSERT INTO player_forge_materials (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity)', [characterId, itemId, quantity]); return { name: item.name, quantity }; });
 export const removeForgeMaterial = async (qqUserId: string, itemId: number) => withTransaction(async connection => { const characterId = await characterIdFor(connection, qqUserId, true); const [rows] = await connection.execute<(RowDataPacket & { quantity: number })[]>('SELECT quantity FROM player_forge_materials WHERE character_id=? AND item_id=? FOR UPDATE', [characterId, itemId]); if (!rows[0] || Number(rows[0].quantity) < 1) throw new Error('该材料尚未放入。'); await connection.execute('UPDATE player_forge_materials SET quantity=quantity-1 WHERE character_id=? AND item_id=?', [characterId, itemId]); await connection.execute('DELETE FROM player_forge_materials WHERE character_id=? AND item_id=? AND quantity<=0', [characterId, itemId]); });
-export const setForgeMaterial = async (qqUserId: string, itemId: number, quantity: number) => withTransaction(async connection => { if (!Number.isInteger(quantity) || quantity < 0) throw new Error('材料数量必须是非负整数。'); const characterId = await characterIdFor(connection, qqUserId, true); const [items] = await connection.execute<(MaterialRow & { code: string })[]>(`SELECT i.id,i.code,i.name,i.item_category,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.id=? AND pi.quantity>0 AND i.item_type='material' AND i.item_category<>'货币' FOR UPDATE`, [characterId, itemId]); const item = items[0]; if (!item) throw new Error('请选择背包中的材料。'); if (!quantity) { await connection.execute('DELETE FROM player_forge_materials WHERE character_id=? AND item_id=?', [characterId, itemId]); return; } if (!forgeMaterialProfiles[item.code]) throw new Error(`材料【${item.name}】尚未配置锻造倾向，不能作为辅材。`); if (quantity > Number(item.quantity)) throw new Error(`材料数量不足，最多可放入 ${item.quantity} 份。`); await connection.execute('INSERT INTO player_forge_materials (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=VALUES(quantity)', [characterId, itemId, quantity]); });
+export const setForgeMaterial = async (qqUserId: string, itemId: number, quantity: number) => withTransaction(async connection => { if (!Number.isInteger(quantity) || quantity < 0) throw new Error('材料数量必须是非负整数。'); const characterId = await characterIdFor(connection, qqUserId, true); const [items] = await connection.execute<(MaterialRow & { code: string })[]>(`SELECT i.id,i.code,i.name,i.item_category,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.id=? AND pi.quantity>0 AND i.item_type='material' AND i.item_category<>'货币' FOR UPDATE`, [characterId, itemId]); const item = items[0]; if (!item) throw new Error('请选择背包中的材料。'); if (!quantity) { await connection.execute('DELETE FROM player_forge_materials WHERE character_id=? AND item_id=?', [characterId, itemId]); return; } if (!(lowForgeMaterials as readonly string[]).includes(item.code)) throw new Error('这里只能指定低级通用主材，提纯辅材按配方消耗。'); if (quantity > Number(item.quantity)) throw new Error(`材料数量不足，最多可放入 ${item.quantity} 份。`); await connection.execute('INSERT INTO player_forge_materials (character_id,item_id,quantity) VALUES (?,?,?) ON DUPLICATE KEY UPDATE quantity=VALUES(quantity)', [characterId, itemId, quantity]); });
 export const clearForgeMaterial = async (qqUserId: string, itemId: number) => withTransaction(async connection => { const characterId = await characterIdFor(connection, qqUserId, true); await blacksmithProgressFor(connection,characterId,true); await connection.execute('DELETE FROM player_forge_materials WHERE character_id=? AND item_id=?', [characterId, itemId]); });
 export const craftForgeEquipment = async (qqUserId: string, _confirmed = false) => withTransaction(async connection => {
   const characterId = await characterIdFor(connection, qqUserId, true); const profession = await blacksmithProgressFor(connection, characterId, true); const [sessions] = await connection.execute<(RowDataPacket & { equipment_category: string; subtype: string; target_level: number; entry_source: ForgeEntrySource })[]>('SELECT equipment_category,subtype,target_level,entry_source FROM player_forge_sessions WHERE character_id=? FOR UPDATE', [characterId]); const session = sessions[0]; if(session?.entry_source!==(currentSecondaryShop()?'blacksmith':'profession'))throw new Error('打造来源已改变，请从当前面板重新选择打造。'); if (!session?.equipment_category || !session.subtype || !session.target_level) throw new Error('请完成打造目标选择。');
-  const requirements = forgeRequirements(session.equipment_category, session.subtype, Number(session.target_level));
-  const materials=await fixedTalentMaterials(connection,characterId,requirements,requirements.slice(1).map(r=>r.code),!currentSecondaryShop());
+  let requirements = forgeRequirements(session.equipment_category, session.subtype, Number(session.target_level));
+  if(requirements[0]?.code==='living_wood'){const [choices]=await connection.execute<(RowDataPacket&{code:string;quantity:number})[]>('SELECT i.code,fm.quantity FROM player_forge_materials fm JOIN item_definitions i ON i.id=fm.item_id WHERE fm.character_id=?',[characterId]);const main=await (await import('./equipment-workshop.service')).workshopCosts(connection,characterId,[requirements[0]],choices.map(r=>({code:r.code,quantity:Number(r.quantity)})));requirements=[...main.map(({code,quantity})=>({code,quantity})),...requirements.slice(1)];}
+  const materials=await fixedTalentMaterials(connection,characterId,requirements,requirements.filter(r=>r.code!==tierForgeMaterial(session.equipment_category,session.subtype,Number(session.target_level))&&!(lowForgeMaterials as readonly string[]).includes(r.code)).map(r=>r.code),!currentSecondaryShop());
   const talent=await ownedTalent(connection,characterId),talentData=await readTalentData(connection,characterId);
   const risk=!currentSecondaryShop()&&talent?.number==='H09'&&talentData.settings.riskCraft===true;
   if(risk&&materials.some(m=>m.item.rarity!=='普通'))throw new Error('孤注制作不能用于含稀有主材的配方。');
@@ -500,7 +510,7 @@ export const craftForgeEquipment = async (qqUserId: string, _confirmed = false) 
   if (session.equipment_category === '武器' && session.subtype !== '盾牌' && Math.random() < specialAffixChance(level)) effect.damageBonusPct = Math.round(randomForgeValue(5) * 10) / 10;
   if ((session.equipment_category !== '武器' || session.subtype === '盾牌') && Math.random() < specialAffixChance(level)) effect.damageReductionPct = Math.round(randomForgeValue(5) * 10) / 10;
   capForgeEffect(effect, session.equipment_category, session.subtype, level, rarity);
-  const mainMaterial = tierForgeMaterial(session.equipment_category, session.subtype, level); const name = forgeName(session.subtype, level, effect, mainMaterial); const code = `crafted_${characterId}_${Date.now()}_${Math.floor(Math.random() * 100000)}`; const quality = randomForgeQuality();
+  const mainMaterial = level<=20 ? requirements.filter(r=>(lowForgeMaterials as readonly string[]).includes(r.code)).sort((a,b)=>b.quantity-a.quantity+(b.quantity===a.quantity?((lowForgeMaterials as readonly string[]).indexOf(a.code)-(lowForgeMaterials as readonly string[]).indexOf(b.code)):0))[0]!.code : tierForgeMaterial(session.equipment_category, session.subtype, level); const name = forgeName(session.subtype, level, effect, mainMaterial, session.equipment_category, rarity); const code = `crafted_${characterId}_${Date.now()}_${Math.floor(Math.random() * 100000)}`; const quality = randomForgeQuality();
   const armorText = armorClassEffectText(session.subtype, session.equipment_category); const description = `由铁匠铺以${forgeMaterialName(mainMaterial)}为主体、按固定配方打造的 Lv.${level}${session.subtype}。随机词条的原始数值即为精炼至 100% 时的上限。${armorText}`;
   const [definition] = await connection.execute<any>('INSERT INTO item_definitions (code,name,description,obtain_source,item_type,item_category,weapon_type,rarity,required_level,weight,stackable,effect_json) VALUES (?,?,?,?,?,?,?,?,?,?,0,?)', [code, name, description, '百纳镇铁匠铺打造', 'equipment', session.equipment_category, session.subtype, rarity, session.target_level, 2, JSON.stringify(effect)]); const [instance] = await connection.execute<any>('INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max,effect_json,forge_primary_json) VALUES (?,?,?,100,100,?,?)', [characterId, definition.insertId, quality, JSON.stringify(effect), JSON.stringify(primaryKeys)]); await connection.execute('DELETE FROM player_forge_sessions WHERE character_id=?', [characterId]);
   if(personalInput)await connection.execute("UPDATE player_item_instances SET bound_kind='personal' WHERE id=?",[instance.insertId]);
@@ -530,7 +540,9 @@ const reforgeQuoteFor = async (connection: PoolConnection | Awaited<ReturnType<t
 };
 export const reforgeEquipmentList = async (qqUserId: string) => { const pool = await getPool(); const characterId = await characterIdFor(pool, qqUserId); const [rows] = await pool.execute<ReforgeRow[]>(`SELECT ii.id,ii.item_id,i.name,i.item_category,i.weapon_type,i.required_level,EXISTS(SELECT 1 FROM player_equipment pe WHERE pe.character_id=ii.character_id AND pe.instance_id=ii.id) AS equipped FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.character_id=? AND i.item_type='equipment' AND i.item_category<>'异械' AND i.rarity<>'神器' ORDER BY ii.acquired_at DESC`, [characterId]); return rows.filter(row => !row.equipped && [5,10,15,20,25].includes(Number(row.required_level))).map(row => ({ id:Number(row.id),name:row.name,category:row.item_category,subtype:row.weapon_type,level:Number(row.required_level) })); };
 export const reforgePreview = async (qqUserId: string, instanceId: number) => { const pool=await getPool(); const characterId=await characterIdFor(pool,qqUserId); const quote=await reforgeQuoteFor(pool,characterId,instanceId); const codes=quote.requirements.map(item=>item.code); const [rows]=codes.length?await pool.execute<(RowDataPacket&{code:string;name:string;quantity:number})[]>(`SELECT i.code,i.name,COALESCE(pi.quantity,0) AS quantity FROM item_definitions i LEFT JOIN player_inventory pi ON pi.item_id=i.id AND pi.character_id=? WHERE i.code IN (${codes.map(()=>'?').join(',')})`,[characterId,...codes]):[[]]; return {...quote,materials:quote.requirements.map(item=>({...item,name:rows.find(row=>row.code===item.code)?.name??forgeMaterialName(item.code),owned:Number(rows.find(row=>row.code===item.code)?.quantity??0)})),fee:forgeFee(quote.requirements)}; };
-export const reforgeEquipment = async (qqUserId: string, instanceId: number) => withTransaction(async connection => { const characterId=await characterIdFor(connection,qqUserId,true); const profession=await blacksmithProgressFor(connection,characterId,true); const quote=await reforgeQuoteFor(connection,characterId,instanceId,true); const materials=await fixedTalentMaterials(connection,characterId,quote.requirements,quote.requirements.slice(1).map(item=>item.code),!currentSecondaryShop()); const fee=forgeFee(quote.requirements); const [coins]=await connection.execute<(RowDataPacket&{copper_coins:number})[]>('SELECT copper_coins FROM characters WHERE id=? FOR UPDATE',[characterId]); if(Number(coins[0]?.copper_coins??0)<fee)throw new Error(`铜币不足，重铸手续费需要 ${fee} 铜币。`); for(const material of materials)await consumeTalentMaterial(connection,characterId,Number(material.item.id),material.quantity,'craft',!currentSecondaryShop()); await connection.execute('DELETE FROM player_item_instances WHERE id=? AND character_id=?',[instanceId,characterId]); await connection.execute('UPDATE characters SET copper_coins=copper_coins-? WHERE id=?',[fee,characterId]); const rarity=forgeRarity(profession.level), level=quote.targetLevel, category=quote.source.item_category, subtype=quote.source.weapon_type, primaryKeys=forgePrimaryKeys(category,subtype), kind=equipmentKind(category,subtype); const effect=Object.fromEntries(Object.entries(baseForgeEffect(category,subtype,level,rarity)).map(([key,value])=>[key,category==='武器'&&subtype!=='盾牌'?randomWeaponPrimary(Number(value)):Number(value)])) as Record<string,number>; const pool=randomSecondaryAffixPool(category,subtype,level,rarity); for(let index=0;index<secondaryAffixCount(rarity)&&pool.length;index++){const key=pickRandomSecondaryAffix(pool);effect[key]=randomForgeValue(forgedAffixCap(kind,key,level,rarity));} capForgeEffect(effect,category,subtype,level,rarity); const main=tierForgeMaterial(category,subtype,level),name=forgeName(subtype,level,effect,main),code=`reforged_${characterId}_${Date.now()}_${Math.floor(Math.random()*100000)}`; const [definition]=await connection.execute<any>('INSERT INTO item_definitions (code,name,description,obtain_source,item_type,item_category,weapon_type,rarity,required_level,weight,stackable,effect_json) VALUES (?,?,?,?,?,?,?,?,?,?,0,?)',[code,name,`由【${quote.source.name}】重铸而成的 Lv.${level}${subtype}。`, '铁匠重铸','equipment',category,subtype,rarity,level,2,JSON.stringify(effect)]); const [instance]=await connection.execute<any>('INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max,effect_json,forge_primary_json) VALUES (?,?,?,100,100,?,?)',[characterId,definition.insertId,randomForgeQuality(),JSON.stringify(effect),JSON.stringify(primaryKeys)]); await recalculateCharacterStats(connection,characterId); await recordCharacterOperation(connection,{characterId,kind:'craft.reforged',source:{system:'forge_instance',id:Number(instance.insertId),step:'reforged'},outcome:'重铸',summary:`将${quote.source.name}重铸为${name}`,detail:{oldInstanceId:instanceId,newInstanceId:Number(instance.insertId),oldName:quote.source.name,newName:name,rarity,level,feeCopper:fee,materials:quote.requirements},scoreKey:`reforge:${quote.source.item_category}:${level}`}); return {name,instanceId:Number(instance.insertId),rarity,level,discount:quote.discount,fee,effect,primaryKeys}; });
+export const reforgeEquipment = async (qqUserId: string, instanceId: number) => withTransaction(async connection => {
+  rejectRetiredWorkshop();
+ const characterId=await characterIdFor(connection,qqUserId,true); const profession=await blacksmithProgressFor(connection,characterId,true); const quote=await reforgeQuoteFor(connection,characterId,instanceId,true); const materials=await fixedTalentMaterials(connection,characterId,quote.requirements,quote.requirements.slice(1).map(item=>item.code),!currentSecondaryShop()); const fee=forgeFee(quote.requirements); const [coins]=await connection.execute<(RowDataPacket&{copper_coins:number})[]>('SELECT copper_coins FROM characters WHERE id=? FOR UPDATE',[characterId]); if(Number(coins[0]?.copper_coins??0)<fee)throw new Error(`铜币不足，重铸手续费需要 ${fee} 铜币。`); for(const material of materials)await consumeTalentMaterial(connection,characterId,Number(material.item.id),material.quantity,'craft',!currentSecondaryShop()); await connection.execute('DELETE FROM player_item_instances WHERE id=? AND character_id=?',[instanceId,characterId]); await connection.execute('UPDATE characters SET copper_coins=copper_coins-? WHERE id=?',[fee,characterId]); const rarity=forgeRarity(profession.level), level=quote.targetLevel, category=quote.source.item_category, subtype=quote.source.weapon_type, primaryKeys=forgePrimaryKeys(category,subtype), kind=equipmentKind(category,subtype); const effect=Object.fromEntries(Object.entries(baseForgeEffect(category,subtype,level,rarity)).map(([key,value])=>[key,category==='武器'&&subtype!=='盾牌'?randomWeaponPrimary(Number(value)):Number(value)])) as Record<string,number>; const pool=randomSecondaryAffixPool(category,subtype,level,rarity); for(let index=0;index<secondaryAffixCount(rarity)&&pool.length;index++){const key=pickRandomSecondaryAffix(pool);effect[key]=randomForgeValue(forgedAffixCap(kind,key,level,rarity));} capForgeEffect(effect,category,subtype,level,rarity); const main=tierForgeMaterial(category,subtype,level),name=forgeName(subtype,level,effect,main),code=`reforged_${characterId}_${Date.now()}_${Math.floor(Math.random()*100000)}`; const [definition]=await connection.execute<any>('INSERT INTO item_definitions (code,name,description,obtain_source,item_type,item_category,weapon_type,rarity,required_level,weight,stackable,effect_json) VALUES (?,?,?,?,?,?,?,?,?,?,0,?)',[code,name,`由【${quote.source.name}】重铸而成的 Lv.${level}${subtype}。`, '铁匠重铸','equipment',category,subtype,rarity,level,2,JSON.stringify(effect)]); const [instance]=await connection.execute<any>('INSERT INTO player_item_instances (character_id,item_id,quality,durability,durability_max,effect_json,forge_primary_json) VALUES (?,?,?,100,100,?,?)',[characterId,definition.insertId,randomForgeQuality(),JSON.stringify(effect),JSON.stringify(primaryKeys)]); await recalculateCharacterStats(connection,characterId); await recordCharacterOperation(connection,{characterId,kind:'craft.reforged',source:{system:'forge_instance',id:Number(instance.insertId),step:'reforged'},outcome:'重铸',summary:`将${quote.source.name}重铸为${name}`,detail:{oldInstanceId:instanceId,newInstanceId:Number(instance.insertId),oldName:quote.source.name,newName:name,rarity,level,feeCopper:fee,materials:quote.requirements},scoreKey:`reforge:${quote.source.item_category}:${level}`}); return {name,instanceId:Number(instance.insertId),rarity,level,discount:quote.discount,fee,effect,primaryKeys}; });
 
 type EpicRecipeMaterialView = { category:string; itemId: number; recipeQuantity: number; code: string; name: string; required: number; owned: number };
 const epicRecipeRequirementCodes = (recipe: EpicForgeRecipe) => [recipe.blueprintCode, ...recipe.materials.map(material => material.code)];

@@ -2745,7 +2745,7 @@ const repairInvalidCombatFor = async (connection: PoolConnection, characterId: n
 
 const chooseTargetInTransaction = async (connection: PoolConnection, qqUserId: string, spawnId: number, ambush = false, retreatPosition?: CombatRetreatPosition, prepaid?: Record<string, boolean>) => {
   let character = await characterFor(qqUserId, connection); let members = await partyCombatants(connection, character);
-  for (const member of members) { await assertNoNegotiation(connection, Number(member.id)); assertTalentReviewResolved(await readTalentData(connection,Number(member.id))); }
+  for (const member of members) { await assertNoNegotiation(connection, Number(member.id), spawnId); assertTalentReviewResolved(await readTalentData(connection,Number(member.id))); }
   for (const member of members) await recalculateCharacterStats(connection, Number(member.id));
   members = await partyCombatants(connection, character); character = members.find(member => Number(member.id) === Number(character.id)) ?? character;
   ensureActionAvailable(character); if (members.some(member => member.activity_status === 'resting')) throw new Error('队伍中有人正在休息，无法进入战斗。');

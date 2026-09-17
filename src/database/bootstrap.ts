@@ -2255,57 +2255,8 @@ export const initializeSchema = async (pool: Pool) => {
     JOIN item_definitions i ON i.id=pe.item_id
     WHERE i.item_category='异械' AND pe.instance_id IS NOT NULL`);
   await pool.query(`DELETE pe FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id WHERE i.item_category='异械'`);
-  await pool.query(`INSERT INTO blacksmith_refinement_materials (item_id,min_gain,max_gain)
-    SELECT id,1,3
-    FROM item_definitions WHERE code IN ('living_wood','ridge_core','refined_beast_bone','refined_beast_hide','refined_beast_tendon','refined_beast_core','refined_magic_wool','refined_magic_tusk','refined_magic_scale','refined_magic_claw','refined_magic_heartcore')
-    ON DUPLICATE KEY UPDATE min_gain=VALUES(min_gain),max_gain=VALUES(max_gain)`);
-  await pool.query(`INSERT INTO blacksmith_fusion_material_effects (item_id,effect_json,description)
-    SELECT id,CASE code
-      WHEN 'beast_bone' THEN JSON_OBJECT('physicalAttackPct',2)
-      WHEN 'beast_hide' THEN JSON_OBJECT('physicalDefensePct',2)
-      WHEN 'beast_tendon' THEN JSON_OBJECT('speedPct',2)
-      WHEN 'beast_core' THEN JSON_OBJECT('magicAttackPct',2)
-      WHEN 'magic_wool' THEN JSON_OBJECT('evasionPct',3)
-      WHEN 'magic_tusk' THEN JSON_OBJECT('physicalAttackPct',3)
-      WHEN 'magic_scale' THEN JSON_OBJECT('magicDefensePct',3)
-      WHEN 'magic_claw' THEN JSON_OBJECT('critRatePct',3)
-      WHEN 'magic_heartcore' THEN JSON_OBJECT('accuracyPct',3)
-      WHEN 'refined_beast_bone' THEN JSON_OBJECT('physicalAttackPct',4)
-      WHEN 'refined_beast_hide' THEN JSON_OBJECT('physicalDefensePct',4,'magicDefensePct',4)
-      WHEN 'refined_beast_tendon' THEN JSON_OBJECT('speedPct',4)
-      WHEN 'refined_beast_core' THEN JSON_OBJECT('magicAttackPct',4)
-      WHEN 'refined_magic_wool' THEN JSON_OBJECT('evasionPct',6)
-      WHEN 'refined_magic_tusk' THEN JSON_OBJECT('physicalAttackPct',6)
-      WHEN 'refined_magic_scale' THEN JSON_OBJECT('magicDefensePct',6)
-      WHEN 'refined_magic_claw' THEN JSON_OBJECT('critRatePct',6)
-      WHEN 'refined_magic_heartcore' THEN JSON_OBJECT('accuracyPct',6)
-      WHEN 'riot_aura' THEN JSON_OBJECT('damageBonusPct',1)
-      WHEN 'goblin_scrap_iron' THEN JSON_OBJECT('physicalDefense',3)
-      WHEN 'goblin_whetstone' THEN JSON_OBJECT('physicalAttack',16)
-      WHEN 'goblin_bowstring' THEN JSON_OBJECT('accuracy',14)
-      WHEN 'goblin_blast_core' THEN JSON_OBJECT('critDamageBp',10)
-      WHEN 'goblin_drumhide' THEN JSON_OBJECT('speed',12)
-      WHEN 'goblin_shadowcloth' THEN JSON_OBJECT('evasion',12)
-      WHEN 'goblin_totem_shard' THEN JSON_OBJECT('magicAttack',18)
-      WHEN 'goblin_earth_crystal' THEN JSON_OBJECT('physicalDefense',16)
-      WHEN 'goblin_command_seal' THEN JSON_OBJECT('physicalDefense',8,'magicDefense',8)
-      WHEN 'goblin_colonel_insignia' THEN JSON_OBJECT('constitution',6,'spirit',6,'strength',6,'intelligence',6,'agility',6,'perception',6)
-      WHEN 'living_wood' THEN JSON_OBJECT('hpPct',2)
-      WHEN 'meteor_iron' THEN JSON_OBJECT('physicalDefensePct',3)
-      WHEN 'star_copper' THEN JSON_OBJECT('accuracyPct',3)
-      WHEN 'moon_silver' THEN JSON_OBJECT('mpPct',3)
-      WHEN 'sun_gold' THEN JSON_OBJECT('physicalAttackPct',2,'magicAttackPct',2)
-      WHEN 'wood_element_dust' THEN JSON_OBJECT('elementMastery_木',2)
-      WHEN 'metal_element_dust' THEN JSON_OBJECT('elementMastery_土',2)
-      WHEN 'water_element_dust' THEN JSON_OBJECT('elementMastery_水',2)
-      WHEN 'ice_element_dust' THEN JSON_OBJECT('elementMastery_冰',2)
-      WHEN 'dark_element_dust' THEN JSON_OBJECT('elementMastery_暗',2)
-      WHEN 'fire_element_dust' THEN JSON_OBJECT('elementMastery_火',2)
-      WHEN 'thunder_element_dust' THEN JSON_OBJECT('elementMastery_雷',2)
-      WHEN 'light_element_dust' THEN JSON_OBJECT('elementMastery_光',2) END,
-      CASE code WHEN 'beast_bone' THEN '物攻+2%' WHEN 'beast_hide' THEN '物防+2%' WHEN 'beast_tendon' THEN '速度+2%' WHEN 'beast_core' THEN '魔攻+2%' WHEN 'magic_wool' THEN '闪避+3%' WHEN 'magic_tusk' THEN '物攻+3%' WHEN 'magic_scale' THEN '魔防+3%' WHEN 'magic_claw' THEN '暴击+3%' WHEN 'magic_heartcore' THEN '命中+3%' WHEN 'refined_beast_bone' THEN '物攻+4%' WHEN 'refined_beast_hide' THEN '双防+4%' WHEN 'refined_beast_tendon' THEN '速度+4%' WHEN 'refined_beast_core' THEN '魔攻+4%' WHEN 'refined_magic_wool' THEN '闪避+6%' WHEN 'refined_magic_tusk' THEN '物攻+6%' WHEN 'refined_magic_scale' THEN '魔防+6%' WHEN 'refined_magic_claw' THEN '暴击+6%' WHEN 'refined_magic_heartcore' THEN '命中+6%' WHEN 'riot_aura' THEN '造成伤害+0.1%～1.0%' WHEN 'goblin_scrap_iron' THEN '物防+3' WHEN 'goblin_whetstone' THEN '物攻+16' WHEN 'goblin_bowstring' THEN '命中+14' WHEN 'goblin_blast_core' THEN '暴伤+10' WHEN 'goblin_drumhide' THEN '速度+12' WHEN 'goblin_shadowcloth' THEN '闪避+12' WHEN 'goblin_totem_shard' THEN '魔攻+18' WHEN 'goblin_earth_crystal' THEN '物防+16' WHEN 'goblin_command_seal' THEN '双防各+8' WHEN 'goblin_colonel_insignia' THEN '全属性各+6' WHEN 'living_wood' THEN '生命上限+2%' WHEN 'meteor_iron' THEN '物防+3%' WHEN 'star_copper' THEN '命中+3%' WHEN 'moon_silver' THEN '魔力上限+3%' WHEN 'sun_gold' THEN '双攻+2%' WHEN 'wood_element_dust' THEN '武器：木元素精通+2；防具：木元素抗性+2' WHEN 'metal_element_dust' THEN '武器：土元素精通+2；防具：土元素抗性+2' WHEN 'water_element_dust' THEN '武器：水元素精通+2；防具：水元素抗性+2' WHEN 'ice_element_dust' THEN '武器：冰元素精通+2；防具：冰元素抗性+2' WHEN 'dark_element_dust' THEN '武器：暗元素精通+2；防具：暗元素抗性+2' WHEN 'fire_element_dust' THEN '武器：火元素精通+2；防具：火元素抗性+2' WHEN 'thunder_element_dust' THEN '武器：雷元素精通+2；防具：雷元素抗性+2' WHEN 'light_element_dust' THEN '武器：光元素精通+2；防具：光元素抗性+2' END
-    FROM item_definitions WHERE code IN ('beast_bone','beast_hide','beast_tendon','beast_core','magic_wool','magic_tusk','magic_scale','magic_claw','magic_heartcore','refined_beast_bone','refined_beast_hide','refined_beast_tendon','refined_beast_core','refined_magic_wool','refined_magic_tusk','refined_magic_scale','refined_magic_claw','refined_magic_heartcore','riot_aura','goblin_scrap_iron','goblin_whetstone','goblin_bowstring','goblin_blast_core','goblin_drumhide','goblin_shadowcloth','goblin_totem_shard','goblin_earth_crystal','goblin_command_seal','goblin_colonel_insignia','living_wood','meteor_iron','star_copper','moon_silver','sun_gold','wood_element_dust','metal_element_dust','water_element_dust','ice_element_dust','dark_element_dust','fire_element_dust','thunder_element_dust','light_element_dust')
-    ON DUPLICATE KEY UPDATE effect_json=VALUES(effect_json),description=VALUES(description)`);
+  // 旧精炼材料表与追加属性熔铸配置仅保留历史数据，不再播种。
+
   await pool.query(`INSERT INTO guild_shop_items (item_id,buy_price,sell_price)
     SELECT id,CASE code WHEN 'map_dark_forest' THEN 20 WHEN 'map_dark_forest_deep' THEN 150 END,0
     FROM item_definitions WHERE code IN ('map_dark_forest','map_dark_forest_deep')
@@ -3788,4 +3739,5 @@ export const initializeSchema = async (pool: Pool) => {
   await refreshShopStocks(pool);
   await (await import('./finance')).initializeFinance(pool);
   await (await import('./map-descriptions')).initializeMapDescriptions(pool);
+  await (await import('./equipment-workshop')).initializeEquipmentWorkshop(pool);
 };

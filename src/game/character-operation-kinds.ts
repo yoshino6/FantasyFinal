@@ -11,6 +11,11 @@ const rule = (title: string, category: OperationCategory, points: number, partia
 
 /** 只有业务结算点能调用这些类型。未登记类型可落 unmapped 事实，但绝不发积分。 */
 export const characterOperationKinds: Record<string, OperationKindRule> = {
+  'craft.workshop_fusion': rule('熔铸升级', '生活', 0, {strength:1}),
+  'craft.workshop_reroll': rule('重铸洗练', '生活', 0, {strength:1}),
+  'craft.workshop_refine': rule('装备精炼', '生活', 2, {strength:1,intelligence:1,perception:1},30,1),
+  'craft.workshop_breakthrough_failed': rule('精炼突破未成', '生活', 0, {strength:1}),
+  'craft.workshop_breakthrough': rule('精炼突破', '生活', 0, {strength:1}),
   'character.created': rule('来到异世界', '成长', 0, { spirit: 1 }),
   'character.name_changed': rule('更改角色姓名', '成长', 0, { spirit: 1, intelligence: 1 }),
   'character.gender_changed': rule('更改角色性别', '成长', 0, { spirit: 1 }),

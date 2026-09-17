@@ -35,8 +35,8 @@ export const readNegotiationReplay = async (connection: PoolConnection, actorId:
   if (Number(rows[0].actor_id) !== actorId || rows[0].request_key !== requestKey(actorId, command)) throw new Error('交涉状态已改变，请刷新页面后重试。');
   return parse<NegotiationResult>(rows[0].result_json);
 };
-export const assertNoNegotiation = async (connection: Pick<PoolConnection, 'execute'>, characterId: number) => {
-  await (await import('./opening-state')).assertOpeningFree(connection, characterId);
+export const assertNoNegotiation = async (connection: Pick<PoolConnection, 'execute'>, characterId: number, forestSpawnId?: number) => {
+  await (await import('./opening-state')).assertOpeningFree(connection, characterId, forestSpawnId);
   const [rows] = await connection.execute<RowDataPacket[]>("SELECT n.id FROM negotiation_participants p JOIN negotiation_sessions n ON n.id=p.session_id WHERE p.character_id=? AND n.state='active' LIMIT 1 FOR UPDATE", [characterId]);
   if (rows.length) throw new Error('你正在交涉中，请先回到交涉页面结束交涉。');
 };
