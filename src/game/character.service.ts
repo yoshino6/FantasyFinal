@@ -13,7 +13,7 @@ import { weaponMasteryBonusesFor } from './weapon-mastery.service';
 import { attributes, type Allocation, type DerivedStats, type Growth } from './types';
 import { recordSkillPointChange, resetSkillPointAllocation } from './skill-point-ledger.service';
 import { evolutionStatBonuses, repairEvolutionProgress } from './evolution.service';
-import { registeredAdvancedProfessionByCode as advancedProfessionByCode, cachedAdvancedPassiveEffectFor } from './advanced-profession.config';
+import { registeredAdvancedProfessionByCode as advancedProfessionByCode, advancedElementMasteryBonusFor, cachedAdvancedPassiveEffectFor } from './advanced-profession.config';
 import { epicLoadoutFor } from './epic-equipment.service';
 import { calculatePanelStats, panelPercentKeys } from './panel-stat-formula';
 import { talentDefinitions } from './opening-content';
@@ -218,6 +218,8 @@ export const recalculateCharacterStats = async (connection: Pool | PoolConnectio
   const baseMastery = jsonRecord(character.element_base_mastery_json ?? character.element_mastery_json);
   const baseResistance = jsonRecord(character.element_base_resistance_json ?? character.element_resistance_json);
   const elemental = await withEquipmentElements(connection, characterId, baseMastery, baseResistance, masteryBonuses.offhandAttributeMultiplier);
+  const advancedMastery = advancedElementMasteryBonusFor(advancedProfessionRows[0]?.profession_code);
+  for (const [element, value] of Object.entries(advancedMastery)) elemental.mastery[element] = Number(elemental.mastery[element] ?? 0) + value;
   const [talentFood]=await connection.execute<RowDataPacket[]>("SELECT 1 FROM player_food_buffs WHERE character_id=? AND expires_at>NOW() AND JSON_EXTRACT(buff_json,'$.__talentFoodBase') IS NOT NULL LIMIT 1",[characterId]);
   const neutralStats=talentFood.length?calculatePanelStats(withVirtualNpcEquipment(await withEquipmentStats(connection,characterId,calculateDerivedStats(effectiveAttributes),evolutionBonus,[masteryPercent,epic.setCode==='valk_forge_regalia'&&epic.setCount>=3?{hpPct:6}:{}],true,masteryBonuses.offhandAttributeMultiplier),Number(character.level),character.npc_code===null?null:String(character.npc_code)),{},cachedAdvancedPassiveEffectFor(advancedProfessionRows[0]?.profession_code)):stats;
   await applyTalentPanel(connection,characterId,stats,elemental,neutralStats);

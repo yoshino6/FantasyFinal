@@ -29,7 +29,7 @@ export const talentWhole = (data: TalentData, key: string, base: number, multipl
 };
 export const talentDay = (now=new Date()) => new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(now);
 export const talentPanel = (number: string | undefined) => ({
-  hp: number==='G03'?1.2:number==='G05'?1.5:number==='F03'?1.5:number==='H01'?.6:1,
+  hp: number==='G03'?1.2:number==='G05'?1.5:number==='F03'?1.35:number==='H01'?.6:1,
   mastery: number==='F01'?'火':number==='F02'?'雷':number==='F10'?'风':number==='G06'?'冰':'',
   resistance: ''
 });

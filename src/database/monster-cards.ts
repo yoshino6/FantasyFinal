@@ -135,6 +135,13 @@ export const initializeMonsterCards = async (pool: Pool) => {
       itemRarityForCard(card.tier), card.level, JSON.stringify(metadata)
     ]);
   }
+  const valkCard = monsterCards.find(card => card.cardCode === 'monster_card_valk_forge_overseer');
+  if (!valkCard) throw new Error('熔炉监工·瓦尔克卡片定义缺失。');
+  await pool.execute(`UPDATE equipment_enchantments
+    SET card_version=?,effect_text=?,effects_json=?,revision=revision+1
+    WHERE card_code=? AND (
+      card_version<>? OR effect_text<>? OR JSON_EXTRACT(effects_json,'$."elementMastery_火"') IS NOT NULL
+    )`, [valkCard.version, valkCard.effectText, JSON.stringify(valkCard.effects), valkCard.cardCode, valkCard.version, valkCard.effectText]);
   const [counts] = await pool.execute<(RowDataPacket & { total: number })[]>("SELECT COUNT(*) AS total FROM item_definitions WHERE item_category='怪物卡片' AND JSON_EXTRACT(effect_json,'$.monsterCard')=true");
   if (Number(counts[0]?.total ?? 0) < monsterCards.length) throw new Error('怪物卡片物品定义未完整写入。');
 };

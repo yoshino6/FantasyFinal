@@ -134,13 +134,17 @@ test('卡片作为材料丢弃时复用绑定感知扣除并递增库存版本',
   assert.match(binding, /binding_revision=binding_revision\+1/);
 });
 
-test('瓦尔克卡片保留精确文案，展示文案不再出现暴击评分', () => {
+test('瓦尔克卡片只保留攻击赋火，不再提供火元素精通', () => {
   const valk = monsterCards.find(card => card.cardCode === 'monster_card_valk_forge_overseer');
   assert.ok(valk);
-  assert.equal(valk.effectText, '攻击赋予火属性；火元素精通 +30');
+  assert.equal(valk.effectText, '攻击赋予火属性');
   assert.equal(valk.effects.attackElement, '火');
   assert.equal(valk.effects.attackElementAll, true);
-  assert.equal(valk.effects.elementMastery_火, 30);
+  assert.equal(valk.effects.elementMastery_火, undefined);
+  assert.equal(valk.version, 3);
+  const database = readFileSync('src/database/monster-cards.ts', 'utf8');
+  assert.match(database, /UPDATE equipment_enchantments[\s\S]*?card_version=\?,effect_text=\?,effects_json=\?,revision=revision\+1/);
+  assert.match(database, /JSON_EXTRACT\(effects_json,'\$\."elementMastery_火"'\) IS NOT NULL/);
   assert.ok(monsterCards.every(card => !card.effectText.includes('评分')));
 });
 

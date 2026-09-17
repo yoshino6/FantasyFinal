@@ -131,14 +131,14 @@ test('天赋A至I真实玩家公共路径：面板、天赋入口、开战、胜
         const mastery=typeof actors[0].element_mastery_json==='string'?JSON.parse(actors[0].element_mastery_json):actors[0].element_mastery_json;assert.equal(Number(mastery.雷)-Number(stored.flags.neutralPanel.mastery.雷??0),50);
       }
       if(talent.number==='F03'){
-        assert.equal(Number(actors[0].hp_max),Math.floor(Number(stored.flags.neutralPanel.hpMax)*1.5));
+        assert.equal(Number(actors[0].hp_max),Math.floor(Number(stored.flags.neutralPanel.hpMax)*1.35));
         const resistance=typeof actors[0].element_resistance_json==='string'?JSON.parse(actors[0].element_resistance_json):actors[0].element_resistance_json;assert.deepEqual(resistance,stored.flags.neutralPanel.resistance);
         await c.execute("UPDATE monster_spawns SET strength=1000,skill_sequence='[]' WHERE id=?",[monster]);await c.execute('UPDATE characters SET physical_defense=0,evasion=0 WHERE id=?',[id]);
-        const base=await pairedAction('defend',false),reflected=await pairedAction('defend',true);assert.equal(base.damage,0);const lost=10000-Number(reflected.row.current_hp);assert.ok(lost>1);assert.equal(Number(base.row.current_hp),Number(reflected.row.current_hp));assert.equal(reflected.damage,Math.floor(lost*.5));
+        const base=await pairedAction('defend',false),reflected=await pairedAction('defend',true);assert.equal(base.damage,0);const lost=10000-Number(reflected.row.current_hp);assert.ok(lost>1);assert.equal(Number(base.row.current_hp),Number(reflected.row.current_hp));assert.equal(reflected.damage,Math.floor(lost*.3));
         await c.execute('UPDATE monster_spawns SET strength=1 WHERE id=?',[monster]);
       }
       if(talent.number==='F04'){
-        for(const [code,factor] of [['attack',1.7],['resident_b05',1.7],['arcane_bolt',1]] as const){const base=await pairedAction(code,false),boosted=await pairedAction(code,true);assert.ok(Math.abs(boosted.damage-base.damage*factor)<=3,code);assert.equal(base.row.current_mp,boosted.row.current_mp);}
+        for(const [code,factor] of [['attack',1.5],['resident_b05',1.5],['arcane_bolt',1]] as const){const base=await pairedAction(code,false),boosted=await pairedAction(code,true);assert.ok(Math.abs(boosted.damage-base.damage*factor)<=3,code);assert.equal(base.row.current_mp,boosted.row.current_mp);}
         const other=await spawn();await c.execute('UPDATE monster_spawns SET level=10,current_hp=1 WHERE id=?',[other]);
         const [sessions]=await c.execute<RowDataPacket[]>("SELECT session_id FROM combat_targets WHERE spawn_id=?",[monster]);const session=sessions[0].session_id;
         await c.execute('INSERT INTO combat_targets(session_id,spawn_id,current_mp,cooldowns) VALUES (?,?,0,JSON_OBJECT())',[session,other]);await c.execute('INSERT INTO combat_threat(session_id,spawn_id,character_id,threat) VALUES (?,?,?,1)',[session,other,id]);
@@ -156,18 +156,18 @@ test('天赋A至I真实玩家公共路径：面板、天赋入口、开战、胜
         const healing=async(enabled:boolean)=>{
           await c.execute('UPDATE combat_members SET current_hp=100,pending_action=NULL WHERE session_id=? AND character_id=?',[session,friendId]);await game.switchCombatTarget(user,friendId,'member');await game.combatAction(friendUser,'defend');const result=await pairedAction('healing_prayer',enabled);const match=String(result.result.log).match(/恢复 (\d+) HP/);assert.ok(match,String(result.result.log));return Number(match[1]);
         };
-        const base=await healing(false),boosted=await healing(true);assert.equal(boosted,Math.floor(base*1.8));assert.ok((await data.readTalentData(c,friendId)).flags.restMark>Date.now());assert.ok((await data.readTalentData(c,friendId)).flags.restMark<=Date.now()+1800000);
+        const base=await healing(false),boosted=await healing(true);assert.equal(boosted,Math.floor(base*1.5));assert.ok((await data.readTalentData(c,friendId)).flags.restMark>Date.now());assert.ok((await data.readTalentData(c,friendId)).flags.restMark<=Date.now()+1800000);
         await c.execute('DELETE FROM combat_members WHERE session_id=? AND character_id=?',[session,friendId]);await c.execute('DELETE FROM combat_threat WHERE session_id=? AND character_id=?',[session,friendId]);await game.switchCombatTarget(user,monster);
       }
       if(talent.number==='F07'){
-        const base=await pairedAction('attack',false),initial=await pairedAction('attack',true);assert.ok(Math.abs(initial.damage-base.damage*1.25)<=3);
+        const base=await pairedAction('attack',false),initial=await pairedAction('attack',true);assert.ok(Math.abs(initial.damage-base.damage*1.15)<=3);
         const [sessions]=await c.execute<RowDataPacket[]>('SELECT session_id FROM combat_targets WHERE spawn_id=?',[monster]);const session=sessions[0].session_id;
         for(let i=1;i<=6;i++){
           const enemy=await spawn();await c.execute('UPDATE monster_spawns SET level=10,current_hp=1 WHERE id=?',[enemy]);await c.execute('INSERT INTO combat_targets(session_id,spawn_id,current_mp,cooldowns) VALUES (?,?,0,JSON_OBJECT())',[session,enemy]);await c.execute('INSERT INTO combat_threat(session_id,spawn_id,character_id,threat) VALUES (?,?,?,1)',[session,enemy,id]);await c.execute('UPDATE combat_members SET current_hp=100 WHERE session_id=? AND character_id=?',[session,id]);await game.switchCombatTarget(user,enemy);
           const random=Math.random;let result:any;try{Math.random=()=>.5;result=await game.combatAction(user,'attack');}finally{Math.random=random;}
-          const state=await battleRow();assert.equal(state.cooldowns.__rules.talent.kills.length,i);assert.match(String(result.log),new RegExp(`恢复 ${Math.floor(Number(state.hp_max)*.25)} HP`));assert.match(String(result.log),new RegExp(`直击倍率升至${(1.25+.25*Math.min(i,5)).toFixed(2)}`));
+          const state=await battleRow();assert.equal(state.cooldowns.__rules.talent.kills.length,i);assert.match(String(result.log),new RegExp(`恢复 ${Math.floor(Number(state.hp_max)*.15)} HP`));assert.match(String(result.log),new RegExp(`直击倍率升至${(1.15+.15*Math.min(i,4)).toFixed(2)}`));
         }
-        await game.switchCombatTarget(user,monster);const before=Number((await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]))[0][0].current_hp),random=Math.random;try{Math.random=()=>.5;await game.combatAction(user,'attack');}finally{Math.random=random;}const after=Number((await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]))[0][0].current_hp);assert.ok(Math.abs(before-after-base.damage*2.5)<=3);
+        await game.switchCombatTarget(user,monster);const before=Number((await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]))[0][0].current_hp),random=Math.random;try{Math.random=()=>.5;await game.combatAction(user,'attack');}finally{Math.random=random;}const after=Number((await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]))[0][0].current_hp);assert.ok(Math.abs(before-after-base.damage*1.75)<=3);
       }
       if(talent.number==='F09'){
         await c.execute('UPDATE monster_spawns SET level=10,constitution=10000 WHERE id=?',[monster]);const [foes]=await c.execute<RowDataPacket[]>('SELECT t.*,ms.*,t.monster_class,COALESCE(ms.spirit,t.spirit) AS spirit,COALESCE(ms.strength,t.strength) AS strength,COALESCE(ms.intelligence,t.intelligence) AS intelligence,COALESCE(ms.agility,t.agility) AS agility,COALESCE(ms.perception,t.perception) AS perception FROM monster_spawns ms JOIN monster_templates t ON t.id=ms.template_id WHERE ms.id=?',[monster]);const max=game.monsterCombatStats(foes[0]).hpMax;
@@ -183,8 +183,8 @@ test('天赋A至I真实玩家公共路径：面板、天赋入口、开战、胜
         for(const code of ['attack','resident_b05','arcane_bolt']){const base=await pairedAction(code,false),boosted=await pairedAction(code,true);assert.equal(base.damage,boosted.damage);const gain=code==='arcane_bolt'?0:Math.min(20000,Math.floor(boosted.damage*.5));assert.equal(Number(boosted.row.current_hp)-Number(base.row.current_hp),gain);if(gain)assert.match(String(boosted.result.log),new RegExp(`恢复 ${gain} HP`));}
       }
       if(talent.number==='G02'){
-        await c.execute("UPDATE monster_spawns SET strength=1000,skill_sequence='[]' WHERE id=?",[monster]);await c.execute('UPDATE characters SET physical_defense=0,evasion=0 WHERE id=?',[id]);await pairedAction('defend',true);const shield=(await battleRow()).cooldowns.__rules.talent.stoneShield;assert.ok(shield<Number(actors[0].hp_max)*.5);
-        await game.combatAction(user,'escape');const saved=(await data.readTalentData(c,id)).flags[`life:${monster}`].stoneShield;assert.ok(saved<=shield);await c.execute('UPDATE monster_spawns SET strength=1 WHERE id=?',[monster]);await c.execute('UPDATE characters SET current_region_id=?,pos_x=0,pos_y=0,pos_z=0,current_hp=hp_max WHERE id=?',[chars[0].current_region_id,id]);await game.chooseTarget(user,monster);await game.combatAction(user,'defend');const row=await battleRow();assert.ok(row.cooldowns.__rules.talent.stoneShield<=saved+Math.floor(Number(row.hp_max)*.05));assert.ok(row.cooldowns.__rules.talent.stoneShield<Number(row.hp_max)*.5);
+        await c.execute("UPDATE monster_spawns SET strength=1000,skill_sequence='[]' WHERE id=?",[monster]);await c.execute('UPDATE characters SET physical_defense=0,evasion=0 WHERE id=?',[id]);await pairedAction('defend',true);const shield=(await battleRow()).cooldowns.__rules.talent.stoneShield;assert.ok(shield<Number(actors[0].hp_max)*.35);
+        await game.combatAction(user,'escape');const saved=(await data.readTalentData(c,id)).flags[`life:${monster}`].stoneShield;assert.ok(saved<=shield);await c.execute('UPDATE monster_spawns SET strength=1 WHERE id=?',[monster]);await c.execute('UPDATE characters SET current_region_id=?,pos_x=0,pos_y=0,pos_z=0,current_hp=hp_max WHERE id=?',[chars[0].current_region_id,id]);await game.chooseTarget(user,monster);await game.combatAction(user,'defend');const row=await battleRow();assert.ok(row.cooldowns.__rules.talent.stoneShield<=saved+Math.floor(Number(row.hp_max)*.04));assert.ok(row.cooldowns.__rules.talent.stoneShield<Number(row.hp_max)*.35);
       }
       if(talent.number==='G03'){
         assert.equal(Number(actors[0].hp_max),Math.floor(stored.flags.neutralPanel.hpMax*1.2));for(const code of ['attack','arcane_bolt']){const base=await pairedAction(code,false),boosted=await pairedAction(code,true);assert.ok(Math.abs(boosted.damage-base.damage*1.25)<=3);}
@@ -219,7 +219,7 @@ test('天赋A至I真实玩家公共路径：面板、天赋入口、开战、胜
         await c.execute('UPDATE monster_spawns SET perception=1000 WHERE id=?',[monster]);const base=await pairedAction('attack',false);await c.execute('INSERT INTO player_blessings(character_id,code) VALUES (?,?)',[id,talent.code]);
         const [skills]=await c.query<RowDataPacket[]>("SELECT code FROM skill_definitions WHERE category='magic' AND element='火' AND power>0 AND chant_turns=0 AND code NOT LIKE 'resident_%' ORDER BY id LIMIT 1");assert.ok(skills[0]);await c.execute('UPDATE monster_spawns SET skill_sequence=?,perception=1000 WHERE id=?',[JSON.stringify([skills[0].code]),monster]);await c.execute('UPDATE combat_targets SET current_mp=100000 WHERE spawn_id=?',[monster]);await c.execute('UPDATE characters SET evasion=0 WHERE id=?',[id]);
         const random=Math.random;try{Math.random=()=>.01;await game.combatAction(user,'defend');}finally{Math.random=random;}assert.equal((await battleRow()).cooldowns.__rules.talent.core,true);await c.execute("UPDATE monster_spawns SET skill_sequence='[]' WHERE id=?",[monster]);
-        const before=Number((await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]))[0][0].current_hp);try{Math.random=()=>.5;await game.combatAction(user,'attack');}finally{Math.random=random;}const after=Number((await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]))[0][0].current_hp);assert.ok(Math.abs(before-after-base.damage*1.4)<=3,`base=${base.damage}, actual=${before-after}`);assert.equal((await battleRow()).cooldowns.__rules.talent.core,false);
+        const before=Number((await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]))[0][0].current_hp);try{Math.random=()=>.5;await game.combatAction(user,'attack');}finally{Math.random=random;}const after=Number((await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]))[0][0].current_hp);assert.ok(Math.abs(before-after-base.damage*1.25)<=3,`base=${base.damage}, actual=${before-after}`);assert.equal((await battleRow()).cooldowns.__rules.talent.core,false);
       }
       if(talent.number==='H01'){
         assert.equal(Number(actors[0].hp_max),Math.floor(stored.flags.neutralPanel.hpMax*.6));for(const code of ['attack','arcane_bolt']){const base=await pairedAction(code,false),boosted=await pairedAction(code,true);assert.ok(Math.abs(boosted.damage-base.damage*2.25)<=3);assert.equal(base.row.current_mp,boosted.row.current_mp);}
@@ -229,7 +229,7 @@ test('天赋A至I真实玩家公共路径：面板、天赋入口、开战、胜
         const base=await pairedAction('healing_prayer',false,10000000,10000),boosted=await pairedAction('healing_prayer',true,10000000,10000),healed=(v:any)=>Number(String(v.result.log).match(/恢复 (\d+) HP/)?.[1]??0);assert.ok(healed(base)>0);assert.equal(healed(boosted),healed(base)*2);
       }
       if(talent.number==='H03'){
-        const hpCost=Math.ceil(Number(actors[0].hp_max)*.08);for(const [code,factor] of [['attack',1],['resident_b05',2],['arcane_bolt',2]] as const){const base=await pairedAction(code,false),boosted=await pairedAction(code,true);assert.ok(Math.abs(boosted.damage-base.damage*factor)<=3);assert.equal(Number(base.row.current_hp)-Number(boosted.row.current_hp),code==='attack'?0:hpCost);assert.equal(base.row.current_mp,boosted.row.current_mp);}
+        const hpCost=Math.ceil(Number(actors[0].hp_max)*.08);for(const [code,factor] of [['attack',1],['resident_b05',1.75],['arcane_bolt',1.75]] as const){const base=await pairedAction(code,false),boosted=await pairedAction(code,true);assert.ok(Math.abs(boosted.damage-base.damage*factor)<=3);assert.equal(Number(base.row.current_hp)-Number(boosted.row.current_hp),code==='attack'?0:hpCost);assert.equal(base.row.current_mp,boosted.row.current_mp);}
         await c.execute('UPDATE combat_members SET cooldowns=JSON_OBJECT(),current_hp=?,current_mp=10000 WHERE character_id=?',[hpCost,id]);const [skills]=await c.query<RowDataPacket[]>("SELECT id FROM skill_definitions WHERE code='resident_b05'");for(let retry=0;retry<2;retry++){const result=await game.combatAction(user,'skill',undefined,Number(skills[0].id));assert.match(String(result.log),/HP不足，未支付资源/);assert.equal(Number((await battleRow()).current_mp),10000);}
       }
       if(talent.number==='H04'){
@@ -238,11 +238,11 @@ test('天赋A至I真实玩家公共路径：面板、天赋入口、开战、胜
           const random=Math.random;let actions=0;try{Math.random=()=>.5;while((await battleRow()).cooldowns.__rules.cast&&actions<6){await game.continueCombatChant(user);actions++;}}finally{Math.random=random;}
           assert.equal((await battleRow()).cooldowns.__rules.cast,undefined);assert.equal(Number((await battleRow()).current_mp),paidMp);assert.equal(await game.continueCombatChant(user),null);const [foes]=await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]);return{release,damage:10000000-Number(foes[0].current_hp),actions,paidMp};
         };
-        const base=await cast(false),boosted=await cast(true);assert.equal(boosted.release,base.release+1);assert.equal(boosted.actions,base.actions+1);assert.ok(Math.abs(boosted.damage-base.damage*3)<=3);assert.equal(boosted.paidMp,base.paidMp);
+        const base=await cast(false),boosted=await cast(true);assert.equal(boosted.release,base.release+1);assert.equal(boosted.actions,base.actions+1);assert.ok(Math.abs(boosted.damage-base.damage*2.5)<=3);assert.equal(boosted.paidMp,base.paidMp);
         const instant=await pairedAction('arcane_bolt',true),ordinary=await pairedAction('arcane_bolt',false);assert.equal(instant.damage,ordinary.damage);assert.equal(instant.row.cooldowns.__rules.cast,undefined);await c.execute('INSERT INTO player_blessings(character_id,code) VALUES (?,?)',[id,talent.code]);
       }
       if(talent.number==='H05'){
-        const base=await pairedAction('attack',false),first=await pairedAction('attack',true);assert.ok(Math.abs(first.damage-base.damage*5)<=3);await game.combatAction(user,'escape');await c.execute('UPDATE characters SET current_region_id=?,pos_x=0,pos_y=0,pos_z=0,current_hp=hp_max WHERE id=?',[chars[0].current_region_id,id]);await game.chooseTarget(user,monster);await c.execute('UPDATE monster_spawns SET current_hp=10000000 WHERE id=?',[monster]);await c.execute('UPDATE characters SET physical_attack=1000,accuracy=100000 WHERE id=?',[id]);const random=Math.random;try{Math.random=()=>.5;await game.combatAction(user,'attack');}finally{Math.random=random;}const [foes]=await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]);assert.ok(Math.abs(10000000-Number(foes[0].current_hp)-base.damage*.75)<=3);
+        const base=await pairedAction('attack',false),first=await pairedAction('attack',true);assert.ok(Math.abs(first.damage-base.damage*4)<=3);await game.combatAction(user,'escape');await c.execute('UPDATE characters SET current_region_id=?,pos_x=0,pos_y=0,pos_z=0,current_hp=hp_max WHERE id=?',[chars[0].current_region_id,id]);await game.chooseTarget(user,monster);await c.execute('UPDATE monster_spawns SET current_hp=10000000 WHERE id=?',[monster]);await c.execute('UPDATE characters SET physical_attack=1000,accuracy=100000 WHERE id=?',[id]);const random=Math.random;try{Math.random=()=>.5;await game.combatAction(user,'attack');}finally{Math.random=random;}const [foes]=await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]);assert.ok(Math.abs(10000000-Number(foes[0].current_hp)-base.damage*.8)<=3);
       }
       if(talent.number==='H07'){
         const base=await pairedAction('attack',false),boosted=await pairedAction('attack',true);assert.ok(Math.abs(boosted.damage-base.damage*2)<=3);
@@ -252,7 +252,7 @@ test('天赋A至I真实玩家公共路径：面板、天赋入口、开战、胜
         const before=Number((await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]))[0][0].current_hp);try{Math.random=()=>.5;await game.combatAction(user,'attack');}finally{Math.random=random;}const after=Number((await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]))[0][0].current_hp);assert.ok(Math.abs(before-after-base.damage)<=3);
       }
       if(talent.number==='H08'){
-        const base=await pairedAction('attack',false),solo=await pairedAction('attack',true);assert.ok(Math.abs(solo.damage-base.damage*2.5)<=3);
+        const base=await pairedAction('attack',false),solo=await pairedAction('attack',true);assert.ok(Math.abs(solo.damage-base.damage*2)<=3);
         const [sessions]=await c.execute<RowDataPacket[]>('SELECT session_id FROM combat_targets WHERE spawn_id=?',[monster]);const session=sessions[0].session_id;await c.execute('INSERT INTO combat_members(session_id,character_id,current_hp,current_mp,selected_target_id,cooldowns,stamina_eligible) VALUES (?,?,10000,0,?,JSON_OBJECT(),0)',[session,friendId,monster]);await c.execute('INSERT INTO combat_threat(session_id,spawn_id,character_id,threat) VALUES (?,?,?,1)',[session,monster,friendId]);
         await game.combatAction(friendUser,'defend');const aided=await pairedAction('attack',true);assert.ok(Math.abs(aided.damage-base.damage)<=3);assert.equal(aided.row.cooldowns.__rules.talent.noAid,false);
         await c.execute('DELETE FROM combat_members WHERE session_id=? AND character_id=?',[session,friendId]);await c.execute('DELETE FROM combat_threat WHERE session_id=? AND character_id=?',[session,friendId]);const before=Number((await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]))[0][0].current_hp),random=Math.random;try{Math.random=()=>.5;await game.combatAction(user,'attack');}finally{Math.random=random;}const after=Number((await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]))[0][0].current_hp);assert.ok(Math.abs(before-after-base.damage)<=3);assert.equal((await battleRow()).cooldowns.__rules.talent.noAid,false);
@@ -260,7 +260,7 @@ test('天赋A至I真实玩家公共路径：面板、天赋入口、开战、胜
       if(talent.number==='H10'){
         await c.execute('UPDATE monster_spawns SET perception=1000 WHERE id=?',[monster]);const base=await pairedAction('attack',false);await c.execute('INSERT INTO player_blessings(character_id,code) VALUES (?,?)',[id,talent.code]);await c.execute('UPDATE characters SET hp_max=1000,current_hp=300,physical_defense=0,evasion=0,speed=100000 WHERE id=?',[id]);await c.execute('UPDATE combat_members SET cooldowns=JSON_OBJECT(),current_hp=300 WHERE character_id=?',[id]);await c.execute("UPDATE monster_spawns SET strength=10000,skill_sequence='[]' WHERE id=?",[monster]);const random=Math.random;try{Math.random=()=>.01;await game.combatAction(user,'defend');}finally{Math.random=random;}
         assert.equal(Number((await battleRow()).current_hp),1);assert.equal((await battleRow()).cooldowns.__rules.talent.fireUsed,true);await c.execute('UPDATE characters SET evasion=100000 WHERE id=?',[id]);await c.execute('UPDATE monster_spawns SET strength=1 WHERE id=?',[monster]);
-        for(const factor of [3,3,1]){const before=Number((await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]))[0][0].current_hp);try{Math.random=()=>.5;await game.combatAction(user,'attack');}finally{Math.random=random;}const after=Number((await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]))[0][0].current_hp);assert.ok(Math.abs(before-after-base.damage*factor)<=3,`factor=${factor} damage=${before-after} base=${base.damage}`);assert.equal(Number((await battleRow()).current_hp),1);}
+        for(const factor of [2.5,2.5,1]){const before=Number((await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]))[0][0].current_hp);try{Math.random=()=>.5;await game.combatAction(user,'attack');}finally{Math.random=random;}const after=Number((await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]))[0][0].current_hp);assert.ok(Math.abs(before-after-base.damage*factor)<=3,`factor=${factor} damage=${before-after} base=${base.damage}`);assert.equal(Number((await battleRow()).current_hp),1);}
         assert.equal((await battleRow()).cooldowns.__rules.talent.fireUntil,undefined);assert.equal((await battleRow()).cooldowns.__rules.talent.fireCost,false);
       }
       if(talent.number==='A02'){
@@ -270,7 +270,7 @@ test('天赋A至I真实玩家公共路径：面板、天赋入口、开战、胜
         assert.ok(healed(base)>0,JSON.stringify(base.result));assert.equal(healed(boosted),Math.floor(healed(base)*1.5));assert.equal(base.row.current_mp,boosted.row.current_mp);
       }
       if(talent.number==='A04'){
-        const base=await pairedAction('attack',false),first=await pairedAction('attack',true);assert.ok(Math.abs(first.damage-base.damage*3)<=3);
+        const base=await pairedAction('attack',false),first=await pairedAction('attack',true);assert.ok(Math.abs(first.damage-base.damage*2.25)<=3);
         assert.equal((await game.combatAction(user,'escape')).ended,true);
         await c.execute('UPDATE characters SET current_region_id=?,pos_x=0,pos_y=0,pos_z=0,current_hp=hp_max WHERE id=?',[chars[0].current_region_id,id]);
         await game.chooseTarget(user,monster);
@@ -297,7 +297,7 @@ test('天赋A至I真实玩家公共路径：面板、天赋入口、开战、胜
       }
       if(talent.number==='A08'){
         const base=await pairedAction('attack',false);await pairedAction('defend',true);
-        for(const factor of [3,1]){
+        for(const factor of [2.5,1]){
           const [before]=await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]);const random=Math.random;
           try{Math.random=()=>.5;await game.combatAction(user,'attack');}finally{Math.random=random;}
           const [after]=await c.execute<RowDataPacket[]>('SELECT current_hp FROM monster_spawns WHERE id=?',[monster]);assert.ok(Math.abs(Number(before[0].current_hp)-Number(after[0].current_hp)-base.damage*factor)<=3);
@@ -305,7 +305,7 @@ test('天赋A至I真实玩家公共路径：面板、天赋入口、开战、胜
         }
       }
       if(talent.number==='A09'){
-        for(const [code,factor] of [['attack',1],['resident_a03',1.65]] as const){const base=await pairedAction(code,false),boosted=await pairedAction(code,true);assert.ok(Math.abs(boosted.damage-base.damage*factor)<=3);}
+        for(const [code,factor] of [['attack',1],['resident_a03',1.5]] as const){const base=await pairedAction(code,false),boosted=await pairedAction(code,true);assert.ok(Math.abs(boosted.damage-base.damage*factor)<=3);}
         assert.match((await game.battleStatus(user)).talentNote,/同一遭遇格.*远程标记/);
       }
       if(talent.number==='A10'){
@@ -358,7 +358,7 @@ test('天赋A至I真实玩家公共路径：面板、天赋入口、开战、胜
         const life=(await data.readTalentData(c,id)).flags[`life:${monster}`];assert.equal(life.seen,true);assert.equal(life.hit,true);
         if(talent.number==='I05'){assert.equal(phaseLosses[0],phaseLosses[1]);assert.equal(phaseLosses[2],phaseLosses[1]+Math.floor(phaseLosses[1]*1.5));const state=(await battleRow()).cooldowns.__rules.talent;assert.equal(state.lastBasic.damage,phaseLosses[1]);assert.equal(state.shadowedNormal,2);}
         if(talent.number==='G10'){
-          assert.ok(Math.abs(phaseLosses[0]-phaseLosses[1]*2)<=2);assert.equal(phaseLosses[2],phaseLosses[0]);await game.combatAction(user,'escape');const saved=(await data.readTalentData(c,id)).flags[`life:${monster}`].phase;
+          assert.ok(Math.abs(phaseLosses[0]-phaseLosses[1]*1.5)<=2);assert.equal(phaseLosses[2],phaseLosses[0]);await game.combatAction(user,'escape');const saved=(await data.readTalentData(c,id)).flags[`life:${monster}`].phase;
           await c.execute('UPDATE characters SET current_region_id=?,pos_x=0,pos_y=0,pos_z=0,current_hp=hp_max WHERE id=?',[chars[0].current_region_id,id]);await game.chooseTarget(user,monster);await game.combatAction(user,'defend');assert.equal((await battleRow()).cooldowns.__rules.talent.phase,saved==='星辉'?'星隐':'星辉');
         }
       }

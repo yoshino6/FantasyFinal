@@ -7,6 +7,9 @@ test('BOSS词条说明只读取当前遇战或战斗目标的实际效果', () =
   assert.match(source, /currentEncounter\(qqUserId\)/);
   assert.match(source, /battleStatus\(qqUserId\)/);
   assert.match(source, /bossRandomEffectSummary\(boss\.traits_json\)/);
+  assert.match(source, /level32BossDifficultyCodeFromTraits/);
+  assert.match(source, /bossTraitCardImage\(card\)/);
+  assert.match(source, /Format\.create\(\)\.addImage/);
   assert.match(source, /if \(foundBoss && !lines\.length\) return;/);
   assert.doesNotMatch(source, /bossCommonEffects|traitDescriptions|bossExclusiveEffects/);
 });

@@ -52,17 +52,19 @@ test('压力在实际行动结束后改变；多段和DOT本身不加压', async
   await battle.playerAction(players[0]!, 'damage_skill'); assert.equal(s.pressure, 30);
   await rules.takeHit(boss, 100); assert.equal(boss.hp, 9500); assert.equal(s.pressure, 30);
 });
-test('压力100立即山崩、清普通盾、施加减益后重置，不等Boss行动', async () => {
-  const { rules, players, battle, s } = fixture(); s.pressure = 94;
-  for (const p of players) rules.add(p, 'shield', 9999, 5, p);
+test('压力100锁定山崩并给完整响应轮；压回85以下取消', async () => {
+  const { rules, players, battle, s, events } = fixture(); s.pressure = 94;
+  rules.add(players[0]!, 'shield', 9999, 5, players[0]!);
   await battle.playerAction(players[0]!, 'attack');
-  assert.equal(s.pressure, 35);
-  assert.ok(players.every(p => p.hp === 6500 && !rules.status(p, 'shield') && rules.status(p, 'slow') && rules.status(p, 'exposed')));
+  assert.equal(s.pressure, 100); assert.equal(s.collapseAt, 2); assert.equal(events.at(-1)?.code, 'gruen_collapse_locked');
+  assert.ok(rules.status(players[0]!, 'shield')); assert.ok(players.every(p => p.hp === 10000));
+  rules.turn = 2; s.pressure = 84; await battle.bossTurn(players[0]!);
+  assert.equal(s.collapseAt, 0); assert.equal(s.pressure, 84); assert.ok(!rules.log.some(line => line.includes('损失 3500')));
 });
-test('山崩经过现有免死流程，不强制覆盖存活结果', async () => {
+test('未拆解山崩保留护盾与免死流程，结算后重置压力', async () => {
   const { rules, players, battle, s } = fixture(); const p = players[0]!; p.hp = 100;
-  rules.add(p, 'feign', 1, 2, p); s.pressure = 99;
-  await battle.playerAction(p, 'attack'); assert.equal(p.hp, 1);
+  rules.add(p, 'feign', 1, 3, p); s.pressure = 100; s.collapseAt = 2; rules.turn = 2;
+  await battle.bossTurn(p); assert.equal(p.hp, 1); assert.equal(s.pressure, 35); assert.ok(rules.status(p, 'slow')); assert.ok(rules.status(p, 'exposed'));
 });
 test('地脉预震给予完整下一轮；低压卸力窗口到下一轮结束', async () => {
   const { rules, battle, s, players, events } = fixture(); s.slot = 2;
@@ -151,11 +153,11 @@ test('火温仅增强火直击；专属伤害不影响百分比鞭痕', async ()
   assert.equal(regionalOutgoingFactor(s, true), 1.35); assert.equal(regionalOutgoingFactor(s, false), 1);
   await battle.mechanism(players[0]!, .04, '鞭痕'); assert.equal(players[0]!.hp, 9600);
 });
-test('高难专属复铸仅一次、山心共振不改变技能基础威力', async () => {
+test('高难专属改为强化反震与地脉回流，不再增加直击或护盾', async () => {
   const { boss, rules, battle, s, players } = fixture(); boss.bossEffects = ['leyline_recast', 'mountainheart_resonance'];
-  s.pressure = 60; assert.equal(rules.hooks.directMultiplier!(boss, players[0]!, '土', false, true, '打击'), 1.15 * 1.5);
-  s.pressure = 20; s.warningAt = 1; await battle.bossTurn(players[0]!); assert.equal(rules.shieldValue(boss), 2000);
-  await rules.remove(boss, effect => effect.code === 'shield'); rules.turn = 2; s.warningAt = 2; await battle.bossTurn(players[0]!); assert.equal(rules.shieldValue(boss), 0);
+  s.pressure = 60; assert.equal(rules.hooks.directMultiplier!(boss, players[0]!, '土', false, true, '打击'), 1.15);
+  s.rockArmorActive = true; await battle.reflectDirect(players[0]!, 1000); assert.equal(players[0]!.hp, 9700);
+  boss.hp = 5000; s.pressure = 60; s.warningAt = 1; await battle.bossTurn(players[0]!); assert.equal(boss.hp, 5800); assert.equal(rules.shieldValue(boss), 0);
   assert.equal(regionalV2SkillProfiles.山心崩震!.power, 150);
 });
 test('两只Boss只有两项负抗，弱点不同；被动与技能均有配置', () => {
@@ -196,6 +198,13 @@ test('自动总罢工排除硬控，重伤高鞭痕者优先服从常规炉令',
   s.revolt = true; members[3]!.controlled = true; for (const member of members) s.orders[member.key] = 'hold';
   const revolt = planRegionalAuto(s, members, 1); assert.equal(revolt.size, 3); assert.ok([...revolt.values()].every(action => action.type !== 'defend'));
 });
+test('自动战斗在封脉时优先使用真实可用净化，否则不重复选择治疗', () => {
+  const s = newRegionalState('valk_forge_overseer');
+  const cleanser = profile('member:1'); cleanser.healingSuppressed = true; cleanser.preferred = { type: 'item', itemId: 1 }; cleanser.cleanse = { type: 'skill', skillId: 9 };
+  const sealed = profile('member:2'); sealed.healingSuppressed = true; sealed.preferred = { type: 'item', itemId: 1 };
+  const planned = planRegionalAuto(s, [cleanser, sealed], 1);
+  assert.deepEqual(planned.get(cleanser.key), { type: 'skill', skillId: 9 }); assert.notEqual(planned.get(sealed.key)?.type, 'item');
+});
 test('服务接入发生在真实行动分支与finally，旧部位不再生成且新状态不递减', () => {
   const source = readFileSync(new URL('../src/game/adventure.service.ts', import.meta.url), 'utf8');
   assert.match(source, /if \(isRegionalV2\(bodyCode\)\) \{[\s\S]*?continue;[\s\S]*?regionalBossComponentsFor/);
@@ -210,12 +219,52 @@ test('高压崩震保留最近承重点追震，压力效率标记到期不导�
   await battle.bossTurn(players[0]!);
   assert.ok(rules.log.some(line => line.includes('承重点追震'))); assert.equal(s.weightTarget, '');
 });
-test('瓦尔克冷炉防御生效；过载失败与永燃词条按正常清算后追加', async () => {
+test('逆震岩甲下一轮生效、降压立即关闭，并按玩家每轮封顶', async () => {
+  const { battle, s, rules, players } = fixture(); const player = players[0]!;
+  s.pressure = 60; await battle.endRound(); assert.ok(s.rockArmorActive);
+  await battle.reflectDirect(player, 10000); assert.equal(player.hp, 8500);
+  await battle.reflectDirect(player, 10000); assert.equal(player.hp, 8500);
+  await battle.changePressure(-1); assert.ok(!s.rockArmorActive);
+  rules.turn = 2; await battle.endRound(); assert.ok(!s.rockArmorActive);
+  await battle.changePressure(1); await battle.endRound(); assert.ok(s.rockArmorActive);
+});
+test('地脉回流按震前压力回血、受减疗且同轮有机制治疗上限', async () => {
+  const { battle, s, rules, players, boss } = fixture(); boss.hp = 5000;
+  rules.add(boss, 'advanced_healing_cut', 50, 3, players[0]!, true);
+  s.warningAt = 1; s.pressure = 85; await battle.bossTurn(players[0]!);
+  assert.equal(boss.hp, 5500);
+  await battle.healBoss(.10, '测试回流'); assert.equal(boss.hp, 6000);
+});
+test('灼封伤口下一轮起叠层降疗，过载封脉完整一轮且不可连续刷新', async () => {
+  const { battle, s, rules, players } = fixture('valk_forge_overseer'); const player = players[0]!;
+  s.slot = 2; s.heat = 60; await battle.bossTurn(player);
+  assert.ok(rules.status(player, 'valk_scorch_pending')); assert.equal(rules.healingMultiplier(player, player), 1);
+  rules.turn = 2; battle.beginRound(); assert.equal(rules.healingMultiplier(player, player), .75);
+  s.overloadAt = 2; await battle.bossTurn(player); assert.ok(rules.status(player, 'valk_heal_seal_pending'));
+  rules.turn = 3; battle.beginRound(); assert.equal(rules.healingMultiplier(player, player), 0);
+  battle.addHealSeal(player); assert.ok(!rules.status(player, 'valk_heal_seal_pending'));
+  rules.turn = 4; battle.beginRound(); battle.addHealSeal(player); assert.ok(rules.status(player, 'valk_heal_seal_pending'));
+});
+test('集体停炉减一层灼封并清除封脉，总罢工清空且关闭炉温增伤', async () => {
+  const { battle, s, rules, players } = fixture('valk_forge_overseer'); const player = players[0]!;
+  player.state.statuses.push({ code: 'valk_scorch', value: 25, until: 5, source: battle.boss.key, debuff: true, stacks: 2 }, { code: 'valk_heal_seal', value: 100, until: 1, source: battle.boss.key, debuff: true, stacks: 1 });
+  s.orders[player.key] = 'light'; s.actions[player.key] = 'defend'; s.orderDue = 1; await battle.settleOrders();
+  assert.equal(rules.status(player, 'valk_scorch')?.stacks, 1); assert.ok(!rules.status(player, 'valk_heal_seal'));
+  s.revolt = true; s.orders[player.key] = 'hold'; s.actions[player.key] = 'attack'; s.orderDue = 1; await battle.settleOrders();
+  assert.ok(s.revoltWon); assert.ok(!rules.status(player, 'valk_scorch'));
+});
+test('孤立违令、清算和总罢工失败按最高档汲养，专属档位替换而非叠加', async () => {
+  const isolated = fixture('valk_forge_overseer'); isolated.boss.hp = 5000; isolated.s.orders = { [isolated.players[0]!.key]: 'light', [isolated.players[1]!.key]: 'light', [isolated.players[2]!.key]: 'light', [isolated.players[3]!.key]: 'light' }; isolated.s.actions = { [isolated.players[0]!.key]: 'defend', [isolated.players[1]!.key]: 'attack', [isolated.players[2]!.key]: 'attack', [isolated.players[3]!.key]: 'attack' }; isolated.s.orderDue = 1;
+  await isolated.battle.settleOrders(); assert.equal(isolated.boss.hp, 5600);
+  const revolt = fixture('valk_forge_overseer'); revolt.boss.hp = 5000; revolt.boss.bossEffects = ['soul_chain_forging']; revolt.s.revolt = true; revolt.s.orders = { [revolt.players[0]!.key]: 'hold', [revolt.players[1]!.key]: 'hold' }; revolt.s.actions = { [revolt.players[0]!.key]: 'attack', [revolt.players[1]!.key]: 'defend' }; revolt.s.orderDue = 1;
+  await revolt.battle.settleOrders(); assert.equal(revolt.boss.hp, 6500);
+});
+test('瓦尔克冷炉防御生效；永燃余烬只改变重置炉温与灼封时长', async () => {
   const { battle, s, rules, players, boss } = fixture('valk_forge_overseer'); s.slot = 2; s.heat = 10;
   await battle.bossTurn(players[0]!); assert.equal(rules.value(boss, 'defense'), 15); assert.equal(s.heat, 20);
   boss.bossEffects = ['everburning_embers']; s.overloadAt = 2; s.heat = 100; rules.turn = 2;
   await battle.bossTurn(players[0]!); assert.equal(s.heat, 75); assert.equal(s.overloadAt, 0);
-  assert.ok(players.filter(p => p.hp > 0).every(p => rules.value(p, 'burn') === 5));
+  assert.ok(players.filter(p => p.hp > 0).every(p => rules.status(p, 'valk_heal_seal_pending'))); assert.ok(players.every(p => !rules.status(p, 'burn')));
 });
 test('有效服从记录不串入下一次停工，待兑现的停炉不会被新一轮覆盖', () => {
   const s = newRegionalState('valk_forge_overseer'); s.obeyed.a = true; s.orders = { a: 'light', b: 'light' }; s.actions.b = 'defend';

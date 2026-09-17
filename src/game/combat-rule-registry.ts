@@ -49,7 +49,8 @@ export type RuleHooks = {
   removeLegacy: (id: number) => Promise<void>;
   updateLegacy?: (effect: RuleStatus) => Promise<void>;
   transferLegacy?: (effect: RuleStatus, source: RuleUnit, target: RuleUnit) => Promise<boolean>;
-  strikeResolved?: (source: RuleUnit, target: RuleUnit, damage: number) => Promise<void>;
+  strikeResolved?: (source: RuleUnit, target: RuleUnit, damage: number, detail?: { actualHpDamage: number; extra: boolean; skill: boolean }) => Promise<void>;
+  healingMultiplier?: (source: RuleUnit, target: RuleUnit) => number;
   directMultiplier?: (source: RuleUnit, target: RuleUnit, element: string, magic: boolean, single: boolean, damageType: string) => number;
   extraAction: (unit: RuleUnit) => void;
   swapThreat: (a: RuleUnit, b: RuleUnit) => Promise<void>;
@@ -67,6 +68,7 @@ const names: Record<string, string> = { poison: '中毒', burn: '灼烧', bleed:
 const opposite: Record<string, string> = { attack: 'attack_down', attack_down: 'attack', magic: 'magic_down', magic_down: 'magic', defense: 'armor_shatter', armor_shatter: 'defense', magic_defense: 'magic_shatter', magic_shatter: 'magic_defense', speed: 'slow', slow: 'speed', accuracy: 'accuracy_down', accuracy_down: 'accuracy', reduction: 'exposed', exposed: 'reduction' };
 Object.assign(names, { speed: '疾行', accuracy: '精准', accuracy_down: '失准', reduction: '减伤', physical_reduction: '物理减伤', magic_reduction: '魔法减伤', defense: '护甲', magic_defense: '魔防', attack: '物攻强化', magic: '魔攻强化', attack_down: '物攻衰减', magic_down: '魔攻衰减', mana_discount: '法潮节流', mana_tax: '施法负担', next_damage: '蓄势', damage: '增伤', conductive: '导电', refraction: '折光', expand: '万象扩散', extra_lock: '时隙锁定', extra_block: '行动封锁', forge: '临锻回火', roots: '根系共鸣', echo: '援护回响', command: '协同号令', flank: '双锋夹角', beat: '共鸣节拍', taunted: '嘲讽', phase: '相位假身', false_shadow: '灯下假影', transfer: '借伤誓约', feign: '绝境佯死', aim: '猎人量距', blade_line: '咒刃引线', swap_magic: '低项魔攻', swap_physical: '高项物攻', shadow_mark: '影缝标记', indexed: '识破增益', false_compass: '谎言罗盘', blind_resist: '抗目盲', ember_screen: '余火护幕', iron_gate: '铁门半开', crit_bonus: '同仇刻印', fire_vulnerable: '畏火' });
 Object.assign(names, { mother_poison: '蛇母中毒', mother_burn: '蛇母灼烧', mother_wind_erosion: '风蚀', mother_wind_barrier: '风之障壁' });
+Object.assign(names, { valk_scorch_pending: '灼封将临', valk_scorch: '灼封伤口', valk_heal_seal_pending: '封脉将临', valk_heal_seal: '焦灼封脉' });
 Object.assign(names, alchemyStatusNames, hiddenNames);
 Object.assign(names, folioStatusNames);
 export const displayedRuleName = (state: RuleState, code: string, actual: string, turn: number, ownView: boolean) => {
@@ -183,10 +185,12 @@ export class CombatRules {
     let pierce = source.pierce;
     if (this.passive(source, 'B08') && this.effects(target).some(effect => controls.includes(effect.code)) && this.once(source, 'listen')) pierce += 12;
     if (this.passive(source, 'J07') && this.sparLevelBand && source.level >= this.sparLevelBand[0] && source.level <= this.sparLevelBand[1] && this.once(source, 'traveller', true)) chance += 8;
-    const resistance = code === 'blind' ? this.value(target, 'blind_resist') : 0;
+    const resistance = (code === 'blind' ? this.value(target, 'blind_resist') : 0)
+      + Number(target.modifiers?.controlResistancePct ?? 0)
+      + this.value(target, 'inheritance_control_resist');
     const randomEffectControl = target.bossEffects?.includes('steadfast_soul') ? .5 : 1;
     const boneFormationControl = target.bossEffects?.includes('bone_formation') && this.shieldValue(target) > 0 ? .5 : 1;
-    const probability = tenacityContest(pierce, target.tenacity * (1 + this.value(target, 'tenacity') / 100), source.level - target.level, chance).controlChance * (this.expansionScale < 1 ? .5 : 1) * (target.boss ? bossControlChanceMultiplier : 1) * (1 - resistance / 100) * randomEffectControl * boneFormationControl;
+    const probability = tenacityContest(pierce, target.tenacity * (1 + this.value(target, 'tenacity') / 100), source.level - target.level, chance, Number(source.modifiers?.statusHitCorrectionPct ?? 0)).controlChance * (this.expansionScale < 1 ? .5 : 1) * (target.boss ? bossControlChanceMultiplier : 1) * (1 - Math.min(80, resistance) / 100) * randomEffectControl * boneFormationControl;
     if (this.random() >= probability) { this.log.push(`　➥${combatUnitLabel(target)}抵抗了${names[code] ?? code}。`); return false; }
     if (hard.includes(code) && this.effects(target).some(effect => hard.includes(effect.code) && !canDispelCombatEffect(effect.code, 'ordinary', Boolean(effect.mechanism)))) return false;
     if (hard.includes(code)) await this.remove(target, effect => hard.includes(effect.code));
@@ -247,7 +251,7 @@ export class CombatRules {
     let healing = sourceFactor * (equipment ? 1 + Number(target.modifiers?.healingReceivedPct ?? 0) / 100 : 1) * (1 + (this.partyCount(target) === 1 ? this.passive(target, 'H08') * .2 : 0));
     if (source.mp / source.mpMax < .25) healing *= 1 - this.passive(source, 'D08') * .25;
     if (target.hp / target.hpMax < .25) healing *= 1 - this.passive(target, 'I08') * .2;
-    return healing * (1-folioValue(source,'healing_down',this.turn)/100) * alchemyHealingFactor(this, target) * hiddenHealingFactor(this, target) * talentReceiveHealing(source, target);
+    return healing * (1-folioValue(source,'healing_down',this.turn)/100) * alchemyHealingFactor(this, target) * hiddenHealingFactor(this, target) * talentReceiveHealing(source, target) * (this.hooks.healingMultiplier?.(source, target) ?? 1);
   }
   async restore(source: RuleUnit, target: RuleUnit, hp: number, mp = 0, echo = false, maxHealing = Infinity, activeHealing = false) {
     if (target.hp <= 0 || target.participating === false) return;
@@ -271,7 +275,7 @@ export class CombatRules {
     const memory = this.units.find(unit => unit.side === source.side)!.state.memory;
     if (memory.rootTurn !== this.turn) { memory.rootTurn = this.turn; memory.rootCount = 0; }
     if (Number(memory.rootCount) >= 3) return; memory.rootCount = Number(memory.rootCount) + 1;
-    const lowest = this.lowest(this.allies(owner)); if (lowest) await this.restore(owner, lowest, lowest.hpMax * .03, 0, true);
+    const lowest = this.lowest(this.allies(owner)); if (lowest) await this.restore(owner, lowest, lowest.hpMax * this.value(owner, 'roots') / 100, 0, true);
   }
   async shield(source: RuleUnit, target: RuleUnit, amount: number, duration: number) {
     if(target.hp<=0||target.participating===false)return;
@@ -289,9 +293,10 @@ export class CombatRules {
     const hp = Math.max(0, original.hp - before.hp); const mp = 0; // 魔力转移不可复制，避免队伍循环产蓝。
     if (!hp && !mp && !gains.length) return;
     await this.consume(source, 'echo');
-    recipient.hp = Math.min(recipient.hpMax, recipient.hp + Math.floor(hp / 2)); recipient.mp = Math.min(recipient.mpMax, recipient.mp + Math.floor(mp / 2));
-    for (const effect of gains) this.add(recipient, effect.code === 'life_shield' ? 'shield' : effect.code, effect.value * .5, Math.max(1, effect.until - this.turn + 1), source, false, effect.data);
-    this.log.push(`　&援护回响&${combatUnitLabel(recipient)}获得本次支援的 50% 数值效果。`);
+    const scale = this.value(source, 'echo') / 100;
+    recipient.hp = Math.min(recipient.hpMax, recipient.hp + Math.floor(hp * scale)); recipient.mp = Math.min(recipient.mpMax, recipient.mp + Math.floor(mp * scale));
+    for (const effect of gains) this.add(recipient, effect.code === 'life_shield' ? 'shield' : effect.code, effect.value * scale, Math.max(1, effect.until - this.turn + 1), source, false, effect.data);
+    this.log.push(`　&援护回响&${combatUnitLabel(recipient)}获得本次支援的 ${Number((scale * 100).toFixed(1))}% 数值效果。`);
     await this.rootEcho(source);
   }
   async dispel(source: RuleUnit, target: RuleUnit, debuff: boolean, count = Infinity, filter: (effect: RuleStatus) => boolean = () => true, authority: DispelAuthority = 'ordinary') {
@@ -503,9 +508,10 @@ export class CombatRules {
     const raw = attack * attack / (attack + Math.max(1, defense)) * (critical ? 1 + correctedCritBonus(opposedCritBonus(source.critDamage, target.critReduction),correction) : 1) * (.9 + this.random() * .2) * this.elementFactor(source, target, element) * cardElementFactor * secondaryScale * setup.powerFactor * (this.hooks.directMultiplier?.(source, target, element, magic, single, options.damageType ?? '打击') ?? 1);
     const incoming = await this.incoming(source, target, raw * this.expansionScale * (options.finalMultiplier ?? 1) * (isSkill ? source.castSpecialization?.damageFactor ?? 1 : 1), element, magic, isSkill, single);
     const bounded = Math.min(incoming, options.damageCap ?? Infinity); options.onResolved?.(bounded);
+    const hpBefore = target.hp;
     const { damage: dealt, absorbed } = await this.takeHit(target, Math.floor(bounded*(1-(options.deferFraction??0))), options.shieldMultiplier ?? 1, !single, source);
     if(critical&&dealt>0)achievementBattleEvidence(source).crit=true;
-    await this.hooks.strikeResolved?.(source,target,dealt);
+    await this.hooks.strikeResolved?.(source,target,dealt,{ actualHpDamage: Math.max(0, hpBefore - target.hp), extra, skill: isSkill });
     this.log.push(`　➥${critical ? '[暴击]' : ''}${combatUnitLabel(target)}受到 ${dealt} 点${magic ? (element === '无' ? '奥术' : element) : '物理'}伤害${absorbed ? `（护盾吸收 ${absorbed}）` : ''}。`);
     await this.afterHit(source, target, dealt - absorbed, element, isSkill, absorbed, extra, magic, options.ranged ?? magic, critical); return true;
   }
@@ -549,7 +555,7 @@ export class CombatRules {
       case 'A05': if (foe && await attack()) { const effects = await this.removeLayers(foe, e => !e.mechanism && ['burn', 'poison'].includes(e.code), 1); if (effects.length) await this.secondary(source, foe, Math.min(foe.hpMax * (foe.boss ? .015 : .03), source.magic * 1.5), '炽痕引爆', '火'); } break;
       case 'A06': buff('refraction', 35, 2, ally); break;
       case 'B01': if (foe) await this.control(source, foe, this.pick(['confusion', 'sleep', 'blind'])!, 65, 3); break;
-      case 'B02': if (foe) await this.control(source, foe, 'petrify', 55, 3); break;
+      case 'B02': if (foe) await this.control(source, foe, 'petrify', 65, 3); break;
       case 'B03': if (foe && !await this.control(source, foe, 'charm', 60, 2)) await this.control(source, foe, 'blind', 100, 2); break;
       case 'B04': if (foe && await attack()) await this.control(source, foe, 'fear', 55, 1); break;
       case 'B05': if (foe && await attack()) await this.control(source, foe, 'silence', 70, 3); break;
@@ -622,11 +628,11 @@ export class CombatRules {
       case 'L04': if (foe) { if (foe.state.cast) { foe.mp = Math.min(foe.mpMax, foe.mp + Math.floor(foe.state.cast.paid / 2)); delete foe.state.cast; achievementBattleEvidence(source).interrupted=true; this.log.push(`　&打断&${combatUnitLabel(foe)}的吟唱中断，返还一半已支付 MP。`); } await this.control(source, foe, 'silence', 60, 2); } break;
       case 'L05': if (foe) { debuff('accuracy_down', 10, 2); const effect = this.pick(this.effects(foe).filter(e => !e.debuff)); if (effect) this.add(foe, 'false_compass', 1, 2, source, true, effect.code + '|' + this.pick(['法镜', '临锻回火', '生命护盾', '三相附锋'].filter(name => name !== names[effect.code]))); } break;
       case 'L06': if (await attack()) debuff('shadow_mark', 20, 2); break;
-      case 'M02': for (const friend of friends) buff('echo', 50, 3, friend); break;
-      case 'M03': if (foe) await attack(155 + Math.min(3, this.effects(foe).filter(e => !e.debuff).length) * 15 + Math.min(3, this.effects(foe).filter(e => e.debuff).length) * 10); break;
+      case 'M02': for (const friend of friends) buff('echo', 75, 3, friend); break;
+      case 'M03': if (foe) await attack(190 + Math.min(3, this.effects(foe).filter(e => !e.debuff).length) * 15 + Math.min(3, this.effects(foe).filter(e => e.debuff).length) * 10); break;
       case 'M04': { const effects = this.effects(source).filter(e => !e.mechanism && Boolean(opposite[e.code])); const selected = [...effects.filter(e => e.debuff).slice(0, 3), ...effects.filter(e => !e.debuff).slice(0, 3)]; await this.remove(source, e => selected.some(selectedEffect => this.sameEffect(e, selectedEffect))); for (const effect of selected) this.add(source, opposite[effect.code], effect.value, Math.max(1, effect.until - this.turn + 1), source, !effect.debuff); break; }
-      case 'M05': buff('roots', 1, 3); break;
-      case 'M06': if (foe) { const removed = await this.remove(foe, e => !e.mechanism && e.debuff && ['poison', 'burn', 'bleed', 'bleeding', 'armor_shatter', 'magic_shatter'].includes(e.code)); const scale = 1 + Math.min(.9, removed.reduce((n, e) => n + e.stacks, 0) * .18); await this.strike(source, foe, 135, '暗', true, extra, false, scale, { redirected, single: !expandedHit }); } break;
+      case 'M05': buff('roots', 4, 3); break;
+      case 'M06': if (foe) { const removed = await this.remove(foe, e => !e.mechanism && e.debuff && ['poison', 'burn', 'bleed', 'bleeding', 'armor_shatter', 'magic_shatter'].includes(e.code)); const scale = 1 + Math.min(.9, removed.reduce((n, e) => n + e.stacks, 0) * .18); await this.strike(source, foe, 165, '暗', true, extra, false, scale, { redirected, single: !expandedHit }); } break;
       default: throw new Error(`未注册主动规则：${id}`);
     }
     if (supportBefore) await this.echoSupport(source, ally, supportBefore);

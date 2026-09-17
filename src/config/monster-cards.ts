@@ -18,7 +18,7 @@ export type MonsterCardDefinition = {
   effects: MonsterCardEffects;
   sourcePolicy: MonsterCardSourcePolicy;
   pursuitRank?: string;
-  version: 2;
+  version: number;
   baseDropRate: number;
 };
 
@@ -153,7 +153,7 @@ export const monsterCards: readonly MonsterCardDefinition[] = monsterCardData.ma
     effectText: normalizedEffectText(raw.effectText),
     effects: parsed.effects,
     minimumEquipmentLevel: Math.max(1, 5 * Math.floor(raw.level / 5)),
-    version: 2 as const,
+    version: raw.cardCode === 'monster_card_valk_forge_overseer' ? 3 : 2,
     baseDropRate: baseRates[raw.tier as MonsterCardTier]
   };
 });

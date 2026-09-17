@@ -1556,7 +1556,7 @@ export const monsterCardData = [
     "allowedSlots": [
       "weapon"
     ],
-    "effectText": "攻击赋予火属性；火元素精通 +30",
+    "effectText": "攻击赋予火属性",
     "sourcePolicy": "kill"
   },
   {

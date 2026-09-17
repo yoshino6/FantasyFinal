@@ -279,6 +279,8 @@ export const pendingPartyAutoBattleActions = async (qqUserId: string) => {
           controlled: statuses.some(effect => ['stun', 'sleep', 'fear', 'petrify', 'charm', 'alchemy_stun', 'hidden_freeze', 'hidden_stun'].includes(String(effect.code))),
           automatic: index >= 0, preferred, preferredDamaging: selected ? Number(selected.power) > 0 && selected.category !== 'utility' : true,
           skill: ready[0] ? { id: Number(ready[0].id), damaging: Number(ready[0].power) > 0 && ready[0].category !== 'utility' } : undefined,
+          healingSuppressed: statuses.some(effect => ['valk_heal_seal', 'valk_scorch'].includes(String(effect.code))),
+          cleanse: ready.find(skill => ['purifying_light', 'saint_healer_absolution_hand', 'saint_healer_revival_sanctuary', 'summoner_returning_veil'].includes(String(skill.code))) ? { type: 'skill' as const, skillId: Number(ready.find(skill => ['purifying_light', 'saint_healer_absolution_hand', 'saint_healer_revival_sanctuary', 'summoner_returning_veil'].includes(String(skill.code)))!.id) } : undefined,
           committed: pending.type ? regionalActionKind({ type: String(pending.type) }, pendingSkill ? Number(pendingSkill.power) > 0 && pendingSkill.category !== 'utility' : true) : undefined };
       }));
       const planned = planRegionalAuto(state, profiles, Number(party[0]?.turn_no ?? 1));

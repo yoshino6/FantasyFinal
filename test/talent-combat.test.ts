@@ -8,6 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CombatRules, emptyRuleState, readRuleState, type RuleUnit } from '../src/game/combat-rule-registry';
 import { fireActive, talentState, talentOpeningShield, talentBeginAction, talentCommitAction, talentEndAction, talentDirectFactor, talentAttackAttempt, talentHpDamage, talentSpellHealing, talentReceiveHealing, talentFinishFire, installTalentHealingGuard } from '../src/game/talent-combat';
+import { talentPanel } from '../src/game/talent-data';
 import { talentDefinitions, selectableTalents, talentGroups, talentCode } from '../src/game/talent.config';
 
 const unit=(id:string,code=''):RuleUnit=>({key:id,name:id,side:id.split(':')[0],level:10,boss:false,hp:1000,hpMax:1000,mp:1000,mpMax:1000,attack:100,magic:100,defense:50,magicDefense:50,accuracy:100,evasion:0,speed:10,crit:0,critResist:0,critDamage:0,critReduction:0,pierce:0,tenacity:0,state:emptyRuleState(),cooldowns:{},passives:[],mastery:{},resistance:{},opening:{divines:code?[talentCode(code)!]:[],weapons:[],crimson:0,pve:true,accessories:0}});
@@ -73,31 +74,32 @@ test('饮血排除魔法、追加和额外行动；反震不能再产生吸血�
   await talentBeginAction(r,a,true);talentCommitAction(a,'attack');await direct(r,a,b,100,false,true);await talentEndAction(r,a);assert.equal(a.hp,100);
   b.hp=10;await talentBeginAction(r,a);talentCommitAction(a,'attack');await direct(r,a,b,999);await talentEndAction(r,a);assert.equal(a.hp,105);
 });
-test('磐心开场50%独立盾与其他盾并存；仅有效正常行动补5%，恢复有上限',async()=>{
+test('磐心开场35%独立盾与其他盾并存；仅有效正常行动补4%，恢复有上限',async()=>{
   const a=unit('member:1','G02'),r=engine(a);talentOpeningShield(a);r.add(a,'shield',100,9,a);
-  await r.take(a,650);assert.equal(a.hp,950);assert.equal(talentState(a).stoneShield,0);
-  await talentBeginAction(r,a);talentCommitAction(a,'defend');await talentEndAction(r,a);assert.equal(talentState(a).stoneShield,50);
-  await talentBeginAction(r,a,true);talentCommitAction(a,'attack');await talentEndAction(r,a);assert.equal(talentState(a).stoneShield,50);
-  await talentBeginAction(r,a);await talentEndAction(r,a);assert.equal(talentState(a).stoneShield,50);
+  await r.take(a,650);assert.equal(a.hp,800);assert.equal(talentState(a).stoneShield,0);
+  await talentBeginAction(r,a);talentCommitAction(a,'defend');await talentEndAction(r,a);assert.equal(talentState(a).stoneShield,40);
+  await talentBeginAction(r,a,true);talentCommitAction(a,'attack');await talentEndAction(r,a);assert.equal(talentState(a).stoneShield,40);
+  await talentBeginAction(r,a);await talentEndAction(r,a);assert.equal(talentState(a).stoneShield,40);
   for(let i=0;i<12;i++){await talentBeginAction(r,a);talentCommitAction(a,'attack');await talentEndAction(r,a);}
-  assert.equal(talentState(a).stoneShield,500);
-  await r.take(a,400);a.state=readRuleState(JSON.parse(JSON.stringify(a.state)));talentOpeningShield(a);assert.equal(talentState(a).stoneShield,100);
+  assert.equal(talentState(a).stoneShield,350);
+  await r.take(a,300);a.state=readRuleState(JSON.parse(JSON.stringify(a.state)));talentOpeningShield(a);assert.equal(talentState(a).stoneShield,50);
 });
-test('玄武按实际损血50%反震且不递归；盾吸收、致死溢出不反震，旧减伤已取消',async()=>{
+test('玄武按实际损血30%反震且不递归；盾吸收、致死溢出不反震，旧减伤已取消',async()=>{
   const a=unit('member:1','F03'),b=unit('target:2','F03'),r=engine(a,b);r.add(a,'shield',100,9,a);
+  assert.equal(talentPanel('F03').hp,1.35);
   assert.equal(await r.incoming(b,a,300,'无',false,false),300);
-  await direct(r,b,a,300);assert.equal(a.hp,800);assert.equal(b.hp,900);
-  await direct(r,b,a,9999);assert.equal(a.hp,0);assert.equal(b.hp,900);
+  await direct(r,b,a,300);assert.equal(a.hp,800);assert.equal(b.hp,940);
+  await direct(r,b,a,9999);assert.equal(a.hp,0);assert.equal(b.hp,940);
 });
 test('鲲鹏直接击败回血并本场成长；本体只记一次，部位、低等级与降服不算',async()=>{
   const a=unit('member:1','F07'),b=unit('target:2'),r=engine(a,b);a.hp=100;
-  await talentBeginAction(r,a);talentCommitAction(a,'attack');assert.equal(talentDirectFactor(a,b,false,false,''),1.25);
-  b.hp=10;await direct(r,a,b,20);assert.equal(a.hp,350);assert.equal(talentDirectFactor(a,b,false,false,''),1.5);
-  await r.afterHit(a,b,10,'无',false);assert.equal(a.hp,350);
+  await talentBeginAction(r,a);talentCommitAction(a,'attack');assert.equal(talentDirectFactor(a,b,false,false,''),1.15);
+  b.hp=10;await direct(r,a,b,20);assert.equal(a.hp,250);assert.equal(talentDirectFactor(a,b,false,false,''),1.3);
+  await r.afterHit(a,b,10,'无',false);assert.equal(a.hp,250);
   for(const [key,level,root,pacified] of [['target:3',10,'target:2',false],['target:4',1,'',false],['target:5',10,'',true]] as const){
     const enemy=unit(key);enemy.level=level;enemy.hp=10;if(root)enemy.state.memory.talentRoot=root;if(pacified)enemy.state.memory.talentPacified=1;r.units.push(enemy);await direct(r,a,enemy,20);
   }
-  assert.equal(talentState(a).kills?.length,1);assert.equal(a.hp,350);
+  assert.equal(talentState(a).kills?.length,1);assert.equal(a.hp,250);
 });
 test('应龙多段在行动结束追加一次风压，部位与本体取最高且额外行动不触发',async()=>{
   const a=unit('member:1','F10'),b=unit('target:2'),part=unit('target:3'),r=engine(a,b,part);part.state.memory.talentRoot=b.key;
@@ -131,19 +133,19 @@ test('统一100项新编号，九类90项可选，特殊道路只展示，旧编
 test('一剑封喉首次失手也消耗，整个多段动作共享首次资格；跨序列化不刷新',async()=>{
   const a=unit('member:1','H05'),b=unit('target:2'),r=engine(a,b);
   await talentBeginAction(r,a);talentCommitAction(a,'skill','斩击');talentAttackAttempt(a,b);
-  assert.equal(talentDirectFactor(a,b,false,true,''),5);
-  talentAttackAttempt(a,b);assert.equal(talentDirectFactor(a,b,false,true,''),5);
+  assert.equal(talentDirectFactor(a,b,false,true,''),4);
+  talentAttackAttempt(a,b);assert.equal(talentDirectFactor(a,b,false,true,''),4);
   await talentEndAction(r,a);a.state=readRuleState(JSON.parse(JSON.stringify(a.state)));
   await talentBeginAction(r,a);talentCommitAction(a,'attack','斩击');talentAttackAttempt(a,b);
-  assert.equal(talentDirectFactor(a,b,false,false,''),.75);
+  assert.equal(talentDirectFactor(a,b,false,false,''),.8);
 });
-test('一剑封喉群攻先手不获5倍，部位和本体共用根敌人身份',async()=>{
+test('一剑封喉群攻先手不获4倍，部位和本体共用根敌人身份',async()=>{
   const a=unit('member:1','H05'),b=unit('target:2'),part=unit('target:3'),r=engine(a,b,part);
   part.state.memory.talentRoot=b.key;
   await talentBeginAction(r,a);talentCommitAction(a,'skill','斩击',false);talentAttackAttempt(a,part);
   assert.equal(talentDirectFactor(a,part,false,true,''),1);await talentEndAction(r,a);
   await talentBeginAction(r,a);talentCommitAction(a,'attack','斩击');talentAttackAttempt(a,b);
-  assert.equal(talentDirectFactor(a,b,false,false,''),.75);
+  assert.equal(talentDirectFactor(a,b,false,false,''),.8);
 });
 test('借火拦住触发当次致命伤害及多段，实际HP损失正确，不消耗第二份免死',async()=>{
   const a=unit('member:1','H10'),b=unit('target:2'),r=engine(a,b);a.hp=300;r.add(a,'feign',1,9,a);
@@ -153,7 +155,7 @@ test('借火拦住触发当次致命伤害及多段，实际HP损失正确，不
 });
 test('借火仅消耗两个本人正常时点，额外行动不推进或享增伤，之后不再免死',async()=>{
   const a=unit('member:1','H10'),b=unit('target:2'),r=engine(a,b);a.hp-=talentHpDamage(a,1500);
-  await talentBeginAction(r,a);talentCommitAction(a,'attack');assert.equal(talentDirectFactor(a,b,false,false,''),3);await talentEndAction(r,a);
+  await talentBeginAction(r,a);talentCommitAction(a,'attack');assert.equal(talentDirectFactor(a,b,false,false,''),2.5);await talentEndAction(r,a);
   await talentBeginAction(r,a,true);talentCommitAction(a,'attack');assert.equal(talentDirectFactor(a,b,false,false,''),1);await talentEndAction(r,a);assert.ok(fireActive(a));
   await talentBeginAction(r,a);await talentEndAction(r,a);assert.equal(fireActive(a),false);
   await r.take(a,100);assert.equal(a.hp,0);
@@ -167,10 +169,10 @@ test('贫者允许队友技能治疗，断契的同类支援使本场资格永�
   await talentBeginAction(r,a);talentCommitAction(a,'attack');assert.equal(talentDirectFactor(a,b,false,false,''),2);assert.equal(talentReceiveHealing(ally,a),1);
   a.opening!.divines=[talentCode('H08')!];talentState(a).noAid=true;talentReceiveHealing(ally,a);assert.equal(talentDirectFactor(a,b,false,false,''),1);
 });
-test('祷告按治疗3.5和直击3分开，无吟唱不获倍率；PVP全部关闭',async()=>{
+test('祷告按治疗3和直击2.5分开，无吟唱不获倍率；PVP全部关闭',async()=>{
   const a=unit('member:1','H04'),b=unit('target:2'),r=engine(a,b);
   await talentBeginAction(r,a);talentCommitAction(a,'skill','火',true,true,true);
-  assert.equal(talentSpellHealing(a),3.5);assert.equal(talentDirectFactor(a,b,true,true,'火'),3);
+  assert.equal(talentSpellHealing(a),3);assert.equal(talentDirectFactor(a,b,true,true,'火'),2.5);
   a.opening!.pve=false;assert.equal(talentSpellHealing(a),1);assert.equal(talentDirectFactor(a,b,true,true,'火'),1);
 });
 
@@ -270,12 +272,12 @@ test('A03 魔力转赠按固定公式支付与到账，不经过天赋折扣',as
   const paid=manaTransferCost(a.mp);assert.equal(paid,580);a.mp-=paid;await r.cast(a,friend,residentSkillByCode('resident_d01')!,paid);
   assert.equal(a.mp,420);assert.equal(friend.mp,580);
 });
-test('A04 首次未命中保留三倍，多段与部位共享本次倍率，命中后跨序列化1.25',async()=>{
+test('A04 首次未命中保留2.25倍，多段与部位共享本次倍率，命中后跨序列化1.25',async()=>{
   const a=unit('member:1','A04'),b=unit('target:2'),part=unit('target:3'),r=engine(a,b,part);part.state.memory.talentRoot=b.key;
   await talentBeginAction(r,a);talentCommitAction(a,'attack');talentAttackAttempt(a,b);await talentEndAction(r,a);
   await talentBeginAction(r,a);talentCommitAction(a,'skill');talentAttackAttempt(a,part);
-  assert.equal(await r.incoming(a,part,100,'无',false,true),300);await direct(r,a,part,100);
-  assert.equal(await r.incoming(a,b,100,'无',false,true),300);await talentEndAction(r,a);
+  assert.equal(await r.incoming(a,part,100,'无',false,true),225);await direct(r,a,part,100);
+  assert.equal(await r.incoming(a,b,100,'无',false,true),225);await talentEndAction(r,a);
   a.state=readRuleState(JSON.parse(JSON.stringify(a.state)));await talentBeginAction(r,a);talentCommitAction(a,'attack');
   assert.equal(await r.incoming(a,b,100,'无',false,false),125);
 });
@@ -295,7 +297,7 @@ test('A06 输出与承伤分开结算，真实伤害不减',async()=>{
 });
 test('A07 同根多段只推进一次，第五次封顶，主动非攻击和换目标重置',async()=>{
   const a=unit('member:1','A07'),b=unit('target:2'),part=unit('target:3'),other=unit('target:4'),r=engine(a,b,part,other);part.state.memory.talentRoot=b.key;
-  for(const want of [110,130,150,170,190,190]){
+  for(const want of [110,125,140,155,170,170]){
     await talentBeginAction(r,a);talentCommitAction(a,'skill');
     for(const target of [b,part,b]){talentAttackAttempt(a,target);assert.equal(await r.incoming(a,target,100,'无',false,true),want);}
     await talentEndAction(r,a);
@@ -304,50 +306,57 @@ test('A07 同根多段只推进一次，第五次封顶，主动非攻击和换�
   await talentBeginAction(r,a);talentCommitAction(a,'attack');talentAttackAttempt(a,b);assert.equal(talentState(a).chain,1);await talentEndAction(r,a);
   await talentBeginAction(r,a);talentCommitAction(a,'attack');talentAttackAttempt(a,other);assert.equal(talentState(a).chain,1);
 });
-test('A08 防御减伤到下次正常行动，额外时点不清除；下一次攻击后消耗三倍',async()=>{
+test('A08 防御减伤到下次正常行动，额外时点不清除；下一次攻击后消耗2.5倍',async()=>{
   const a=unit('member:1','A08'),b=unit('target:2'),r=engine(a,b);
   await talentBeginAction(r,a);talentCommitAction(a,'defend');r.add(a,'reduction',50,100000,a,false,'talentDefend');await talentEndAction(r,a);
   assert.equal(await r.incoming(b,a,100,'无',false,false),50);
   await talentBeginAction(r,a,true);assert.equal(await r.incoming(b,a,100,'无',false,false),50);await talentEndAction(r,a);
   await talentBeginAction(r,a);assert.equal(await r.incoming(b,a,100,'无',false,false),100);talentCommitAction(a,'attack');
-  assert.equal(await r.incoming(a,b,100,'无',false,false),300);await talentEndAction(r,a);
+  assert.equal(await r.incoming(a,b,100,'无',false,false),250);await talentEndAction(r,a);
   await talentBeginAction(r,a);talentCommitAction(a,'attack');assert.equal(await r.incoming(a,b,100,'无',false,false),100);
 });
 test('A09 只按远程标记增幅，魔法类别本身不能代替远程',async()=>{
   const a=unit('member:1','A09'),b=unit('target:2'),r=engine(a,b);
   await talentBeginAction(r,a);talentCommitAction(a,'skill','奥术',true,false);assert.equal(await r.incoming(a,b,100,'无',true,true),100);
-  talentCommitAction(a,'skill','刺击',true,true);assert.equal(await r.incoming(a,b,100,'无',false,true),165);
+  talentCommitAction(a,'skill','刺击',true,true);assert.equal(await r.incoming(a,b,100,'无',false,true),150);
 });
-test('F06 第三个攻击生成210%延迟伤害，下一正常时点结算且只一次',async()=>{
+test('白虎斩刺直击1.5，焚命只放大主动攻击技能1.75',async()=>{
+  const tiger=unit('member:1','F04'),burner=unit('member:2','H03'),target=unit('target:3'),r=engine(tiger,burner,target);
+  await talentBeginAction(r,tiger);talentCommitAction(tiger,'skill','斩击');assert.equal(talentDirectFactor(tiger,target,false,true,'斩击'),1.5);
+  talentCommitAction(tiger,'skill','奥术');assert.equal(talentDirectFactor(tiger,target,true,true,'奥术'),1);
+  await talentBeginAction(r,burner);talentCommitAction(burner,'skill','火');assert.equal(talentDirectFactor(burner,target,true,true,'火'),1.75);
+  talentCommitAction(burner,'attack','斩击');assert.equal(talentDirectFactor(burner,target,false,false,'斩击'),1);
+});
+test('F06 第三个攻击生成150%延迟伤害，下一正常时点结算且只一次',async()=>{
   const a=unit('member:1','F06'),b=unit('target:2'),r=engine(a,b);
   for(let n=0;n<3;n++){await talentBeginAction(r,a);talentCommitAction(a,'attack');await direct(r,a,b,100);await talentEndAction(r,a);}
   assert.equal(b.hp,700);assert.equal(talentState(a).delayed.length,1);
   await talentBeginAction(r,a,true);assert.equal(b.hp,700);await talentEndAction(r,a);
-  await talentBeginAction(r,a);assert.equal(b.hp,490);await talentEndAction(r,a);
-  await talentBeginAction(r,a);assert.equal(b.hp,490);
+  await talentBeginAction(r,a);assert.equal(b.hp,550);await talentEndAction(r,a);
+  await talentBeginAction(r,a);assert.equal(b.hp,550);
 });
 test('G08 盾吸收可叠劫纹，后续伤害乘算，八层封顶，友伤不叠',async()=>{
   const a=unit('member:1','G08'),b=unit('target:2'),friend=unit('member:3'),r=engine(a,b,friend);r.add(a,'shield',1000,99,a);
   for(let n=0;n<10;n++)await direct(r,b,a,1);
-  assert.equal(talentState(a).stacks,8);assert.equal(await r.incoming(b,a,1000,'无',false,false),Math.floor(1000*.93**8));
+  assert.equal(talentState(a).stacks,8);assert.equal(await r.incoming(b,a,1000,'无',false,false),Math.floor(1000*.95**8));
   talentState(a).stacks=0;await direct(r,friend,a,1);assert.equal(talentState(a).stacks,0);
 });
-test('G09 元素承伤储存一核，攻击结束余震40%，普物理与二次伤害不储核',async()=>{
+test('G09 元素承伤储存一核，攻击结束余震25%，普物理与二次伤害不储核',async()=>{
   const a=unit('member:1','G09'),b=unit('target:2'),r=engine(a,b);
   assert.equal(await r.incoming(b,a,120,'火',true,true),100);assert.equal(await r.incoming(b,a,120,'无',false,false),120);
   await r.afterHit(b,a,100,'火',true);await r.afterHit(b,a,100,'冰',true);
-  await talentBeginAction(r,a);talentCommitAction(a,'attack');await direct(r,a,b,100);await talentEndAction(r,a);assert.equal(b.hp,860);
-  await talentBeginAction(r,a);talentCommitAction(a,'attack');await direct(r,a,b,100);await talentEndAction(r,a);assert.equal(b.hp,760);
+  await talentBeginAction(r,a);talentCommitAction(a,'attack');await direct(r,a,b,100);await talentEndAction(r,a);assert.equal(b.hp,875);
+  await talentBeginAction(r,a);talentCommitAction(a,'attack');await direct(r,a,b,100);await talentEndAction(r,a);assert.equal(b.hp,775);
 });
 test('G10 首相位可选，额外行动不轮换，星辉和星隐分别结算',async()=>{
   const a=unit('member:1','G10'),b=unit('target:2'),r=engine(a,b);a.opening!.settings={phase:'星隐'};
-  await talentBeginAction(r,a);talentCommitAction(a,'attack');assert.equal(await r.incoming(a,b,100,'无',false,false),100);assert.equal(await r.incoming(b,a,100,'无',false,false),50);await talentEndAction(r,a);
+  await talentBeginAction(r,a);talentCommitAction(a,'attack');assert.equal(await r.incoming(a,b,100,'无',false,false),100);assert.equal(await r.incoming(b,a,100,'无',false,false),66);await talentEndAction(r,a);
   await talentBeginAction(r,a,true);assert.equal(talentState(a).phase,'星隐');await talentEndAction(r,a);
-  await talentBeginAction(r,a);talentCommitAction(a,'attack');assert.equal(await r.incoming(a,b,100,'无',false,false),200);assert.equal(await r.incoming(b,a,100,'无',false,false),100);assert.equal(talentSpellHealing(a),2);
+  await talentBeginAction(r,a);talentCommitAction(a,'attack');assert.equal(await r.incoming(a,b,100,'无',false,false),150);assert.equal(await r.incoming(b,a,100,'无',false,false),100);assert.equal(talentSpellHealing(a),1.5);
 });
 test('H08 外援永久取消输出资格，但不能取消25%额外MP代价',async()=>{
   const a=unit('member:1','H08'),b=unit('target:2'),friend=unit('member:3'),r=engine(a,b);
-  await talentBeginAction(r,a);talentCommitAction(a,'attack');assert.equal(await r.incoming(a,b,100,'无',false,false),250);assert.equal(r.manaCost(a,100),125);
+  await talentBeginAction(r,a);talentCommitAction(a,'attack');assert.equal(await r.incoming(a,b,100,'无',false,false),200);assert.equal(r.manaCost(a,100),125);
   talentReceiveHealing(friend,a);assert.equal(await r.incoming(a,b,100,'无',false,false),100);assert.equal(r.manaCost(a,100),125);
 });
 
@@ -372,7 +381,7 @@ test('A10 实际随从支援仅指定单位翻倍，主人不增伤，同一时�
 });
 test('F05 麒麟只强化治疗术对他人，满血无休息印记，自疗与PVP不放大',async()=>{
   const a=unit('member:1','F05'),b=unit('member:2'),r=engine(a,b);a.castSpecialization={effectFactor:1} as any;a.hp=b.hp=100;
-  await r.restore(a,b,100);assert.equal(b.hp,280);assert.ok(Number(b.state.memory.talentRestMark)>Date.now());await r.restore(a,a,100);assert.equal(a.hp,200);assert.equal(a.state.memory.talentRestMark,undefined);
+  await r.restore(a,b,100);assert.equal(b.hp,250);assert.ok(Number(b.state.memory.talentRestMark)>Date.now());await r.restore(a,a,100);assert.equal(a.hp,200);assert.equal(a.state.memory.talentRestMark,undefined);
   delete b.state.memory.talentRestMark;b.hp=b.hpMax;await r.restore(a,b,100);assert.equal(b.state.memory.talentRestMark,undefined);
   a.opening!.pve=false;b.hp=100;await r.restore(a,b,100);assert.equal(b.hp,200);assert.equal(b.state.memory.talentRestMark,undefined);
 });

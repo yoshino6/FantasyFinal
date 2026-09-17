@@ -23,7 +23,7 @@ export const talentOpeningShield = (unit: RuleUnit) => {
   const state = talentState(unit);
   if (hasTalent(unit, 'G02') && !state.stoneGranted) {
     state.stoneGranted = true;
-    state.stoneShield = Math.floor(unit.hpMax * .5);
+    state.stoneShield = Math.floor(unit.hpMax * .35);
   }
 };
 const rootKey = (unit: RuleUnit) => String(unit.state.memory.talentRoot ?? unit.key);
@@ -38,11 +38,11 @@ export const talentReceiveHealing = (source: RuleUnit, target: RuleUnit) => {
   return fireActive(target) ? 0 : hasTalent(target, 'H02') && source.key !== target.key ? .5 : 1;
 };
 export const talentSpellHealing = (source: RuleUnit, target = source) => {
-  let factor = hasTalent(source, 'A02') ? 1.5 : hasTalent(source, 'F05') && source.key !== target.key ? 1.8 : 1;
+  let factor = hasTalent(source, 'A02') ? 1.5 : hasTalent(source, 'F05') && source.key !== target.key ? 1.5 : 1;
   if (hasTalent(source, 'G04')) factor *= 1.2;
   if (hasTalent(source, 'H02') && talentState(source).action?.low) factor *= 2;
-  if (hasTalent(source, 'H04') && talentState(source).action?.prayer) factor *= 3.5;
-  if (hasTalent(source, 'G10') && talentState(source).phase === '星辉') factor *= 2;
+  if (hasTalent(source, 'H04') && talentState(source).action?.prayer) factor *= 3;
+  if (hasTalent(source, 'G10') && talentState(source).phase === '星辉') factor *= 1.5;
   return factor;
 };
 export const talentManaFactor = (unit: Pick<RuleUnit,'companion'|'opening'>) => hasTalent(unit, 'A03') ? 2 / 3 : hasTalent(unit, 'G04') ? .8 : hasTalent(unit, 'H08') ? 1.25 : 1;
@@ -117,25 +117,25 @@ export const talentDirectFactor = (source: RuleUnit, target: RuleUnit, magic: bo
   if (!action || !['attack', 'skill'].includes(action.kind)) return 1;
   const root = rootKey(target); let f = 1;
   if (hasTalent(source, 'A01')) f *= 1.5;
-  if (hasTalent(source, 'F07')) f *= 1.25 + .25 * Math.min(5, state.kills?.length ?? 0);
-  if (hasTalent(source, 'A04')) f *= state.hit.includes(root) ? 1.25 : 3;
+  if (hasTalent(source, 'F07')) f *= (115 + 15 * Math.min(4, state.kills?.length ?? 0)) / 100;
+  if (hasTalent(source, 'A04')) f *= state.hit.includes(root) ? 1.25 : 2.25;
   if (hasTalent(source, 'A05')) f *= state.previousType && state.previousType !== action.damageType ? 1.6 : 1.1;
   if (hasTalent(source, 'A06') || hasTalent(source, 'G03')) f *= 1.25;
-  if (hasTalent(source, 'A07')) f *= .9 + .2 * Math.max(1, state.chain);
-  if (hasTalent(source, 'A08') && state.defend) f *= 3;
-  if (hasTalent(source, 'A09') && action.ranged) f *= 1.65;
-  if (hasTalent(source, 'F04') && ['斩击','刺击'].includes(action.damageType)) f *= 1.7;
+  if (hasTalent(source, 'A07')) f *= (95 + 15 * Math.max(1, state.chain)) / 100;
+  if (hasTalent(source, 'A08') && state.defend) f *= 2.5;
+  if (hasTalent(source, 'A09') && action.ranged) f *= 1.5;
+  if (hasTalent(source, 'F04') && ['斩击','刺击'].includes(action.damageType)) f *= 1.5;
   if (hasTalent(source, 'F09') && target.hp > target.hpMax / 2) f *= 2;
   if (hasTalent(source, 'G04') && magic) f *= 1.2;
-  if (hasTalent(source, 'G10') && state.phase === '星辉') f *= 2;
+  if (hasTalent(source, 'G10') && state.phase === '星辉') f *= 1.5;
   if (hasTalent(source, 'H01')) f *= 2.25;
   if (hasTalent(source, 'H02') && action.low) f *= 2;
-  if (hasTalent(source, 'H03') && skill) f *= 2;
-  if (hasTalent(source, 'H04') && action.prayer && magic) f *= 3;
-  if (hasTalent(source, 'H05')) f *= action.first[root] ? action.single ? 5 : 1 : .75;
+  if (hasTalent(source, 'H03') && skill) f *= 1.75;
+  if (hasTalent(source, 'H04') && action.prayer && magic) f *= 2.5;
+  if (hasTalent(source, 'H05')) f *= action.first[root] ? action.single ? 4 : 1 : .8;
   if (hasTalent(source, 'H07') && source.opening?.accessories === 0 && !state.poorBroken) f *= 2;
-  if (hasTalent(source, 'H08') && state.noAid) f *= 2.5;
-  if (hasTalent(source, 'H10') && action.fire && !action.extra) f *= 3;
+  if (hasTalent(source, 'H08') && state.noAid) f *= 2;
+  if (hasTalent(source, 'H10') && action.fire && !action.extra) f *= 2.5;
   if (hasTalent(source, 'I01')) f *= .9;
   if (hasTalent(source, 'D07') && source.opening?.settings?.peaceFailure && state.clock <= 2) f *= .5;
   return f;
@@ -145,9 +145,9 @@ export const talentIncomingFactor = (source: RuleUnit, target: RuleUnit, element
   let f = 1;
   if (hasTalent(target, 'A06')) f *= 5 / 6;
   if (hasTalent(target, 'G07')) f *= .8;
-  if (hasTalent(target, 'G08')) f *= .93 ** talentState(target).stacks;
+  if (hasTalent(target, 'G08')) f *= .95 ** talentState(target).stacks;
   if (hasTalent(target, 'G09') && elemental(element)) f *= 5 / 6;
-  if (hasTalent(target, 'G10') && talentState(target).phase === '星隐') f *= .5;
+  if (hasTalent(target, 'G10') && talentState(target).phase === '星隐') f *= 2 / 3;
   return f;
 };
 
@@ -168,7 +168,7 @@ export const talentAfterHit = async (rules: CombatRules, source: RuleUnit, targe
   talentRecordEnemyDamage(source, target, hpLoss);
   if (source.side === target.side || extra || hpLoss + absorbed <= 0) return;
   if (hasTalent(target, 'F03') && hpLoss > 0 && target.hp > 0 && source.hp > 0) {
-    await rules.secondary(target, source, Math.floor(hpLoss * .5), '玄武反震');
+    await rules.secondary(target, source, Math.floor(hpLoss * .3), '玄武反震');
   }
   if (hasTalent(target, 'G08')) talentState(target).stacks = Math.min(8, talentState(target).stacks + 1);
   if (hasTalent(target, 'G09') && elemental(element)) talentState(target).core = true;
@@ -185,8 +185,8 @@ export const talentAfterHit = async (rules: CombatRules, source: RuleUnit, targe
     const kills = state.kills ??= [];
     if (!kills.includes(root)) {
       kills.push(root);
-      await rules.restore(source, source, source.hpMax * .25, 0, true, source.hpMax * .25);
-      rules.log.push(`　➥${source.name}吞纳战意，直击倍率升至${(1.25 + .25 * Math.min(5, kills.length)).toFixed(2)}。`);
+      await rules.restore(source, source, source.hpMax * .15, 0, true, source.hpMax * .15);
+      rules.log.push(`　➥${source.name}吞纳战意，直击倍率升至${((115 + 15 * Math.min(4, kills.length)) / 100).toFixed(2)}。`);
     }
   }
   if (hasTalent(source, 'F09') && root === target.key && target.hp <= 0 && !target.state.memory.talentPacified && Math.abs(target.level-source.level) <= 5 && rules.once(source, `talentDevour:${root}`,true) && rules.once(source, 'talentDevourRound')) await rules.restore(source, source, source.hpMax*.08, 0, true, source.hpMax*.08);
@@ -206,9 +206,9 @@ export const talentEndAction = async (rules: CombatRules, unit: RuleUnit) => {
       const correction=tenacityContest(unit.pierce,target.tenacity*(1+rules.value(target,'tenacity')/100),unit.level-target.level,100).damageOverTimeMultiplier;
       if(amount>0||previous)ts.burns.push({ source: unit.key, amount: Math.max(previous?.amount ?? 0, amount*.025*correction), ticks: 2 });
     }
-    if (hasTalent(unit, 'F06') && state.attacks % 3 === 0) state.delayed.push({ target: target.key, amount: Math.floor(amount*2.1), due: state.clock+1, label: '烛龙回响' });
+    if (hasTalent(unit, 'F06') && state.attacks % 3 === 0) state.delayed.push({ target: target.key, amount: Math.floor(amount*1.5), due: state.clock+1, label: '烛龙回响' });
     if (hasTalent(unit, 'I01')) state.delayed.push({ target: target.key, amount, due: state.clock+1, label: '因果欠条' });
-    if (hasTalent(unit, 'G09') && action.core && target.hp > 0) await rules.take(target, Math.floor(amount*.4), 1, unit);
+    if (hasTalent(unit, 'G09') && action.core && target.hp > 0) await rules.take(target, Math.floor(amount*.25), 1, unit);
     if (hasTalent(unit, 'F10') && !action.extra && unit.hp > 0 && target.hp > 0 && amount > 0) await rules.secondary(unit, target, Math.floor(amount * .5), '应龙风压');
   }
   for (const root of Object.keys(action.struck)) if (!state.hit.includes(root)) state.hit.push(root);
@@ -218,7 +218,7 @@ export const talentEndAction = async (rules: CombatRules, unit: RuleUnit) => {
     if (unit.hp > 0 && action.kind !== 'none') {
       state.completed = (state.completed ?? 0) + 1;
       if (hasTalent(unit, 'G01') && (state.leech ?? 0) > 0) await rules.restore(unit, unit, state.leech!, 0, true, Math.floor(unit.hpMax * .2));
-      if (hasTalent(unit, 'G02')) state.stoneShield = Math.min(Math.floor(unit.hpMax * .5), (state.stoneShield ?? 0) + Math.floor(unit.hpMax * .05));
+      if (hasTalent(unit, 'G02')) state.stoneShield = Math.min(Math.floor(unit.hpMax * .35), (state.stoneShield ?? 0) + Math.floor(unit.hpMax * .04));
     }
     if(action.kind !== 'none') state.normal++;
     if (action.kind === 'attack') {

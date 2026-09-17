@@ -6,7 +6,7 @@ import { hiddenMix, rollHiddenMix } from './hidden-particles';
 import { inventorCapability, inventorProjection } from './hidden-device-protocol';
 import type { ActiveDeviceSkill } from './device.service';
 import { specializeTime, specializeEffectValue } from './skill-specialization';
-import { gainHiddenResource, hiddenActionKey, hiddenState, hiddenResourceShortage, type HiddenChoice, type HiddenDevice, type HiddenWeapon } from './hidden-combat-state';
+import { gainHiddenResource, hiddenActionKey, hiddenState, hiddenResourceShortage, type HiddenChoice, type HiddenDevice, type HiddenWeapon, type HiddenWeaponTrait } from './hidden-combat-state';
 
 export class HiddenBattleError extends Error {}
 export const hiddenDamageSource = (r: CombatRules, source: RuleUnit, target: RuleUnit, direct = false) => incoming.set(r, { source, target, direct });
@@ -30,8 +30,36 @@ export const hiddenShield = (r: CombatRules, source: RuleUnit, target: RuleUnit,
   effect(r, target, 'shield', value, duration, source, false, { hidden: true, ...data });
   r.log.push(`　➥【${target.name}】获得 ${value} 点护盾。`); return value - (old?.value ?? 0);
 };
-const inherit = (r: CombatRules, u: RuleUnit) => {
-  const state = hiddenState(u); if (state.inheritance) return; state.inheritance = true; hiddenShield(r, u, u, .04 * u.hpMax);
+const twoTurnReady = (last: number | undefined, turn: number) => last === undefined || turn - last >= 2;
+const recordInventorCapabilities = (state: ReturnType<typeof hiddenState>, turn: number, capabilities: string[]) => {
+  const distinct = [...new Set(capabilities.filter(Boolean))];
+  if (!distinct.length) return;
+  const key = `${turn}/${state.action}`;
+  state.inventorActions = [...(state.inventorActions ?? []).filter(entry => entry.key !== key), { key, capabilities: distinct }].slice(-2);
+  const recent = [...new Set(state.inventorActions.flatMap(entry => entry.capabilities))];
+  if (state.inventorActions.length === 2 && recent.length >= 2) state.inventorLink = { capabilities: recent, until: turn + 2 };
+};
+const planSucceeded = async (r: CombatRules, owner: RuleUnit, target: RuleUnit, plan: RuleStatus, mode: 'guard' | 'rescue' | 'interrupt') => {
+  const state = hiddenState(owner), data = metadata(plan);
+  if (data.predicted) {
+    state.freePlan = { until: r.turn + 1 };
+    const next = state.prediction?.nextTarget ? r.units.find(unit => unit.key === state.prediction?.nextTarget) : undefined;
+    r.log.push(`　➥【${owner.name}】的预判命中；${next ? `下一名敌方为【${next.name}】（${state.prediction?.nextActionType ?? '攻击'}）` : '敌方后续行动已尽'}，可免费替换一次未触发预案。`);
+  }
+  if (!twoTurnReady(state.tacticianInheritanceTurn, r.turn)) return;
+  state.tacticianInheritanceTurn = r.turn;
+  state.remainder = { until: r.turn + 2 };
+  if (mode === 'guard') {
+    const removed = await r.dispel(owner, target, true, 1);
+    if (removed.length) r.log.push(`　➥余策·守势：为【${target.name}】清除一项普通减益。`);
+  } else if (mode === 'rescue') {
+    const shield = r.status(target, 'shield');
+    if (shield) shield.until = Math.max(shield.until, r.turn + 2);
+    r.log.push(`　➥余策·接应：生命护盾维持至【${target.name}】下次行动结束。`);
+  } else {
+    effect(r, target, 'slow', 20, 1, owner, true);
+    r.log.push(`　➥余策·截断：令【${target.name}】减速20%。`);
+  }
 };
 const locked = (r: CombatRules, u: RuleUnit) => r.effects(u).some(e => ['sleep', 'petrify', 'charm', 'fear', 'alchemy_stun', 'hidden_stun', 'hidden_freeze'].includes(e.code));
 const readySource = (r: CombatRules, key: string) => r.units.find(u => u.key === key && u.hp > 0 && u.participating !== false && !locked(r, u));
@@ -42,12 +70,20 @@ export const hiddenNativeDevice = (r: CombatRules, source: RuleUnit, skill: Acti
   const state=hiddenState(source),capability=inventorCapability(skill);
   if(state.profession!=='inventor'||!capability)return;
   const effective=r.units.some(u=>{const old=before.find(b=>b.key===u.key);return old && (u.side===source.side?u.hp>old.hp:u.hp<old.hp)||old&&JSON.stringify(r.effects(u).map(e=>[e.code,e.value,e.stacks]).sort())!==old.effects;});
-  if(effective){gainHiddenResource(source,r.turn,20+(state.lastCapability&&state.lastCapability!==capability.primary?10:0));state.lastCapability=capability.primary;}
+  if(effective){gainHiddenResource(source,r.turn,20+(state.lastCapability&&state.lastCapability!==capability.primary?10:0));state.lastCapability=capability.primary;recordInventorCapabilities(state,r.turn,[capability.primary]);}
 };
 
 export const hiddenBeforeAction = async (r: CombatRules, u: RuleUnit) => {
   actor.set(r, u); incoming.delete(r);
   const state = hiddenState(u); state.action++; delete state.active; delete state.consumes;
+  if (state.observation && state.observation.until < r.turn) delete state.observation;
+  if (state.review && state.review.until < r.turn) delete state.review;
+  if (state.weaponSheath && state.weaponSheath.until < r.turn) delete state.weaponSheath;
+  if (state.inventorLink && state.inventorLink.until < r.turn) delete state.inventorLink;
+  if (state.inventorAcceptance && state.inventorAcceptance.until < r.turn) delete state.inventorAcceptance;
+  if (state.inventorStandby && state.inventorStandby.until < r.turn) delete state.inventorStandby;
+  if (state.freePlan && state.freePlan.until < r.turn) delete state.freePlan;
+  if (state.remainder && state.remainder.until < r.turn) delete state.remainder;
   for (const target of r.units) {
     const plan = r.status(target, 'hidden_plan'), data = metadata(plan);
     if (!plan || data.mode !== 'interrupt' || target !== u || !u.state.cast) continue;
@@ -61,7 +97,7 @@ const interrupt = async (r: CombatRules, source: RuleUnit, target: RuleUnit, pla
   target.state.memory.hiddenInterrupt = stamp; await r.removeEffect(target, plan);
   const immune = r.effects(target).some(e => e.mechanism && ['silence', 'petrify', 'sleep'].includes(e.code));
   if (!immune && r.random() < .5 * (target.boss ? .4 : 1)) {
-    delete target.state.cast; reward(r,source,20); inherit(r, source); r.log.push(`　➥【${source.name}】截断了【${target.name}】的吟唱。`);
+    delete target.state.cast; reward(r,source,20); await planSucceeded(r, source, target, plan, 'interrupt'); r.log.push(`　➥【${source.name}】截断了【${target.name}】的吟唱。`);
   } else r.log.push(`　➥【${target.name}】顶住截断，继续吟唱。`);
 };
 export const hiddenIncoming = async (r: CombatRules, source: RuleUnit, target: RuleUnit, amount: number, direct = true, magic = false) => {
@@ -80,7 +116,7 @@ export const hiddenIncoming = async (r: CombatRules, source: RuleUnit, target: R
     const plan = r.status(target, 'hidden_plan');
     if (plan && metadata(plan).mode === 'guard') {
       const owner = readySource(r, plan.source);
-      if (owner) { effect(r, target, 'hidden_guard', plan.value, 1, owner, false, { action: key }); await r.removeEffect(target, plan); reward(r,owner,20); inherit(r, owner); }
+      if (owner) { effect(r, target, 'hidden_guard', plan.value, 1, owner, false, { action: key }); await r.removeEffect(target, plan); reward(r,owner,20); await planSucceeded(r, owner, target, plan, 'guard'); }
     }
     const guard = r.status(target, 'hidden_guard'); if (guard && metadata(guard).action === key) amount *= 1 - guard.value / 100;
     const mark = r.status(target, 'hidden_mark'), data = metadata(mark);
@@ -104,7 +140,7 @@ export const hiddenBeforeDamage = async (r: CombatRules, target: RuleUnit, damag
     if (owner) {
       await r.removeEffect(target, plan); const gained = hiddenShield(r, owner, target, target.hpMax * plan.value / 100);
       const absorbed = await r.drainShield(target, damage); damage -= absorbed;
-      if (gained > 0 || absorbed > 0) { reward(r,owner,20); inherit(r, owner); }
+      if (gained > 0 || absorbed > 0) { reward(r,owner,20); await planSucceeded(r, owner, target, plan, 'rescue'); }
     }
   }
   return damage;
@@ -158,6 +194,16 @@ export const hiddenReorder = <T>(r: CombatRules, queue: T[], unit: (entry: T) =>
     if (from < 0 || from === to) { gainHiddenResource(source, r.turn, 30, true); r.log.push(`　➥调度未改变行动位置，向【${source.name}】返还30筹策。`); }
     else { const [entry] = queue.splice(from, 1); queue.splice(to, 0, entry); r.log.push(`　➥【${unit(entry).name}】按调度改变行动位置。`); }
   }
+  const ordered = queue.map(entry => r.units.find(candidate => candidate.key === unit(entry).key)).filter((candidate): candidate is RuleUnit => Boolean(candidate));
+  for (const source of r.units.filter(candidate => hiddenState(candidate).profession === 'tactician' && candidate.hp > 0)) {
+    const enemies = ordered.filter(candidate => candidate.side !== source.side && candidate.hp > 0);
+    const first = enemies[0], next = enemies[1];
+    if (!first) continue;
+    const actionType = first.state.cast ? '准备' : '攻击';
+    const nextActionType = next?.state.cast ? '准备' : '攻击';
+    hiddenState(source).prediction = { target: first.key, actionType, nextTarget: next?.key, nextActionType, turn: r.turn };
+    r.log.push(`　➥全局视野：【${source.name}】预读【${first.name}】的${actionType}行动。`);
+  }
   return queue;
 };
 
@@ -178,7 +224,11 @@ export const executeHiddenCombat = async (r: CombatRules, u: RuleUnit, code: str
   let mana = r.manaCost(u, Math.ceil((mix?.mana ?? definition.mana) * (spec?.manaFactor ?? 1))), cooldown = mix?.cooldown ?? definition.cooldown;
   cooldown = Math.max(0, specializeTime(cooldown, spec?.timeChange ?? 0));
   if (u.mp < mana) throw new HiddenBattleError(`MP不足，需要${mana}。`);
-  const shortage=hiddenResourceShortage(code,u.cooldowns);if(shortage)throw new HiddenBattleError(shortage);
+  const ownedPlans = r.units.flatMap(target => r.effects(target).filter(item => item.code === 'hidden_plan' && item.source === u.key).map(item => ({ target, item })));
+  const freeReplace = code === 'hidden_plan' && Boolean(state.freePlan && state.freePlan.until >= r.turn && ownedPlans.length);
+  const remainderDiscount = code === 'hidden_plan' && Boolean(state.remainder && state.remainder.until >= r.turn);
+  const resourceCost = freeReplace ? 0 : remainderDiscount ? Math.max(Math.ceil(definition.resource * .6), Math.ceil(definition.resource * .75)) : definition.resource;
+  const shortage=resourceCost===definition.resource?hiddenResourceShortage(code,u.cooldowns):state.resource<resourceCost?`专属资源不足：需要 ${resourceCost}，当前 ${state.resource}/100。`:null;if(shortage)throw new HiddenBattleError(shortage);
   if (choice.target && !r.units.some(t => t.key === choice.target && t.hp > 0 && t.participating !== false)) throw new HiddenBattleError('选定目标已经失效，请重新选择。');
   let weapons = (choice.weapons ?? ctx.weapons.slice(0, 1).map(w => w.id)).map(id => ctx.weapons.find(w => w.id === id));
   if (definition.profession === 'weapon_master' && code !== 'hidden_weapon_guard' && (!enemy || !weapons.length || weapons.length > 3 || weapons.some(w => !w) || new Set(weapons.map(w => w?.id)).size !== weapons.length)) throw new HiddenBattleError('请选择器阵内1～3件不同武器及存活敌人。');
@@ -186,8 +236,8 @@ export const executeHiddenCombat = async (r: CombatRules, u: RuleUnit, code: str
   if (['hidden_mark', 'hidden_finale'].includes(code) && !enemy) throw new HiddenBattleError('没有存活敌人。');
   if (code === 'hidden_catalyst' && !['stable', 'excite'].includes(choice.mode ?? '')) throw new HiddenBattleError('请选择稳定或激发。');
   if (code === 'hidden_plan' && !['guard', 'rescue', 'interrupt'].includes(choice.mode ?? '')) throw new HiddenBattleError('请选择守势、接应或截断。');
-  if (code === 'hidden_plan' && r.units.some(t => r.effects(t).some(e => e.code === 'hidden_plan' && e.source === u.key))) throw new HiddenBattleError('你已有尚未触发的预案。');
-  if (code === 'hidden_plan' && r.status(choice.mode === 'interrupt' ? enemy ?? u : ally, 'hidden_plan')) throw new HiddenBattleError('目标已有一项待命预案。');
+  if (code === 'hidden_plan' && ownedPlans.length && !freeReplace) throw new HiddenBattleError('你已有尚未触发的预案。');
+  if (code === 'hidden_plan' && r.effects(choice.mode === 'interrupt' ? enemy ?? u : ally).some(e => e.code === 'hidden_plan' && (!freeReplace || e.source !== u.key))) throw new HiddenBattleError('目标已有一项待命预案。');
   if (code === 'hidden_plan' && choice.mode === 'interrupt' && !enemy) throw new HiddenBattleError('截断需要一名存活敌人。');
   const chosenTarget = r.units.find(t=>t.key===choice.target);
   if (chosenTarget && (code==='hidden_weapon_guard'||code==='hidden_order'&&choice.mode==='advance'||code==='hidden_plan'&&choice.mode!=='interrupt') && chosenTarget.side!==u.side) throw new HiddenBattleError('该模式需要选择友方。');
@@ -202,6 +252,9 @@ export const executeHiddenCombat = async (r: CombatRules, u: RuleUnit, code: str
     return { device, skill, capability };
   });
   const donor = ctx.devices.find(d => d.id === choice.donor);
+  const deviceEnergyCost = (device: HiddenDevice, skill: ActiveDeviceSkill) => state.inventorStandby?.device === device.id && state.inventorStandby.until >= r.turn
+    ? Math.max(Math.ceil(skill.energyCost * .6), Math.ceil(skill.energyCost * .75))
+    : skill.energyCost;
   if (definition.profession === 'inventor') {
     if (state.driverTurn === r.turn) throw new HiddenBattleError('本轮已驱动异械，额外行动不能再次驱动。');
     const count = code === 'hidden_synergy' ? 2 : 1;
@@ -210,7 +263,7 @@ export const executeHiddenCombat = async (r: CombatRules, u: RuleUnit, code: str
       const reduction = code === 'hidden_debug' ? 2 : 0;
       if (Number(u.cooldowns[`device_${device!.id}_${skill!.code}`] ?? 0) > reduction) throw new HiddenBattleError('异械原生模式仍在冷却。');
       const bonus = ['hidden_debug', 'hidden_transfer'].includes(code) ? Math.min(30, device!.max - device!.energy) : 0;
-      if (device!.energy + bonus < skill!.energyCost) throw new HiddenBattleError('异械能量不足，不能启动。');
+      if (device!.energy + bonus < deviceEnergyCost(device!, skill!)) throw new HiddenBattleError('异械能量不足，不能启动。');
     }
     if (code === 'hidden_debug' && choice.donor && !donor) throw new HiddenBattleError('追加维护的异械不在主脑中。');
     if (code === 'hidden_transfer') {
@@ -222,10 +275,13 @@ export const executeHiddenCombat = async (r: CombatRules, u: RuleUnit, code: str
   const harmful=mix ? mix.branches.some(branch=>branch.damage>0) : definition.power>0;
   if(!talentCanPaySkill(u,harmful))throw new HiddenBattleError('焚命者需要支付8%最大HP并保留1HP。');
   if (mix) await ctx.payParticles([...mix.particles]);
+  if (freeReplace) for (const existing of ownedPlans) await r.removeEffect(existing.target, existing.item);
   talentPaySkill(u,harmful);talentCommitAction(u,harmful?'skill':'support',definition.profession==='weapon_master'?'斩击':'奥术',mix?mix.targets===1:code!=='hidden_weapon_finale',definition.profession!=='weapon_master');
-  u.mp -= mana; state.resource -= definition.resource; state.active = code; state.consumes = definition.resource > 0;
+  u.mp -= mana; state.resource -= resourceCost; state.active = code; state.consumes = resourceCost > 0;
+  if (freeReplace) delete state.freePlan;
+  if (remainderDiscount) delete state.remainder;
   await r.paid(u,mana,{category:definition.profession==='weapon_master'?'physical':definition.power?'magic':'utility',cooldown});
-  u.cooldowns[code] = cooldown + 1; r.log.push(`➤【${u.name}】施放「${definition.name}」 · MP −${mana}${definition.resource ? ` · 专属资源 −${definition.resource}` : ''}`);
+  u.cooldowns[code] = cooldown + 1; r.log.push(`➤【${u.name}】施放「${definition.name}」 · MP −${mana}${resourceCost ? ` · 专属资源 −${resourceCost}` : ''}`);
   if (mix) {
     const outcome = rollHiddenMix(mix.particles.length, state.catalyst?.mode, code === 'hidden_kettle', r.random); delete state.catalyst;
     mix = hiddenMix(mix.particles, outcome, code === 'hidden_kettle');

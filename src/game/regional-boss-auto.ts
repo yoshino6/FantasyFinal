@@ -4,7 +4,7 @@ export type RegionalAutoAction = { type: 'attack' | 'defend' } | { type: 'skill'
 export type RegionalAutoMember = {
   key: string; hp: number; hpMax: number; shield: number; controlled: boolean; automatic: boolean;
   preferred: RegionalAutoAction; skill?: { id: number; damaging: boolean }; preferredDamaging?: boolean;
-  committed?: RegionalAction;
+  committed?: RegionalAction; healingSuppressed?: boolean; cleanse?: RegionalAutoAction;
 };
 export const regionalActionKind = (action: { type: string }, damaging = true): RegionalAction => action.type === 'attack' ? 'attack'
   : action.type === 'defend' ? 'defend' : action.type === 'skill' || action.type === 'device' ? damaging ? 'damage_skill' : 'support_skill' : 'sustain';
@@ -27,7 +27,7 @@ export const planRegionalAuto = (state: RegionalState, members: RegionalAutoMemb
           pressure = Math.max(state.phase === 3 ? 15 : 0, pressure + delta(member, member.committed ?? (action ? actionKind(member, action) : 'attack')));
           if (pressure >= 100) { collapse = true; pressure = 35; }
         }
-        const target = state.warningAt ? 29 : 84;
+        const target = state.warningAt ? 29 : state.collapseAt ? 84 : state.rockArmorActive ? 59 : 84;
         const scored = score - Math.max(0, pressure - target) * 100 - (collapse ? 10000 : 0);
         if (scored > bestScore) { bestScore = scored; best = new Map(actions); }
         return;
@@ -44,6 +44,7 @@ export const planRegionalAuto = (state: RegionalState, members: RegionalAutoMemb
     };
     search(0, 0, new Map()); return best;
   }
+  for (const member of automatic.filter(member => member.healingSuppressed)) result.set(member.key, member.cleanse ?? (member.hp / member.hpMax < .45 ? { type: 'defend' } : { type: 'attack' }));
   if (!state.orderDue || state.orderDue > turn || !effective.length) return result;
   const threshold = state.revolt ? effective.length : Math.ceil(effective.length / 2);
   const vote = (key: string) => state.revolt ? 1 : key === state.foreman ? 2 : 1;
@@ -57,6 +58,7 @@ export const planRegionalAuto = (state: RegionalState, members: RegionalAutoMemb
   for (const member of ranked) if (!canRest && votes < threshold) { chosen.add(member.key); votes += vote(member.key); }
   for (const member of automatic) {
     const order = state.orders[member.key]; if (!order) continue;
+    if (member.healingSuppressed && member.cleanse) { result.set(member.key, member.cleanse); continue; }
     const rebel = chosen.has(member.key);
     const available = choices(member).filter(action => obeysFurnaceOrder(order, actionKind(member, action)) !== rebel);
     // MP/技能在下令后失效时仍选择合法行动，不伪造“服从”；实际结算再次判定。

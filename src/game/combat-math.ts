@@ -10,7 +10,7 @@ export const opposedCritBonus = (critDamage: number, critReduction: number) => {
   return 2 * (1 - Math.pow(.5, x / y));
 };
 
-export type StrikeCorrections = { hitCorrectionPct?: number; evasionCorrectionPct?: number; critAvoidanceCorrectionPct?: number; critDamageCorrectionPct?: number; actualHitRatePct?: number; actualCritRatePct?: number };
+export type StrikeCorrections = { hitCorrectionPct?: number; evasionCorrectionPct?: number; critRateCorrectionPct?: number; critAvoidanceCorrectionPct?: number; critDamageCorrectionPct?: number; actualHitRatePct?: number; actualCritRatePct?: number };
 export type StrikeCorrectionSource = StrikeCorrections & { armorSet?: StrikeCorrections | null; cardEffects?: StrikeCorrections | null };
 const correctionRate = (value = 0) => Math.max(0,Math.min(100,value))/100;
 const combineCorrectionPct = (...values: Array<number | undefined>) => (1-values.reduce<number>((remaining,value)=>remaining*(1-correctionRate(value)),1))*100;
@@ -26,11 +26,16 @@ export const resolvedHitChance = (chance: number, actualHitRatePct = 0, hitMulti
   const minimum = Math.max(0, Math.min(100, Number(minimumHitRatePct))) / 100;
   return correctedHitChance(Math.min(1, Math.max(multiplied, minimum)), correction);
 };
-export const correctedCritChance = (chance: number, correction: StrikeCorrections = {}) => Math.max(0,Math.min(1,chance+Math.max(0,Number(correction.actualCritRatePct??0))/100))*(1-correctionRate(correction.critAvoidanceCorrectionPct));
+/** 暴击率正向修正补足未暴击部分；抗暴率修正再按当前被暴击概率向下修正。 */
+export const correctedCritChance = (chance: number, correction: StrikeCorrections = {}) => {
+  const base = Math.max(0,Math.min(1,chance+Math.max(0,Number(correction.actualCritRatePct??0))/100));
+  return (base+(1-base)*correctionRate(correction.critRateCorrectionPct))*(1-correctionRate(correction.critAvoidanceCorrectionPct));
+};
 export const correctedCritBonus = (bonus: number, correction: StrikeCorrections = {}) => bonus*(1-correctionRate(correction.critDamageCorrectionPct));
 export const strikeCorrections = (source?: StrikeCorrectionSource, target?: StrikeCorrectionSource): StrikeCorrections => ({
   hitCorrectionPct:combineCorrectionPct(source?.armorSet?.hitCorrectionPct,source?.hitCorrectionPct,source?.cardEffects?.hitCorrectionPct),
   evasionCorrectionPct:combineCorrectionPct(target?.armorSet?.evasionCorrectionPct,target?.evasionCorrectionPct,target?.cardEffects?.evasionCorrectionPct),
+  critRateCorrectionPct:combineCorrectionPct(source?.armorSet?.critRateCorrectionPct,source?.critRateCorrectionPct,source?.cardEffects?.critRateCorrectionPct),
   critAvoidanceCorrectionPct:combineCorrectionPct(target?.armorSet?.critAvoidanceCorrectionPct,target?.critAvoidanceCorrectionPct,target?.cardEffects?.critAvoidanceCorrectionPct),
   critDamageCorrectionPct:combineCorrectionPct(target?.armorSet?.critDamageCorrectionPct,target?.critDamageCorrectionPct,target?.cardEffects?.critDamageCorrectionPct),
   actualHitRatePct:Number(source?.armorSet?.actualHitRatePct??0)+Number(source?.actualHitRatePct??0)+Math.min(12,Math.max(0,Number(source?.cardEffects?.actualHitRatePct??0))),
@@ -40,11 +45,12 @@ export const strikeCorrections = (source?: StrikeCorrectionSource, target?: Stri
 /** 首领承受控制时的命中系数，技能与药剂共用。 */
 export const bossControlChanceMultiplier = .4;
 /** 技能负面状态按破韧与韧性对抗；命中、暴击只参与直击结算。 */
-export const tenacityContest = (tenacityPierce: number, targetTenacity: number, levelDifference: number, baseChancePct: number) => {
+export const tenacityContest = (tenacityPierce: number, targetTenacity: number, levelDifference: number, baseChancePct: number, positiveCorrectionPct = 0) => {
   const pierce = Math.max(0, Number(tenacityPierce));
   const tenacity = Math.max(0, Number(targetTenacity));
   // 同级破韧等于韧性时 K=1；更高破韧不再提高本次状态效果。
-  const coefficient = Math.min(1, 2 * pierce / Math.max(1, pierce + tenacity));
+  const opposedCoefficient = Math.min(1, 2 * pierce / Math.max(1, pierce + tenacity));
+  const coefficient = opposedCoefficient + (1 - opposedCoefficient) * correctionRate(positiveCorrectionPct);
   const levelMultiplier = levelDifference >= 0 ? Math.pow(1.1, levelDifference) : Math.pow(.9, -levelDifference);
   return {
     coefficient,
