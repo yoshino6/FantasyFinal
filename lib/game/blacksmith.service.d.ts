@@ -1,5 +1,10 @@
-import type { RowDataPacket } from 'mysql2/promise';
+import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
+import { getPool } from '../database/pool';
 import { type EpicForgeRecipe } from '../config/epic-forging';
+type ForgeRequirement = {
+    code: string;
+    quantity: number;
+};
 type ForgeEntrySource = 'blacksmith' | 'profession';
 export declare const blacksmithMaxLevel = 11;
 export declare const armorClassEffectText: (subtype: string | null | undefined, slot?: string) => string;
@@ -7,6 +12,21 @@ export declare const forgeFee: (requirements: ReadonlyArray<{
     code: string;
     quantity: number;
 }>) => number;
+export declare const characterIdFor: (connection: PoolConnection | Awaited<ReturnType<typeof getPool>>, qqUserId: string, lock?: boolean) => Promise<number>;
+export declare const blacksmithProgressFor: (connection: PoolConnection | Awaited<ReturnType<typeof getPool>>, characterId: number, lock?: boolean) => Promise<{
+    isBlacksmith: boolean;
+    level: number;
+    proficiency: number;
+    required: number;
+    bonus: number;
+}>;
+export declare const addBlacksmithProficiency: (connection: PoolConnection, characterId: number, gained?: number) => Promise<{
+    isBlacksmith: boolean;
+    level: number;
+    proficiency: number;
+    required: number;
+    bonus: number;
+}>;
 export declare const blacksmithWeapons: (qqUserId: string) => Promise<{
     id: number;
     name: string;
@@ -112,8 +132,22 @@ export declare const fuseWeapon: (qqUserId: string, instanceId: number, material
         bonus: number;
     };
 }>;
+export declare const tierForgeMaterial: (category: string, subtype: string | null | undefined, level: number) => "ridge_core" | "fire_crystal" | "marsh_heart" | "duskvein_crystal" | "living_wood";
+export declare const forgeRequirements: (category: string, subtype: string | null | undefined, level: number) => ForgeRequirement[];
 export declare const forgeRarityWeights: (blacksmithLevel: number) => Array<[string, number]>;
 export declare const forgePrimaryKeys: (category: string, subtype: string | null | undefined) => string[];
+export declare const equipmentKind: (category: string, subtype?: string | null) => "\u6B66\u5668" | "\u9632\u5177";
+type WeightedAffix = {
+    key: string;
+    weight: number;
+};
+export declare const randomSecondaryAffixPool: (category: string, subtype: string, level: number, rarity: string) => {
+    key: string;
+    weight: number;
+}[];
+export declare const pickRandomSecondaryAffix: (pool: WeightedAffix[]) => string;
+export declare const randomForgeValue: (upper: number) => number;
+export declare const specialAffixChance: (level: number) => number;
 export declare const legendaryTestForgeDraft: (category: string, subtype: string, level: number) => {
     rarity: string;
     name: string;
@@ -121,6 +155,8 @@ export declare const legendaryTestForgeDraft: (category: string, subtype: string
     primaryKeys: string[];
 };
 export declare const forgeEquipmentCapsFor: (category: string, subtype: string | null | undefined, level: number, rarity: string, primaryKeys: readonly string[]) => Record<string, number>;
+export declare const secondaryAffixCount: (rarity: string) => number;
+export declare const forgeName: (subtype: string, level: number, effect: Record<string, number>, materialCode?: string, category?: string, rarity?: string, budgetLevel?: number) => string;
 export declare const forgeState: (qqUserId: string) => Promise<{
     category: string | null;
     subtype: string | null;

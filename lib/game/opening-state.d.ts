@@ -2,7 +2,7 @@ import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 export { chooseWeighted } from './opening-route-draw';
 import { type WorldArea } from './world-site-geometry';
 export type OpeningConnection = Pick<PoolConnection, 'execute'>;
-export declare const assertOpeningFree: (connection: OpeningConnection, characterId: number) => Promise<void>;
+export declare const assertOpeningFree: (connection: OpeningConnection, characterId: number, forestSpawnId?: number) => Promise<void>;
 export declare const openingWorldFor: (connection: OpeningConnection, lock?: boolean) => Promise<RowDataPacket>;
 export declare const openingSafeHubs: (connection: OpeningConnection, lock?: boolean) => Promise<RowDataPacket[]>;
 export declare const availableOpeningSpawns: (connection: OpeningConnection) => Promise<{

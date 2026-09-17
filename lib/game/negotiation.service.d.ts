@@ -76,7 +76,7 @@ export type NegotiationHooks = {
     settle: (state: NegotiationState, eligibility: Record<string, boolean>, drops: NegotiationDrop[], sessionId: string) => Promise<string>;
 };
 export declare const readNegotiationReplay: (connection: PoolConnection, actorId: number, command: NegotiationCommand) => Promise<NegotiationResult | undefined>;
-export declare const assertNoNegotiation: (connection: Pick<PoolConnection, "execute">, characterId: number) => Promise<void>;
+export declare const assertNoNegotiation: (connection: Pick<PoolConnection, "execute">, characterId: number, forestSpawnId?: number) => Promise<void>;
 export declare const assertMonsterNotNegotiating: (connection: PoolConnection, spawnIds: number[]) => Promise<void>;
 export declare const closeNegotiationSession: (connection: PoolConnection, sessionId: string, state?: string) => Promise<void>;
 export declare const readNegotiationView: (connection: PoolConnection, ctx: NegotiationContext, session: Session, state: NegotiationState, command: NegotiationCommand) => Promise<NegotiationView>;
