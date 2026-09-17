@@ -3,7 +3,7 @@ import { refreshShopStocks } from '../game/shop-stock.service';
 import { recalculateCharacterStats } from '../game/character.service';
 import { forgedEquipmentBase } from '../game/constants';
 import { worldSurfaceMaterials, worldSurfaceMonsters, worldSurfaceRegions } from '../config/world-surface';
-import { epicForgeRecipes, rareForgeMaterials, regionalForgeMaterials } from '../config/epic-forging';
+import { epicBlueprintDropChance, epicForgeRecipes, rareForgeMaterials, regionalForgeMaterials } from '../config/epic-forging';
 import { allBeastCoreMaterials, allMeatChunkMaterials, allPurifiedCraftMaterials, beastCoreCode, meatChunkCode, meatChunkQuantity, monsterCraftMaterialCode, monsterCraftMaterialKinds, monsterCraftMaterialName, monsterDropsMeat } from '../game/monster-crafting-material.service';
 import { alchemyOutputDefinitions, alchemyStatusDefinitions } from '../game/alchemy-catalog';
 import { advancedProfessionActiveSkillCodes, worldTreeAdvancedProfessions } from '../game/advanced-profession.config';
@@ -1387,7 +1387,7 @@ const seedEpicForgeContent = async (pool: Pool) => {
     const filtered = genericDrops.filter((drop: any) => !String(drop.code ?? '').startsWith('blueprint_epic_') && !['mountainheart_seal','forge_warden_brand','threehead_molt_sigel','crown_hunt_seal'].includes(String(drop.code ?? '')));
     const partCode = recipes[0]?.materials.find(material => material.code.endsWith('_seal') || material.code.endsWith('_brand') || material.code.endsWith('_sigel'))?.code;
     if (partCode) filtered.push({ code: partCode, chance: 1, min_quantity: 1, max_quantity: 2 });
-    for (const recipe of recipes) filtered.push({ code: recipe.blueprintCode, chance: recipe.category === '武器' ? .01 : .02, min_quantity: 1, max_quantity: 1 });
+    for (const recipe of recipes) filtered.push({ code: recipe.blueprintCode, chance: epicBlueprintDropChance[recipe.category], min_quantity: 1, max_quantity: 1 });
     await pool.execute('UPDATE monster_templates SET drops_json=? WHERE id=?', [JSON.stringify(filtered), boss.id]);
   }
 };
@@ -1431,6 +1431,7 @@ export const initializeSchema = async (pool: Pool) => {
   await(await import('./talent-codes')).migrateTalentCodes(pool);
   await (await import('./alchemy-v2')).initializeAlchemyV2(pool);
   await (await import('./inventory-binding')).initializeInventoryBinding(pool);
+  await (await import('./monster-cards')).initializeMonsterCards(pool);
   await (await import('./automaton')).initializeAutomaton(pool);
   await (await import('./instance-market')).initializeInstanceMarket(pool);
   await seedDynamicAlchemyContent(pool);
@@ -1975,7 +1976,7 @@ export const initializeSchema = async (pool: Pool) => {
     ('home_metal', '金属', '可用于制作耐用家具与房屋构件的金属。', '百纳居购买与兑换', 'material', '建材', 0.30, 1, NULL),
     ('slime_gel', '史莱姆凝胶', '从史莱姆身上收集的普通弹性凝胶，是制作奇妙家具的怪物材料。', '地下史莱姆 80% 掉落', 'material', '怪材', 0.10, 1, NULL),
     ('red_slime_gel', '红色凝胶', '炽热的史莱姆凝胶，可由解构师稳定析出火元素微尘。', '地下红色史莱姆 20% 掉落', 'material', '怪材', 0.10, 1, NULL),
-    ('orange_slime_gel', '橙色凝胶', '裹着细砂的史莱姆凝胶，可由解构师稳定析出金元素微尘。', '地下橙色史莱姆 20% 掉落', 'material', '怪材', 0.10, 1, NULL),
+    ('orange_slime_gel', '橙色凝胶', '裹着细砂的史莱姆凝胶，可由解构师稳定析出土元素微尘。', '地下橙色史莱姆 20% 掉落', 'material', '怪材', 0.10, 1, NULL),
     ('yellow_slime_gel', '黄色凝胶', '跳动电光的史莱姆凝胶，可由解构师稳定析出雷元素微尘。', '地下黄色史莱姆 20% 掉落', 'material', '怪材', 0.10, 1, NULL),
     ('green_slime_gel', '绿色凝胶', '带有草木气息的史莱姆凝胶，可由解构师稳定析出木元素微尘。', '地下绿色史莱姆 20% 掉落', 'material', '怪材', 0.10, 1, NULL),
     ('cyan_slime_gel', '青色凝胶', '湿润澄澈的史莱姆凝胶，可由解构师稳定析出水元素微尘。', '地下青色史莱姆 20% 掉落', 'material', '怪材', 0.10, 1, NULL),
@@ -1986,14 +1987,14 @@ export const initializeSchema = async (pool: Pool) => {
     ('energy_ember', '能量余烬', '从兽材魔力结构中析出的微弱能量粒子，是魔力药剂的基础主材。', '解构师分解', 'material', '粒子', 0.08, 1, NULL),
     ('magic_unit', '魔力微弧', '高级兽材分解后偶得的稳定魔力微弧，可用于调制秘药。', '解构师分解', 'material', '粒子', 0.05, 1, NULL),
     ('wood_element_dust', '木元素微尘', '活木解构后逸散出的木元素微粒，带着草木清香。', '锻材解构', 'material', '粒子', 0.03, 1, NULL),
-    ('metal_element_dust', '金元素微尘', '金属锻材解构后析出的金元素微粒，闪着冷冽光泽。', '锻材解构', 'material', '粒子', 0.03, 1, NULL),
+    ('metal_element_dust', '土元素微尘', '金属与岩石类材料解构后析出的土元素微粒，带着沉稳厚重的气息。', '解构师分解', 'material', '粒子', 0.03, 1, NULL),
     ('water_element_dust', '水元素微尘', '星铜中游离出的水元素微粒，如晨露般清澈。', '锻材解构', 'material', '粒子', 0.03, 1, NULL),
     ('ice_element_dust', '冰元素微尘', '月银中沉淀的冰元素微粒，触之微寒。', '锻材解构', 'material', '粒子', 0.03, 1, NULL),
     ('dark_element_dust', '暗元素微尘', '月银阴影面析出的暗元素微粒，吞没周围的微光。', '锻材解构', 'material', '粒子', 0.03, 1, NULL),
     ('fire_element_dust', '火元素微尘', '曜金中跃动的火元素微粒，隐隐传来灼热。', '锻材解构', 'material', '粒子', 0.03, 1, NULL),
     ('thunder_element_dust', '雷元素微尘', '曜金中闪烁的雷元素微粒，偶有细微鸣响。', '锻材解构', 'material', '粒子', 0.03, 1, NULL),
     ('light_element_dust', '光元素微尘', '曜金辉芒中剥离的光元素微粒，温和而明亮。', '锻材解构', 'material', '粒子', 0.03, 1, NULL),
-    ('magic_gear', '魔力齿轮', '以金元素微尘与魔力微弧构成的稳定传动基材。', '解构师构造', 'material', '基材', 0.30, 1, NULL),
+    ('magic_gear', '魔力齿轮', '以土元素微尘与魔力微弧构成的稳定传动基材。', '解构师构造', 'material', '基材', 0.30, 1, NULL),
     ('energy_core', '能量中枢', '将余烬与元素微粒压缩而成的持续供能基材。', '解构师构造', 'material', '基材', 0.45, 1, NULL),
     ('flesh_atrium', '血肉心房', '模拟生物循环结构制成的活性基材，会随魔力脉动轻轻收缩。', '解构师构造', 'material', '基材', 0.50, 1, NULL),
     ('flame_matrix', '炽焰矩阵', '将火元素规整为稳定热源的基础基材。', '解构师构造', 'material', '基材', 0.20, 1, NULL),
@@ -2099,7 +2100,6 @@ export const initializeSchema = async (pool: Pool) => {
   // 最终异械才有绑定图纸；基材和构件会随已获异械图纸的构造链直接解锁，不生成冗余材料图纸。
   for (const recipe of constructionRecipes) {
     const isDevice = deviceCodes.has(recipe.code);
-    if (recipe.constructionCategory !== '异械') continue;
     await pool.execute(`INSERT INTO item_definitions
       (code,name,description,obtain_source,item_type,item_category,rarity,required_level,weight,trade_price,stack_limit,stackable,is_tradeable,effect_json)
       VALUES (?,?,?,'解构师构造',?,?, '普通',?, ?,?, ?,?,?,?)
@@ -2108,6 +2108,7 @@ export const initializeSchema = async (pool: Pool) => {
       recipe.recommendedSecondaryLevel, isDevice ? .45 : .15, Number(constructionValueByCode.get(recipe.code) ?? 0),
       isDevice ? 1 : 99, isDevice ? 0 : 1, 0, JSON.stringify(recipe.effect ?? {})
     ]);
+    if (recipe.constructionCategory !== '异械') continue;
     await pool.execute(`INSERT INTO item_definitions
       (code,name,description,obtain_source,item_type,item_category,rarity,required_level,weight,trade_price,stack_limit,stackable,is_tradeable,effect_json)
       VALUES (?,?,?,'解构师图纸','consumable','图纸','优秀',1,.01,0,1,1,0,JSON_OBJECT('constructionBlueprint',?))
@@ -3739,5 +3740,6 @@ export const initializeSchema = async (pool: Pool) => {
   await refreshShopStocks(pool);
   await (await import('./finance')).initializeFinance(pool);
   await (await import('./map-descriptions')).initializeMapDescriptions(pool);
+  await (await import('./travel-routes')).initializeTravelRoutes(pool);
   await (await import('./equipment-workshop')).initializeEquipmentWorkshop(pool);
 };

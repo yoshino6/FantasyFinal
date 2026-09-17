@@ -2,7 +2,7 @@ import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { armorSlot } from './armor-class';
 export { armorSlot } from './armor-class';
 
-export type ArmorSet = { name: string; count: number; tier: 3 | 5; hitCorrectionPct: number; evasionCorrectionPct: number; critAvoidanceCorrectionPct: number; critDamageCorrectionPct: number; damageReductionPct: number; panelPercent: Record<string,number> };
+export type ArmorSet = { name: string; count: number; tier: 3 | 5; hitCorrectionPct: number; evasionCorrectionPct: number; critAvoidanceCorrectionPct: number; critDamageCorrectionPct: number; actualHitRatePct?: number; actualCritRatePct?: number; damageReductionPct: number; panelPercent: Record<string,number> };
 
 /** 仅五个实际防具槽计件；品质、稀有度不影响甲类套装，5件覆盖3件。 */
 export const armorSetFromRows = (rows: readonly { slot: string; weapon_type?: string | null }[]): ArmorSet | null => {

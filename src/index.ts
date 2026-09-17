@@ -17,6 +17,7 @@ installGroupReplyMention();
 
 let settlingDueTravels = false;
 let settlingInactiveCombatSessions = false;
+let recoveringMonsterCardGrants = false;
 const combatTimeoutSweepMs = 10_000;
 
 const r = new koaRouter();
@@ -268,6 +269,7 @@ appGroup.use({ path: '自动战斗 药剂选择', schema: { usage: '/自动战�
 appGroup.use({ path: '自动战斗 选择药剂', schema: { usage: '/自动战斗 选择药剂 <生命|魔力> <物品编号> [PVP]', args: [{ name: 'kind', rules: [{ required: true, type: 'enum', enum: ['生命', '魔力'] }] }, { name: 'item', rules: [{ required: true, type: 'number', min: 0 }] }, { name: 'mode', rules: [{ type: 'enum', enum: ['PVP'] }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.potionChoiceHandler })))
 appGroup.use({ path: '自动战斗 药剂搜索', schema: { usage: '/自动战斗 药剂搜索 <生命|魔力> <关键词>', args: [{ name: 'kind', rules: [{ required: true, type: 'enum', enum: ['生命', '魔力'] }] }, { name: 'keyword', rules: [{ required: true, type: 'rest' }] }] } }, () => import('./response/auto-battle').then(module => ({ default: module.potionSearchHandler })))
 appGroup.use({ path: '前往', schema: { usage: '/前往 <横坐标> <纵坐标> <高度坐标>', args: [{ name: 'x', rules: [{ required: true, type: 'number' }] }, { name: 'y', rules: [{ required: true, type: 'number' }] }, { name: 'z', rules: [{ required: true, type: 'number' }] }] } }, () => import('./response/go-to'))
+appGroup.use({ path: '确认前往', schema: { usage: '/确认前往 <确认编号>', args: [{ name: 'token', rules: [{ required: true }] }] } }, () => import('./response/adventure').then(module => ({ default: module.confirmGoToHandler })))
 appGroup.use({ path: '前往地图', schema: { usage: '/前往地图 <地图编号>', args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/adventure').then(module => ({ default: module.goToMapHandler })))
 appGroup.use('寻怪', () => import('./response/adventure').then(module => ({ default: module.huntHandler })))
 appGroup.use({ path: '下迷宫', schema: { usage: '/下迷宫 <入口编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/adventure').then(module => ({ default: module.dungeonEnterHandler })))
@@ -329,6 +331,9 @@ appGroup.use({ path: '偷袭', schema: { usage: '/偷袭 <编号>', args: [{ nam
 appGroup.use({ path: '伏击', schema: { usage: '/伏击 <编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/adventure').then(module => ({ default: module.queueAmbushHandler })))
 appGroup.use('离开战斗', () => import('./response/adventure').then(module => ({ default: module.leaveOccupiedBattleHandler })))
 appGroup.use({ path: '怪物详情', schema: { usage: '/怪物详情 <编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/monster-detail'))
+appGroup.use({ path: '追迹', schema: { usage: '/追迹 <怪物编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/monster-card-exploration').then(module => ({ default: module.trackMonsterHandler })))
+appGroup.use('追迹列表', () => import('./response/monster-card-exploration').then(module => ({ default: module.trackedMonsterListHandler })))
+appGroup.use({ path: '取消追迹', schema: { usage: '/取消追迹 <怪物编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/monster-card-exploration').then(module => ({ default: module.untrackMonsterHandler })))
 appGroup.use({ path: '域民详情', schema: { usage: '/域民详情 <域民代号>', args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/npc-detail'))
 appGroup.use({ path: '切磋', schema: { usage: '/切磋 <域民代号> [开始]', args: [{ name: 'code', rules: [{ required: true }] }, { name: 'action', rules: [{ type: 'enum', enum: ['开始'] }] }] } }, () => import('./response/npc-sparring'))
 appGroup.use({ path: '附锋元素', schema: { usage: '/附锋元素 <风/雷/火>', args: [{ name: 'element', rules: [{ required: true, type: 'enum', enum: ['风', '雷', '火'] }] }] } }, () => import('./response/npc-sparring').then(module => ({ default: module.enchantmentHandler })))
@@ -421,7 +426,7 @@ for (const [path, operation] of [['店内委托', 'view'], ['重读委托', 'sto
   appGroup.use({ path, schema: { usage: `/${path} <职业>`, args: [{ name: 'code', rules: [{ required: true }] }] } }, () => import('./response/hidden-profession').then(module => ({ default: module.hiddenProfessionHandler(operation) })));
 }
 appGroup.use({ path: '隐藏自动保存', schema: { usage: '/隐藏自动保存 <技能> <版本>', args: [{ name: 'code', rules: [{ required: true }] }, { name: 'revision', rules: [{ required: true, type: 'number', min: 0 }] }] } }, () => import('./response/hidden-combat').then(m => ({ default: m.hiddenAutoSaveHandler })));
-appGroup.use({ path: '隐藏战技', schema: { usage: '/隐藏战技 <技能> [版本] [操作] [值]', args: [{ name: 'code', rules: [{ required: true }] }, { name: 'revision', rules: [{ type: 'number', min: 0 }] }, { name: 'operation' }, { name: 'value' }] } }, () => import('./response/hidden-combat').then(m => ({ default: m.hiddenCombatHandler })));
+appGroup.use({ path: '隐藏战技', schema: { usage: '/隐藏战技 <技能> [版本] [操作] [值]', args: [{ name: 'code', rules: [{ required: true }] }, { name: 'revision', rules: [{ type: 'number', min: 0 }] }, { name: 'operation' }, { name: 'value', rules: [{ type: 'rest' }] }] } }, () => import('./response/hidden-combat').then(m => ({ default: m.hiddenCombatHandler })));
 appGroup.use({ path: '二转配置', schema: { usage: '/二转配置 [类别] [编号] [页]', args: [{ name: 'type' }, { name: 'id', rules: [{ type: 'number', min: 0 }] }, { name: 'page', rules: [{ type: 'number', min: 0 }] }] } }, () => import('./response/hidden-combat').then(m => ({ default: m.hiddenLoadoutHandler })));
 appGroup.use({ path: '隐藏施放', schema: { usage: '/隐藏施放 <技能> <编号> <版本> <回合> <战斗>', args: [{ name: 'code', rules: [{ required: true }] }, { name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'revision', rules: [{ required: true, type: 'number', min: 0 }] }, { name: 'turn', rules: [{ required: true, type: 'number', min: 0 }] }, { name: 'battle', rules: [{ required: true }] }] } }, () => import('./response/adventure').then(m => ({ default: m.hiddenCombatConfirmHandler })));
 
@@ -482,6 +487,14 @@ appGroup.use({ path: '重铸洗练预览', schema: { args: [{ name: 'id', rules:
 appGroup.use({ path: '确认重铸洗练', schema: { args: [{ name: 'token', rules: [{ required: true }] }] } }, () => import('./response/equipment-workshop').then(module => ({ default: module.rerollExecute })))
 appGroup.use({ path: '装备精炼预览', schema: { args: [{ name: 'id', rules: [{ required: true }] }] } }, () => import('./response/equipment-workshop').then(module => ({ default: module.refinementPreview })))
 appGroup.use({ path: '确认装备精炼', schema: { args: [{ name: 'token', rules: [{ required: true }] }] } }, () => import('./response/equipment-workshop').then(module => ({ default: module.refinementExecute })))
+appGroup.use('附魔', () => import('./response/equipment-enchantment').then(module => ({ default: module.enchantmentListHandler })))
+appGroup.use({ path: '附魔页', schema: { usage: '/附魔页 <页码> [关键词]', args: [{ name: 'page', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'keyword' }] } }, () => import('./response/equipment-enchantment').then(module => ({ default: module.enchantmentListHandler })))
+appGroup.use({ path: '附魔搜索', schema: { usage: '/附魔搜索 <关键词>', args: [{ name: 'keyword', rules: [{ required: true, type: 'rest' }] }] } }, () => import('./response/equipment-enchantment').then(module => ({ default: module.enchantmentSearchHandler })))
+appGroup.use({ path: '附魔放入', schema: { usage: '/附魔放入 <装备实例编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/equipment-enchantment').then(module => ({ default: module.enchantmentPutHandler })))
+appGroup.use({ path: '附魔卡片页', schema: { usage: '/附魔卡片页 <装备实例编号> <页码> [关键词]', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'page', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'keyword' }] } }, () => import('./response/equipment-enchantment').then(module => ({ default: module.enchantmentCardPageHandler })))
+appGroup.use({ path: '附魔卡片搜索', schema: { usage: '/附魔卡片搜索 <装备实例编号> <关键词>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'keyword', rules: [{ required: true, type: 'rest' }] }] } }, () => import('./response/equipment-enchantment').then(module => ({ default: module.enchantmentCardSearchHandler })))
+appGroup.use({ path: '附魔预览', schema: { usage: '/附魔预览 <装备实例编号> <卡片物品编号>', args: [{ name: 'instanceId', rules: [{ required: true, type: 'number', min: 1 }] }, { name: 'cardItemId', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/equipment-enchantment').then(module => ({ default: module.enchantmentPreviewHandler })))
+appGroup.use({ path: '确认附魔', schema: { usage: '/确认附魔 <确认凭据>', args: [{ name: 'token', rules: [{ required: true, type: 'string' }] }] } }, () => import('./response/equipment-enchantment').then(module => ({ default: module.enchantmentExecuteHandler })))
 appGroup.use({ path: '重铸页', schema: { args: [{ name: 'page', rules: [{ required: true }] }, {name:'keyword'}] } }, () => import('./response/equipment-workshop').then(module => ({ default: module.rerollList })))
 appGroup.use('重铸', () => import('./response/equipment-workshop').then(module => ({ default: module.rerollList })))
 appGroup.use({ path: '重铸放入', schema: { args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/equipment-workshop').then(module => ({ default: module.retiredWorkshopHandler })))
@@ -744,6 +757,14 @@ export default defineChildren({
         .catch(error => logger.warn({ err: error }, '超时怪物战斗结算失败'))
         .finally(() => { settlingInactiveCombatSessions = false; });
     }, combatTimeoutSweepMs);
+    setInterval(() => {
+      if (recoveringMonsterCardGrants) return;
+      recoveringMonsterCardGrants = true;
+      void runMonitoredJob('monster_card.pending_grants', () => import('./game/monster-card-drop.service').then(module => module.recoverPendingMonsterCardGrants()))
+        .then(grants => { if (grants.length) logger.info({ granted: grants.length }, '已补发待处理的怪物卡片'); })
+        .catch(error => logger.warn({ err: error }, '怪物卡片补发扫描失败'))
+        .finally(() => { recoveringMonsterCardGrants = false; });
+    }, 30_000);
     // 动态世界每十分钟独立推进：天气只允许相邻演变，巡游实体的每次路线推进都会写入事件账本。
     setCron('*/10 * * * *', () => void runMonitoredJob('world.dynamic_settlement', () => import('./game/world-dynamics.service').then(module => module.settleDynamicWorld())).catch(error => logger.warn({ err: error }, '动态世界结算失败')));
     setCron('0 */4 * * *', () => void runMonitoredJob('finance.period_settlement', () => import('./game/finance-settlement').then(module => module.settleFinancePeriod())).catch(error => logger.warn({ err: error }, '势力份额结算失败')));

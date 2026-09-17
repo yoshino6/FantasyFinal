@@ -53,6 +53,12 @@ export const bossRandomEffectTrait = (bossCode: string, difficultyCode: string, 
   const exclusives = bossExclusiveEffects[bossCode] ?? [];
   return { code: 'boss_random_effect', name: '', version: 1, common: pick(bossCommonEffects, slots.common, random).map(item => item.code), exclusive: pick(exclusives, slots.exclusive, random).map(item => item.code) };
 };
+export const replaceBossRandomEffectTrait = <T extends { code?: string }>(traits: T[], effect?: BossRandomEffectTrait): Array<T | BossRandomEffectTrait> => [
+  ...traits.filter(trait => trait.code !== 'boss_random_effect'),
+  ...(effect ? [effect] : [])
+];
+export const rerollBossRandomEffectTrait = <T extends { code?: string }>(traits: T[], bossCode: string, difficultyCode: string, random: () => number = Math.random) =>
+  replaceBossRandomEffectTrait(traits, bossRandomEffectTrait(bossCode, difficultyCode, random));
 export const readBossRandomEffect = (traits: unknown): BossRandomEffectTrait | undefined => {
   let values: unknown[] = [];
   if (Array.isArray(traits)) values = traits; else if (typeof traits === 'string') { try { const parsed = JSON.parse(traits); values = Array.isArray(parsed) ? parsed : []; } catch {} }

@@ -5,7 +5,7 @@ import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { monsterNegotiationProfile, monsterItemPreference } from '../config/monster-negotiation';
 import { negotiationDialogue } from '../config/monster-negotiation-dialogues';
 import { classifyNegotiationItem, negotiationInventoryPage, type NegotiationItem } from './negotiation-item-policy';
-import { initialNegotiationState, moodBand, resolveNegotiationMove, synchronizeNegotiation, negotiationVersion, type NegotiationState } from './negotiation-rules';
+import { initialNegotiationState, moodBand, resolveNegotiationMove, synchronizeNegotiation, negotiationVersion, type NegotiationState, type NegotiationCardPolicy } from './negotiation-rules';
 import { consumeBinding, consumeInventory } from './inventory-binding';
 import { hiddenAttributesFor } from './hidden-attributes.service';
 import { recordCharacterOperation } from './character-operation.service';
@@ -15,7 +15,7 @@ export class NegotiationCombatError extends Error {
   constructor() { super('战斗已经开始，不能继续交涉。请回到战斗面板继续行动。'); this.name = 'NegotiationCombatError'; }
 }
 export type NegotiationDrop = { code: string; chance: number; min: number; max: number; value: number; fixed?: boolean; group?: string; traitBonus?: number };
-export type NegotiationContext = { actorId: number; leaderId: number; memberIds: number[]; target: { id: number; code: string; name: string }; battleId?: string; drops: NegotiationDrop[]; capacity: number; completionText?: string };
+export type NegotiationContext = { actorId: number; leaderId: number; memberIds: number[]; target: { id: number; code: string; name: string }; battleId?: string; drops: NegotiationDrop[]; capacity: number; completionText?: string; cardPolicy?: NegotiationCardPolicy };
 type Session = RowDataPacket & { id: string; spawn_id: number; owner_id: number; battle_id: string | null; state: string; revision: number; members_json: unknown; stamina_json: unknown; last_text: string; last_key: string; expires_at: Date };
 type Life = RowDataPacket & { spawn_id: number; state_json: unknown; profile_json: unknown; drops_json: unknown; capacity: number; resolved: number };
 export type NegotiationView = { kind: 'ongoing'; actorId: number; sessionId: string; revision: number; spawnId: number; name: string; mood: string; goodwill: number; protection: number; text: string; completionText?: string; inventory: ReturnType<typeof negotiationInventoryPage> };
@@ -23,11 +23,21 @@ export type NegotiationResult = NegotiationView | { kind: 'success' | 'combat_st
 export type NegotiationHooks = {
   random?: () => number;
   activate: (sessionId: string) => Promise<Record<string, boolean>>;
-  fight: (eligibility: Record<string, boolean>, sessionId: string, failed: boolean) => Promise<string>;
+  fight: (eligibility: Record<string, boolean> | undefined, sessionId: string, failed: boolean) => Promise<string>;
   settle: (state: NegotiationState, eligibility: Record<string, boolean>, drops: NegotiationDrop[], sessionId: string) => Promise<string>;
 };
 const parse = <T>(raw: unknown): T => (typeof raw === 'string' ? JSON.parse(raw) : raw) as T;
 const requestKey = (actorId: number, command: NegotiationCommand) => `${command.revision}:${actorId}:${command.type}:${command.itemId ?? 0}:${command.quantity ?? 0}`;
+const normalizedCardPolicy = (policy: NegotiationCardPolicy | undefined): NegotiationCardPolicy => ({
+  actualSuccessBonusPct: Math.max(0, Math.min(10, Number(policy?.actualSuccessBonusPct ?? 0))),
+  neutralGiftAggressionReductionPct: Math.max(0, Math.min(100, Number(policy?.neutralGiftAggressionReductionPct ?? 0))),
+  neutralGiftAggressionRetry: Boolean(policy?.neutralGiftAggressionRetry),
+  talkAggressionRetry: Boolean(policy?.talkAggressionRetry),
+  revealPreferenceCategory: Boolean(policy?.revealPreferenceCategory),
+  revealNegotiationMoodBand: Boolean(policy?.revealNegotiationMoodBand),
+  revealNegotiationMoodDirection: Boolean(policy?.revealNegotiationMoodDirection),
+  ignoreFirstProbeFailureEscalation: Boolean(policy?.ignoreFirstProbeFailureEscalation)
+});
 export const readNegotiationReplay = async (connection: PoolConnection, actorId: number, command: NegotiationCommand): Promise<NegotiationResult | undefined> => {
   if (!command.sessionId || command.revision === undefined || command.type === 'view') return;
   const [rows] = await connection.execute<RowDataPacket[]>('SELECT actor_id,request_key,result_json FROM negotiation_actions WHERE session_id=? AND revision=?', [command.sessionId, command.revision]);
@@ -53,7 +63,7 @@ export const readNegotiationView = async (connection: PoolConnection, ctx: Negot
   const [items] = await connection.execute<(RowDataPacket & NegotiationItem & { quantity: number; trade_bound_quantity: number; personal_bound_quantity: number })[]>(`SELECT i.id,i.code,i.name,i.item_type,i.item_category,i.stackable,i.trade_price,i.effect_json,p.quantity,p.trade_bound_quantity,p.personal_bound_quantity
     FROM player_inventory p JOIN item_definitions i ON i.id=p.item_id WHERE p.character_id=? AND p.quantity>0`, [ctx.actorId]);
   return { kind: 'ongoing', actorId: ctx.actorId, sessionId: session.id, revision: Number(session.revision), spawnId: ctx.target.id, name: ctx.target.name,
-    mood: moodBand(state.mood).name, goodwill: state.goodwill, protection: state.protection, text: session.last_text, ...(ctx.completionText ? { completionText: ctx.completionText } : {}),
+    mood: (state.cardPolicyByActor?.[String(ctx.actorId)]?.revealNegotiationMoodBand ?? normalizedCardPolicy(ctx.cardPolicy).revealNegotiationMoodBand) ? moodBand(state.mood).name : '未判明', goodwill: state.goodwill, protection: state.protection, text: session.last_text, ...(ctx.completionText ? { completionText: ctx.completionText } : {}),
     inventory: negotiationInventoryPage(items, command.page, command.keyword) };
 };
 
@@ -97,8 +107,24 @@ export const runNegotiation = async (connection: PoolConnection, ctx: Negotiatio
     const text = session.battle_id && session.state === 'active' ? await hooks.fight(parse(session.stamina_json), session.id, false) : '交涉暂时结束，怪物保留了上次的心情与记忆。';
     return { kind: session.battle_id && session.state === 'active' ? 'combat_resumed' : 'closed', spawnId: ctx.target.id, text };
   }
-  if (command.type === 'view' && !blocked) return readNegotiationView(connection, ctx, session, state, command);
-  if (command.type !== 'view' && Number(command.revision) !== Number(session.revision)) throw new Error('交涉状态已改变，请刷新后重试。');
+  if (blocked) {
+    const quote = negotiationDialogue(frozenProfile.family, state.mood, 'blocked', '', '', session.last_key);
+    const eligibility = session.state === 'active' ? parse<Record<string, boolean>>(session.stamina_json) : undefined;
+    await closeNegotiationSession(connection, session.id, 'combat');
+    for (const id of ctx.memberIds) await connection.execute(`INSERT INTO monster_negotiation_memories (spawn_id,character_id,state_json,combat_failed,first_failure_at) VALUES (?,?,?,1,NOW())
+      ON DUPLICATE KEY UPDATE state_json=VALUES(state_json),combat_failed=1,first_failure_at=COALESCE(first_failure_at,VALUES(first_failure_at))`, [ctx.target.id, id, JSON.stringify(state)]);
+    const text = `${quote.text}\n${await hooks.fight(eligibility, session.id, true)}`;
+    return { kind: ctx.battleId ? 'combat_resumed' : 'combat_started', spawnId: ctx.target.id, text };
+  }
+  const actorKey = String(ctx.actorId);
+  state.cardPolicyByActor ??= {};
+  if (!Object.hasOwn(state.cardPolicyByActor, actorKey)) {
+    state.cardPolicyByActor[actorKey] = normalizedCardPolicy(ctx.cardPolicy);
+    await connection.execute('UPDATE monster_negotiation_lives SET state_json=?,updated_at=NOW() WHERE spawn_id=?', [JSON.stringify(state), ctx.target.id]);
+  }
+  const cardPolicy = state.cardPolicyByActor[actorKey] ?? normalizedCardPolicy(undefined);
+  if (command.type === 'view') return readNegotiationView(connection, ctx, session, state, command);
+  if (Number(command.revision) !== Number(session.revision)) throw new Error('交涉状态已改变，请刷新后重试。');
   if (['leave', 'fight'].includes(command.type) && ctx.actorId !== ctx.leaderId) throw new Error('只有队长可以结束交涉或主动开战。');
   if (session.state === 'preview' && ctx.actorId !== ctx.leaderId && !blocked) throw new Error('请先由队长发起第一项交涉动作。');
   if (!blocked && command.type === 'gift' && state.mood === 1_000_000) {
@@ -122,15 +148,13 @@ export const runNegotiation = async (connection: PoolConnection, ctx: Negotiatio
   }
   let result: NegotiationResult; let kind: 'ongoing' | 'success' | 'combat' | 'closed' = 'ongoing'; let key = session.last_key;
   const openingTalent=await ownedTalent(connection,ctx.actorId),talentData=await readTalentData(connection,ctx.actorId),peaceKey=`peace:${ctx.target.id}`;
-  if(openingTalent?.number==='D07'&&!Object.hasOwn(talentData.flags,peaceKey)&&!blocked){
+  if(openingTalent?.number==='D07'&&!Object.hasOwn(talentData.flags,peaceKey)){
     const [goods]=await connection.execute<RowDataPacket[]>("SELECT i.effect_json FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type='consumable'",[ctx.actorId]);
     const offensive=goods.some(row=>{const effect=typeof row.effect_json==='string'?JSON.parse(row.effect_json):row.effect_json??{};return Boolean(effect.throwable||effect.damage||effect.damagePct||effect.aoeDamage||effect.alchemyOutput&&/damage|poison|burn/.test(JSON.stringify(effect)));});
     talentData.flags[peaceKey]=talentData.settings.peaceOpening===true&&!offensive&&memories.length===0;await saveTalentData(connection,ctx.actorId,talentData);
   }
   let text = session.last_text; let failed = false;
-  if (blocked) {
-    const quote = negotiationDialogue(frozenProfile.family, state.mood, 'blocked', '', '', key); text = quote.text; key = quote.key; kind = 'combat'; failed = true;
-  } else if (command.type === 'leave' || command.type === 'fight') {
+  if (command.type === 'leave' || command.type === 'fight') {
     const quote = negotiationDialogue(frozenProfile.family, state.mood, 'left', '', '', key); text = quote.text; key = quote.key;
     kind = command.type === 'fight' || Boolean(ctx.battleId && session.state === 'active') ? 'combat' : 'closed';
   } else {
@@ -157,10 +181,41 @@ export const runNegotiation = async (connection: PoolConnection, ctx: Negotiatio
         consumeBinding({ trade, personal, unbound: Number(stock[0]?.quantity ?? 0) - trade - personal }, Number(command.quantity), true);
       }
     } else move = { type: 'talk', charm: (await hiddenAttributesFor(connection, ctx.actorId)).charm };
-    const before = state; const outcome = resolveNegotiationMove(before, move, hooks.random); state = outcome.state; kind = outcome.result;
+    const before = state;
+    const retryUsage = state.cardRetryUsageByActor?.[actorKey] ?? {};
+    const retryAggression = command.type === 'talk'
+      ? Boolean(cardPolicy.talkAggressionRetry && !retryUsage.talk)
+      : preference === 'neutral' && Boolean(cardPolicy.neutralGiftAggressionRetry && !retryUsage.neutralGift);
+    const outcome = resolveNegotiationMove(before, move, hooks.random, {
+      actualSuccessBonusPct: cardPolicy.actualSuccessBonusPct,
+      neutralGiftAggressionReductionPct: cardPolicy.neutralGiftAggressionReductionPct,
+      retryAggression,
+      ignoreFailureEscalation: command.type === 'talk' && Boolean(cardPolicy.ignoreFirstProbeFailureEscalation && !retryUsage.firstProbe)
+    });
+    state = outcome.state; kind = outcome.result;
+    const usageAfter = { ...retryUsage };
+    if (outcome.aggressionRetried) Object.assign(usageAfter, command.type === 'talk' ? { talk: true } : { neutralGift: true });
+    if (outcome.failureEscalationIgnored) usageAfter.firstProbe = true;
+    if (outcome.aggressionRetried || outcome.failureEscalationIgnored) state.cardRetryUsageByActor = { ...(state.cardRetryUsageByActor ?? {}), [actorKey]: usageAfter };
     if(command.type==='gift'&&(outcome.refused||preference!=='like')){const refused=state.achievementGiftRefusedBy??=[];if(!refused.includes(ctx.actorId))refused.push(ctx.actorId);}
     const quote = negotiationDialogue(frozenProfile.family, before.mood, outcome.refused ? 'refused' : command.type === 'gift' ? preference : kind === 'success' ? 'success' : 'talk_failed', subtype, itemName, key);
     text = quote.text; key = quote.key;
+    if (command.type === 'gift' && cardPolicy.revealNegotiationMoodDirection && !usageAfter.moodDirection) {
+      const direction = state.mood > before.mood ? '上升' : state.mood < before.mood ? '下降' : '未变化';
+      text += `\n附魔洞察：送礼后，对方心情${direction}。`;
+      usageAfter.moodDirection = true;
+      state.cardRetryUsageByActor = { ...(state.cardRetryUsageByActor ?? {}), [actorKey]: usageAfter };
+    }
+    if (command.type === 'gift' && preference !== 'dislike' && cardPolicy.revealPreferenceCategory && !usageAfter.preference) {
+      const knownPreferences = state.cardPreferenceRevealsByActor?.[actorKey] ?? [];
+      const revealedPreference = frozenProfile.likes.find(category => Boolean(category) && !knownPreferences.includes(category));
+      if (revealedPreference) {
+        text += `\n附魔洞察：对方偏好「${revealedPreference}」类礼物。`;
+        state.cardPreferenceRevealsByActor = { ...(state.cardPreferenceRevealsByActor ?? {}), [actorKey]: [...knownPreferences, revealedPreference] };
+      } else text += '\n附魔洞察：该怪物的喜好已全部掌握。';
+      usageAfter.preference = true;
+      state.cardRetryUsageByActor = { ...(state.cardRetryUsageByActor ?? {}), [actorKey]: usageAfter };
+    }
     if (command.type === 'gift' && !outcome.refused) text += preference === 'like' ? `\n已交付：${itemName} ×${command.quantity}` : `\n对方未收下：${itemName} ×${command.quantity}（仍在背包）`;
     if (outcome.earned) text += '\n它记住了接连的善意，你们获得了 1 次开战保护。';
     if (outcome.protected) text += `\n开战保护生效。${negotiationDialogue(frozenProfile.family, state.mood, 'protected', '', '', key).text}`;
@@ -190,11 +245,9 @@ export const runNegotiation = async (connection: PoolConnection, ctx: Negotiatio
     result = await readNegotiationView(connection, ctx, session, state, command);
   }
   if(['talk','gift'].includes(command.type))recordAchievement(connection,ctx.actorId,['ACH_F01']);
-  if (command.type !== 'view') {
-    await connection.execute('INSERT INTO negotiation_actions (session_id,revision,actor_id,request_key,result_json) VALUES (?,?,?,?,?)', [session.id, Number(command.revision), ctx.actorId, requestKey(ctx.actorId, command), JSON.stringify(result)]);
+  await connection.execute('INSERT INTO negotiation_actions (session_id,revision,actor_id,request_key,result_json) VALUES (?,?,?,?,?)', [session.id, Number(command.revision), ctx.actorId, requestKey(ctx.actorId, command), JSON.stringify(result)]);
     const operationKind=result.kind==='success'?'negotiation.succeeded':result.kind==='combat_started'||result.kind==='combat_resumed'?command.type==='fight'?'negotiation.fought':'negotiation.failed':command.type==='gift'?'negotiation.gifted':command.type==='talk'?'negotiation.talked':'negotiation.left';
     const outcome=result.kind==='success'?'和平结束':result.kind==='combat_started'||result.kind==='combat_resumed'?'进入战斗':result.kind==='closed'?'结束交涉':command.type==='gift'?'交付礼物':'继续交谈';
     await recordCharacterOperation(connection,{characterId:ctx.actorId,kind:operationKind,source:{system:'negotiation_actions',id:session.id,step:`revision_${command.revision}`},outcome,summary:`与${ctx.target.name}交涉：${outcome}`,detail:{sessionId:session.id,spawnId:ctx.target.id,monsterCode:ctx.target.code,monsterName:ctx.target.name,action:command.type,itemId:command.type==='gift'?command.itemId:null,quantity:command.type==='gift'?command.quantity:null,result:result.kind},scoreKey:`negotiation:${ctx.target.code}`});
-  }
   return result;
 };

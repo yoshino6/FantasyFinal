@@ -1,7 +1,7 @@
 import { recordAchievement } from './achievement-events';
 import { armorSetsFor } from './armor-set';
 import { recalculateCharacterStats } from './character.service';
-import { correctedHitChance, opposedChance, strikeCorrections } from './combat-math';
+import { resolvedHitChance, opposedChance, strikeCorrections } from './combat-math';
 import { randomUUID } from 'node:crypto';
 import { recordCharacterOperation } from './character-operation.service';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
@@ -12,6 +12,7 @@ import { monsterCombatStats } from './adventure.service';
 type DungeonMonsterTemplate = RowDataPacket & Parameters<typeof monsterCombatStats>[0] & {id:number;code:string;skill_sequence:unknown};
 import { dungeonBlueprintDrops } from './deconstructor-catalog';
 import { bossRandomEffectTrait } from './boss-random-effects.config';
+import { recordCardMovement, resetCardMovementCharge } from './monster-card-exploration.service';
 
 const DUNGEON_REGION_CODE = 'dark_forest_dungeon';
 const FLOORS = [-10, -20, -30] as const;
@@ -378,6 +379,7 @@ export const enterDungeon = async (qqUserId: string, dungeonId: number) => withT
   const dungeonRegion = await regionId(connection, DUNGEON_REGION_CODE); const [entry] = await connection.execute<DungeonCell[]>('SELECT * FROM dungeon_cells WHERE dungeon_id=? AND cell_type=\'entrance\' LIMIT 1', [dungeonId]);
   if (!entry[0]) throw new Error('这座迷宫的入口结构尚未形成。');
   await connection.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=?,pos_z=? WHERE id=?', [dungeonRegion, entry[0].pos_x, entry[0].pos_y, entry[0].pos_z, character.id]);
+  await recordCardMovement(connection, Number(character.id), { regionId: dungeonRegion, z: Number(entry[0].pos_z) }, { teleport: true });
   await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'dungeon.entered', source: { system: 'dungeon_entry', id: randomUUID(), step: 'entered' }, outcome: '进入', summary: `进入地下迷宫 ${dungeonId}`, detail: { dungeonId, x: Number(entry[0].pos_x), y: Number(entry[0].pos_y), z: Number(entry[0].pos_z) } });
   return { dungeonId, x: Number(entry[0].pos_x), y: Number(entry[0].pos_y), z: Number(entry[0].pos_z) };
 });
@@ -470,6 +472,7 @@ export const changeDungeonFloor = async (qqUserId: string, direction: 'down' | '
       usedTeleporter = true;
     }
     await connection.execute('UPDATE characters SET current_region_id=?,pos_x=?,pos_y=?,pos_z=0 WHERE id=?', [dungeon.entrance_region_id, dungeon.entrance_x, dungeon.entrance_y, character.id]);
+    await recordCardMovement(connection, Number(character.id), { regionId: Number(dungeon.entrance_region_id), z: 0 }, { teleport: true });
     await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'dungeon.left', source: { system: 'dungeon_visit', id: randomUUID(), step: 'left' }, outcome: '离开', summary: `离开地下迷宫 ${dungeon.id}`, detail: { dungeonId: Number(dungeon.id), usedTeleporter } });
     return { action: 'leave' as const, x: Number(dungeon.entrance_x), y: Number(dungeon.entrance_y), z: 0, usedTeleporter };
   }
@@ -494,6 +497,7 @@ export const changeDungeonFloor = async (qqUserId: string, direction: 'down' | '
   const targetZ = Number(character.pos_z) + (direction === 'down' ? -10 : 10); const targetType = direction === 'down' ? 'stairs_up' : Number(targetZ) === -10 ? 'entrance' : 'stairs_down';
   const [target] = await connection.execute<DungeonCell[]>('SELECT * FROM dungeon_cells WHERE dungeon_id=? AND pos_z=? AND cell_type=? LIMIT 1', [dungeon.id, targetZ, targetType]); if (!target[0]) throw new Error('楼层之间的石阶已经坍塌。');
   await connection.execute('UPDATE characters SET pos_x=?,pos_y=?,pos_z=? WHERE id=?', [target[0].pos_x, target[0].pos_y, target[0].pos_z, character.id]);
+  await recordCardMovement(connection, Number(character.id), { regionId: Number(character.current_region_id), z: Number(target[0].pos_z) }, { teleport: true });
   await recordCharacterOperation(connection, { characterId: Number(character.id), kind: 'dungeon.floor_changed', source: { system: 'dungeon_floor_visit', id: randomUUID(), step: direction }, outcome: direction === 'down' ? '下楼' : '上楼', summary: `地下迷宫${direction === 'down' ? '下至' : '返回'} ${Math.abs(targetZ) / 10} 层`, detail: { dungeonId: Number(dungeon.id), fromZ: Number(character.pos_z), toZ: targetZ, direction } });
   return { action: direction, x: Number(target[0].pos_x), y: Number(target[0].pos_y), z: Number(target[0].pos_z) };
 });
@@ -535,7 +539,7 @@ const resolvePvpAction = async (connection: PoolConnection, actor: CharacterRow,
   if (skill?.category === 'utility') { await recordPvpAttack(connection, actor, target, `技能「${skill.name}」`, 0, 'utility'); return `【${actor.name}】释放技能「${skill.name}」，但该辅助技能尚未在 PvP 对抗中形成直接伤害。`; }
   const magic = skill?.category === 'magic'; const attack = magic ? Number(actor.magic_attack) : Number(actor.physical_attack); const defense = magic ? Number(target.magic_defense) : Number(target.physical_defense); const label = skill ? `释放技能「${skill.name}」` : '普通攻击';
   const armorSets = await armorSetsFor(connection,[Number(actor.id),Number(target.id)]);
-  if (Math.random() >= correctedHitChance(opposedChance(Number(actor.accuracy), Number(target.evasion)),strikeCorrections({armorSet:armorSets.get(Number(actor.id))},{armorSet:armorSets.get(Number(target.id))}))) { await recordPvpAttack(connection, actor, target, label, 0, 'miss'); return `【${actor.name}】${label}，但【${target.name}】闪避了攻击。`; }
+  if (Math.random() >= resolvedHitChance(opposedChance(Number(actor.accuracy), Number(target.evasion)), 0, 1, 0, strikeCorrections({armorSet:armorSets.get(Number(actor.id))},{armorSet:armorSets.get(Number(target.id))}))) { await recordPvpAttack(connection, actor, target, label, 0, 'miss'); return `【${actor.name}】${label}，但【${target.name}】闪避了攻击。`; }
   const damage = Math.max(1, Math.floor(attack * attack / Math.max(1, attack + defense) * (skill ? skill.power / 100 : 1))); const hp = Math.max(0, Number(target.current_hp) - damage); const defeated = hp <= 0;
   if (defeated) {
     const settlement = await resolvePvpVictory(connection, Number(actor.id), Number(target.id)); target.current_hp = 1;
@@ -558,6 +562,7 @@ export const dungeonPvP = async (qqUserId: string, targetGameId: number) => with
     const [rows] = await connection.execute<CharacterRow[]>('SELECT * FROM characters WHERE id=?',[fighter.id]);
     if (rows[0]) Object.assign(fighter,rows[0]);
   }
+  await resetCardMovementCharge(connection, [Number(attacker.id), Number(target.id)]);
   const battleLogId = await createPvpBattleLog(connection, attacker, target, '地宫');
   const opening = await resolvePvpAction(connection, attacker, target, await pvpActionFor(connection, attacker, true));
   const response = Number(target.current_hp) > 1 ? await resolvePvpAction(connection, target, attacker, await pvpActionFor(connection, target)) : null;

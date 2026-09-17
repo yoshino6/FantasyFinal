@@ -49,7 +49,8 @@ export const alchemistShopFormat = async (qqUserId: string, dialogue?: string, c
     .addRow().addButton('我要买', '/炼金商店购买', { type: 'command', autoEnter: true, style: 'blue' }).addButton('我要卖', '/炼金商店出售', { type: 'command', autoEnter: true, style: 'blue' })
     .addRow().addButton('切磋', '/切磋 alchemy_sweetshop', { type: 'command', autoEnter: true, style: 'blue' }).addButton('闲聊', '/晴儿闲聊', { type: 'command', autoEnter: true, style: 'blue' }).addButton('关于 炼金师', '/关于炼金师', { type: 'command', autoEnter: true, style: 'blue' });
   buttons
-    .addRow().addButton('提纯','/店铺提纯',{type:'command',autoEnter:true,style:'blue'}).addButton('炼金','/店铺炼金',{type:'command',autoEnter:true,style:'blue'});
+    .addRow().addButton('提纯','/店铺提纯',{type:'command',autoEnter:false,style:'blue'}).addButton('炼金','/店铺炼金',{type:'command',autoEnter:false,style:'blue'});
+  markdown.addNewline().addNewline().addBlockquote('晴儿代工 Lv.3：提纯、炼金消耗你的材料；完成代工基础好感+10，每日合计前3次，不增加个人熟练度。');
   if (creationQuest.pending) buttons.addRow().addButton(`关于 ${alchemyCreationQuestTitle}`, '/晴儿 关于点灵与育成', { type: 'command', autoEnter: true, style: 'blue' });
   if (questReady) buttons.addRow().addButton('关于 无形的禁锢', '/晴儿 关于无形的禁锢', { type: 'command', autoEnter: true, style: 'blue' });
   await appendHiddenQuestButton(buttons, qqUserId, shopCode);

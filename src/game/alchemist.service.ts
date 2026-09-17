@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { awardSecondaryShopCraftAffinity } from './secondary-shop-context';
 import { achievementAlchemySurprises } from './achievement-surprise';
 import { alchemyUtilityOutput } from './achievement-production';
 import { achievementAlchemyRecovery } from './achievement-state';
@@ -154,13 +155,13 @@ export const activateSweetshopAlchemy = async (qqUserId: string) => {
 
 export const purificationMaterials = async (qqUserId: string) => {
   const pool = await getPool(); const characterId = await characterIdFor(pool, qqUserId); await activeAlchemistProgressFor(pool, qqUserId, characterId);
-  const [rows] = await pool.execute<AlchemyItemRow[]>(`SELECT i.id,i.code,i.name,i.item_category,i.effect_json,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type='material' ORDER BY i.id`, [characterId]);
+  const [rows] = await pool.execute<AlchemyItemRow[]>(`SELECT i.id,i.code,i.name,i.item_category,i.effect_json,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type='material' AND i.item_category<>'怪物卡片' ORDER BY i.id`, [characterId]);
   return rows.map(row => ({ id: Number(row.id), code: row.code, name: row.name, category: row.item_category, quantity: Number(row.quantity), outputCode: purificationOutputFor(row) })).filter((row): row is typeof row & { outputCode: string } => Boolean(row.outputCode));
 };
 const bulkPurificationItemsFor = async (connection: PoolConnection | Awaited<ReturnType<typeof getPool>>, characterId: number, lock = false): Promise<BulkPurificationItem[]> => {
   const [rows] = await connection.execute<AlchemyItemRow[]>(`SELECT i.id,i.code,i.name,i.item_type,i.rarity,i.item_category,i.effect_json,pi.quantity
     FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id
-    WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type='material'
+    WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type='material' AND i.item_category<>'怪物卡片'
       AND JSON_EXTRACT(i.effect_json,'$.monster_craft_material') IS NOT NULL
       AND JSON_UNQUOTE(JSON_EXTRACT(i.effect_json,'$.material_monster_class')) IN ('normal','large')
     ORDER BY i.item_category,i.name,i.id${lock ? ' FOR UPDATE' : ''}`, [characterId]);
@@ -229,6 +230,7 @@ export const executePurification = async (qqUserId: string,requestToken?:string)
   const journalId = await recordAlchemyJournal(connection,characterId,token,{kind:'purification',source:'single',version:alchemyRuleVersion,level:progress.level,craftsmanship:0,ingredients:[{id:Number(item.id),code:item.code,name:item.name,quantity:selected,role:'提纯耗材',effect:item.effect_json}]},[{success:succeeded,consumed:[{id:Number(item.id),code:item.code,name:item.name,quantity:settled.paid,role:'提纯耗材'}],outputs:succeeded?[{id:Number(outputs[0].id),code:outputCode,name:outputs[0].name,quantity:outputQuantity,role:'output'}]:[]}],{success});
   const result = { succeeded, inputName: item.name, inputQuantity: settled.paid, refundedQuantity: settled.refunded, outputName: outputs[0].name, outputQuantity, success:settled.success, proficiencyGain, progress: next, journalId };
   await recordCharacterOperation(connection,{characterId,kind:succeeded?'craft.purified':'craft.purification_failed',source:{system:'alchemy_journal',id:journalId,step:'purification_settled'},outcome:succeeded?'提纯成功':'提纯无产物',summary:`提纯${item.name} ×${selected}，获得${outputs[0].name} ×${outputQuantity}`,detail:{journalId,inputItemId:Number(item.id),inputName:item.name,inputQuantity:settled.paid,refundedQuantity:settled.refunded,outputItemId:Number(outputs[0].id),outputName:outputs[0].name,outputQuantity},scoreKey:`purification:${item.code}`});
+  await awardSecondaryShopCraftAffinity(connection, characterId);
   await completeCraftRequest(connection,characterId,token,result); return result;
 });
 export const executeBulkPurification = async (qqUserId: string, requestToken?:string) => withTransaction(async connection => {
@@ -262,6 +264,7 @@ export const executeBulkPurification = async (qqUserId: string, requestToken?:st
   const journalId = await recordAlchemyJournal(connection,characterId,token,{kind:'purification',source:'bulk',version:alchemyRuleVersion,level:progress.level,craftsmanship:0,ingredients:items.map(item=>({id:item.id,code:item.code,name:item.name,quantity:item.quantity,role:'提纯耗材',effect:item.effect_json}))},[{success:results.size>0,consumed:paidInputs,outputs:[...results].map(([code,item])=>({id:outputs.get(code)!.id,code,name:item.name,quantity:item.quantity,role:'output'}))}],{success});
   const result = { inputQuantity, refundedQuantity, outputQuantity: [...results.values()].reduce((total, result) => total + result.quantity, 0), outputs: [...results.values()], success:success*(rules.risk?.7:1), proficiencyGain: earnedProficiency, progress: next, journalId };
   await recordCharacterOperation(connection,{characterId,kind:result.outputQuantity>0?'craft.purified':'craft.purification_failed',source:{system:'alchemy_journal',id:journalId,step:'bulk_purification_settled'},outcome:result.outputQuantity>0?'提纯成功':'提纯无产物',summary:`一键提纯 ${inputQuantity} 份，产出 ${result.outputQuantity} 份`,detail:{journalId,inputQuantity,refundedQuantity,outputQuantity:result.outputQuantity,inputs:paidInputs.map(item=>({id:item.id,code:item.code,name:item.name,quantity:item.quantity})),outputs:result.outputs},scoreKey:'purification:bulk'});
+  await awardSecondaryShopCraftAffinity(connection, characterId);
   await completeCraftRequest(connection,characterId,token,result); return result;
 });
 
@@ -296,7 +299,7 @@ const tagSetFor = (item: AlchemyMaterialInfo): AlchemyTag[] => {
   if (/光|圣|日|辉|light/.test(source)) add('光辉');
   if (/暗|影|夜|月|雾|黑|shadow|dark/.test(source)) add('暗蚀');
   if (/wood_element|木元素/.test(source)) add('生机');
-  if (/metal_element|金元素/.test(source)) add('韧护', '锋锐');
+  if (/metal_element|土元素|土相/.test(source)) add('韧护', '锋锐');
   if (/water_element|水元素/.test(source)) add('潮汐');
   if (/fire_element|火元素/.test(source)) add('炎性');
   if (/ice_element|冰元素/.test(source)) add('霜寒');
@@ -380,7 +383,7 @@ export const alchemyState = async (qqUserId: string) => {
 export const selectAlchemyMaterial = async (qqUserId: string, role: 'main' | 'auxiliary' | 'reagent', itemKey: string, quantity = 1) => withTransaction(async connection => {
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99) throw new Error('每个材料槽位可放入 1～99 份。');
   const characterId = await characterIdFor(connection, qqUserId, true); await activeAlchemistProgressFor(connection, qqUserId, characterId, true); await assertAlchemyNotProcessingFor(connection, characterId, true); const itemId = Number(itemKey);
-  const [items] = await connection.execute<AlchemyItemRow[]>(`SELECT i.id,i.code,i.name,i.item_category,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type='material' AND ${Number.isInteger(itemId) && itemId > 0 ? 'i.id=?' : 'i.name=?'} LIMIT 1 FOR UPDATE`, [characterId, Number.isInteger(itemId) && itemId > 0 ? itemId : itemKey]);
+  const [items] = await connection.execute<AlchemyItemRow[]>(`SELECT i.id,i.code,i.name,i.item_category,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type='material' AND i.item_category<>'怪物卡片' AND ${Number.isInteger(itemId) && itemId > 0 ? 'i.id=?' : 'i.name=?'} LIMIT 1 FOR UPDATE`, [characterId, Number.isInteger(itemId) && itemId > 0 ? itemId : itemKey]);
   const item = items[0]; if (!item) throw new Error('背包中没有该材料。'); if (Number(item.quantity) < quantity) throw new Error(`材料不足，最多可放入 ${item.quantity} 份。`); const column = role === 'main' ? 'main_item_id' : role === 'auxiliary' ? 'auxiliary_item_id' : 'reagent_item_id'; const quantityColumn = role === 'main' ? 'main_quantity' : role === 'auxiliary' ? 'auxiliary_quantity' : 'reagent_quantity';
   await invalidateCraftRequests(connection, characterId);
   await connection.execute(`INSERT INTO player_alchemy_sessions (character_id,${column},${quantityColumn},alchemy_confirmation_expires_at) VALUES (?,?,?,NULL) ON DUPLICATE KEY UPDATE ${column}=VALUES(${column}),${quantityColumn}=VALUES(${quantityColumn}),alchemy_confirmation_expires_at=NULL`, [characterId, item.id, quantity]); return item.name;
@@ -389,7 +392,7 @@ export const clearAlchemyMaterial = async (qqUserId: string, role: 'main' | 'aux
 
 export const alchemyMaterials = async (qqUserId: string) => {
   const pool = await getPool(); const characterId = await characterIdFor(pool, qqUserId); await activeAlchemistProgressFor(pool, qqUserId, characterId);
-  const [rows] = await pool.execute<AlchemyItemRow[]>('SELECT i.id,i.code,i.name,i.item_category,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type=\'material\' ORDER BY i.item_category,i.name,i.id', [characterId]);
+  const [rows] = await pool.execute<AlchemyItemRow[]>('SELECT i.id,i.code,i.name,i.item_category,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type=\'material\' AND i.item_category<>\'怪物卡片\' ORDER BY i.item_category,i.name,i.id', [characterId]);
   return rows.map(row => ({ id: Number(row.id), code: row.code, name: row.name, category: row.item_category, quantity: Number(row.quantity) }));
 };
 
@@ -494,7 +497,7 @@ export const executeAlchemy = async (qqUserId: string, token?: string, origin='m
     { role: '催化剂', id: Number(state.reagent_id), quantity: Math.max(1, Number(state.reagent_quantity)) }
   ];
   const ids = [...new Set(roleRows.map(row => row.id))]; const marks = ids.map(() => '?').join(',');
-  const [items] = await connection.execute<AlchemyItemRow[]>(`SELECT i.id,i.code,i.name,i.item_type,i.rarity,i.item_category,i.effect_json,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.id IN (${marks}) AND i.item_type='material' FOR UPDATE`, [characterId, ...ids]);
+  const [items] = await connection.execute<AlchemyItemRow[]>(`SELECT i.id,i.code,i.name,i.item_type,i.rarity,i.item_category,i.effect_json,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.id IN (${marks}) AND i.item_type='material' AND i.item_category<>'怪物卡片' FOR UPDATE`, [characterId, ...ids]);
   const getMaterial = (id: number) => {
     const item = items.find(row => Number(row.id) === id);
     if (!item) throw new Error('选中的材料已不在背包中。');
@@ -602,6 +605,7 @@ export const executeAlchemy = async (qqUserId: string, token?: string, origin='m
   result.journalId = await recordAlchemyJournal(connection, characterId, token, snapshot, batchRecords, result);
   await recordCharacterOperation(connection, { characterId, kind: successes > 0 ? 'craft.alchemy_succeeded' : 'craft.alchemy_failed', source: { system: 'alchemy_request', id: token, step: 'settled' }, outcome: successes > 0 ? '炼成' : '失败', summary: `炼金结算：成功 ${successes}/${batches} 批`, detail: { journalId: result.journalId, ingredients: roleRows.map(row => ({ itemId: row.id, itemName: getMaterial(row.id).name, quantity: batches * perBatch })), batches, successes, greatSuccesses, failures, outputs: outputEntries.map(row => ({ name: row.name, quantity: row.quantity })) }, scoreKey: `alchemy:${roleRows.map(row => row.id).join(':')}` });
   if (successes > 0) await (await import('./finance-settlement')).recordFinanceSignal(connection, { sourceKey: `alchemy:${result.journalId}`, factionCode: 'alchemists_association', characterId: Number(characterId), eventType: 'alchemy.crafted', sourceType: 'alchemy_craft', score: 2 });
+  await awardSecondaryShopCraftAffinity(connection, characterId);
   await completeCraftRequest(connection, characterId, token, result);
   if(!currentSecondaryShop())await achievementAlchemySurprises(connection,characterId,token,roleRows.map(row=>row.id).join(':'),successes,exploded,greatSuccesses);
   if(!currentSecondaryShop())await achievementAlchemyRecovery(connection,characterId,token,roleRows.map(row=>row.id).join(':'),successes,failures);
@@ -646,7 +650,7 @@ export const randomAlchemyFormula = async (qqUserId: string, searchToken?: strin
   const selected = await withTransaction(async connection => {
     const id = await characterIdFor(connection, qqUserId, true); const progress=await activeAlchemistProgressFor(connection, qqUserId, id, true); await assertAlchemyNotProcessingFor(connection, id, true);
     if (replaceToken) { const old = await craftRequestFor(connection, id, 'alchemy', replaceToken); if (old.result) throw new Error('该炉已经完成，请使用结果底部的继续尝试。'); }
-    const [items] = await connection.execute<RowDataPacket[]>("SELECT i.id,i.code,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type='material' AND i.item_category IN ('怪材','炼材','锻材','粒子','构件','基材') AND i.code NOT IN ('evolution_catalyst','evolution_stable_medium','sky_dust','automaton_body','pure_soul_trace') AND COALESCE(JSON_EXTRACT(i.effect_json,'$.automatonProduct'),0)=0 ORDER BY i.id FOR UPDATE", [id]);
+    const [items] = await connection.execute<RowDataPacket[]>("SELECT i.id,i.code,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND pi.quantity>0 AND i.item_type='material' AND i.item_category<>'怪物卡片' AND i.item_category IN ('怪材','炼材','锻材','粒子','构件','基材') AND i.code NOT IN ('evolution_catalyst','evolution_stable_medium','sky_dust','automaton_body','pure_soul_trace') AND COALESCE(JSON_EXTRACT(i.effect_json,'$.automatonProduct'),0)=0 ORDER BY i.id FOR UPDATE", [id]);
     const [history] = await connection.execute<RowDataPacket[]>("SELECT DISTINCT combination_key FROM player_alchemy_journal WHERE character_id=? AND kind<>'purification'", [id]);
     const tried = new Set(history.map(row => String(row.combination_key)));
     const ids = items.map(row => Number(row.id)); const available = new Map(items.map(row => [Number(row.id), Number(row.quantity)]));

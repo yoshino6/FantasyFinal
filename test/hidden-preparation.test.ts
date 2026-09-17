@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
 import * as alemon from 'alemonjs';
 import { hiddenSkills, hiddenProfession } from '../src/game/hidden-profession.config';
 import { hiddenResourceShortage, hiddenState } from '../src/game/hidden-combat-state';
 import { hiddenMix, hiddenBranchDamage } from '../src/game/hidden-particles';
+import { parseHiddenParticleInput } from '../src/game/hidden-particle-input';
 import { newHiddenTrial } from '../src/game/hidden-trial';
 import { CombatRules } from '../src/game/combat-rule-registry';
 import { executeHiddenCombat, hiddenEndTurn } from '../src/game/hidden-combat';
@@ -37,6 +39,49 @@ const fixture=(kind:'pve'|'pvp'|'setup'='pve')=>{
   };
   return {service:load('src/game/hidden-battle.service'),c,cooldowns,stocks,draft:()=>draft,writes:()=>writes};
 };
+
+test('批量粒子保留顺序与重复，兼容提及、重复按钮命令与十二种名称',()=>{
+  assert.deepEqual(parseHiddenParticleInput('暗 @机器人 /隐藏战技 hidden_mix 7 particle 火 <@!123>/隐藏战技 hidden_mix 7 particle 火 [CQ:at,qq=123] /隐藏战技 hidden_mix 7 particle 余烬','hidden_mix',7),['dark_element_dust','fire_element_dust','fire_element_dust','energy_ember']);
+  assert.deepEqual(parseHiddenParticleInput('风粒子，魔弧＋<qqbot-at-user id="123" />残渣；水元素微尘','hidden_mix',7),['wind_element_dust','magic_unit','blood_residue','water_element_dust']);
+  assert.deepEqual(parseHiddenParticleInput('土 木 冰 雷','hidden_mix',7),['metal_element_dust','wood_element_dust','ice_element_dust','thunder_element_dust']);
+  assert.deepEqual(parseHiddenParticleInput('光微尘 能量余烬 魔力微弧 血肉残渣','hidden_mix',7),['light_element_dust','energy_ember','magic_unit','blood_residue']);
+  for(const text of ['暗 火 火 火 火','暗 金','暗 /隐藏战技 hidden_mix 6 particle 火','暗 /隐藏战技 hidden_kettle 7 particle 火','暗 /隐藏施放 hidden_mix 7'])assert.throws(()=>parseHiddenParticleInput(text,'hidden_mix',7));
+});
+
+test('实际路由声明和 Alemon 校验器完整保留穿插命令的选材尾部',async()=>{
+  const source=ts.createSourceFile('index.ts',readFileSync(resolve('src/index.ts'),'utf8'),ts.ScriptTarget.Latest,true);
+  let schema:ts.Expression|undefined;
+  const visit=(node:ts.Node)=>{
+    if(ts.isObjectLiteralExpression(node)&&node.properties.some(p=>ts.isPropertyAssignment(p)&&p.name.getText(source)==='path'&&p.initializer.getText(source)==="'隐藏战技'")){
+      const property=node.properties.find(p=>ts.isPropertyAssignment(p)&&p.name.getText(source)==='schema') as ts.PropertyAssignment;
+      schema=property.initializer;
+    }
+    ts.forEachChild(node,visit);
+  };
+  visit(source);assert.ok(schema);
+  const config=new Function(`return (${schema.getText(source)})`)();
+  const validator=await import(pathToFileURL(resolve('node_modules/alemonjs/lib/application/router/validator.js')).href);
+  const result=validator.validateRouteArgs(['hidden_mix','7','particle','暗','<@123>/隐藏战技','hidden_mix','7','particle','火'],config);
+  assert.equal(result.valid,true);
+  assert.deepEqual(parseHiddenParticleInput(result.parsedArgs[3],'hidden_mix',7),['dark_element_dust','fire_element_dust']);
+});
+
+for(const kind of ['pve','pvp','setup'] as const)test(`${kind}批量追加及整组替换：一次写入，库存不足/旧面板/超量整批拒绝`,async()=>{
+  const f=fixture(kind);let d=await f.service.hiddenDraft('user','hidden_mix');
+  const start=f.writes(),version=d.revision;
+  d=await f.service.hiddenDraft('user','hidden_mix',version,'particle',`暗 <@123>/隐藏战技 hidden_mix ${version} particle 火 @机器人 /隐藏战技 hidden_mix ${version} particle 火 @机器人 /隐藏战技 hidden_mix ${version} particle 余烬`);
+  assert.deepEqual(d.choice.particles,['dark_element_dust','fire_element_dust','fire_element_dust','energy_ember']);
+  assert.equal(f.writes(),start+1);assert.equal(d.remainingStocks.fire_element_dust,0);assert.equal(f.stocks.fire_element_dust,2);
+  const saved=structuredClone(f.draft()),writes=f.writes();
+  for(const [revision,op,text] of [[version,'particles','火 火'],[d.revision,'particles','火 火 火'],[d.revision,'particles','暗'],[d.revision,'particle','火'],[d.revision,'particles',`暗 /隐藏战技 hidden_mix ${version} particle 火`]] as const){
+    await assert.rejects(f.service.hiddenDraft('user','hidden_mix',revision,op,text));assert.deepEqual(f.draft(),saved);assert.equal(f.writes(),writes);
+  }
+  d=await f.service.hiddenDraft('user','hidden_mix',d.revision,'particles','暗 火');
+  assert.deepEqual(d.choice.particles,['dark_element_dust','fire_element_dust']);assert.equal(d.remainingStocks.fire_element_dust,1);
+  f.stocks.dark_element_dust=0;
+  await assert.rejects(f.service.hiddenDraft('user','hidden_mix',d.revision,'particles','暗 火'),/不足/);
+  assert.equal(f.draft().revision,d.revision);
+});
 
 test('四职业全部有资源消耗的技能：不足立即提示准确名称，零消耗技能不误拦截',()=>{
   for(const skill of hiddenSkills){

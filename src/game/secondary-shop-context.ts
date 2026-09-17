@@ -9,6 +9,13 @@ const storage=new AsyncLocalStorage<ShopContext>();
 export const currentSecondaryShop=()=>storage.getStore();
 export const withSecondaryShop=<T>(context:ShopContext,work:()=>T):T=>storage.run(context,work);
 export const shopProficiency=(amount:number)=>currentSecondaryShop()?0:amount;
+/** 同店各种代工共用每日三次技艺互动额度，一次批量结算只计一次。 */
+export const awardSecondaryShopCraftAffinity = async (connection: PoolConnection, characterId: number) => {
+  const context = currentSecondaryShop();
+  if (!context || !['alchemy_sweetshop', 'oddworkshop'].includes(context.shop)) return;
+  if (context.characterId !== characterId) throw new Error('店铺服务与本次操作不匹配。');
+  return (await import('./adventure.service')).addNpcAffinityFor(connection, characterId, context.shop, 'craft');
+};
 export const shopProgressFor=async(connection:Pick<Pool|PoolConnection,'execute'>,characterId:number,profession:string)=>{
   const context=currentSecondaryShop();if(!context)return null;
   if(context.characterId!==characterId||shopProfessions[context.shop]!==profession)throw new Error('店铺服务与本次操作不匹配。');

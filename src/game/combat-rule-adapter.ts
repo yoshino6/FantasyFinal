@@ -5,6 +5,7 @@ import { initializeHiddenBattleUnits } from './hidden-battle.service';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { passiveSpecializationFactor } from './passive-specialization';
 import { CombatRules, readRuleState, type RuleStatus, type RuleUnit } from './combat-rule-registry';
+import { equippedEnchantmentEffects } from './equipment-enchantment-effects';
 
 type CombatRow = Record<string, any>;
 type LegacyEffect = { source_key?: string | null; id: number; target_kind: string; target_id: number; code: string; effect_type: string; value: number; stacks: number; remaining_turns: number };
@@ -26,6 +27,7 @@ export const createCombatRules = async (connection: PoolConnection, sessionId: s
   const ids = members.map(member => Number(member.id));
   const appraisal = await ruleAppraisalLevels(connection, ids);
   const armorSets = await armorSetsFor(connection, ids);
+  const cardEffects = new Map(await Promise.all(ids.map(async id => [id, await equippedEnchantmentEffects(connection, id)] as const)));
   const openingEffects = await openingCombatEffectsFor(connection, members.filter(member=>!member.npc_code).map(member=>Number(member.id)), openingPve);
   const [passives] = await connection.execute<(RowDataPacket & { character_id: number; code: string })[]>(`SELECT ps.character_id,s.code,s.tier,COALESCE(sp.level,1) AS potent_level FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id LEFT JOIN player_skill_specializations sp ON sp.character_id=ps.character_id AND sp.skill_id=s.id AND sp.specialization='potent' WHERE ps.character_id IN (${ids.map(() => '?').join(',')}) AND ps.passive_linked=1 AND s.code LIKE 'resident_%'`, ids);
   const [weapons] = await connection.execute<RowDataPacket[]>(`SELECT pe.character_id,COUNT(DISTINCT i.weapon_type) AS types FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id WHERE pe.character_id IN (${ids.map(() => '?').join(',')}) AND i.item_category IN ('武器','副手') GROUP BY pe.character_id`, ids);
@@ -51,6 +53,7 @@ export const createCombatRules = async (connection: PoolConnection, sessionId: s
       armorSet: kind === 'member' ? armorSets.get(Number(row.id)) : profile?.armorSet ?? (Array.isArray(traits) ? traits.find(trait => trait.code === 'advanced_mentor_build')?.build?.armorSet : undefined),
       opening: kind === 'member' && !row.npc_code ? openingEffects.get(Number(row.id)) : undefined,
       modifiers: profile?.advancedEffect ?? {},
+      cardEffects: kind === 'member' ? cardEffects.get(Number(row.id)) ?? {} : {},
       bossEffects: Array.isArray(traits) ? [...(traits.find(trait => trait.code === 'boss_random_effect')?.common ?? []), ...(traits.find(trait => trait.code === 'boss_random_effect')?.exclusive ?? [])].map(String) : []
     };
   };

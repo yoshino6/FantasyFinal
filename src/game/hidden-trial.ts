@@ -37,7 +37,7 @@ export const advanceHiddenTrial = async (profession: HiddenProfessionCode, previ
     // 原生按钮仍支付完整能量；只有第五轮使用职业驱动。
     if(round===1) { trial.devices[0].energy-=30; r.add(student,'hidden_evade',100,1,student); await r.beforeAction(foe); await r.strike(foe,student,100,'',false,false,true,1,{skill:false}); trial.events.push('避开试射'); }
     if(round===2) { trial.devices[1].energy-=60; await r.strike(student,foe,200,'',false,false,true,1,{skill:true}); trial.events.push('清除障碍'); dummy.hp-=300;r.add(dummy,'poison',1,2,foe,true); }
-    if(round===3) { trial.devices[2].energy-=55;await r.restore(student,dummy,.18*dummy.hpMax);await r.dispel(student,dummy,true,1);trial.events.push('缝补药偶'); }
+    if(round===3) { trial.devices[2].energy-=55;await r.restore(student,dummy,.18*dummy.hpMax,0,false,Infinity,true);await r.dispel(student,dummy,true,1);trial.events.push('缝补药偶'); }
     if(round===4) { await r.strike(student,foe,100,'',false,false,true,1,{skill:false});dummy.hp-=200; }
     if(round===5) { await skill('hidden_transfer',{donor:1,devices:[{id:3,skill:'weave_repair'}],target:dummy.key});trial.events.push('转供即刻修复'); }
   } else {

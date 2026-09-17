@@ -33,7 +33,7 @@ export const hasMappedTravelRoute = (areas: MappedTravelArea[], owned: ReadonlyS
   return false;
 };
 
-export const assertMappedTravelRoute = async (connection: PoolConnection, characterId: number, partyId: number | undefined, start: Point, target: Point, targetRegionId: number) => {
+export const assertMappedTravelRoute = async (connection: PoolConnection, characterId: number, partyId: string | number | undefined, start: Point, target: Point, targetRegionId: number) => {
   await(await import('./leaf-route.service')).assertLeafDestination(connection,characterId,targetRegionId,partyId);
   const [members] = partyId
     ? await connection.execute<(RowDataPacket & { character_id: number })[]>('SELECT character_id FROM party_members WHERE party_id=?', [partyId])

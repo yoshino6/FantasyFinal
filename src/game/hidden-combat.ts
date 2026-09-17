@@ -1,5 +1,5 @@
 import { talentCanPaySkill, talentPaySkill, talentCommitAction } from './talent-combat';
-import { correctedHitChance, opposedChance, strikeCorrections } from './combat-math';
+import { resolvedHitChance, opposedChance, strikeCorrections } from './combat-math';
 import type { CombatRules, RuleStatus, RuleUnit } from './combat-rule-registry';
 import { hiddenSkill, hiddenWeaponAttackPower } from './hidden-profession.config';
 import { hiddenMix, rollHiddenMix } from './hidden-particles';
@@ -127,7 +127,7 @@ export const hiddenAfterHit = async (r: CombatRules, source: RuleUnit, target: R
     if (!window || !owner || owner.side !== source.side || data.created === key || !data.charges || data.used?.[source.key] === r.turn || enemy !== target) continue;
     if (!r.once(source, 'hiddenEchoAction' + key)) return;
     data.used ??= {}; data.used[source.key] = r.turn; data.charges--; window.data = JSON.stringify(data);
-    if (r.random() < correctedHitChance(opposedChance(data.accuracy, enemy.evasion),strikeCorrections(owner,enemy))) {
+    if (r.random() < resolvedHitChance(opposedChance(data.accuracy, enemy.evasion), 0, 1, 0, strikeCorrections(owner,enemy))) {
       const x = data.attack * .7, defense = data.magic ? enemy.magicDefense : enemy.defense;
       await r.secondary(owner, enemy, x * x / (x + Math.max(1, defense)) * data.scale, '合围追击', data.magic ? '奥术' : '无', false);
     } else r.log.push(`　➥【${enemy.name}】避开了合围追击。`);
@@ -283,7 +283,7 @@ export const executeHiddenCombat = async (r: CombatRules, u: RuleUnit, code: str
         const limit = (negative ? allEnemies : allAllies) ? code === 'hidden_synergy' ? 3 : targets.length : 1;
         for (const target of targets.slice(0, limit)) {
           if (fragment.kind === 'damage') effective = await r.strike(u, target, fragment.power*(1+(active.includes('rail_stabilizer')?.12:0)+(fragment.element==='雷'&&active.includes('electromagnetic_coil_cannon')?.12:0)), fragment.element ?? '', fragment.magic ?? false, false, false, 1, { skill: true, single: !allEnemies, accuracyMultiplier: active.includes('precision_scope')?1.1:1, specializedPower: fixed, finalMultiplier: numeric, damageCap: code === 'hidden_synergy' ? (2*(fragment.magic?u.magic:u.attack))**2/(2*(fragment.magic?u.magic:u.attack)+Math.max(1,fragment.magic?target.magicDefense:target.defense)) : undefined }) || effective;
-          else if (fragment.kind === 'heal') { const before = target.hp; await r.restore(u, target, Math.min(target.hpMax * fragment.percent / 100 * numeric * support, code === 'hidden_synergy' ? .2*target.hpMax/Math.max(.01,r.healingMultiplier(u,target)) : Infinity), 0, true, code==='hidden_synergy'?.2*target.hpMax:Infinity); effective ||= target.hp > before; }
+          else if (fragment.kind === 'heal') { const before = target.hp; await r.restore(u, target, Math.min(target.hpMax * fragment.percent / 100 * numeric * support, code === 'hidden_synergy' ? .2*target.hpMax/Math.max(.01,r.healingMultiplier(u,target,true,true)) : Infinity), 0, true, code==='hidden_synergy'?.2*target.hpMax:Infinity, true); effective ||= target.hp > before; }
           else if (fragment.kind === 'shield') effective = hiddenShield(r, u, target, Math.min(target.hpMax * fragment.percent / 100 * numeric * support,code==='hidden_synergy'?.2*target.hpMax:Infinity)) > 0 || effective;
           else if (fragment.kind === 'control' && !budget.control) { budget.control = true; effective = await r.control(u, target, 'hidden_' + fragment.code, code === 'hidden_synergy' ? Math.min(50,fragment.chance*(spec?.controlChanceFactor??1)) : fragment.chance, 1, false) || effective; }
           else if (fragment.kind === 'status') { effect(r, target, fragment.code, specializeEffectValue(fragment.code,fragment.value,stateScale*potency), fragment.duration+(code!=='hidden_synergy'&&skill.effect==='fold_barrier'&&active.includes('fold_barrier_generator')?1:0), u, fragment.debuff, { untilHit: fragment.untilHit }); effective = true; }
@@ -367,7 +367,7 @@ const executeMix = async (r: CombatRules, u: RuleUnit, mix: ReturnType<typeof hi
     for (const target of friends) {
       const total = allocation(target, 'heal', target.hpMax * (branch.heal + branch.regeneration) / 100 * healScale);
       if (branch.regeneration) queue(target, 'heal', total, mix.duration, '木相再生', great && mix.primary === branch.code ? allocation(target, 'shield', .06 * target.hpMax * branch.stateScale * common) : undefined);
-      else if (total) { const immediate = total * (mix.counts.energy_ember ? .6 : 1), overflow = Math.max(0, immediate * r.healingMultiplier(u, target) - (target.hpMax - target.hp)); await r.restore(u, target, immediate, 0, true, immediate * r.healingMultiplier(u, target)); if (mix.counts.energy_ember) queue(target, 'heal', total * .4, mix.duration - 1, '余烬复苏'); if (great && branch.code === mix.primary && ['water_element_dust','blood_residue'].includes(branch.code)) hiddenShield(r,u,target,allocation(target,'shield',Math.min(overflow,.15*target.hpMax*common))); }
+      else if (total) { const immediate = total * (mix.counts.energy_ember ? .6 : 1), overflow = Math.max(0, immediate * r.healingMultiplier(u, target, true, true) - (target.hpMax - target.hp)); await r.restore(u, target, immediate, 0, true, immediate * r.healingMultiplier(u, target, true, true), true); if (mix.counts.energy_ember) queue(target, 'heal', total * .4, mix.duration - 1, '余烬复苏'); if (great && branch.code === mix.primary && ['water_element_dust','blood_residue'].includes(branch.code)) hiddenShield(r,u,target,allocation(target,'shield',Math.min(overflow,.15*target.hpMax*common))); }
       if (branch.shield) hiddenShield(r, u, target, allocation(target, 'shield', target.hpMax * branch.shield / 100 * common * branch.stateScale * mix.numericScale * (spec?.supportFactor ?? 1)), mix.duration, great && mix.primary === 'metal_element_dust' ? { earth: .08 * target.hpMax * common } : {});
       if (!failed && branch.code === 'light_element_dust' && cleanse < (great && mix.primary === branch.code ? 2 : 1)) { const removed = await r.dispel(u,target,true,(great && mix.primary === branch.code ? 2 : 1)-cleanse); cleanse += removed.length; }
     }

@@ -4,13 +4,15 @@ import { castFolioSkill, folioStatusNames, folioStat, folioValue, folioCorrectio
 import { hiddenBeforeAction, hiddenIncoming, hiddenBeforeDamage, hiddenAbsorbed, hiddenAfterHit, hiddenHealingFactor, hiddenNames, hiddenDamageSource } from './hidden-combat';
 import { combatUnitLabel } from './combat-unit-label';
 import { alchemyIncoming, alchemyAfterHit, alchemySaveLife, alchemyHealingFactor, alchemyStatusNames } from './alchemy-combat';
-import { correctedHitChance, correctedCritChance, correctedCritBonus, strikeCorrections, type StrikeCorrections, bossControlChanceMultiplier, opposedChance, opposedCritBonus, tenacityContest } from './combat-math';
+import { resolvedHitChance, correctedCritChance, correctedCritBonus, strikeCorrections, type StrikeCorrections, bossControlChanceMultiplier, opposedChance, opposedCritBonus, tenacityContest } from './combat-math';
 import { nativeSkillBalanceByCode } from './combat-skill-balance.config';
 import { residentScalablePassives } from './passive-specialization';
 import { canDispelCombatEffect, isHardControlEffect, type DispelAuthority } from './combat-dispel-policy';
 import { specializeEffectValue, specializeEffectDuration, specializeControlChance, type SkillSpecializationResult } from './skill-specialization';
 import { residentExpansionSecondaryScale, residentSkillByCode, residentSkills, type ResidentSkill } from './resident-skill.config';
 import { talentBurnEffects, talentRecordEnemyDamage, talentOpeningShield, talentState, hasTalent, talentDirectFactor, talentIncomingFactor, talentHpDamage, talentReceiveHealing, talentSpellHealing, talentSupport, talentAttackAttempt, talentAfterHit, type TalentBattleState } from './talent-combat';
+import { resolveDirectAttackElement } from './combat-element';
+import { activeHealingMultiplier, cardElementDamageMultiplier, cardIncomingDamageMultiplier } from './equipment-enchantment-effects';
 
 export type RuleStatus = { code: string; value: number; until: number; source: string; debuff: boolean; stacks: number; legacyId?: number; data?: string; mechanism?: string };
 import { hasOpeningWeapon, openingManaCost, openingPaid, openingAfterHit, type OpeningCombatEffects } from './opening-combat';
@@ -26,6 +28,8 @@ export type RuleUnit = {
   appraisal?: number; resistance: Record<string, number>; mastery: Record<string, number>;
   /** 已写进派生面板的属性不得再放在这里；只记录战斗结算乘区。 */
   modifiers?: Record<string, number>;
+  /** 怪物卡片附魔在开战时固化；固定数值已写入面板，这里只保留独立战斗乘区。 */
+  cardEffects?: Record<string, any>;
   castSpecialization?: SkillSpecializationResult;
   passiveSpecializations?: Record<string, number>;
   participating?: boolean;
@@ -238,15 +242,16 @@ export class CombatRules {
     unit.state.memory.previousCastTurn = unit.state.memory.castTurn ?? 0;
     unit.state.memory.castTurn = this.turn;
   }
-  healingMultiplier(source: RuleUnit, target: RuleUnit, equipment = true) {
-    let healing = (equipment ? (1 + Number(source.modifiers?.healingBonusPct ?? 0) / 100) * (1 + Number(target.modifiers?.healingReceivedPct ?? 0) / 100) : 1) * (1 + (this.partyCount(target) === 1 ? this.passive(target, 'H08') * .2 : 0));
+  healingMultiplier(source: RuleUnit, target: RuleUnit, equipment = true, activeHealing = false) {
+    const sourceFactor = equipment ? activeHealingMultiplier(Number(source.modifiers?.healingBonusPct ?? 0), activeHealing ? Number(source.cardEffects?.activeHealingBonusPct ?? 0) : 0) : 1;
+    let healing = sourceFactor * (equipment ? 1 + Number(target.modifiers?.healingReceivedPct ?? 0) / 100 : 1) * (1 + (this.partyCount(target) === 1 ? this.passive(target, 'H08') * .2 : 0));
     if (source.mp / source.mpMax < .25) healing *= 1 - this.passive(source, 'D08') * .25;
     if (target.hp / target.hpMax < .25) healing *= 1 - this.passive(target, 'I08') * .2;
     return healing * (1-folioValue(source,'healing_down',this.turn)/100) * alchemyHealingFactor(this, target) * hiddenHealingFactor(this, target) * talentReceiveHealing(source, target);
   }
-  async restore(source: RuleUnit, target: RuleUnit, hp: number, mp = 0, echo = false, maxHealing = Infinity) {
+  async restore(source: RuleUnit, target: RuleUnit, hp: number, mp = 0, echo = false, maxHealing = Infinity, activeHealing = false) {
     if (target.hp <= 0 || target.participating === false) return;
-    let healing = this.healingMultiplier(source, target);
+    let healing = this.healingMultiplier(source, target, true, activeHealing && hp > 0);
     if (!echo && source.castSpecialization) healing *= talentSpellHealing(source, target);
     if (hp > 0 && this.status(source, 'beat')) { healing *= 1 + this.value(source, 'beat') / 100; await this.consume(source, 'beat'); }
     if (!echo) healing *= source.castSpecialization?.supportFactor ?? 1;
@@ -398,7 +403,7 @@ export class CombatRules {
       raw*=talentDirectFactor(source,target,magic,skill,element);
       if(!skill&&hasOpeningWeapon(source,'dawn_knuckle')&&source.state.memory.opening_dawn_knuckle_ready){raw*=1.1;delete source.state.memory.opening_dawn_knuckle_ready;}
     }
-    let dealt = Math.floor(raw * talentIncomingFactor(source,target,element) * (1 + clamp(bonus, -80, 150) / 100) * (1 + exposed / 100) * (1 - clamp(reduction, 0, 80) / 100));
+    let dealt = Math.floor(raw * talentIncomingFactor(source,target,element) * (1 + clamp(bonus, -80, 150) / 100) * (1 + exposed / 100) * (1 - clamp(reduction, 0, 80) / 100) * cardIncomingDamageMultiplier(target.cardEffects, magic, element));
     if (magic && await this.consume(target, 'mirror')) await this.secondary(target, source, raw * .75 * (source.state.memory.forgeReflect === this.turn ? 1.25 : 1), '法镜返照');
     if (this.status(target, 'sleep') && !this.status(target, 'sleep')?.mechanism) await this.consume(target, 'sleep');
     const stone = this.status(target, 'petrify');
@@ -470,6 +475,7 @@ export class CombatRules {
   async strike(source: RuleUnit, original: RuleUnit, power: number, element: string, magic: boolean, extra = false, forceHit = false, secondaryScale = 1,
     options: { skill?: boolean; redirected?: boolean; single?: boolean; damageType?: string; ranged?: boolean; hitPenalty?: number; accuracyMultiplier?: number; accuracyFlat?: number; hitCorrection?: number; specializedPower?: boolean; penetration?: number; finalMultiplier?: number; shieldMultiplier?: number; damageCap?: number; deferFraction?: number; onResolved?: (amount: number) => void } = {}) {
     const isSkill = options.skill !== false;
+    element = resolveDirectAttackElement({ skill: isSkill, skillElement: element, weaponElement: element, cardElement: source.cardEffects?.attackElement });
     // 群攻不能逐个被嘲讽重定向为同一本体；魅惑和混乱的友伤规则仍保留。
     const target = options.redirected ? original : this.redirect(source, original, true, options.single === false); if (target.hp <= 0||target.participating===false) return false;
     let attack = magic ? source.magic : source.attack;
@@ -486,12 +492,15 @@ export class CombatRules {
     correction.hitCorrectionPct=100*(1-(1-(correction.hitCorrectionPct??0)/100)*(1-folioHit/100));
     hit*=1-folioValue(source,'hit_down',this.turn)/100;
     await this.consume(source,'folio_accuracy');
-    hit = correctedHitChance(clamp((hit + setup.hitBonus - Number(options.hitPenalty ?? 0) / 100) * setup.hitFactor,Number(source.modifiers?.minimumHitRatePct ?? 1)/100,1),correction);
+    hit = resolvedHitChance(hit + setup.hitBonus - Number(options.hitPenalty ?? 0) / 100, 0, setup.hitFactor, Number(source.modifiers?.minimumHitRatePct ?? 1), correction);
     if (!(forceHit || setup.forceHit) && this.random() >= hit) { this.log.push(`　➥${combatUnitLabel(target)}闪避了攻击。`); await this.missed(source, target); return false; }
     const critical = this.random() < correctedCritChance(opposedChance(source.crit * (1 + this.value(source, 'crit_bonus') / 100), target.critResist),correction);
     attack *= power / 100 * (isSkill && !options.specializedPower ? source.castSpecialization?.powerFactor ?? 1 : 1);
     const single = options.single !== false;
-    const raw = attack * attack / (attack + Math.max(1, defense)) * (critical ? 1 + correctedCritBonus(opposedCritBonus(source.critDamage, target.critReduction),correction) : 1) * (.9 + this.random() * .2) * this.elementFactor(source, target, element) * secondaryScale * setup.powerFactor * (this.hooks.directMultiplier?.(source, target, element, magic, single, options.damageType ?? '打击') ?? 1);
+    // 共享直击入口承接居民技能、隐藏技能与异械主动伤害。卡片的指定元素增伤只放大
+    // 持有者本人的这一段直击；炼金投掷、召唤物、治疗与持续伤害均不经过这里。
+    const cardElementFactor = cardElementDamageMultiplier(source.cardEffects, element);
+    const raw = attack * attack / (attack + Math.max(1, defense)) * (critical ? 1 + correctedCritBonus(opposedCritBonus(source.critDamage, target.critReduction),correction) : 1) * (.9 + this.random() * .2) * this.elementFactor(source, target, element) * cardElementFactor * secondaryScale * setup.powerFactor * (this.hooks.directMultiplier?.(source, target, element, magic, single, options.damageType ?? '打击') ?? 1);
     const incoming = await this.incoming(source, target, raw * this.expansionScale * (options.finalMultiplier ?? 1) * (isSkill ? source.castSpecialization?.damageFactor ?? 1 : 1), element, magic, isSkill, single);
     const bounded = Math.min(incoming, options.damageCap ?? Infinity); options.onResolved?.(bounded);
     const { damage: dealt, absorbed } = await this.takeHit(target, Math.floor(bounded*(1-(options.deferFraction??0))), options.shieldMultiplier ?? 1, !single, source);
@@ -565,7 +574,7 @@ export class CombatRules {
       }
       case 'E03': if (foe) { const effect = (await this.dispel(source, source, true, 1))[0]; if (effect) { if (controls.includes(effect.code)) await this.control(source, foe, effect.code, 100, Math.min(3, effect.until - this.turn)); else this.add(foe, effect.code, effect.value, Math.min(3, Math.max(1, effect.until - this.turn) + (this.status(foe, effect.code) ? 1 : 0)), source, true); } } break;
       case 'E04': if (foe && await attack() && (await this.dispel(source, foe, false, 1)).length) buff('reduction', 10, 1); break;
-      case 'E05': { const effects = await this.dispel(source, ally, true, Infinity, e => ['burn', 'poison', 'bleed', 'bleeding'].includes(e.code)); await this.restore(source, ally, ally.hpMax * Math.min(.12, effects.reduce((n, e) => n + e.stacks, 0) * .03)); break; }
+      case 'E05': { const effects = await this.dispel(source, ally, true, Infinity, e => ['burn', 'poison', 'bleed', 'bleeding'].includes(e.code)); await this.restore(source, ally, ally.hpMax * Math.min(.12, effects.reduce((n, e) => n + e.stacks, 0) * .03), 0, false, Infinity, true); break; }
       case 'E06': if (foe && await attack()) { const effect = this.pick(this.effects(foe).filter(e => !e.mechanism && e.debuff && ['poison', 'burn', 'bleed', 'bleeding', 'armor_shatter', 'magic_shatter'].includes(e.code))); if (effect) { await this.removeEffect(foe, effect); const next = this.add(foe, effect.code, effect.value, Math.min(3, effect.until - this.turn + 1), source, true); next.stacks = Math.min(3, effect.stacks + 1); } } break;
       case 'F01': buff('mirror', 75, 3, ally); break;
       case 'F02': buff('physical_reduction', 24, 3, ally); buff('iron_gate', 1, 3, ally); break;
@@ -592,7 +601,7 @@ export class CombatRules {
       case 'H06': for (const enemy of enemies) debuff('taunted', 1, 2, enemy); buff('reduction', 20, 2); break;
       case 'I02': if (this.expansionScale === 1) source.hp = Math.max(1, source.hp - Math.floor(source.hp * .1)); await attack(source.hp / source.hpMax < .35 ? 160 : 135); break;
       case 'I03': if (source.hp / source.hpMax < .4) { await this.dispel(source, source, true, 1); await this.restore(source, source, 0, source.mpMax * .12); } else await this.restore(source, source, 0, source.mpMax * .06); break;
-      case 'I04': { const recipient = ally.key !== source.key ? ally : this.lowest(friends.filter(unit => unit.key !== source.key)); if (recipient) { const cost = Math.max(1, Math.ceil(source.hp * .15)); if (source.hp <= cost) { this.log.push('　➥生命不足，无法转移生命。'); break; } source.hp -= cost; await this.restore(source, recipient, source.hpMax * .18); } break; }
+      case 'I04': { const recipient = ally.key !== source.key ? ally : this.lowest(friends.filter(unit => unit.key !== source.key)); if (recipient) { const cost = Math.max(1, Math.ceil(source.hp * .15)); if (source.hp <= cost) { this.log.push('　➥生命不足，无法转移生命。'); break; } source.hp -= cost; await this.restore(source, recipient, source.hpMax * .18, 0, false, Infinity, true); } break; }
       case 'I05': await attack(foe && foe.hp / foe.hpMax < .3 ? 145 : 100); break;
       case 'I06': if (this.once(source, 'feignUsed', true)) buff('feign', 1, 2); break;
       case 'J01': for (const friend of /雾|雨|湿/.test(this.weather) ? friends : [source]) { buff('accuracy', 15, 2, friend); buff('blind_resist', 30, 2, friend); } break;
@@ -602,7 +611,7 @@ export class CombatRules {
       case 'J05': for (const friend of /水|湿|河|潮/.test(this.weather) ? friends : [ally]) { buff('reduction', 12, 2, friend); await this.dispel(source, friend, true, 1, e => e.code === 'slow'); } break;
       case 'J06': for (const enemy of /雪|冰|极光/.test(this.weather) ? enemies : foe ? [foe] : []) { if (this.status(enemy, 'blind')) await this.dispel(source, enemy, false, 1); else await this.control(source, enemy, 'blind', 100, 1); } break;
       case 'K01': buff('forge', 20, 3, ally); break;
-      case 'K02': await this.restore(source, ally, ally.hpMax * .15, Math.min(ally.mpMax * .08, paid * .6)); await this.dispel(source, ally, true, 1, e => ['poison', 'burn'].includes(e.code)); break;
+      case 'K02': await this.restore(source, ally, ally.hpMax * .15, Math.min(ally.mpMax * .08, paid * .6), false, Infinity, true); await this.dispel(source, ally, true, 1, e => ['poison', 'burn'].includes(e.code)); break;
       case 'K03': if (foe && await attack()) await this.dispel(source, foe, false, 1, e => ['shield', 'life_shield', 'barrier', 'enchant'].includes(e.code)); break;
       case 'K04': if (foe) { const effect = this.effects(foe).find(e => !e.debuff); const cooling = Object.entries(foe.cooldowns).filter(([code, value]) => isSkillCooldown(code) && Number(value) > 0).sort((a, b) => Number(b[1]) - Number(a[1]))[0]; this.add(foe, 'indexed', 1, 2, source, true, effect?.code); this.log.push(`　&索引&${this.status(foe, 'nightmare') ? '信息被雾遮蔽' : `${effect ? names[effect.code] ?? effect.code : '无增益'}；最长冷却：${cooling ? `${residentSkillByCode(cooling[0])?.name ?? cooling[0]}（${cooling[1]}）` : '无'}`}。`); } break;
       case 'K05': buff('aim', 1, 3); break;

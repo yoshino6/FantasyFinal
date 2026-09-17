@@ -10,18 +10,31 @@ export const opposedCritBonus = (critDamage: number, critReduction: number) => {
   return 2 * (1 - Math.pow(.5, x / y));
 };
 
-export type StrikeCorrections = { hitCorrectionPct?: number; evasionCorrectionPct?: number; critAvoidanceCorrectionPct?: number; critDamageCorrectionPct?: number };
+export type StrikeCorrections = { hitCorrectionPct?: number; evasionCorrectionPct?: number; critAvoidanceCorrectionPct?: number; critDamageCorrectionPct?: number; actualHitRatePct?: number; actualCritRatePct?: number };
+export type StrikeCorrectionSource = StrikeCorrections & { armorSet?: StrikeCorrections | null; cardEffects?: StrikeCorrections | null };
 const correctionRate = (value = 0) => Math.max(0,Math.min(100,value))/100;
+const combineCorrectionPct = (...values: Array<number | undefined>) => (1-values.reduce<number>((remaining,value)=>remaining*(1-correctionRate(value)),1))*100;
 /** 对抗概率先结算其余修正，再补足未命中部分，最后由防守方削减命中率。 */
 export const correctedHitChance = (chance: number, correction: StrikeCorrections = {}) => {
   const base = Math.max(0,Math.min(1,chance));
   return (base+(1-base)*correctionRate(correction.hitCorrectionPct))*(1-correctionRate(correction.evasionCorrectionPct));
 };
-export const correctedCritChance = (chance: number, correction: StrikeCorrections = {}) => chance*(1-correctionRate(correction.critAvoidanceCorrectionPct));
+/** 实际命中先进入基础对抗概率，再经过原命中倍率/最低命中，最后才结算命中与闪避修正。 */
+export const resolvedHitChance = (chance: number, actualHitRatePct = 0, hitMultiplier = 1, minimumHitRatePct = 0, correction: StrikeCorrections = {}) => {
+  const actual = Number(actualHitRatePct) + Number(correction.actualHitRatePct ?? 0);
+  const multiplied = (Number(chance) + actual / 100) * Math.max(0, Number(hitMultiplier));
+  const minimum = Math.max(0, Math.min(100, Number(minimumHitRatePct))) / 100;
+  return correctedHitChance(Math.min(1, Math.max(multiplied, minimum)), correction);
+};
+export const correctedCritChance = (chance: number, correction: StrikeCorrections = {}) => Math.max(0,Math.min(1,chance+Math.max(0,Number(correction.actualCritRatePct??0))/100))*(1-correctionRate(correction.critAvoidanceCorrectionPct));
 export const correctedCritBonus = (bonus: number, correction: StrikeCorrections = {}) => bonus*(1-correctionRate(correction.critDamageCorrectionPct));
-export const strikeCorrections = (source?: { armorSet?: StrikeCorrections | null }, target?: { armorSet?: StrikeCorrections | null }): StrikeCorrections => ({
-  hitCorrectionPct:source?.armorSet?.hitCorrectionPct, evasionCorrectionPct:target?.armorSet?.evasionCorrectionPct,
-  critAvoidanceCorrectionPct:target?.armorSet?.critAvoidanceCorrectionPct, critDamageCorrectionPct:target?.armorSet?.critDamageCorrectionPct
+export const strikeCorrections = (source?: StrikeCorrectionSource, target?: StrikeCorrectionSource): StrikeCorrections => ({
+  hitCorrectionPct:combineCorrectionPct(source?.armorSet?.hitCorrectionPct,source?.hitCorrectionPct,source?.cardEffects?.hitCorrectionPct),
+  evasionCorrectionPct:combineCorrectionPct(target?.armorSet?.evasionCorrectionPct,target?.evasionCorrectionPct,target?.cardEffects?.evasionCorrectionPct),
+  critAvoidanceCorrectionPct:combineCorrectionPct(target?.armorSet?.critAvoidanceCorrectionPct,target?.critAvoidanceCorrectionPct,target?.cardEffects?.critAvoidanceCorrectionPct),
+  critDamageCorrectionPct:combineCorrectionPct(target?.armorSet?.critDamageCorrectionPct,target?.critDamageCorrectionPct,target?.cardEffects?.critDamageCorrectionPct),
+  actualHitRatePct:Number(source?.armorSet?.actualHitRatePct??0)+Number(source?.actualHitRatePct??0)+Math.min(12,Math.max(0,Number(source?.cardEffects?.actualHitRatePct??0))),
+  actualCritRatePct:Number(source?.armorSet?.actualCritRatePct??0)+Number(source?.actualCritRatePct??0)+Math.min(12,Math.max(0,Number(source?.cardEffects?.actualCritRatePct??0)))
 });
 
 /** 首领承受控制时的命中系数，技能与药剂共用。 */
@@ -45,7 +58,7 @@ export const tenacityContest = (tenacityPierce: number, targetTenacity: number, 
 export const directDamageVariance = (damage: number) => Math.max(1, Math.floor(damage * (.9 + Math.random() * .2)));
 
 export const resolveStrike = (attack: number, defense: number, accuracy: number, evasion: number, crit: number, critResist: number, critDamage: number, critReduction: number, forceHit = false, forceCrit = false, minimumHitRatePct = 0, actualHitRatePct = 0, hitMultiplier = 1, correction: StrikeCorrections = {}) => {
-  const hitChance = correctedHitChance(Math.min(1, Math.max((opposedChance(accuracy, evasion) + actualHitRatePct / 100) * Math.max(0, hitMultiplier), Math.max(0, Math.min(100, minimumHitRatePct)) / 100)),correction);
+  const hitChance = resolvedHitChance(opposedChance(accuracy, evasion), actualHitRatePct, hitMultiplier, minimumHitRatePct, correction);
   if (!forceHit && Math.random() >= hitChance) return { hit: false, crit: false, damage: 0 };
   let damage = Math.max(1, Math.floor(attack * attack / (attack + Math.max(1, defense))));
   const critical = forceCrit || Math.random() < correctedCritChance(opposedChance(crit, critResist),correction);

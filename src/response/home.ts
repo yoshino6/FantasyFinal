@@ -1,3 +1,4 @@
+import { travelConfirmationFormat } from './travel-confirmation';
 import { Format, useEvent, useRoute } from 'alemonjs';
 import { useGameMessage as useMessage } from '../game/use-game-message';
 import { craftFurniture, enterHome, expandHome, homePanel, leaveHome, listFurniture, purchaseHome, removeFurniture, renameHome, upgradeHome } from '../game/home.service';
@@ -100,6 +101,7 @@ export const homeEnterHandler = async () => { const [event] = useEvent(); const 
   const panel = await homePanel(event.current.UserId); if (!panel.home) throw new Error('你还没有小屋，请先在百纳居购买。');
   if (panel.inHome) { await message.send({ format: await homeFormat(event.current.UserId, '你已经在家中。') }); return; }
   const result = await moveTo(event.current.UserId, Number(panel.home.plot_x), Number(panel.home.plot_y), Number(panel.home.plot_z), { destinationKind: 'home', destinationRegionId: Number(panel.home.town_region_id) });
+  if (result.kind === 'travel_confirmation') { await message.send({format:travelConfirmationFormat(result)}); return; }
   if (result.kind === 'travel') {
     await message.send({ format: homeTravelFormat(result.regionName, result.x, result.y, result.z, result.seconds, result.remaining) });
     scheduleTravelCompletion(message, event.current.UserId, result.remaining);

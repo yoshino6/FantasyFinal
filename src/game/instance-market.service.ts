@@ -7,8 +7,11 @@ import { createCraftRequest, craftRequestFor, completeCraftRequest, craftJson } 
 import type { AutomatonState } from './automaton';
 import { recordAutomatonFirstEvent } from './automaton.service';
 import { recordCharacterOperation } from './character-operation.service';
+import { equipmentSlotName, type EquipmentSlot } from '../config/monster-cards';
 
 const integer=(value:number)=>{if(!Number.isSafeInteger(value)||value<1||value>99999999)throw new Error('编号或单价须为 1～99999999 的整数。');return value;};
+const stringArray=(value:unknown):string[]=>{try{const parsed=craftJson<unknown>(value);return Array.isArray(parsed)?parsed.map(String):[];}catch{return[];}};
+const enchantmentSlotText=(value:unknown)=>stringArray(value).map(slot=>equipmentSlotName(slot as EquipmentSlot)).filter(Boolean).join(' / ');
 const release=async(c:PoolConnection,row:RowDataPacket,status:string)=>{
   const table=row.kind==='automaton'?'player_automatons':'player_item_instances';
   await c.execute(`UPDATE ${table} SET market_listing_id=NULL WHERE id=? AND market_listing_id=?`,[row.resource_id,row.id]);
@@ -36,15 +39,19 @@ const resource=async(c:PoolConnection,ownerId:number,kind:string,id:number)=>{
   }
   if(kind!=='instance')throw new Error('请选择装备异械或未认主人偶。');
   await assertHiddenInstanceMutable(c,ownerId,id);
-  const [rows]=await c.execute<RowDataPacket[]>(`SELECT ii.*,i.name,i.item_category,i.required_level,i.description,i.rarity,i.is_tradeable,i.effect_json AS definition_effect FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id WHERE ii.id=? AND ii.character_id=? AND ii.bound_kind='none' AND ii.market_listing_id IS NULL FOR UPDATE`,[id,ownerId]);const row=rows[0];if(!row||!row.is_tradeable||row.rarity==='神器')throw new Error('该实例不可寄售。');
+  const [rows]=await c.execute<RowDataPacket[]>(`SELECT ii.*,i.name,i.item_category,i.required_level,i.description,i.rarity,i.is_tradeable,i.effect_json AS definition_effect,
+    ee.card_code AS enchant_card_code,ee.card_version AS enchant_card_version,ee.effect_text AS enchant_effect_text,ee.allowed_slots_json AS enchant_allowed_slots_json,card.name AS enchant_card_name
+    FROM player_item_instances ii JOIN item_definitions i ON i.id=ii.item_id
+    LEFT JOIN equipment_enchantments ee ON ee.instance_id=ii.id LEFT JOIN item_definitions card ON card.id=ee.card_item_id
+    WHERE ii.id=? AND ii.character_id=? AND ii.bound_kind='none' AND ii.market_listing_id IS NULL FOR UPDATE`,[id,ownerId]);const row=rows[0];if(!row||!row.is_tradeable||row.rarity==='神器')throw new Error('该实例不可寄售。');
   const [active]=await c.execute<RowDataPacket[]>('SELECT instance_id FROM player_equipment WHERE instance_id=? UNION SELECT instance_id FROM player_active_devices WHERE instance_id=? UNION SELECT instance_id FROM player_home_storage_instances WHERE instance_id=?',[id,id,id]);if(active.length)throw new Error('使用中或仓储中的装备与异械不可寄售。');
-  return{name:String(row.name),snapshot:{...row,effect_json:row.effect_json??row.definition_effect}};
+  return{name:String(row.name),snapshot:{...row,effect_json:row.effect_json??row.definition_effect,enchantment:row.enchant_card_code?{cardCode:String(row.enchant_card_code),cardVersion:Number(row.enchant_card_version),cardName:String(row.enchant_card_name),effectText:String(row.enchant_effect_text),allowedSlots:stringArray(row.enchant_allowed_slots_json)}:null}};
 };
 export const previewInstanceMarket=(user:string,action:MarketRequest['action'],kind:string,id:number,price=1)=>withTransaction(async c=>{
   const character=await marketCharacterFor(c,user,true);await expire(c);integer(id);integer(price);
   let summary:string;
   if(action==='list'){const r=await resource(c,Number(character.id),kind,id);summary=`寄售 ${r.name} #${id}，单价 ${price} 铜币，有效期72小时。成交收取分段手续费；买家收货后绑定。`;}
-  else{const [rows]=await c.execute<RowDataPacket[]>("SELECT * FROM market_instance_listings WHERE id=? AND status='open' FOR UPDATE",[id]);const row=rows[0];if(!row)throw new Error('订单已结束。');if(action==='cancel'&&Number(row.seller_id)!==Number(character.id))throw new Error('只能撤销自己的订单。');price=Number(row.price);kind=row.kind;summary=`${action==='buy'?'购买':'撤回'} ${row.name}，${price} 铜币。${action==='buy'?'成交后绑定，不能转卖。':'两分钟内撤单按既有市场规则收费。'}`;}
+  else{const [rows]=await c.execute<RowDataPacket[]>("SELECT * FROM market_instance_listings WHERE id=? AND status='open' FOR UPDATE",[id]);const row=rows[0];if(!row)throw new Error('订单已结束。');if(action==='cancel'&&Number(row.seller_id)!==Number(character.id))throw new Error('只能撤销自己的订单。');price=Number(row.price);kind=row.kind;const enchantment=craftJson<Record<string,unknown>>(row.snapshot_json).enchantment as Record<string,unknown>|undefined;const slots=enchantmentSlotText(enchantment?.allowedSlots);summary=`${action==='buy'?'购买':'撤回'} ${row.name}，${price} 铜币。${action==='buy'?'成交后绑定，不能转卖。':'两分钟内撤单按既有市场规则收费。'}${action==='buy'&&enchantment?.cardName?` 附魔：${enchantment.cardName}${slots?`｜可附魔部位：${slots}`:''}｜${enchantment.effectText??''}`:''}`;}
   const token=await createCraftRequest(c,Number(character.id),'instance_market',{action,kind,id,price} satisfies MarketRequest);return{token,summary};
 });
 export const confirmInstanceMarket=(user:string,token:string)=>withTransaction(async c=>{

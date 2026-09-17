@@ -19,8 +19,9 @@ export const hiddenCombatFormat = async (user: string, code: string, revision?: 
   if(!mixSkill)md.addBold(`MP ${draft.mana} · CD ${draft.spec.cooldown}${definition.resource?` · ${definition.resource}专属资源`:''}`).addNewline().addNewline();
   if (mixSkill) {
     md.addBold(`已投入 ${(draft.choice.particles??[]).length}/4`).addNewline().addText((draft.choice.particles??[]).map((code,index)=>`${index===0?'主材·':''}${hiddenParticles.find(p=>p.code===code)?.name}`).join(' ＋ ') || '首颗决定主反应；同种可重复，每颗各消耗1个。').addNewline().addNewline();
-    md.addText('按钮数字为扣除本次已选粒子后的剩余数量。').addNewline();
-    for (let row=0;row<3;row++) { const line=buttons.addRow(); for (const particle of hiddenParticles.slice(row*4,row*4+4)) line.addButton(`${particle.name} ${draft.remainingStocks[particle.code]??0}`,command('particle',particle.code),{type:'command',autoEnter:true,style:draft.remainingStocks[particle.code]>0?'blue':'gray'}); }
+    md.addBlockquote('可连续点选粒子后一起发送；穿插的 @ 与同面板选材命令会自动识别。首颗为主材，同种可重复，总计2～4颗。').addNewline();
+    md.addText('按钮为追加选材；「整组输入」可重填配方，例如：暗 火 火 余烬。发送后预览，再确定调配。数量为已提交选材后的剩余量，未发送的选择尚未计入。').addNewline();
+    for (let row=0;row<3;row++) { const line=buttons.addRow(); for (const particle of hiddenParticles.slice(row*4,row*4+4)) line.addButton(`${particle.name} ${draft.remainingStocks[particle.code]??0}`,command('particle',particle.code),{type:'command',autoEnter:false,style:draft.remainingStocks[particle.code]>0?'blue':'gray'}); }
     if ((draft.choice.particles?.length??0)>=2) {
       const mix=hiddenMix(draft.choice.particles!, 'success',code==='hidden_kettle'), chance=hiddenMixProbability(mix.particles.length,draft.catalyst,code==='hidden_kettle');
       md.addBold(`MP ${draft.mana} · CD ${specializeTime(mix.cooldown,draft.spec.timeChange)} · ${mix.targets}目标 · ${mix.duration}回合`).addNewline().addText(`失败 ${chance.failure}% / 成功 ${chance.success}% / 大成功 ${chance.great}%`).addNewline().addText(draft.catalyst?`已计入${draft.catalyst==='stable'?'稳定':'激发'}催化。`:'已计入当前专精与施法状态。').addNewline().addNewline();
@@ -62,6 +63,7 @@ export const hiddenCombatFormat = async (user: string, code: string, revision?: 
     return Format.create().addMarkdown(Format.createMarkdown().addTitle(operation==='targets'?'选择目标':'选择供体／维护异械').addNewline().addBlockquote('选择不会消耗行动或材料。')).addButtonGroup(selection);
   }
   const controls=buttons.addRow().addButton('撤回一项',command('undo'),{type:'command',autoEnter:true}).addButton('清空',command('clear'),{type:'command',autoEnter:true}).addButton('选择目标',command('targets'),{type:'command',autoEnter:true});
+  if(mixSkill)controls.addButton('整组输入',command('particles')+' ',{type:'command',autoEnter:false});
   if(['hidden_transfer','hidden_debug'].includes(code))controls.addButton(code==='hidden_transfer'?'选择供体':'追加维护',command('donors'),{type:'command',autoEnter:true});
   if(draft.kind==='setup') { md.addNewline().addBlockquote('保存即允许自动战斗使用这份固定选择并消耗所列材料；还需在原有自动战斗列表中编排此技能。');buttons.addRow().addButton('保存自动配置',`/隐藏自动保存 ${code} ${draft.revision}`,{type:'command',autoEnter:true,style:'blue'}); }
   else buttons.addRow().addButton(mixSkill?'确定调配':'确定施放',`/隐藏施放 ${code} ${draft.skillId} ${draft.revision} ${draft.turn} ${draft.battleKey}`,{type:'command',autoEnter:true,style:'blue'}).addButton('返回战斗','/战斗',{type:'command',autoEnter:true});

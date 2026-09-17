@@ -23,6 +23,7 @@ import { chooseOpeningSpawn, openingWorldFor } from './opening-state';
 import { grantOpeningItem } from './opening.service';
 import { achievementStatBonus, flushAchievements, unlockAccountAchievement } from './achievement.service';
 import { recordAchievement, takeAchievementEvents } from './achievement-events';
+import { cardIndependentPanelPercent, equippedEnchantmentEffects, equippedEnchantments } from './equipment-enchantment-effects';
 
 type RegistrationStage = 'story' | 'audience' | 'question' | 'destination' | 'heaven' | 'danger' | 'choice';
 type SessionRow = RowDataPacket & { id: string; player_id: number; stage: RegistrationStage; expires_at: Date };
@@ -64,14 +65,15 @@ const withEquipmentStats = async (connection: Pool | PoolConnection, characterId
     LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
     WHERE pe.character_id=?`, [characterId]);
   const [foodRows] = await connection.execute<(RowDataPacket & { buff_json: unknown })[]>('SELECT buff_json FROM player_food_buffs WHERE character_id=? AND expires_at>NOW()', [characterId]);
+  const enchantment = await equippedEnchantmentEffects(connection, characterId);
   if(neutralFood)for(const row of foodRows){const effect=jsonRecord(row.buff_json);if(effect.__talentFoodBase)row.buff_json=Number(effect.__talentFoodExpires??Infinity)>Date.now()?effect.__talentFoodBase:{};}
-  const effects = [...rows.map(row => ({ effect: jsonRecord(row.effect_json), scale: equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? offhandMultiplier : 1) })), ...foodRows.map(row => ({ effect: jsonRecord(row.buff_json), scale: 1 }))];
+  const effects = [...rows.map(row => ({ effect: jsonRecord(row.effect_json), scale: equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? offhandMultiplier : 1) })), { effect: enchantment, scale: 1 }, ...foodRows.map(row => ({ effect: jsonRecord(row.buff_json), scale: 1 }))];
   const flat = (key: string) => effects.reduce((total, entry) => total + Number(entry.effect[key] ?? 0) * entry.scale, 0);
   // 食物保留独立倍率；进化与所有装备的同项百分比加算，不再彼此连乘。
   const percent = Object.fromEntries(Object.values(panelPercentKeys).map(key => [key, Number(evolutionBonus[key] ?? 0) + rows.reduce((sum, row) => sum + Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? offhandMultiplier : 1), 0)]));
   const flatStats = Object.fromEntries(Object.keys(panelPercentKeys).map(key => [key, flat(key)]));
   const foodPercent = foodRows.map(row => Object.fromEntries(Object.values(panelPercentKeys).map(key => [key, Number(jsonRecord(row.buff_json)[key] ?? 0)])));
-  const stats = calculatePanelStats(base, flatStats, percent, [...foodPercent, ...independentPercent, armorSetFromRows(rows)?.panelPercent ?? {}, armorPanelPercent(rows)]);
+  const stats = calculatePanelStats(base, flatStats, percent, [...foodPercent, ...independentPercent, cardIndependentPanelPercent(enchantment), armorSetFromRows(rows)?.panelPercent ?? {}, armorPanelPercent(rows)]);
   return stats;
 };
 
@@ -95,8 +97,11 @@ export const equipmentExtraAttributes = async (connection: Pool | PoolConnection
     FROM player_active_devices ad JOIN player_item_instances ii ON ii.id=ad.instance_id AND ii.character_id=ad.character_id
     JOIN item_definitions i ON i.id=ii.item_id WHERE ad.character_id=? AND i.item_type='device'`, [characterId]);
   const effects = [...rows, ...deviceRows];
-  const keys = ['damageBonusPct', 'damageReductionPct', 'chantReduction', 'magicChantBonus', 'manaCostReduction', 'ignoreDefensePct', 'lifestealPct', 'magicDamagePct', 'physicalDamageReductionPct', 'magicDamageReductionPct', 'hpRegenPct', 'mpRegenPct', 'minimumHitRatePct', 'actualHitRatePct', 'physicalActualHitRatePct', 'physicalSkillDamagePct', 'magicSkillDamagePct', 'lightSkillBonusPct', 'criticalDamageBonusPct', 'physicalCriticalFinalDamagePct'];
-  return Object.fromEntries(keys.map(key => [key, Math.round(effects.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[key] ?? 0) * (key === 'damageBonusPct' || key === 'damageReductionPct' ? 1 : equipmentQualityMultiplier(Number(row.quality))), 0) * 10) / 10]));
+  const keys = ['damageBonusPct', 'damageReductionPct', 'chantReduction', 'magicChantBonus', 'manaCostReduction', 'ignoreDefensePct', 'lifestealPct', 'magicDamagePct', 'physicalDamageReductionPct', 'magicDamageReductionPct', 'hpRegenPct', 'mpRegenPct', 'minimumHitRatePct', 'actualHitRatePct', 'actualCritRatePct', 'physicalActualHitRatePct', 'physicalSkillDamagePct', 'magicSkillDamagePct', 'lightSkillBonusPct', 'criticalDamageBonusPct', 'physicalCriticalFinalDamagePct', 'hitCorrectionPct', 'evasionCorrectionPct', 'critAvoidanceCorrectionPct', 'critDamageCorrectionPct', 'healingBonusPct'];
+  const result: Record<string, number> = Object.fromEntries(keys.map(key => [key, Math.round(effects.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[key] ?? 0) * (key === 'damageBonusPct' || key === 'damageReductionPct' ? 1 : equipmentQualityMultiplier(Number(row.quality))), 0) * 10) / 10]));
+  const enchantment = await equippedEnchantmentEffects(connection, characterId);
+  for (const key of keys) result[key] = Number(result[key] ?? 0) + Number(enchantment[key] ?? 0);
+  return result;
 };
 
 /** 角色详情与战斗结算共用六维口径：基础与成长、全属性增益、已穿戴装备的六维加成。 */
@@ -112,8 +117,9 @@ export const effectiveCharacterAttributes = async (connection: Pool | PoolConnec
   const multiplier = Number(timedRows[0]?.all_core_attributes_multiplier ?? 1); const base = finalAttributes(await applyHeartGrowthToRow(connection, characterId, character));
   const achievementBonus = await achievementStatBonus(connection, characterId);
   for (const key of attributes) base[key] += achievementBonus[key] ?? 0;
-  const bonus = (key: string) => equipmentRows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? mastery.offhandAttributeMultiplier : 1), 0);
-  const percent = (key: string) => equipmentRows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[`${key}Pct`] ?? 0) * equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? mastery.offhandAttributeMultiplier : 1), 0);
+  const enchantment = await equippedEnchantmentEffects(connection, characterId);
+  const bonus = (key: string) => equipmentRows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? mastery.offhandAttributeMultiplier : 1), 0) + Number(enchantment[key] ?? 0);
+  const percent = (key: string) => equipmentRows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[`${key}Pct`] ?? 0) * equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? mastery.offhandAttributeMultiplier : 1), 0) + Number(enchantment[`${key}Pct`] ?? 0);
   return Object.fromEntries(attributes.map(key => [key, base[key] * multiplier * (1 + percent(key) / 100) + bonus(key)])) as Allocation;
 };
 
@@ -157,7 +163,8 @@ const activeCharacterEffects = async (connection: Pool | PoolConnection, charact
   for (const row of timedRows[0]) {
     if (row.buff_code === 'church_blessing') activeBuffs.push(`教堂祈福：经验获取+${Math.round((Number(row.experience_multiplier) - 1) * 100)}%｜全六项核心属性+${Math.round((Number(row.all_core_attributes_multiplier) - 1) * 100)}%｜剩余${Math.max(0, Number(row.remaining_seconds))}秒`);
   }
-  const combatNotes = equipmentRows[0].flatMap(row => equipmentCombatNotes(row.name, jsonRecord(row.effect_json)));
+  const enchantments = await equippedEnchantments(connection, characterId);
+  const combatNotes = [...equipmentRows[0].flatMap(row => equipmentCombatNotes(row.name, jsonRecord(row.effect_json))), ...enchantments.map(row => `${row.cardName}：${row.effectText}`)];
   return { activeBuffs, combatNotes };
 };
 
@@ -166,7 +173,8 @@ const withEquipmentElements = async (connection: Pool | PoolConnection, characte
     FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
     LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
     WHERE pe.character_id=?`, [characterId]);
-  const bonus = (prefix: 'elementMastery' | 'elementResistance', element: string) => rows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[`${prefix}_${element}`] ?? 0) * equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? offhandMultiplier : 1), 0);
+  const enchantment = await equippedEnchantmentEffects(connection, characterId);
+  const bonus = (prefix: 'elementMastery' | 'elementResistance', element: string) => rows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[`${prefix}_${element}`] ?? 0) * equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? offhandMultiplier : 1), 0) + Number(enchantment[`${prefix}_${element}`] ?? 0);
   const value = (base: Record<string, unknown>, prefix: 'elementMastery' | 'elementResistance') => Object.fromEntries(elements.map(element => [element, Math.round((Number(base[element] ?? 0) + bonus(prefix, element)) * 10) / 10]));
   return { mastery: value(baseMastery, 'elementMastery'), resistance: value(baseResistance, 'elementResistance') };
 };
@@ -190,8 +198,9 @@ export const recalculateCharacterStats = async (connection: Pool | PoolConnectio
     FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
     LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
     WHERE pe.character_id=?`, [characterId]);
-  const equipmentAttributeBonus = (key: string) => equipmentAttributeRows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? masteryBonuses.offhandAttributeMultiplier : 1), 0);
-  const equipmentAttributePercent = (key: string) => equipmentAttributeRows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[`${key}Pct`] ?? 0) * equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? masteryBonuses.offhandAttributeMultiplier : 1), 0);
+  const enchantment = await equippedEnchantmentEffects(connection, characterId);
+  const equipmentAttributeBonus = (key: string) => equipmentAttributeRows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[key] ?? 0) * equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? masteryBonuses.offhandAttributeMultiplier : 1), 0) + Number(enchantment[key] ?? 0);
+  const equipmentAttributePercent = (key: string) => equipmentAttributeRows.reduce((total, row) => total + Number(jsonRecord(row.effect_json)[`${key}Pct`] ?? 0) * equipmentQualityMultiplier(Number(row.quality)) * (row.slot === 'offhand' ? masteryBonuses.offhandAttributeMultiplier : 1), 0) + Number(enchantment[`${key}Pct`] ?? 0);
   const effectiveAttributes = Object.fromEntries(attributes.map(key => [key, baseAttributes[key] * attributeMultiplier * (1 + equipmentAttributePercent(key) / 100) + equipmentAttributeBonus(key)])) as Allocation;
   const evolutionBonus = await evolutionStatBonuses(connection, characterId);
   const [advancedProfessionRows] = await connection.execute<(RowDataPacket & { profession_code: string })[]>('SELECT profession_code FROM player_advanced_professions WHERE character_id=? LIMIT 1', [characterId]);

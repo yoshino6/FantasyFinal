@@ -28,7 +28,7 @@ const device = (code: string, name: string, description: string, ingredients: Co
 
 // 基材
 const bases: ConstructionRecipe[] = [
-  material('magic_gear', '魔力齿轮', '以金元素微尘为骨架、魔力微弧为驱动的基础传动基材。', [ingredient('metal_element_dust', 4), ingredient('magic_unit', 2), ingredient('thunder_element_dust', 3)]),
+  material('magic_gear', '魔力齿轮', '以土元素微尘为骨架、魔力微弧为驱动的基础传动基材。', [ingredient('metal_element_dust', 4), ingredient('magic_unit', 2), ingredient('thunder_element_dust', 3)]),
   material('energy_core', '能量中枢', '将余烬与水元素微粒压缩为持续供能的基础中枢。', [ingredient('energy_ember', 5), ingredient('magic_unit', 2), ingredient('water_element_dust', 2)]),
   material('flesh_atrium', '血肉心房', '模拟生物循环结构制成的活性基材。', [ingredient('blood_residue', 5), ingredient('energy_ember', 3), ingredient('wood_element_dust', 1)]),
   material('flame_matrix', '炽焰矩阵', '将火元素规整成稳定热源的基础基材。', [ingredient('fire_element_dust', 4), ingredient('metal_element_dust', 2), ingredient('energy_ember', 3)]),

@@ -11,7 +11,7 @@ type Character = RowDataPacket & { id: number; level: number };
 const categories: Record<CodexKind, CodexCategory[]> = {
   装备: [{ label: '全部', value: '全部' }, { label: '武器', value: '武器' }, { label: '头肩', value: '头肩' }, { label: '上装', value: '上装' }, { label: '腰部', value: '腰部' }, { label: '下装', value: '下装' }, { label: '脚部', value: '脚部' }, { label: '项链', value: '项链' }, { label: '手镯', value: '手镯' }, { label: '戒指', value: '戒指' }, { label: '异械', value: '异械' }],
   道具: [{ label: '全部', value: '全部' }, { label: '药剂', value: '药剂' }, { label: '食物', value: '食物' }, { label: '特殊', value: '特殊' }],
-  材料: [{ label: '全部', value: '全部' }, { label: '食材', value: '食材' }, { label: '草药', value: '草药' }, { label: '怪材', value: '怪材' }, { label: '建材', value: '建材' }, { label: '锻材', value: '锻材' }, { label: '特殊', value: '特殊' }],
+  材料: [{ label: '全部', value: '全部' }, { label: '卡片', value: '怪物卡片' }, { label: '食材', value: '食材' }, { label: '草药', value: '草药' }, { label: '怪材', value: '怪材' }, { label: '建材', value: '建材' }, { label: '锻材', value: '锻材' }, { label: '特殊', value: '特殊' }],
   怪物: [{ label: '全部', value: '全部' }, { label: '普通', value: '普通' }, { label: '大型', value: '大型' }, { label: '精英', value: '精英' }, { label: '首领', value: '首领' }],
   技能: [{ label: '全部', value: '全部' }, { label: '物理', value: '物理' }, { label: '魔法', value: '魔法' }, { label: '辅助', value: '辅助' }, { label: '绑定', value: '绑定' }, { label: '被动', value: '被动' }, { label: '特殊', value: '特殊' }]
 };

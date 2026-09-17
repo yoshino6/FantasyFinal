@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { snapshotCombatEnvironment } from './world-dynamics.service';
 import { leafRouteTransport } from './leaf-route.service';
+import { resetCardMovementCharge } from './monster-card-exploration.service';
 const json = (v: unknown): Record<string, any> => typeof v === 'string' ? JSON.parse(v) : v as any ?? {};
 export const leafEnemyScale = (stage: number, wave: number) => stage === 4 ? { hp: .8, attack: .75, defense: 1 } : wave === 0 ? { hp: .55, attack: .75, defense: .6 } : { hp: 2, attack: .85, defense: 1.1 };
 const spawnEnemies = async (c: PoolConnection, character: RowDataPacket, stage: number, wave: number, level: number) => {
@@ -34,6 +35,7 @@ export const startLeafRouteBattle = async (c: PoolConnection, character: RowData
     Object.assign(character, current[0]);
     const session = randomUUID(), enemies = await spawnEnemies(c, character, Number(row.stage), 0, Number(row.level_snapshot));
     await c.execute('INSERT INTO player_leaf_route_battles(session_id,character_id,stage,snapshot_json) VALUES (?,?,?,?)', [session, character.id, row.stage, JSON.stringify({ hp: character.current_hp, mp: character.current_mp, level: Number(row.level_snapshot) })]);
+    await resetCardMovementCharge(c, [Number(character.id)]);
     await c.execute("INSERT INTO combat_sessions(id,character_id,spawn_id,player_hp,player_mp,cooldowns,opening_damage_bonus,mode) VALUES (?,?,?,?,?,JSON_OBJECT(),0,'story')", [session, character.id, enemies.spawns[0], character.current_hp, character.current_mp]);
     await c.execute('INSERT INTO combat_members(session_id,character_id,current_hp,current_mp,selected_target_id,cooldowns,stamina_eligible) VALUES (?,?,?,?,?,JSON_OBJECT(),0)', [session, character.id, character.current_hp, character.current_mp, enemies.spawns[0]]);
     await attach(c, session, Number(character.id), enemies);

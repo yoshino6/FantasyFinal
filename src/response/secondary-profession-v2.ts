@@ -39,7 +39,7 @@ export const alchemyGuideHandler=async()=>{const[message]=useMessage();await mes
 export const forgeRepairHandler=async()=>{
   const[event]=useEvent();const[route]=useRoute();const[message]=useMessage();
   try{const service=await import('../game/forge-repair.service');const id=Number(route.param('id')??0);const craft=String(route.param('craft')??'');
-    if(craft==='制作'){await service.craftForgeRepairKit(event.current.UserId);await message.send({format:messageFormat('制作成功','消耗活木×1、金元素微尘×3、10铜币，获得锻造维修包×1。')});return;}
+    if(craft==='制作'){await service.craftForgeRepairKit(event.current.UserId);await message.send({format:messageFormat('制作成功','消耗活木×1、土元素微尘×3、10铜币，获得锻造维修包×1。')});return;}
     if(id){const name=await service.useForgeRepairKit(event.current.UserId,id);await message.send({format:messageFormat('修理完成',`消耗锻造维修包×1，【${name}】已恢复全部耐久。`)});return;}
     const items=await service.damagedEquipment(event.current.UserId);const md=Format.createMarkdown().addTitle('个人装备修理').addNewline().addText('每件消耗锻造维修包×1，恢复全部耐久；可从铁匠铺购买成品。').addNewline();
     for(const item of items)md.addText(`【${item.name}】#${item.id} 耐久${item.durability}/${item.durability_max}`).addText(' ').addButton('[使用维修包]',{data:`/修理装备 ${item.id}`,autoEnter:false}).addNewline();

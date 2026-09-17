@@ -31,6 +31,9 @@ import { ruleStatusSummary, maskRuleBattleLog, readRuleState } from './combat-ru
 import { residentSkillByCode } from './resident-skill.config';
 import { activeDeviceSkillByCode, combatDeviceSlotsFor, initializeCombatDeviceEnergy, restoreCombatDeviceEnergy, type ActiveDeviceSkill } from './device.service';
 import { isAdvancedProfessionSkillCode } from './advanced-profession.config';
+import { cardElementDamageMultiplier, cardIncomingDamageMultiplier, equippedEnchantmentEffects } from './equipment-enchantment-effects';
+import { resolveDirectAttackElement } from './combat-element';
+import { resetCardMovementCharge } from './monster-card-exploration.service';
 
 type PvpCharacter = RowDataPacket & {
   id: number; game_id: number; name: string; current_region_id: number; pos_x: number; pos_y: number; pos_z: number;
@@ -40,7 +43,7 @@ type PvpCharacter = RowDataPacket & {
   crit_resist_bp: number; crit_damage_reduction_bp: number; speed: number; secondary_profession_code: string | null; activity_status: string; detained_until: Date | null;
 };
 type PvpAction = { type: 'attack' }
-  | { type: 'skill'; id: number; code: string; name: string; category: 'physical' | 'magic' | 'utility'; requiredWeaponType: string | null; manaCost: number; power: number; cooldown: number; chant?: number; specialized?: SkillSpecializationResult; specializations?: Array<{specialization:string;level:number}> }
+  | { type: 'skill'; id: number; code: string; name: string; category: 'physical' | 'magic' | 'utility'; requiredWeaponType: string | null; manaCost: number; power: number; cooldown: number; element?: string; chant?: number; specialized?: SkillSpecializationResult; specializations?: Array<{specialization:string;level:number}> }
   | { type: 'item'; id: number; code:string; name: string; effect: Record<string, number> }
   | { type: 'device'; instanceId: number; deviceCode: string; deviceName: string; skill: ActiveDeviceSkill; target: 'self' | 'enemy' }
   | { type: 'device_charge'; instanceId: number; deviceName: string };
@@ -481,7 +484,8 @@ const resolveAction = async (connection: PoolConnection, actor: PvpCharacter, ta
     }
     if (action.skill.effect === 'reactor_overcharge') actor.current_hp = Math.max(1, Number(actor.current_hp) - Math.floor(Number(actor.current_hp) * .15));
     const magic = action.skill.effect === 'frost_pulse' || action.skill.effect === 'reactor_overcharge';
-    const pseudo: PvpAction = { type: 'skill', id: 0, code: `device_${action.skill.code}`, name: `${action.deviceName}·${action.skill.name}`, category: magic ? 'magic' : 'physical', requiredWeaponType: null, manaCost: 0, power: aoeSkillPower(`device_${action.skill.code}`, Number(action.skill.power ?? 100)), cooldown: 0 };
+    const deviceElement = action.skill.effect === 'frost_pulse' ? '冰' : action.skill.effect === 'coil_cannon' ? '雷' : action.skill.effect === 'reactor_overcharge' ? '火' : '无';
+    const pseudo: PvpAction = { type: 'skill', id: 0, code: `device_${action.skill.code}`, name: `${action.deviceName}·${action.skill.name}`, category: magic ? 'magic' : 'physical', requiredWeaponType: null, manaCost: 0, power: aoeSkillPower(`device_${action.skill.code}`, Number(action.skill.power ?? 100)), cooldown: 0, element: deviceElement };
     const result = await resolveAction(connection, actor, target, pseudo, sessionId, targetCooldowns, actorCooldowns, actorDevices, targetDevices, context);
     if (!result.defeated && action.skill.effect === 'shock_pile' && Math.random() < .65) targetCooldowns!.device_stun = 2;
     if (!result.defeated && action.skill.effect === 'frost_pulse') targetCooldowns!.device_slow = 2;
@@ -514,6 +518,8 @@ const resolveAction = async (connection: PoolConnection, actor: PvpCharacter, ta
   }
   if (skill?.category === 'utility') { await recordPvpAttack(connection, actor, target, `技能「${skill.name}」`, 0, 'utility'); return { text: `【${actor.name}】释放技能「${skill.name}」，但该辅助技能尚未在 PvP 对抗中形成直接伤害。`, defeated: false }; }
   const sourceUnit = context?.get(Number(actor.id)); let targetUnit = context?.get(Number(target.id));
+  const sourceCardEffects = sourceUnit?.cardEffects ?? await equippedEnchantmentEffects(connection, Number(actor.id));
+  const targetCardEffects = targetUnit?.cardEffects ?? await equippedEnchantmentEffects(connection, Number(target.id));
   if (sourceUnit && targetUnit) {
     const redirected = context!.rule.redirect(sourceUnit, targetUnit, true);
     if (redirected.key === sourceUnit.key) { target = actor; targetCooldowns = actorCooldowns; targetDevices = actorDevices; targetUnit = sourceUnit; }
@@ -546,8 +552,15 @@ const resolveAction = async (connection: PoolConnection, actor: PvpCharacter, ta
   if (!strike.hit) { await recordPvpAttack(connection, actor, target, label, 0, 'miss'); return { text: `【${actor.name}】${label}，但【${target.name}】闪避了攻击。`, defeated: false }; }
   const exposed = Number(targetCooldowns?.device_exposed ?? 0) > 0 ? .15 : 0; const barrier = Number(targetCooldowns?.device_barrier ?? 0) > 0 ? .15 : 0; const phase = Number(targetCooldowns?.device_phase_decoy ?? 0) > 0 ? .8 : 0;
   if (phase) delete targetCooldowns!.device_phase_decoy;
-  const[elementRows]=skill&&skill.id>0?await connection.execute<RowDataPacket[]>('SELECT element FROM skill_definitions WHERE id=?',[skill.id]):[[] as RowDataPacket[]];const element=String(elementRows[0]?.element??'无');
-  let damage = directDamageVariance(Math.max(1, Math.floor(strike.damage * (skill?.specialized?.damageFactor ?? 1) * (1 + exposed) * (1 - barrier) * (1 - phase) * setup.powerFactor * (sourceUnit&&targetUnit?context!.rule.elementFactor(sourceUnit,targetUnit,element):1))));
+  const [elementRows]=skill&&skill.id>0?await connection.execute<RowDataPacket[]>('SELECT element FROM skill_definitions WHERE id=?',[skill.id]):[[] as RowDataPacket[]];
+  const [weaponRows]=!skill?await connection.execute<RowDataPacket[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json
+    FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
+    LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
+    WHERE pe.character_id=? AND pe.slot='weapon' LIMIT 1`,[actor.id]):[[] as RowDataPacket[]];
+  const element=resolveDirectAttackElement({skill:Boolean(skill),skillElement:skill?.element ?? elementRows[0]?.element,weaponElement:record(weaponRows[0]?.effect_json).element,cardElement:sourceCardEffects.attackElement});
+  const cardElementDamage = cardElementDamageMultiplier(sourceCardEffects, element);
+  const cardReduction = sourceUnit && targetUnit ? 1 : cardIncomingDamageMultiplier(targetCardEffects, Boolean(magic), element);
+  let damage = directDamageVariance(Math.max(1, Math.floor(strike.damage * (skill?.specialized?.damageFactor ?? 1) * (1 + exposed) * (1 - barrier) * (1 - phase) * setup.powerFactor * cardElementDamage * cardReduction * (sourceUnit&&targetUnit?context!.rule.elementFactor(sourceUnit,targetUnit,element):1))));
   if (sourceUnit && targetUnit) { damage = await context!.rule.incoming(sourceUnit, targetUnit, damage, element, Boolean(magic), Boolean(skill), true, true); const absorbed = await context!.rule.take(targetUnit, damage); await context!.rule.afterHit(sourceUnit, targetUnit, damage - absorbed, element, Boolean(skill), absorbed, Boolean(actorCooldowns?.__extraTurn), Boolean(magic)); }
   const hp = targetUnit ? targetUnit.hp : Math.max(0, Number(target.current_hp) - damage); const defeated = hp <= 0; const critText = strike.crit ? '暴击' : '';
   if (context && (defeated || Number(actor.current_hp) <= 0)) { target.current_hp = hp; await recordPvpAttack(connection, actor, target, label, damage, 'defeat'); return { text: `【${actor.name}】${label}，造成 ${damage} 点伤害。`, defeated: true }; }
@@ -585,6 +598,7 @@ export const cityPvp = async (qqUserId: string, targetGameId: number, confirmed 
   if (unlawfulAttack) { await connection.execute('INSERT INTO player_warrants (wanted_character_id,city_region_id,status) VALUES (?,?,\'active\')', [attacker.id, town.id]); await recordWarrantSighting(connection, Number(attacker.id), Number(town.id), Number(attacker.pos_x), Number(attacker.pos_y)); }
   if (!targetWarrant) await recordWarrantVictim(connection, await wanted(connection, Number(attacker.id), Number(town.id)), Number(target.id));
   await refreshPvpPanel(connection,[attacker,target]);
+  await resetCardMovementCharge(connection, [Number(attacker.id), Number(target.id)]);
   const battleLogId = await createPvpBattleLog(connection, attacker, target, '城镇');
   const opening = await resolveAction(connection, attacker, target, await actionFor(connection, attacker, true));
   const response = !opening.defeated && Number(target.current_hp) > 1 ? await resolveAction(connection, target, attacker, await actionFor(connection, target)) : null;
@@ -607,6 +621,7 @@ export const fieldPvp = async (qqUserId: string, targetGameId: number) => withTr
   if (target.activity_status === 'detained') throw new Error('目标已被守卫关押。');
   if (await isInHome(connection, Number(target.id))) throw new Error('目标正在自己的家园中，无法攻击或打劫。');
   await refreshPvpPanel(connection,[attacker,target]);
+  await resetCardMovementCharge(connection, [Number(attacker.id), Number(target.id)]);
   const battleLogId = await createPvpBattleLog(connection, attacker, target, '野外');
   const opening = await resolveAction(connection, attacker, target, await actionFor(connection, attacker, true));
   const response = !opening.defeated && Number(target.current_hp) > 1 ? await resolveAction(connection, target, attacker, await actionFor(connection, target)) : null;
@@ -736,6 +751,7 @@ export const startPvpBattle = async (qqUserId: string, targetGameId: number, con
   const [occupied] = await connection.execute<RowDataPacket[]>(`SELECT 1 FROM player_pvp_battle_sessions WHERE state='active' AND (attacker_character_id IN (?,?) OR defender_character_id IN (?,?)) LIMIT 1 FOR UPDATE`, [attacker.id, defender.id, attacker.id, defender.id]);
   if (occupied[0]) throw new Error('其中一方正在进行玩家对战。');
   await refreshPvpPanel(connection,[attacker,defender]);
+  await resetCardMovementCharge(connection, [Number(attacker.id), Number(defender.id)]);
   const id = randomUUID(); await connection.execute('INSERT INTO player_pvp_battle_sessions (id,attacker_character_id,defender_character_id,attacker_hp,attacker_mp,defender_hp,defender_mp,attacker_cooldowns,defender_cooldowns) VALUES (?,?,?,?,?,?,?,JSON_OBJECT(),JSON_OBJECT())', [id, attacker.id, defender.id, attacker.current_hp, attacker.current_mp, defender.current_hp, defender.current_mp]);
   await initializeCombatDeviceEnergy(connection, id, Number(attacker.id), 'pvp'); await initializeCombatDeviceEnergy(connection, id, Number(defender.id), 'pvp');
   await createPvpBattleLog(connection, attacker, defender, regionCode === 'baina_town' ? '城镇' : '野外', id);
@@ -756,6 +772,7 @@ export const startAmbushPvpBattle = async (attackerCharacterId: number, defender
   if (occupied[0]) throw new Error('伏击目标已进入另一场玩家对战。');
   const id = randomUUID();
   await refreshPvpPanel(connection,[attacker,defender]);
+  await resetCardMovementCharge(connection, [Number(attacker.id), Number(defender.id)]);
   await connection.execute(`INSERT INTO player_pvp_battle_sessions
     (id,attacker_character_id,defender_character_id,attacker_hp,attacker_mp,defender_hp,defender_mp,attacker_cooldowns,defender_cooldowns,ambush_spawn_id,ambush_delivery_scope,ambush_delivery_target_id,ambush_delivery_bot_id)
     VALUES (?,?,?,?,?,?,?,JSON_OBJECT(),JSON_OBJECT(),?,?,?,?)`, [id, attacker.id, defender.id, attacker.current_hp, attacker.current_mp, defender.current_hp, defender.current_mp, spawnId, delivery.scope, delivery.targetId, delivery.botId ?? null]);

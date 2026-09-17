@@ -66,6 +66,9 @@ export const outsidePanel = (title: string, location: string, speed: number, ran
       markdown.addText(` · ${directionText(point, x, y)}${point.distance}`);
       // 域民只有离开驻点时才会进入野外感知；此时明确给出坐标，便于追踪巡游路线。
       if (point.type === '域民') markdown.addText(`（${point.x}, ${point.y}, ${point.z}）`);
+      if (point.movementState) markdown.addText(` [${point.movementState}]`);
+      if (point.observedOnly) markdown.addText(' [仅观察]');
+      else {
       // 同格目标的“前往”只会把玩家原地送回；建筑则可直接进入，其余目标重开对应互动。
       if (point.type === '怪物' && point.code) markdown.addText(' ').addButton('[交互]', { data: `/怪物交互 ${point.code}`, autoEnter: false });
       else if (point.distance === 0 && point.interaction?.type === '建筑') markdown.addText(' ').addButton('[进入]', { data: `/建筑进入 ${point.interaction.id}`, autoEnter: false });
@@ -79,6 +82,8 @@ export const outsidePanel = (title: string, location: string, speed: number, ran
         if (point.pvpAvailable) markdown.addText(' ').addButton('[攻击]', { data: `/玩家攻击 ${point.code}`, autoEnter: false });
         else markdown.addText(' [好友]');
       }
+      }
+if (point.trackable && point.type === '怪物' && point.code) markdown.addText(' ').addButton('[追迹]', { data: `/追迹 ${point.code}`, autoEnter: false });
       markdown.addNewline();
     }
   }

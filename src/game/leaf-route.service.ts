@@ -12,7 +12,7 @@ export const hasLeafPermit = async (c: Db, id: number) => {
 };
 export const assertLeafPermit = async (c: Db, id: number) => { if (!await hasLeafPermit(c, id))
     throw Error('尚未获得个人浮叶航路许可。请到世界树根冠分会完成《风从未寄达的地方》。'); };
-export const assertLeafDestination = async (c: Db, id: number, regionId: number, partyId?: number) => {
+export const assertLeafDestination = async (c: Db, id: number, regionId: number, partyId?: string | number) => {
     const [regions] = await c.execute<RowDataPacket[]>('SELECT code FROM map_regions WHERE id=?', [regionId]);
     if (regions[0]?.code !== 'floating_leaf_town')
         return;

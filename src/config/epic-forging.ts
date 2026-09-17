@@ -3,6 +3,11 @@ import { purifiedCraftMaterialCode, purifiedMaterialForArmor } from '../game/mon
 export type EpicSetCode = 'mountainheart_regalia' | 'valk_forge_regalia' | 'mistmother_cocoon' | 'goblin_court_hunt';
 export type EpicArmorSlot = '头肩' | '上装' | '腰部' | '下装' | '脚部';
 
+/** 每张图纸独立判定的基础掉率，后续仍应用原有掉落加成。 */
+export const epicBlueprintDropChance: Record<'武器' | EpicArmorSlot, number> = {
+  '武器': .02, '上装': .04, '下装': .04, '头肩': .06, '腰部': .06, '脚部': .06
+};
+
 export type EpicForgeRecipe = {
   code: string;
   blueprintCode: string;

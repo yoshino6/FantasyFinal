@@ -10,6 +10,7 @@ import { snapshotCombatEnvironment } from './world-dynamics.service';
 import { advancedResourceForProfession } from './advanced-resource.config';
 import { buildNpcSparProfile, canonicalSparNpc, canSparNpc, carriedSparSkills, type NpcSparProfile } from './npc-sparring.config';
 import { residentSkillByCode } from './resident-skill.config';
+import { resetCardMovementCharge } from './monster-card-exploration.service';
 
 type Db = Pool | PoolConnection;
 const json = (value: unknown): Record<string, any> => typeof value === 'string' ? JSON.parse(value) : (value ?? {}) as Record<string, any>;
@@ -65,6 +66,7 @@ export const startNpcSparring = async (userId: string, code: string) => withTran
   // defeated_at 从创建起即非空：临时对手不会进入任何地图活怪查询或自然刷新计数。
   const [spawn] = await connection.execute<ResultSetHeader>(`INSERT INTO monster_spawns (template_id,region_id,pos_x,pos_y,pos_z,level,current_hp,skill_sequence,traits_json,defeated_at)
     VALUES (?,?,?,?,?,?,?,?,?,NOW())`, [templates[0].id, character.current_region_id, character.pos_x, character.pos_y, character.pos_z, profile.level, profile.stats.hpMax, JSON.stringify(profile.rotation), JSON.stringify([{ code: 'npc_sparring', name: '', profile }])]);
+  await resetCardMovementCharge(connection, [Number(character.id)]);
   await connection.execute("INSERT INTO combat_sessions (id,character_id,spawn_id,player_hp,player_mp,cooldowns,opening_damage_bonus,mode) VALUES (?,?,?,?,?,JSON_OBJECT(),0,'spar')", [sessionId, character.id, spawn.insertId, character.current_hp, character.current_mp]);
   await connection.execute('INSERT INTO combat_members (session_id,character_id,current_hp,current_mp,selected_target_id,cooldowns,stamina_eligible) VALUES (?,?,?,?,?,JSON_OBJECT(),0)', [sessionId, character.id, character.current_hp, character.current_mp, spawn.insertId]);
   await connection.execute('INSERT INTO combat_targets (session_id,spawn_id,current_mp,cooldowns) VALUES (?,?,?,JSON_OBJECT())', [sessionId, spawn.insertId, profile.stats.mpMax]);

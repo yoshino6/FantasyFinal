@@ -1,3 +1,5 @@
+import { travelConfirmationFormat } from './travel-confirmation';
+import { confirmTravelTarget } from '../game/connected-travel.service';
 import { negotiationFormat } from './negotiation';
 import { negotiateEncounter } from '../game/adventure.service';
 import { isHiddenSkill, hiddenSkill } from '../game/hidden-profession.config';
@@ -8,7 +10,7 @@ import { automatonBattleInteractionText } from '../game/automaton-dialogue';
 import { readFile } from 'node:fs/promises';
 import { durationText } from '../game/time-format';
 import { continueCombatChant } from '../game/adventure.service';
-import { addNpcAffinity, adjustMovementStep, battleStatus, blockedDungeonDirections, cancelResourceMining, cancelTravel, claimCombatAmbushHandoffs, combatAction, chooseTarget, completeTravel, continueForestArrival, coordinateInteraction, currentEncounter, encounterAction, explore, forceAutoBattleDefeat, forestGuideAdvance, forestGuideChoice, forestGuideProgress, huntMonster, inventory, leaveOccupiedBattle, mineResource, move, moveTo, moveToMap, moveToNearbyMonster, movementProfile, nearbyPoints, queueAmbush, requireNpcAtCurrentPosition, resourceMiningStatus, switchCombatTarget, talkToNpc, travelStatus, type CombatAmbushHandoff, type CoordinateInteractionTarget, type VictorySettlement } from '../game/adventure.service';
+import { addNpcAffinity, adjustMovementStep, battleStatus, blockedDungeonDirections, cancelResourceMining, cancelTravel, claimCombatAmbushHandoffs, combatAction, chooseTarget, completeTravel, continueForestArrival, coordinateInteraction, currentEncounter, encounterAction, explore, forceAutoBattleDefeat, forestGuideAdvance, forestGuideChoice, forestGuideProgress, huntMonster, inventory, leaveOccupiedBattle, mineResource, move, moveTo, moveToMap, moveToNearbyMonster, movementProfile, nearbyPoints, queueAmbush, requireNpcAtCurrentPosition, requireNpcForOrdinaryTalk, resourceMiningStatus, switchCombatTarget, talkToNpc, travelStatus, type CombatAmbushHandoff, type CoordinateInteractionTarget, type VictorySettlement } from '../game/adventure.service';
 import { bossRandomEffectSummary } from '../game/adventure.service';
 import { autoBattleConfig, isFullPartyAutoBattle, pendingPartyAutoBattleActions } from '../game/auto-battle.service';
 import { messageFormat, npcInteractionMarkdown } from '../game/message';
@@ -847,7 +849,19 @@ const professionDetailFormat = async (qqUserId: string, name: string) => {
 };
 
 export const exploreHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await explore(event.current.UserId); if (!result.spawns.length) { const encounter = await offerDynamicEncounter(event.current.UserId); if (encounter) { await message.send({ format: encounterFormat(encounter) }); return; } } const targets = result.spawns.length ? `\n\n可选目标\n${result.spawns.map(s => result.canViewMonsterInfo ? `#${s.id} ${s.name} Lv.${s.level}｜HP ${s.current_hp}/${s.hp_max}` : `#${s.id} ???`).join('\n')}\n\n发送 /目标 编号 进入战斗。` : ''; await message.send({ format: messageFormat('探索', result.text + targets) }); } catch (error) { logger.warn({ err: error }, 'explore failed'); await fail(message, error); } };
-export const inventoryHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const bag = await inventory(event.current.UserId); const penaltyText = `移速降低 ${bag.speedPenaltyPct.toFixed(1)}%${bag.overloadPct > 0 ? `｜超重 ${bag.overloadPct.toFixed(1)}%` : ''}`; await message.send({ format: messageFormat('冒险背包', `负重 ${bag.weight.toFixed(2)}/${bag.capacity.toFixed(2)} kg｜${penaltyText}\n当前速度 ${bag.speed.toFixed(2)}\n\n${bag.items.length ? bag.items.map(i => `${i.equipped_slot ? `[已装备·${i.equipped_slot}] ` : i.quick_slot ? `[道具${i.quick_slot}] ` : ''}${i.name} ×${i.quantity}（${i.weight}kg）`).join('\n') : '背包为空。'}`) }); } catch (error) { await fail(message, error); } };
+export const inventoryHandler = async () => {
+  const [event] = useEvent(); const [message] = useMessage();
+  try {
+    const bag = await inventory(event.current.UserId);
+    const overloadText = bag.overloadPct > 0 ? `｜超重 ${bag.overloadPct.toFixed(1)}%` : '';
+    const chargeText = bag.chargedMoveBonus > 0 ? `\n凯尔蓄力：已就绪，临时 +${bag.chargedMoveBonus} 格已计入上限（绝对上限10格）` : '';
+    await message.send({ format: messageFormat('冒险背包', `负重 ${bag.weight.toFixed(2)}/${bag.capacity.toFixed(2)} kg${overloadText}
+战斗速度惩罚 ${bag.speedPenaltyPct.toFixed(1)}%｜地图移动惩罚 ${bag.mapSpeedPenaltyPct.toFixed(1)}%
+当前战斗速度 ${bag.speed.toFixed(2)}｜地图单次移动上限 ${Math.max(1, Math.floor(bag.movementSpeed))}格${chargeText}
+
+${bag.items.length ? bag.items.map(i => `${i.equipped_slot ? `[已装备·${i.equipped_slot}] ` : i.quick_slot ? `[道具${i.quick_slot}] ` : ''}${i.name} ×${i.quantity}（${i.weight}kg）`).join('\n') : '背包为空。'}`) });
+  } catch (error) { await fail(message, error); }
+};
 const dungeonPanel = async (message: any, qqUserId: string, text: string) => { const panel = await movementPanel(qqUserId, text); const nearby = await nearbyPoints(qqUserId); await message.send({ format: panel.addButtonGroup(await movementButtons(qqUserId, nearby.character.activity_status !== 'active')) }); };
 export const dungeonEnterHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const result = await enterDungeon(event.current.UserId, Number(route.param('id'))); await dungeonPanel(message, event.current.UserId, `你沿着石阶踏入地下。地下迷宫第一层（${result.x}, ${result.y}, ${result.z}）的墙壁渗着寒意。`); } catch (error) { await fail(message, error, '无法进入地下迷宫'); } };
 const dungeonFloorHandler = (direction: 'down' | 'up' | 'leave' | 'escape') => async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await changeDungeonFloor(event.current.UserId, direction); const leaving = direction === 'leave' || direction === 'escape'; const text = leaving ? `${'usedTeleporter' in result && result.usedTeleporter ? '破魔传送器的符文碎裂成光点，你被送回入口外。' : '你从入口的石阶返回地面。'}\n你回到了幽暗密林（${result.x}, ${result.y}, 0）。` : `你沿石阶来到地下迷宫的下一处区域（${result.x}, ${result.y}, ${result.z}）。`; await dungeonPanel(message, event.current.UserId, text); } catch (error) { await fail(message, error, direction === 'escape' ? '脱离失败' : '无法通过石阶'); } };
@@ -923,6 +937,8 @@ export const coordinateInteractionHandler = async () => {
   } catch (error) { await fail(message, error, '无法互动'); }
 };
 const showMoveResult = async (message: any, qqUserId: string, result: any) => {
+  if (result.kind === 'route_cancelled') { await message.send({format:messageFormat('行动停止',result.text)}); return; }
+  if (result.routeNotices?.length) await message.send({format:messageFormat('途中见闻',result.routeNotices.join('\n\n'))});
   try { await recordExplorationMovement(qqUserId); } catch (error) { logger.warn({ err: error, qqUserId }, 'exploration exposure recording failed'); }
   const wanted = await cityWantedAlert(qqUserId);
   if (result.character?.enteredTown && wanted) {
@@ -1311,12 +1327,22 @@ export const npcEncounterHandler = (action: 'talk' | 'ignore') => async () => {
   const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage();
   try {
     const code = String(route.param('code'));
-    const npc = await requireNpcAtCurrentPosition(event.current.UserId, code);
+    const npc = action === 'talk'
+      ? await requireNpcForOrdinaryTalk(event.current.UserId, code)
+      : { ...(await requireNpcAtCurrentPosition(event.current.UserId, code)), remoteTalk: false };
     if (npc.interaction_kind !== 'npc') throw new Error('该目标不是域民。');
     if (action === 'ignore') {
       const [nearby, movement] = await Promise.all([nearbyPoints(event.current.UserId), movementProfile(event.current.UserId)]);
       const panel = outsidePanel('行动', currentLocationText(nearby.character), movement.step, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), '你暂时没有上前搭话，继续留意四周。', nearby.points, nearby.character.activity_status !== 'active', nearby.landmarks, '', movement.maximum, false, movement.showLandmarks, movement.showPlayers, nearby.mapUnlocked);
       await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) });
+      return;
+    }
+    if (npc.remoteTalk) {
+      const affinity = await addNpcAffinity(event.current.UserId, code, 'chat');
+      const text = code === 'pear_guide'
+        ? npcChatDialogue('pear_guide', affinity.affinity)
+        : dynamicNpcChatDialogue(code, affinity.affinity) ?? `${npc.description}\n\n${npc.name}朝声音传来的方向点头回应。`;
+      await message.send({ format: messageFormat(`远距交谈·${simpleNpcName(npc.name)}`, `${text}\n\n凯尔卡只放宽普通闲聊；商店、任务、提交物品与切磋仍需近身。`) });
       return;
     }
     const { isWorldTreeAdvancedMentor } = await import('../game/advanced-profession.service');
@@ -1361,8 +1387,8 @@ export const mineResourceHandler = async () => { const [event] = useEvent(); con
 export const refreshMiningHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const mining = await resourceMiningStatus(event.current.UserId); if (!mining) throw new Error('当前没有正在进行的资源开采。'); const result = await mineResource(event.current.UserId, mining.resourceId); if (result.state === 'completed') { const panel = await movementPanel(event.current.UserId, `连续开采结束，获得${result.rewardText || '无'}。`); const nearby = await nearbyPoints(event.current.UserId); await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); return; } await message.send({ format: miningFormat(result.kind, result.name, result.seconds, result.remaining, result.rewardText) }); } catch (error) { await fail(message, error, '开采状态不可用'); } };
 export const cancelMiningHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await cancelResourceMining(event.current.UserId); const panel = await movementPanel(event.current.UserId, `你收起工具，中止连续开采。${result.rewardText ? `已完成的轮次结算：${result.rewardText}。` : '没有新增已完成的轮次。'}未满时长的轮次不产出材料。`); const nearby = await nearbyPoints(event.current.UserId); await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); } catch (error) { await fail(message, error, '取消开采失败'); } };
 export const moveHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await leaveHomeForMovement(message, event.current.UserId); await showMoveResult(message, event.current.UserId, await move(event.current.UserId, String(route.param('direction')))); } catch (error) { if (error instanceof Error && error.message.includes('当前格子存在敌对生物') && await showBlockedEncounter(message, event.current.UserId)) return; if (isForestGuideLocked(error)) { await storyLockedMessage(message, '无法移动'); return; } if (await showOngoingActivity(message, event.current.UserId, '无法移动')) return; await fail(message, error, '无法移动'); } };
-export const goToHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await leaveHomeForMovement(message, event.current.UserId); const result = await moveTo(event.current.UserId, Number(route.param('x')), Number(route.param('y')), Number(route.param('z'))); if (result.kind === 'travel') { await message.send({ format: travelFormat('开始前往', result.regionName, result.x, result.y, result.seconds, result.remaining, 'move', result.destinationName, result.z) }); scheduleTravelCompletion(message, event.current.UserId, result.remaining); return; } await showMoveResult(message, event.current.UserId, result); } catch (error) { if (error instanceof Error && error.message.includes('当前格子存在敌对生物') && await showBlockedEncounter(message, event.current.UserId)) return; if (isForestGuideLocked(error)) { await storyLockedMessage(message, '无法前往该位置'); return; } if (await showOngoingActivity(message, event.current.UserId, '无法前往该位置')) return; await fail(message, error, '无法前往该位置'); } };
-export const goToMapHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await leaveHomeForMovement(message, event.current.UserId); const result = await moveToMap(event.current.UserId, String(route.param('code'))); if (result.kind === 'travel') { await message.send({ format: travelFormat('开始前往', result.regionName, result.x, result.y, result.seconds, result.remaining, 'move', result.destinationName, result.z) }); scheduleTravelCompletion(message, event.current.UserId, result.remaining); return; } await showMoveResult(message, event.current.UserId, result); } catch (error) { if (error instanceof Error && error.message.includes('当前格子存在敌对生物') && await showBlockedEncounter(message, event.current.UserId)) return; if (isForestGuideLocked(error)) { await storyLockedMessage(message, '无法前往地图'); return; } if (await showOngoingActivity(message, event.current.UserId, '无法前往地图')) return; await fail(message, error, '无法前往地图'); } };
+export const goToHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await leaveHomeForMovement(message, event.current.UserId); const result = await moveTo(event.current.UserId, Number(route.param('x')), Number(route.param('y')), Number(route.param('z'))); if (result.kind === 'travel_confirmation') { await message.send({format:travelConfirmationFormat(result)}); return; } if (result.kind === 'travel') { await message.send({ format: travelFormat('开始前往', result.regionName, result.x, result.y, result.seconds, result.remaining, 'move', result.destinationName, result.z) }); scheduleTravelCompletion(message, event.current.UserId, result.remaining); return; } await showMoveResult(message, event.current.UserId, result); } catch (error) { if (error instanceof Error && error.message.includes('当前格子存在敌对生物') && await showBlockedEncounter(message, event.current.UserId)) return; if (isForestGuideLocked(error)) { await storyLockedMessage(message, '无法前往该位置'); return; } if (await showOngoingActivity(message, event.current.UserId, '无法前往该位置')) return; await fail(message, error, '无法前往该位置'); } };
+export const goToMapHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { await leaveHomeForMovement(message, event.current.UserId); const result = await moveToMap(event.current.UserId, String(route.param('code'))); if (result.kind === 'travel_confirmation') { await message.send({format:travelConfirmationFormat(result)}); return; } if (result.kind === 'travel') { await message.send({ format: travelFormat('开始前往', result.regionName, result.x, result.y, result.seconds, result.remaining, 'move', result.destinationName, result.z) }); scheduleTravelCompletion(message, event.current.UserId, result.remaining); return; } await showMoveResult(message, event.current.UserId, result); } catch (error) { if (error instanceof Error && error.message.includes('当前格子存在敌对生物') && await showBlockedEncounter(message, event.current.UserId)) return; if (isForestGuideLocked(error)) { await storyLockedMessage(message, '无法前往地图'); return; } if (await showOngoingActivity(message, event.current.UserId, '无法前往地图')) return; await fail(message, error, '无法前往地图'); } };
 export const huntHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const result = await huntMonster(event.current.UserId); await message.send({ format: travelFormat('开始寻怪……', result.regionName, result.x, result.y, result.seconds, result.remaining, 'hunt') }); scheduleTravelCompletion(message, event.current.UserId, result.remaining); } catch (error) { if (error instanceof Error && error.message.includes('当前格子存在敌对生物') && await showBlockedEncounter(message, event.current.UserId)) return; if (isForestGuideLocked(error)) { await storyLockedMessage(message, '无法寻怪'); return; } if (await showOngoingActivity(message, event.current.UserId, '无法寻怪')) return; await fail(message, error, '无法寻怪'); } };
 export const cancelTravelHandler = async () => { const [event] = useEvent(); const [message] = useMessage(); try { const cancelled = await cancelTravel(event.current.UserId); const timer = travelTimers.get(event.current.UserId); if (timer) clearTimeout(timer); travelTimers.delete(event.current.UserId); const [nearby, movement] = await Promise.all([nearbyPoints(event.current.UserId), movementProfile(event.current.UserId)]); const character = cancelled.character; const cancellationText = cancelled.activityType === 'hunt' ? '寻怪已取消' : '移动已取消'; const panel = outsidePanel('行动', `${cancellationText}\n${currentLocationText(character)}`, movement.step, nearby.range, Number(character.pos_x), Number(character.pos_y), nearby.description, nearby.points, nearby.character.activity_status !== 'active', nearby.landmarks, '', movement.maximum, false, movement.showLandmarks, movement.showPlayers, nearby.mapUnlocked); await message.send({ format: panel.addButtonGroup(await movementButtons(event.current.UserId, nearby.character.activity_status !== 'active')) }); } catch (error) { await fail(message, error, '取消行动失败'); } };
 
@@ -1703,3 +1729,18 @@ export const hiddenCombatConfirmHandler = async () => {
 };
 
 export const defendHandler=async()=>{const[event]=useEvent();const[message]=useMessage();try{stopAutoBattle(event.current.UserId);let result=await combatAction(event.current.UserId,'defend');if(!result.ended&&result.waiting)result=await resolvePartyAutoBattleActions(event.current.UserId)??result;await sendCombatResult(message,event.current.UserId,result);}catch(error){await message.send({format:messageFormat('防御',error instanceof Error?error.message:'请在PVE战斗中防御。')});}};
+
+export const confirmGoToHandler = async () => {
+  const [event]=useEvent(),[route]=useRoute(),[message]=useMessage();
+  try {
+    const user=event.current.UserId,token=String(route.param('token'));
+    const plan=await confirmTravelTarget(user,token);
+    const result=await moveTo(user,plan.target.x,plan.target.y,plan.target.z,{confirmationToken:token,destinationKind:plan.destinationKind,destinationRegionId:plan.target.regionId});
+    if(result.kind==='travel_confirmation'){await message.send({format:travelConfirmationFormat(result)});return;}
+    if(result.kind==='travel'){
+      await message.send({format:travelFormat('开始前往',result.regionName,result.x,result.y,result.seconds,result.remaining,'move',result.destinationName,result.z)});
+      scheduleTravelCompletion(message,user,result.remaining);return;
+    }
+    await showMoveResult(message,user,result);
+  }catch(error){await fail(message,error,'无法确认前往');}
+};

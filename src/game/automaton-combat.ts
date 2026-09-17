@@ -32,7 +32,7 @@ const shieldFactor=(p:AutomatonCombatant)=>equipped(p,'S005')?1.22:1;
 const effective=(rules:CombatRules,u:RuleUnit)=>[u.key,u.hp,u.mp,...rules.effects(u).map(e=>[e.code,e.value,e.until,e.source])];
 const once=(rules:CombatRules,p:AutomatonCombatant,key:string,battle=false)=>rules.once(p.unit,`automaton_${key}`,battle);
 const heal=async(rules:CombatRules,p:AutomatonCombatant,target:RuleUnit,amount:number,normal=true)=>{
-  if(target.hp<=0)return false;const old=target.hp;const proposed=amount*healFactor(p);await rules.restore(p.unit,target,proposed,0,!normal);
+  if(target.hp<=0)return false;const old=target.hp;const proposed=amount*healFactor(p);await rules.restore(p.unit,target,proposed,0,!normal,Infinity,normal);
   const actual=target.hp-old,overflow=Math.max(0,Math.floor(proposed*rules.healingMultiplier(p.unit,target))-(target.hpMax-old));
   if(normal&&equipped(p,'N047')&&overflow>0&&once(rules,p,'overflow'))await rules.shield(p.unit,target,Math.min(p.unit.magic*.25,overflow*.2),1);
   if(normal&&actual>0&&equipped(p,'S014')){const memory=p.unit.state.memory;memory.healCount=Number(memory.healCount??0)+1;if(Number(memory.healCount)%3===0){const echo=Math.min(target.hpMax-target.hp,Math.floor(actual*.4));target.hp+=echo;if(echo)rules.log.push(`　&修护回响&${combatUnitLabel(target)}恢复 ${echo} HP。`);}}

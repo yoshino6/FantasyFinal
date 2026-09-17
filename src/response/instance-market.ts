@@ -6,10 +6,16 @@ import { girlGratitudeStage } from '../game/girl-gratitude.service';
 import { escapeAutomatonText } from '../game/automaton-dialogue';
 import { automatonSkills } from '../game/automaton-skill-catalog';
 import { messageFormat } from '../game/message';
+import { equipmentSlotName, type EquipmentSlot } from '../config/monster-cards';
+
+const enchantmentSlotText = (value: unknown) => (Array.isArray(value) ? value : [])
+  .map(slot => equipmentSlotName(String(slot) as EquipmentSlot))
+  .filter(Boolean)
+  .join(' / ') || '未知';
 
 const navigationButtons = () => Format.createButtonGroup().addRow()
-  .addButton('标准品市场', '/万叶市场 1 全部', { type: 'command', autoEnter: true, style: 'blue' })
-  .addButton('返回 万叶联市', '/万叶联市', { type: 'command', autoEnter: true });
+  .addButton('标准品市场', '/万叶市场 1 全部', { type: 'command', autoEnter: false, style: 'blue' })
+  .addButton('返回 万叶联市', '/万叶联市', { type: 'command', autoEnter: false });
 
 const listFormat = async (user: string, page: number, category: string, keyword: string) => {
   const data = await instanceMarketList(user, page, category, keyword);
@@ -33,6 +39,8 @@ const listFormat = async (user: string, page: number, category: string, keyword:
         .addNewline().addBlockquote(`技能：${escapeAutomatonText(skills.map(id => automatonSkills.find(s => s.id === id)?.name ?? String(id)).join('、') || '无')}`).addNewline();
     } else {
       markdown.addBlockquote(`等级：${snapshot.required_level ?? 1}｜品质：${Number(snapshot.quality ?? 0).toFixed(2)}%｜耐久：${snapshot.durability ?? '—'}/${snapshot.durability_max ?? '—'}`).addNewline();
+      const enchantment = snapshot.enchantment as Record<string, unknown> | null | undefined;
+      if (enchantment?.cardName) markdown.addBlockquote(`附魔：${escapeAutomatonText(String(enchantment.cardName))}｜可附魔部位：${enchantmentSlotText(enchantment.allowedSlots)}｜${escapeAutomatonText(String(enchantment.effectText ?? ''))}`).addNewline();
       if (snapshot.description) markdown.addBlockquote(escapeAutomatonText(String(snapshot.description))).addNewline();
     }
     markdown.addNewline();
@@ -51,11 +59,11 @@ const listFormat = async (user: string, page: number, category: string, keyword:
   markdown.addNewline().addText(`当前第（${data.page}/${data.pages}）页`);
   const command = (target: number) => `/实例寄售 列表 ${target} ${data.category}${data.keyword ? ` ${data.keyword}` : ''}`;
   const buttons = Format.createButtonGroup().addRow()
-    .addButton('上一页', command(Math.max(1, data.page - 1)), { type: 'command', autoEnter: true, style: data.page > 1 ? 'blue' : undefined })
+    .addButton('上一页', command(Math.max(1, data.page - 1)), { type: 'command', autoEnter: false, style: data.page > 1 ? 'blue' : undefined })
     .addButton('搜索', `/实例寄售 列表 1 ${data.category} `, { type: 'command', autoEnter: false, style: 'blue' })
-    .addButton('下一页', command(Math.min(data.pages, data.page + 1)), { type: 'command', autoEnter: true, style: data.page < data.pages ? 'blue' : undefined })
-    .addRow().addButton('标准品市场', '/万叶市场 1 全部', { type: 'command', autoEnter: true, style: 'blue' })
-    .addButton('返回 万叶联市', '/万叶联市', { type: 'command', autoEnter: true });
+    .addButton('下一页', command(Math.min(data.pages, data.page + 1)), { type: 'command', autoEnter: false, style: data.page < data.pages ? 'blue' : undefined })
+    .addRow().addButton('标准品市场', '/万叶市场 1 全部', { type: 'command', autoEnter: false, style: 'blue' })
+    .addButton('返回 万叶联市', '/万叶联市', { type: 'command', autoEnter: false });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 
@@ -83,7 +91,7 @@ export default async () => {
       markdown.addBlockquote(result.summary);
       buttons.addRow().addButton('确认', `/实例寄售 确认 0 token ${result.token}`, { type: 'command', autoEnter: false, style: 'blue' });
     }
-    buttons.addRow().addButton('返回寄售', '/实例寄售', { type: 'command', autoEnter: true });
+    buttons.addRow().addButton('返回寄售', '/实例寄售', { type: 'command', autoEnter: false });
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) });
   } catch (error) {
     await message.send({ format: messageFormat('实例寄售不可用', error instanceof Error ? error.message : '市场操作失败。') });

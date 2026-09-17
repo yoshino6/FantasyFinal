@@ -1,4 +1,4 @@
-import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
+import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 export type Binding = { unbound: number; trade: number; personal: number };
 export const consumeBinding = (stock: Binding, quantity: number, unboundOnly = false): Binding => {
   if (!Number.isSafeInteger(quantity) || quantity < 1 || Object.values(stock).some(n => !Number.isSafeInteger(n) || n < 0)) throw new Error('物品数量无效。');
@@ -11,7 +11,11 @@ export const consumeInventory = async (connection: PoolConnection, characterId: 
   const [rows] = await connection.execute<(RowDataPacket & {quantity:number;trade_bound_quantity:number;personal_bound_quantity:number})[]>('SELECT quantity,trade_bound_quantity,personal_bound_quantity FROM player_inventory WHERE character_id=? AND item_id=? FOR UPDATE',[characterId,itemId]);
   const row = rows[0], trade = Number(row?.trade_bound_quantity ?? 0), personal = Number(row?.personal_bound_quantity ?? 0);
   const used = consumeBinding({trade,personal,unbound:Number(row?.quantity ?? 0)-trade-personal},quantity,unboundOnly);
-  await connection.execute(`UPDATE player_inventory SET quantity=quantity-?,trade_bound_quantity=trade_bound_quantity-?,personal_bound_quantity=personal_bound_quantity-?,binding_revision=binding_revision+1 WHERE character_id=? AND item_id=?`,[quantity,used.trade,used.personal,characterId,itemId]);
+  const [updated] = await connection.execute<ResultSetHeader>(`UPDATE player_inventory
+    SET quantity=quantity-?,trade_bound_quantity=trade_bound_quantity-?,personal_bound_quantity=personal_bound_quantity-?,binding_revision=binding_revision+1
+    WHERE character_id=? AND item_id=? AND quantity>=? AND trade_bound_quantity>=? AND personal_bound_quantity>=?
+      AND quantity-trade_bound_quantity-personal_bound_quantity>=?`, [quantity,used.trade,used.personal,characterId,itemId,quantity,used.trade,used.personal,used.unbound]);
+  if (Number(updated.affectedRows) !== 1) throw new Error('物品库存已经变化，请重试。');
   await connection.execute('DELETE FROM player_inventory WHERE character_id=? AND item_id=? AND quantity=0',[characterId,itemId]);
   return used;
 };

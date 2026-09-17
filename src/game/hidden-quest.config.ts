@@ -101,12 +101,12 @@ export const hiddenQuests: HiddenQuestDefinition[] = [
     "stage": 6,
     "name": "洗净上一锅",
     "dialogue": "「材料单没变，杯壁却还留着上一锅的痕迹。先把这层干扰排掉。」",
-    "objective": "交付金元素微尘×10、魔力微弧×4；在晴儿提供的旧釜、洁净釜上各测一次同方案，标出残留差异",
+    "objective": "交付土元素微尘×10、魔力微弧×4；在晴儿提供的旧釜、洁净釜上各测一次同方案，标出残留差异",
     "result": "土相旧料用于试制隔离内衬，魔弧用于测试脉冲；得到清釜记录与中和通道草图。这里只排除额外器具干扰，不取消正式调配的失败概率",
     "materials": [
       {
         "code": "metal_element_dust",
-        "name": "金元素微尘",
+        "name": "土元素微尘",
         "quantity": 10
       },
       {
@@ -139,7 +139,7 @@ export const hiddenQuests: HiddenQuestDefinition[] = [
     "stage": 9,
     "name": "双路阀就位",
     "dialogue": "「临出手可以偏稳，也可以激发；真的失控了，还得留一条中和的路。」",
-    "objective": "交付水元素微尘×8、金元素微尘×8、能量余烬×8；按第6、8环图纸完成一次装配验收，识别稳定催化、激发催化和中和各自作用",
+    "objective": "交付水元素微尘×8、土元素微尘×8、能量余烬×8；按第6、8环图纸完成一次装配验收，识别稳定催化、激发催化和中和各自作用",
     "result": "晴儿将土相内衬、水相中和通道、余烬测试负载装入试釜；确认阀门调整概率、中和处理事故，不额外增加投料量或保证成功，便携釜可进入综合演练",
     "materials": [
       {
@@ -154,7 +154,7 @@ export const hiddenQuests: HiddenQuestDefinition[] = [
       },
       {
         "code": "metal_element_dust",
-        "name": "金元素微尘",
+        "name": "土元素微尘",
         "quantity": 8
       }
     ]
@@ -249,12 +249,12 @@ export const hiddenQuests: HiddenQuestDefinition[] = [
     "stage": 7,
     "name": "一器离手",
     "dialogue": "「先让一把出去，停在该停的位置，再沿原路收回。」",
-    "objective": "交付金元素微尘×10、魔力微弧×4；用借用试剑完成一次“离手→定点→回收”操作",
+    "objective": "交付土元素微尘×10、魔力微弧×4；用借用试剑完成一次“离手→定点→回收”操作",
     "result": "土相材料用于导引刻纹基底，魔弧用于驱动试验；得到单器收放轨迹，下一环在此基础上分配三器位置",
     "materials": [
       {
         "code": "metal_element_dust",
-        "name": "金元素微尘",
+        "name": "土元素微尘",
         "quantity": 10
       },
       {
@@ -278,7 +278,7 @@ export const hiddenQuests: HiddenQuestDefinition[] = [
     "stage": 9,
     "name": "让出归鞘的路",
     "dialogue": "「出手时错开的路，回来时也要错开。照着标记收，别挤在持器人身前。」",
-    "objective": "交付金元素微尘×6、木元素微尘×6；小北制作有缓冲层的回收刻纹，玩家按借用器具编号A→B→C完成一次无碰撞回收",
+    "objective": "交付土元素微尘×6、木元素微尘×6；小北制作有缓冲层的回收刻纹，玩家按借用器具编号A→B→C完成一次无碰撞回收",
     "result": "完成试阵回收验收；顺序只适用于该教学装置，不规定正式战斗必须“短刃→长刃→导魔器”，随后进行攻守综合演练",
     "materials": [
       {
@@ -288,7 +288,7 @@ export const hiddenQuests: HiddenQuestDefinition[] = [
       },
       {
         "code": "metal_element_dust",
-        "name": "金元素微尘",
+        "name": "土元素微尘",
         "quantity": 6
       }
     ]
@@ -307,7 +307,7 @@ export const hiddenQuests: HiddenQuestDefinition[] = [
     "stage": 1,
     "name": "给拆件分清用途",
     "dialogue": "「我把故障机拆好了。先把骨架、供能和驱动材料分开，下一步才知道该接在哪里。」",
-    "objective": "交付金元素微尘×12、能量余烬×12、魔力微弧×6；在NPC拆件图上完成一次用途匹配",
+    "objective": "交付土元素微尘×12、能量余烬×12、魔力微弧×6；在NPC拆件图上完成一次用途匹配",
     "result": "土相旧料对应结构基底、余烬对应供能、魔弧对应驱动；得到回路用料记录。玩家任务是备料与辨认，不把交材料写成玩家完成解构",
     "materials": [
       {
@@ -317,7 +317,7 @@ export const hiddenQuests: HiddenQuestDefinition[] = [
       },
       {
         "code": "metal_element_dust",
-        "name": "金元素微尘",
+        "name": "土元素微尘",
         "quantity": 12
       },
       {
@@ -531,7 +531,7 @@ export const hiddenQuests: HiddenQuestDefinition[] = [
     "stage": 5,
     "name": "指向同一个目标",
     "dialogue": "「三个人都打中了，那个施术者却一直没人管。给队伍一个清楚的集火点。」",
-    "objective": "交付金元素微尘×6、木元素微尘×6，供洛文制作耐用棋面与生命刻度；在沙盘用落子标记施术靶，让两次模拟队友主动作兑现增伤",
+    "objective": "交付土元素微尘×6、木元素微尘×6，供洛文制作耐用棋面与生命刻度；在沙盘用落子标记施术靶，让两次模拟队友主动作兑现增伤",
     "result": "获得目标选择与落子兑现记录；这是集中伤害，不把落子说成打断技能。下一环把“危险”改写成可执行的情报",
     "materials": [
       {
@@ -541,7 +541,7 @@ export const hiddenQuests: HiddenQuestDefinition[] = [
       },
       {
         "code": "metal_element_dust",
-        "name": "金元素微尘",
+        "name": "土元素微尘",
         "quantity": 6
       }
     ]

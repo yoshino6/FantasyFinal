@@ -71,23 +71,38 @@ export const scaledDropEntries = <T extends { chance?: number; group?: string }>
   return result;
 };
 
+export type NegotiationCardPolicy = {
+  actualSuccessBonusPct?: number;
+  neutralGiftAggressionReductionPct?: number;
+  neutralGiftAggressionRetry?: boolean;
+  talkAggressionRetry?: boolean;
+  revealPreferenceCategory?: boolean;
+  revealNegotiationMoodBand?: boolean;
+  revealNegotiationMoodDirection?: boolean;
+  ignoreFirstProbeFailureEscalation?: boolean;
+};
+export type NegotiationCardRetryUsage = { neutralGift?: boolean; talk?: boolean; preference?: boolean; moodDirection?: boolean; firstProbe?: boolean };
 export type NegotiationState = {
   mood: number; remainder: number; failures: number; neutralCount: number; dislikeCount: number;
   goodwill: number; protection: number;
   companionGiftUsed?: boolean;
   achievementGiftRefusedBy?: number[];
+  cardPolicyByActor?: Record<string, NegotiationCardPolicy>;
+  cardRetryUsageByActor?: Record<string, NegotiationCardRetryUsage>;
+  cardPreferenceRevealsByActor?: Record<string, string[]>;
 };
 export const initialNegotiationState = (mood = 0): NegotiationState => ({ mood: clamp(Math.round(mood), -moodScale, moodScale), remainder: 0, failures: 0, neutralCount: 0, dislikeCount: 0, goodwill: 0, protection: 0 });
 export type NegotiationMove = { type: 'talk'; charm: number } | { type: 'gift'; preference: Preference; value: number; capacity: number };
-export type NegotiationOutcome = { state: NegotiationState; result: 'ongoing' | 'success' | 'combat'; protected: boolean; earned: boolean; refused: boolean };
+export type NegotiationOutcome = { state: NegotiationState; result: 'ongoing' | 'success' | 'combat'; protected: boolean; earned: boolean; refused: boolean; aggressionRetried?: boolean; failureEscalationIgnored?: boolean };
+export type NegotiationMoveOptions = { actualSuccessBonusPct?: number; neutralGiftAggressionReductionPct?: number; retryAggression?: boolean; ignoreFailureEscalation?: boolean };
 /** 纯规则：资格拒绝在调用前处理；保护拦截后不得写失败开战标记。 */
-export const resolveNegotiationMove = (before: NegotiationState, move: NegotiationMove, random: () => number = secureRandom): NegotiationOutcome => {
+export const resolveNegotiationMove = (before: NegotiationState, move: NegotiationMove, random: () => number = secureRandom, options: NegotiationMoveOptions = {}): NegotiationOutcome => {
   const state = { ...before }; let aggression = 0;
   if (move.type === 'talk') {
-    const probability = negotiationProbability(before.mood, move.charm);
+    const probability = clamp(negotiationProbability(before.mood, move.charm) + clamp(Number(options.actualSuccessBonusPct ?? 0), 0, 10) / 100, 0, 1);
     if (probability === 1 || random() < probability) return { state, result: 'success', protected: false, earned: false, refused: false };
     state.failures++; state.mood = Math.max(-moodScale, state.mood - 20_000);
-    aggression = talkAggression(state.mood, state.failures);
+    aggression = talkAggression(state.mood, options.ignoreFailureEscalation ? 0 : state.failures);
   } else {
     if (!Number.isFinite(move.value) || move.value <= 0 || !Number.isFinite(move.capacity) || move.capacity <= 0) throw new Error('物品参考价值尚未准备好。');
     if (move.preference === 'like' && state.mood === moodScale) return { state, result: 'ongoing', protected: false, earned: false, refused: true };
@@ -101,17 +116,21 @@ export const resolveNegotiationMove = (before: NegotiationState, move: Negotiati
       state.mood = Math.max(-moodScale, state.mood - Math.min(350_000, Math.max(1, Math.round(1.5 * move.value / move.capacity * moodScale))));
     } else state.neutralCount++;
     aggression = giftAggression(state.mood, move.preference);
+    if (move.preference === 'neutral') aggression *= 1 - clamp(Number(options.neutralGiftAggressionReductionPct ?? 0), 0, 100) / 100;
   }
+  const failureEscalationIgnored = move.type === 'talk' && Boolean(options.ignoreFailureEscalation);
   let earned = false;
   if (state.mood > before.mood) {
     state.goodwill++; aggression = 0;
     if (state.goodwill >= 3) { state.goodwill = 0; state.protection++; earned = true; }
   } else if (state.mood < before.mood) { state.goodwill = 0; state.remainder = 0; }
   if (aggression > 0 && random() < aggression) {
-    if (state.protection > 0) { state.protection--; return { state, result: 'ongoing', protected: true, earned, refused: false }; }
-    return { state, result: 'combat', protected: false, earned, refused: false };
+    const aggressionRetried = Boolean(options.retryAggression);
+    if (aggressionRetried && random() >= aggression) return { state, result: 'ongoing', protected: false, earned, refused: false, aggressionRetried, ...(failureEscalationIgnored ? { failureEscalationIgnored } : {}) };
+    if (state.protection > 0) { state.protection--; return { state, result: 'ongoing', protected: true, earned, refused: false, ...(aggressionRetried ? { aggressionRetried } : {}), ...(failureEscalationIgnored ? { failureEscalationIgnored } : {}) }; }
+    return { state, result: 'combat', protected: false, earned, refused: false, ...(aggressionRetried ? { aggressionRetried } : {}), ...(failureEscalationIgnored ? { failureEscalationIgnored } : {}) };
   }
-  return { state, result: 'ongoing', protected: false, earned, refused: false };
+  return { state, result: 'ongoing', protected: false, earned, refused: false, ...(failureEscalationIgnored ? { failureEscalationIgnored } : {}) };
 };
 
 export const synchronizeNegotiation = (shared: NegotiationState, memories: Array<Pick<NegotiationState, 'mood' | 'failures' | 'neutralCount' | 'dislikeCount'>>) => {

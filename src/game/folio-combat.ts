@@ -101,7 +101,7 @@ export const castFolioSkill = async (rules: CombatRules, source: RuleUnit, targe
                 }
                 const healing = ({ s02: .6, s04: .4, s06: .5 } as Record<string, number>)[id];
                 if (healing)
-                    await rules.restore(source, unit, healingMagic * healing, 0, false, healingMagic * (id === 's02' ? 1.2 : .8) * rules.healingMultiplier(source, unit));
+                    await rules.restore(source, unit, healingMagic * healing, 0, false, healingMagic * (id === 's02' ? 1.2 : .8) * rules.healingMultiplier(source, unit, true, true), true);
             }
             if (id === 's05' || id === 's17') {
                 const amount = unit.hpMax * folioBenefit(source, id === 's05' ? 12 : 8, id === 's05' ? 20 : 12) / 100;

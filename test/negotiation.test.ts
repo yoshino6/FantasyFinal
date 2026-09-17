@@ -39,6 +39,22 @@ test('分数心情累计、满心情拒收、交谈失败重置未完成积累',
   const failure = resolveNegotiationMove({ ...initialNegotiationState(), goodwill: 2 }, { type: 'talk', charm: 100 }, () => 1);
   assert.equal(failure.state.mood, -20000); assert.equal(failure.state.goodwill, 0); assert.equal(failure.state.failures, 1);
 });
+test('卡片成功率只加实际百分点；中性敌意相对降低，重判不重复应用行动', () => {
+  assert.equal(resolveNegotiationMove(initialNegotiationState(), { type: 'talk', charm: 0 }, () => .05, { actualSuccessBonusPct: 50 }).result, 'success');
+  const ordinary = resolveNegotiationMove(initialNegotiationState(), { type: 'gift', preference: 'neutral', value: 1, capacity: 100 }, () => .06);
+  const reduced = resolveNegotiationMove(initialNegotiationState(), { type: 'gift', preference: 'neutral', value: 1, capacity: 100 }, () => .06, { neutralGiftAggressionReductionPct: 50 });
+  assert.equal(ordinary.result, 'combat'); assert.equal(reduced.result, 'ongoing');
+  const rolls = [0, .99];
+  const retried = resolveNegotiationMove(initialNegotiationState(), { type: 'gift', preference: 'neutral', value: 1, capacity: 100 }, () => rolls.shift()!, { retryAggression: true });
+  assert.equal(retried.result, 'ongoing'); assert.equal(retried.aggressionRetried, true); assert.equal(retried.state.neutralCount, 1);
+});
+test('首次交谈失败可忽略连续失败加剧，但仍记录一次失败和心情下降', () => {
+  const without = [1, .48]; const withCard = [1, .48];
+  assert.equal(resolveNegotiationMove(initialNegotiationState(), { type: 'talk', charm: 0 }, () => without.shift()!).result, 'combat');
+  const protectedProbe = resolveNegotiationMove(initialNegotiationState(), { type: 'talk', charm: 0 }, () => withCard.shift()!, { ignoreFailureEscalation: true });
+  assert.equal(protectedProbe.result, 'ongoing'); assert.equal(protectedProbe.failureEscalationIgnored, true);
+  assert.equal(protectedProbe.state.failures, 1); assert.equal(protectedProbe.state.mood, -20000);
+});
 test('换队以共享与成员历史最低心情为准，新人不会把正心情归零', () => {
   const shared = { ...initialNegotiationState(800000), goodwill: 2, protection: 1 };
   assert.equal(synchronizeNegotiation(shared, []).mood, 800000);
@@ -67,6 +83,7 @@ test('实例、装备、地图、任务凭证、育成和绑定库存不能绕�
   assert.equal(classifyNegotiationItem({ ...item, item_type: 'equipment' }).usable, false);
   for (const category of ['地图', '任务', 'Boss部件', '世界印记', '育成', '图纸', '技能书']) assert.equal(classifyNegotiationItem({ ...item, item_category: category }).usable, false);
   assert.equal(classifyNegotiationItem({ ...item, effect_json: { important: true } }).usable, false);
+  assert.equal(classifyNegotiationItem({ ...item, item_category: '怪物卡片', effect_json: { monsterCard: true } }).usable, false);
   assert.equal(classifyNegotiationItem({ ...item, code: 'map_rabbit_bone', item_category: '怪材', trade_price: 0, effect_json: { monster_craft_material: 'bone' } }).usable, true);
   assert.equal(classifyNegotiationItem({ ...item, code: 'meat_chunk', item_category: '食材', trade_price: 0 }).usable, true);
   const items = Array.from({ length: 21 }, (_, i) => ({ ...item, id: i + 1, code: `wood${i}`, item_category: '锻材' }));

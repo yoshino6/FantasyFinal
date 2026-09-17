@@ -35,6 +35,7 @@ test('店铺翻页、搜索与确认保留来源，非炼金师不显示手记�
   withSecondaryShop(context('alchemy_sweetshop'),()=>{
     const result=JSON.stringify(secondaryShopFormatSource(source));
     assert(result.includes('/店铺炼金材料搜索 main '));assert(result.includes('/店铺确认炼金 token'));assert(result.includes('/店铺副职业 alchemy_sweetshop'));assert(result.includes('/背包'));assert(!result.includes('查看手记'));assert(result.includes('返回店铺'));assert(result.includes('不增加熟练度'));
+    assert(!result.includes('"autoEnter":true'),'代工流程的确认和返回均只填入命令');
   });
   withSecondaryShop(context('alchemy_sweetshop','alchemist'),()=>assert(JSON.stringify(secondaryShopFormatSource(source)).includes('/店铺炼金手记')));
   assert.equal(JSON.stringify(source),original);

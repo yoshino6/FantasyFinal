@@ -2,6 +2,7 @@ import { equipmentQualityMultiplier } from './constants';
 import { skillSpecialization } from './skill-specialization';
 import { readRuleState, ruleManaCost } from './combat-rule-registry';
 import { hiddenMix } from './hidden-particles';
+import { parseHiddenParticleInput } from './hidden-particle-input';
 import { HiddenBattleError } from './hidden-combat';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { withTransaction } from '../database/pool';
@@ -90,7 +91,14 @@ export const hiddenDraft = (user: string, code: string, revision?: number, opera
   let choice: HiddenChoice = draft?.skill_code === code && !draft.submitted ? object(draft.draft_json) : {};
   const [stocks] = await connection.execute<RowDataPacket[]>('SELECT i.code,p.quantity FROM player_inventory p JOIN item_definitions i ON i.id=p.item_id WHERE p.character_id=? FOR UPDATE',[character.id]);
   const inventory=Object.fromEntries(stocks.map(s=>[s.code,Number(s.quantity)]));
-  if (operation==='particle') { if (!hiddenParticles.some(p=>p.code===value)) throw new Error('粒子无效。'); choice.particles = [...(choice.particles??[]),value!]; if (choice.particles.length>4) throw new Error('最多放入4颗粒子。'); }
+  if (operation==='particle' || operation==='particles') {
+    if (!['hidden_mix','hidden_kettle'].includes(code)) throw new Error('该技能不能调配粒子。');
+    if (revision === undefined) throw new Error('请从当前调配面板选择粒子。');
+    const particles = parseHiddenParticleInput(value??'',code,revision);
+    choice.particles = operation==='particles' ? particles : [...(choice.particles??[]),...particles];
+    if (choice.particles.length>4) throw new Error('最多放入4颗粒子。');
+    if (operation==='particles' && choice.particles.length<2) throw new Error('完整调配需要2～4颗粒子。');
+  }
   if (operation==='undo') { choice.particles?.pop(); choice.weapons?.pop(); choice.devices?.pop(); }
   if (operation==='clear') choice = {};
   if (operation==='weapon') choice.weapons = [...(choice.weapons??[]),Number(value)];
@@ -99,7 +107,7 @@ export const hiddenDraft = (user: string, code: string, revision?: number, opera
   if (operation==='target') choice.target=value;
   if (operation==='donor') choice.donor=Number(value);
   const selected:Record<string,number>={};for(const particle of choice.particles??[])selected[particle]=(selected[particle]??0)+1;
-  if(operation==='particle')for(const [particle,count] of Object.entries(selected))if(count>(inventory[particle]??0))throw new HiddenBattleError(`${hiddenParticles.find(p=>p.code===particle)?.name??particle}不足：本次需要${count}个，背包现有${inventory[particle]??0}个。`);
+  if(operation==='particle'||operation==='particles')for(const [particle,count] of Object.entries(selected))if(count>(inventory[particle]??0))throw new HiddenBattleError(`${hiddenParticles.find(p=>p.code===particle)?.name??particle}不足：本次需要${count}个，背包现有${inventory[particle]??0}个。`);
   const next = Number(draft?.revision??0)+1;
   await connection.execute('INSERT INTO player_hidden_action_drafts (character_id,battle_key,turn_no,skill_code,draft_json,revision) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE skill_code=VALUES(skill_code),draft_json=VALUES(draft_json),revision=VALUES(revision),submitted=0',[character.id,key,turn,code,JSON.stringify(choice),next]);
   const ctx = await hiddenBattleContext(connection,Number(character.id),String(battle.id),kind);

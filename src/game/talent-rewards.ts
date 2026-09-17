@@ -110,7 +110,7 @@ export const talentProductionRecord = async(connection:PoolConnection,id:number,
   data.flags.productionAutomaton=automaton;data.flags.productionOrdinary=ordinary;await saveTalentData(connection,id,data);
 };
 
-export const ordinaryTalentItem = (item:Record<string,any>) => item.rarity==='普通' && !item.is_unique && !item.boss_source && !item.quest_bound && !['货币','任务','剧情','特殊','核心','粒子','Boss部件','育成','世界印记','稀有锻材'].includes(String(item.item_category));
+export const ordinaryTalentItem = (item:Record<string,any>) => item.rarity==='普通' && !item.is_unique && !item.boss_source && !item.quest_bound && !['货币','任务','剧情','特殊','核心','粒子','Boss部件','育成','世界印记','稀有锻材','怪物卡片'].includes(String(item.item_category));
 export const talentCraftMultiplier = async(connection:PoolConnection,id:number,item:Record<string,any>)=>{
   if(!ordinaryTalentItem(item))return 1;
   const talent=await ownedTalent(connection,id),data=await readTalentData(connection,id);

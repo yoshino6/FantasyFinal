@@ -12,6 +12,8 @@ test('六维承载公式与超重比例：低于及等于上限无惩罚，超�
   }
   const burden=encumbrance(attributes,120);
   assert.equal(burden.overloadPct,20);assert.equal(burden.speedPenaltyPct,20);assert.equal(burden.applySpeed(8),6.4);
+  assert.ok(Math.abs(burden.applyMapSpeed(8,20)-6.72)<1e-9);assert.ok(Math.abs(burden.mapSpeedPenaltyPct(20)-16)<1e-9);
+  assert.equal(burden.applySpeed(8),6.4); // 地图卡片减免不影响战斗/逃跑速度。
   assert.equal(encumbrance({...attributes,constitution:21,strength:32,spirit:11,intelligence:21,agility:31,perception:41},100).capacity,105);
 });
 
@@ -26,12 +28,13 @@ test('背包结算使用最终六维、实际库存和装备效果，每次读�
   const source=readFileSync('src/game/adventure.service.ts','utf8');
   const start=source.indexOf('export const inventory =');const end=source.indexOf('\n};',start)+3;
   const compiled=ts.transpileModule(source.slice(start,end),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-  let quantity=12,ignoreWeightPenalty=false;const final={...attributes};
+  let quantity=12,ignoreWeightPenalty=false;let cardEffects:Record<string,number>={};const final={...attributes};
   const pool={execute:async(sql:string)=>sql.includes('FROM player_inventory')?[[{quantity,weight:10}]]:[[{effect_json:{ignoreWeightPenalty,moveSpeedBonus:2}}]]};
   const module={exports:{} as any};
-  new Function('exports','characterFor','getPool','effectiveCharacterAttributes','jsonObject','encumbrance','movementSpeedFrom',compiled)(module.exports,async()=>({id:1,speed:100,level:30}),async()=>pool,async()=>final,(value:unknown)=>value,encumbrance,()=>6);
+  new Function('exports','characterFor','getPool','effectiveCharacterAttributes','jsonObject','encumbrance','movementSpeedFrom','equippedEnchantmentEffects','chargedMapMoveBonus','require',compiled)(module.exports,async()=>({id:1,speed:100,level:30}),async()=>pool,async()=>final,(value:unknown)=>value,encumbrance,()=>6,async()=>cardEffects,async()=>0,(id:string)=>id==='./talent-data'?{ownedTalent:async()=>null}:{});
   const read=()=>module.exports.inventory('test');
   const heavy=await read();assert.equal(heavy.weight,120);assert.equal(heavy.capacity,100);assert.equal(heavy.speed,80);assert.equal(heavy.movementSpeed,6.4);
+  cardEffects={mapMoveBonus:4,mapBurdenPenaltyReductionPct:20};const enchanted=await read();assert.equal(enchanted.speed,80);assert.equal(enchanted.movementSpeed,8.4);assert.ok(Math.abs(enchanted.mapSpeedPenaltyPct-16)<1e-9);cardEffects={};
   final.constitution+=20;const stronger=await read();assert.equal(stronger.capacity,120);assert.equal(stronger.speedPenaltyPct,0);assert.equal(stronger.movementSpeed,8);
   quantity=24;ignoreWeightPenalty=true;assert.equal((await read()).movementSpeed,8);
   ignoreWeightPenalty=false;assert.equal((await read()).movementSpeed,1);

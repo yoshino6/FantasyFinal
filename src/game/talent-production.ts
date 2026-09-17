@@ -76,7 +76,7 @@ export const fixedTalentMaterials=async(connection:PoolConnection,id:number,requ
     if(Number(item.quantity)>=paid){result.push({item,quantity:required.quantity});continue;}
     const missing=required.quantity-Number(item.quantity),value=missing*fixedMaterialValue(item);
     if(talent?.number!=='I02'||!data.settings.substitute||substituted||!auxiliaryCodes.includes(required.code)||!ordinaryTalentItem(item)||value<=0||value>ordinaryValue*.5)throw new Error(`材料不足：${item.name}需要${paid}份。`);
-    const [alternatives]=await connection.execute<RowDataPacket[]>(`SELECT i.*,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.item_type='material' AND i.rarity='普通' AND i.required_level=? ORDER BY i.id FOR UPDATE`,[id,item.required_level]);
+    const [alternatives]=await connection.execute<RowDataPacket[]>(`SELECT i.*,pi.quantity FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id WHERE pi.character_id=? AND i.item_type='material' AND i.item_category<>'怪物卡片' AND i.rarity='普通' AND i.required_level=? ORDER BY i.id FOR UPDATE`,[id,item.required_level]);
     // Integral value equality prevents free change or a negative material balance.
     const replacement=alternatives.find(other=>!codes.includes(String(other.code))&&ordinaryTalentItem(other)&&fixedMaterialValue(other)>0&&Number.isSafeInteger(value/fixedMaterialValue(other))&&Number(other.quantity)>=value/fixedMaterialValue(other));
     if(!replacement)throw new Error('没有价值恰好相等且数量足够的同阶普通替代材料。');

@@ -7,6 +7,7 @@ import { passiveSpecializationFactor, specializedPassiveValue } from './passive-
 import { CombatRules, readRuleState, type RuleStatus, type RuleUnit } from './combat-rule-registry';
 import { ruleAppraisalLevels } from './combat-rule-adapter';
 import { isCachedAdvancedPassiveKey } from './advanced-profession.config';
+import { equippedEnchantmentEffects } from './equipment-enchantment-effects';
 
 type Fighter = Record<string, any>;
 const record = (value: unknown): Record<string, any> => typeof value === 'string' ? JSON.parse(value) : (value ?? {}) as Record<string, any>;
@@ -15,6 +16,7 @@ export const createPvpCombatRules = async (connection: PoolConnection, fighters:
   const ids = fighters.map(f => Number(f.id));
   const appraisal = await ruleAppraisalLevels(connection, ids);
   const armorSets = await armorSetsFor(connection, ids);
+  const cardEffects = new Map(await Promise.all(ids.map(async id => [id, await equippedEnchantmentEffects(connection, id)] as const)));
   const openingEffects = await openingCombatEffectsFor(connection, ids, false);
   for(const fighter of fighters)await neutralTalentSnapshot(connection,fighter);
   const [passives] = await connection.execute<RowDataPacket[]>(`SELECT ps.character_id,s.code,s.passive_effect_json,s.tier,COALESCE(sp.level,1) AS potent_level FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id LEFT JOIN player_skill_specializations sp ON sp.character_id=ps.character_id AND sp.skill_id=s.id AND sp.specialization='potent' WHERE ps.character_id IN (${ids.map(() => '?').join(',')}) AND (s.category='bound' OR (s.category='passive' AND ps.passive_linked=1))`, ids);
@@ -29,7 +31,7 @@ export const createPvpCombatRules = async (connection: PoolConnection, fighters:
       get mp() { return Number(fighter.current_mp); }, set mp(value) { fighter.current_mp = Math.max(0, Math.floor(value)); }, mpMax: Number(fighter.mp_max),
       attack: Number(fighter.physical_attack), magic: Number(fighter.magic_attack), defense: Number(fighter.physical_defense), magicDefense: Number(fighter.magic_defense),
       accuracy: Number(fighter.accuracy), evasion: Number(fighter.evasion), speed: Number(fighter.speed), crit: Number(fighter.crit_rate_bp), critResist: Number(fighter.crit_resist_bp), critDamage: Number(fighter.crit_damage_bp), critReduction: Number(fighter.crit_damage_reduction_bp), pierce: Number(fighter.tenacity_pierce ?? 0), tenacity: Number(fighter.tenacity ?? 0),
-      armorSet: armorSets.get(Number(fighter.id)), opening: openingEffects.get(Number(fighter.id)), state, cooldowns, passives: owned.map(row => String(row.code)), modifiers,
+      armorSet: armorSets.get(Number(fighter.id)), opening: openingEffects.get(Number(fighter.id)), state, cooldowns, passives: owned.map(row => String(row.code)), modifiers, cardEffects: cardEffects.get(Number(fighter.id)) ?? {},
       passiveSpecializations: Object.fromEntries(owned.map(row => [row.code, passiveSpecializationFactor(row.potent_level, String(row.tier))])),
       weaponsDifferent: Number(weapons.find(row => Number(row.character_id) === Number(fighter.id))?.types ?? 0) > 1,
       mastery: record(fighter.element_mastery_json), resistance: record(fighter.element_resistance_json), appraisal: appraisal.get(Number(fighter.id)) ?? 0 };

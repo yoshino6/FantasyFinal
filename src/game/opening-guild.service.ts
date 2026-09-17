@@ -125,7 +125,8 @@ export const openingKeepsakes=async(user:string)=>{
   const[events]=await pool.execute<RowDataPacket[]>('SELECT text,created_at FROM opening_world_events ORDER BY created_at DESC LIMIT 8');
   return{items:rows.map(r=>{const item=parse(r.record_json);return{name:String(item.name),use:String(item.use),future:String(item.future),code:String(r.code),used:Boolean(r.used),archived:Boolean(r.archived),recordOnly:Boolean(item.recordOnly),route:String(item.route??'')};}),events};
 };
-export const openingTransport=async(user:string,destination:string)=>withTransaction(async c=>{
+export const openingTransport=async(user:string,destination:string)=>withTransaction(c=>openingTransportIn(c,user,destination));
+export const openingTransportIn=async(c:PoolConnection,user:string,destination:string)=>{
   const character=await openingCharacter(c,user,true);const context=await requireGuildService(c,Number(character.id));const target=openingHubs[destination as OpeningHubCode];
   if(destination==='floating_leaf_town')await(await import('./leaf-route.service')).assertLeafPermit(c,Number(character.id));
   if(context.code==='floating_leaf_town')await(await import('./floating-leaf.service')).assertFloatingTourFreeAction(c,Number(character.id));
@@ -139,4 +140,4 @@ export const openingTransport=async(user:string,destination:string)=>withTransac
   await ensureMapRegions(c,Number(character.id),[destination]);
   await recordCharacterOperation(c,{characterId:Number(character.id),kind:'travel.guild_transport',source:{system:'guild_transport',id:randomUUID(),step:'arrived'},outcome:'抵达',summary:`乘公会接驳舱抵达${target.name}`,detail:{destinationCode:destination,destinationRegionId:Number(point.id)}});
   return `公会工作人员打开有护栏的接驳舱，确认行李安放妥当后启动线路。途中无需穿过野怪领地。\n\n舱门再次打开时，${target.name}的公会入口已经在眼前。`;
-});
+};

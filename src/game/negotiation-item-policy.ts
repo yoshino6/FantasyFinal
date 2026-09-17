@@ -10,7 +10,7 @@ export const negotiationItemObject = (raw: unknown): Record<string, any> => {
   return raw && typeof raw === 'object' ? raw as Record<string, any> : {};
 };
 const categories: Record<string, string> = { 怪材: '兽材', 建材: '木石', 锻材: '金属', 稀有锻材: '金属', 区域锻材: '金属', 基材: '零件', 构件: '零件', 炼材: '炼材', 食材: '鲜肉', 草药: '草药' };
-const protectedCategories = new Set(['地图', '图纸', '技能书', '任务', '剧情', '货币', '世界印记', 'Boss部件', '育成', '礼物']);
+const protectedCategories = new Set(['地图', '图纸', '技能书', '任务', '剧情', '货币', '世界印记', 'Boss部件', '育成', '礼物', '怪物卡片']);
 const protectedCodes = new Set(['sky_dust', 'evolution_seed', 'adventurer_card', 'celestial_judicator_imitation', 'demon_breaker_teleporter']);
 const plantCodes = new Set(['healing_herb', 'herbal_extract', 'living_wood', 'magic_branch']);
 /** 零收购价不代表没有价值；复用材料固定成本，不读取联市成交价。 */
@@ -31,6 +31,7 @@ export const classifyNegotiationItem = (item: NegotiationItem): NegotiationItemP
   const effects = negotiationItemObject(item.effect_json);
   const deny = (reason: string): NegotiationItemPolicy => ({ usable: false, category: item.item_category || '未分类', subtype: '禁止', reason, value: Number(item.trade_price) || 0 });
   if (item.source === 'instance' || ['equipment', 'device'].includes(item.item_type) || !Number(item.stackable)) return deny('实例物品不能用于交涉');
+  if (item.item_category === '怪物卡片' || effects.monsterCard) return deny('怪物卡片不能作为普通交涉礼物');
   if (protectedCategories.has(item.item_category) || protectedCodes.has(item.code) || /^(blueprint_|relic_)/.test(item.code)
     || effects.map || effects.quest || effects.questItem || effects.important || effects.worldInsight || effects.evolutionMaterial || effects.evolutionSeed || effects.adventurerCard || effects.epic_boss_part || effects.epic_blueprint || effects.constructionBlueprint || effects.npcGift) return deny('地图、任务重要物品与解锁凭证不能用于交涉');
   let subtype = plantCodes.has(item.code) ? '草药' : categories[item.item_category];

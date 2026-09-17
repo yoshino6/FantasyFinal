@@ -1,7 +1,7 @@
 import type { RowDataPacket } from 'mysql2/promise';
 import { getPool, withTransaction } from '../database/pool';
 import { folioSkillByCode } from './active-folio-skills.config';
-import { battleStatus, submitFolioActionInTransaction } from './adventure.service';
+import { battleStatus, finalizeCombatCardGrants, submitFolioActionInTransaction } from './adventure.service';
 const parse = (value: unknown) => typeof value === 'string' ? JSON.parse(value) : value ?? {};
 export const folioTargetView = async (user: string, slot: number) => {
     const c = await getPool();
@@ -18,7 +18,7 @@ export const folioTargetView = async (user: string, slot: number) => {
     const primary = (friendly ? battle.selectedAllyId ?? battle.characterId : battle.selectedTargetId) ?? pool[0]?.id;
     return { skill, battle, pool, primary };
 };
-export const saveFolioTargets = async (user: string, slot: number, ids: number[], turn: number, session: string) => withTransaction(async (c) => {
+export const saveFolioTargets = async (user: string, slot: number, ids: number[], turn: number, session: string) => finalizeCombatCardGrants(await withTransaction(async (c) => {
     const [rows] = await c.execute<RowDataPacket[]>('SELECT m.*,s.turn_no FROM combat_members m JOIN combat_sessions s ON s.id=m.session_id AND s.state=\'active\' JOIN characters ch ON ch.id=m.character_id JOIN players p ON p.id=ch.player_id WHERE p.qq_user_id=? FOR UPDATE', [user]);
     const row = rows[0];
     if (!row || row.session_id !== session || Number(row.turn_no) !== turn || row.pending_action)
@@ -35,4 +35,4 @@ export const saveFolioTargets = async (user: string, slot: number, ids: number[]
     cooldowns.__folioDraft = { code: view.skill.code, turn, ids };
     await c.execute('UPDATE combat_members SET cooldowns=? WHERE session_id=? AND character_id=?', [JSON.stringify(cooldowns), session, row.character_id]);
     return submitFolioActionInTransaction(c, user, slot);
-});
+}));

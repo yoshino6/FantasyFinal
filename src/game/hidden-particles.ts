@@ -1,8 +1,8 @@
-/** 调配只使用这12种粒子；旧“金元素微尘”沿用物品身份，对应土元素。 */
+/** 调配只使用这12种粒子；内部代码 metal_element_dust 对应土元素。 */
 export const hiddenParticles = [
   { code: 'water_element_dust', name: '水微尘', element: '水', role: '即时恢复' },
   { code: 'fire_element_dust', name: '火微尘', element: '火', role: '爆发与灼烧' },
-  { code: 'metal_element_dust', name: '土相微尘', element: '土', role: '护盾与承伤' },
+  { code: 'metal_element_dust', name: '土元素微尘', element: '土', role: '护盾与承伤' },
   { code: 'wood_element_dust', name: '木微尘', element: '木', role: '持续再生' },
   { code: 'wind_element_dust', name: '风微尘', element: '风', role: '扩散至多目标' },
   { code: 'ice_element_dust', name: '冰微尘', element: '冰', role: '减速与冻结' },
