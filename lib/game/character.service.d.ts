@@ -29,9 +29,7 @@ export type CharacterView = Allocation & DerivedStats & {
 };
 export declare const armorClassDefenseMultiplier: (_subtype: string | null | undefined, _key: "physicalDefense" | "magicDefense") => number;
 export declare const withVirtualNpcEquipment: (stats: DerivedStats, level: number, npcCode: string | null) => DerivedStats;
-export declare const equipmentExtraAttributes: (connection: Pool | PoolConnection, characterId: number) => Promise<{
-    [k: string]: number;
-}>;
+export declare const equipmentExtraAttributes: (connection: Pool | PoolConnection, characterId: number) => Promise<Record<string, number>>;
 export declare const effectiveCharacterAttributes: (connection: Pool | PoolConnection, character: Record<string, unknown>, characterId: number) => Promise<Allocation>;
 export declare const recalculateCharacterStats: (connection: Pool | PoolConnection, characterId: number) => Promise<void>;
 export declare const refreshCharacterStamina: (connection: PoolConnection, characterId: number) => Promise<{

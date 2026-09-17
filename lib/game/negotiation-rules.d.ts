@@ -84,6 +84,23 @@ export declare const scaledDropEntries: <T extends {
     chance?: number;
     group?: string;
 }>(entries: T[], probability: (entry: T) => number, multiplier: number, random?: () => number) => T[];
+export type NegotiationCardPolicy = {
+    actualSuccessBonusPct?: number;
+    neutralGiftAggressionReductionPct?: number;
+    neutralGiftAggressionRetry?: boolean;
+    talkAggressionRetry?: boolean;
+    revealPreferenceCategory?: boolean;
+    revealNegotiationMoodBand?: boolean;
+    revealNegotiationMoodDirection?: boolean;
+    ignoreFirstProbeFailureEscalation?: boolean;
+};
+export type NegotiationCardRetryUsage = {
+    neutralGift?: boolean;
+    talk?: boolean;
+    preference?: boolean;
+    moodDirection?: boolean;
+    firstProbe?: boolean;
+};
 export type NegotiationState = {
     mood: number;
     remainder: number;
@@ -94,6 +111,9 @@ export type NegotiationState = {
     protection: number;
     companionGiftUsed?: boolean;
     achievementGiftRefusedBy?: number[];
+    cardPolicyByActor?: Record<string, NegotiationCardPolicy>;
+    cardRetryUsageByActor?: Record<string, NegotiationCardRetryUsage>;
+    cardPreferenceRevealsByActor?: Record<string, string[]>;
 };
 export declare const initialNegotiationState: (mood?: number) => NegotiationState;
 export type NegotiationMove = {
@@ -111,8 +131,16 @@ export type NegotiationOutcome = {
     protected: boolean;
     earned: boolean;
     refused: boolean;
+    aggressionRetried?: boolean;
+    failureEscalationIgnored?: boolean;
 };
-export declare const resolveNegotiationMove: (before: NegotiationState, move: NegotiationMove, random?: () => number) => NegotiationOutcome;
+export type NegotiationMoveOptions = {
+    actualSuccessBonusPct?: number;
+    neutralGiftAggressionReductionPct?: number;
+    retryAggression?: boolean;
+    ignoreFailureEscalation?: boolean;
+};
+export declare const resolveNegotiationMove: (before: NegotiationState, move: NegotiationMove, random?: () => number, options?: NegotiationMoveOptions) => NegotiationOutcome;
 export declare const synchronizeNegotiation: (shared: NegotiationState, memories: Array<Pick<NegotiationState, "mood" | "failures" | "neutralCount" | "dislikeCount">>) => {
     mood: number;
     goodwill: number;
@@ -123,4 +151,7 @@ export declare const synchronizeNegotiation: (shared: NegotiationState, memories
     protection: number;
     companionGiftUsed?: boolean;
     achievementGiftRefusedBy?: number[];
+    cardPolicyByActor?: Record<string, NegotiationCardPolicy>;
+    cardRetryUsageByActor?: Record<string, NegotiationCardRetryUsage>;
+    cardPreferenceRevealsByActor?: Record<string, string[]>;
 };

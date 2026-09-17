@@ -82,3 +82,4 @@ export declare const openingKeepsakes: (user: string) => Promise<{
     events: RowDataPacket[];
 }>;
 export declare const openingTransport: (user: string, destination: string) => Promise<string>;
+export declare const openingTransportIn: (c: PoolConnection, user: string, destination: string) => Promise<string>;

@@ -8,6 +8,8 @@ export type ArmorSet = {
     evasionCorrectionPct: number;
     critAvoidanceCorrectionPct: number;
     critDamageCorrectionPct: number;
+    actualHitRatePct?: number;
+    actualCritRatePct?: number;
     damageReductionPct: number;
     panelPercent: Record<string, number>;
 };

@@ -4,4 +4,6 @@ export declare const encumbrance: (attributes: Allocation, weight: number, ignor
     overloadPct: number;
     speedPenaltyPct: number;
     applySpeed: (speed: number) => number;
+    applyMapSpeed: (speed: number, relativeReductionPct?: number) => number;
+    mapSpeedPenaltyPct: (relativeReductionPct?: number) => number;
 };

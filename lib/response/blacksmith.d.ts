@@ -1,4 +1,5 @@
 import { Format } from 'alemonjs';
+export declare const requireBlacksmith: (qqUserId: string) => Promise<void>;
 export declare const blacksmithButtons: () => import("alemonjs").FormatButtonGroup;
 export declare const blacksmithFormat: (qqUserId: string, text?: string) => Promise<Format>;
 declare const _default: () => Promise<void>;

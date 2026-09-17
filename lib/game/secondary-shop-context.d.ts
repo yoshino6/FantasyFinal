@@ -15,6 +15,14 @@ export type ShopContext = {
 export declare const currentSecondaryShop: () => ShopContext | undefined;
 export declare const withSecondaryShop: <T>(context: ShopContext, work: () => T) => T;
 export declare const shopProficiency: (amount: number) => number;
+export declare const awardSecondaryShopCraftAffinity: (connection: PoolConnection, characterId: number) => Promise<{
+    affinity: number;
+    dailyInteractions: number;
+    rank: {
+        level: number;
+        title: string;
+    };
+} | undefined>;
 export declare const shopProgressFor: (connection: Pick<Pool | PoolConnection, "execute">, characterId: number, profession: string) => Promise<{
     level: number;
     proficiency: number;

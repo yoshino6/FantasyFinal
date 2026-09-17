@@ -66,6 +66,7 @@ export type RuleUnit = {
     resistance: Record<string, number>;
     mastery: Record<string, number>;
     modifiers?: Record<string, number>;
+    cardEffects?: Record<string, any>;
     castSpecialization?: SkillSpecializationResult;
     passiveSpecializations?: Record<string, number>;
     participating?: boolean;
@@ -137,8 +138,8 @@ export declare class CombatRules {
         category: string;
         cooldown: number;
     }): Promise<void>;
-    healingMultiplier(source: RuleUnit, target: RuleUnit, equipment?: boolean): number;
-    restore(source: RuleUnit, target: RuleUnit, hp: number, mp?: number, echo?: boolean, maxHealing?: number): Promise<void>;
+    healingMultiplier(source: RuleUnit, target: RuleUnit, equipment?: boolean, activeHealing?: boolean): number;
+    restore(source: RuleUnit, target: RuleUnit, hp: number, mp?: number, echo?: boolean, maxHealing?: number, activeHealing?: boolean): Promise<void>;
     rootEcho(source: RuleUnit): Promise<void>;
     shield(source: RuleUnit, target: RuleUnit, amount: number, duration: number): Promise<void>;
     supportSnapshot(unit: RuleUnit): {

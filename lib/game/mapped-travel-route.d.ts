@@ -17,5 +17,5 @@ type Point = {
     z: number;
 };
 export declare const hasMappedTravelRoute: (areas: MappedTravelArea[], owned: ReadonlySet<number>, start: Point, target: Point, targetRegionId: number) => boolean;
-export declare const assertMappedTravelRoute: (connection: PoolConnection, characterId: number, partyId: number | undefined, start: Point, target: Point, targetRegionId: number) => Promise<void>;
+export declare const assertMappedTravelRoute: (connection: PoolConnection, characterId: number, partyId: string | number | undefined, start: Point, target: Point, targetRegionId: number) => Promise<void>;
 export {};

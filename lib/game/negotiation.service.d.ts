@@ -1,6 +1,6 @@
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { negotiationInventoryPage } from './negotiation-item-policy';
-import { type NegotiationState } from './negotiation-rules';
+import { type NegotiationState, type NegotiationCardPolicy } from './negotiation-rules';
 export type NegotiationCommand = {
     type: 'view' | 'talk' | 'gift' | 'leave' | 'fight';
     sessionId?: string;
@@ -36,6 +36,7 @@ export type NegotiationContext = {
     drops: NegotiationDrop[];
     capacity: number;
     completionText?: string;
+    cardPolicy?: NegotiationCardPolicy;
 };
 type Session = RowDataPacket & {
     id: string;
@@ -72,7 +73,7 @@ export type NegotiationResult = NegotiationView | {
 export type NegotiationHooks = {
     random?: () => number;
     activate: (sessionId: string) => Promise<Record<string, boolean>>;
-    fight: (eligibility: Record<string, boolean>, sessionId: string, failed: boolean) => Promise<string>;
+    fight: (eligibility: Record<string, boolean> | undefined, sessionId: string, failed: boolean) => Promise<string>;
     settle: (state: NegotiationState, eligibility: Record<string, boolean>, drops: NegotiationDrop[], sessionId: string) => Promise<string>;
 };
 export declare const readNegotiationReplay: (connection: PoolConnection, actorId: number, command: NegotiationCommand) => Promise<NegotiationResult | undefined>;

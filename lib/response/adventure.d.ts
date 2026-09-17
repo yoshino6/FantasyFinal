@@ -71,3 +71,4 @@ export declare const encounterHandler: (action: "avoid" | "persuade", title: str
 export declare const alchemyAllyHandler: () => Promise<void>;
 export declare const hiddenCombatConfirmHandler: () => Promise<void>;
 export declare const defendHandler: () => Promise<void>;
+export declare const confirmGoToHandler: () => Promise<void>;

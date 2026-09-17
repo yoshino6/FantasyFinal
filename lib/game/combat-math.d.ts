@@ -5,15 +5,18 @@ export type StrikeCorrections = {
     evasionCorrectionPct?: number;
     critAvoidanceCorrectionPct?: number;
     critDamageCorrectionPct?: number;
+    actualHitRatePct?: number;
+    actualCritRatePct?: number;
+};
+export type StrikeCorrectionSource = StrikeCorrections & {
+    armorSet?: StrikeCorrections | null;
+    cardEffects?: StrikeCorrections | null;
 };
 export declare const correctedHitChance: (chance: number, correction?: StrikeCorrections) => number;
+export declare const resolvedHitChance: (chance: number, actualHitRatePct?: number, hitMultiplier?: number, minimumHitRatePct?: number, correction?: StrikeCorrections) => number;
 export declare const correctedCritChance: (chance: number, correction?: StrikeCorrections) => number;
 export declare const correctedCritBonus: (bonus: number, correction?: StrikeCorrections) => number;
-export declare const strikeCorrections: (source?: {
-    armorSet?: StrikeCorrections | null;
-}, target?: {
-    armorSet?: StrikeCorrections | null;
-}) => StrikeCorrections;
+export declare const strikeCorrections: (source?: StrikeCorrectionSource, target?: StrikeCorrectionSource) => StrikeCorrections;
 export declare const bossControlChanceMultiplier = 0.4;
 export declare const tenacityContest: (tenacityPierce: number, targetTenacity: number, levelDifference: number, baseChancePct: number) => {
     coefficient: number;

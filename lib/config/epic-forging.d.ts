@@ -1,5 +1,6 @@
 export type EpicSetCode = 'mountainheart_regalia' | 'valk_forge_regalia' | 'mistmother_cocoon' | 'goblin_court_hunt';
 export type EpicArmorSlot = '头肩' | '上装' | '腰部' | '下装' | '脚部';
+export declare const epicBlueprintDropChance: Record<'武器' | EpicArmorSlot, number>;
 export type EpicForgeRecipe = {
     code: string;
     blueprintCode: string;

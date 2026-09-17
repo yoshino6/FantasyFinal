@@ -10,7 +10,7 @@ export declare const hiddenParticles: readonly [{
     readonly role: "爆发与灼烧";
 }, {
     readonly code: "metal_element_dust";
-    readonly name: "土相微尘";
+    readonly name: "土元素微尘";
     readonly element: "土";
     readonly role: "护盾与承伤";
 }, {

@@ -158,6 +158,10 @@ export declare const deconstructionItems: (qqUserId: string, category?: Deconstr
     name: string;
     category: string;
     quantity: number;
+    canDeconstruct: boolean;
+    preview: string;
+    notice: string;
+    blockReason: string;
 }[]>;
 export declare const deconstructItems: (qqUserId: string, itemId: number, quantity?: number) => Promise<{
     inputName: string;

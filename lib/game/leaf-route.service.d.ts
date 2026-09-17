@@ -2,7 +2,7 @@ import type { Pool, PoolConnection } from 'mysql2/promise';
 type Db = Pool | PoolConnection;
 export declare const hasLeafPermit: (c: Db, id: number) => Promise<boolean>;
 export declare const assertLeafPermit: (c: Db, id: number) => Promise<void>;
-export declare const assertLeafDestination: (c: Db, id: number, regionId: number, partyId?: number) => Promise<void>;
+export declare const assertLeafDestination: (c: Db, id: number, regionId: number, partyId?: string | number) => Promise<void>;
 export declare const leafRoutePoint: (stage: number, work: number) => {
     region: string;
     x: number;

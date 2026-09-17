@@ -117,6 +117,7 @@ type CombatRetreatPosition = {
 export type VictorySettlement = {
     kind: 'victory';
     members: {
+        characterId: number;
         name: string;
         experience: number;
         staminaSpent?: number;
@@ -224,6 +225,7 @@ export declare const settleHomeRestExperience: (connection: PoolConnection, char
 }>;
 export declare const bossRandomEffectSummary: (traits: unknown) => string[];
 export declare const decayWorldBossTraits: (pool: Pool) => Promise<number>;
+export declare const ensureForestGuideFreeAction: (connection: Pool | PoolConnection, characterId: number) => Promise<void>;
 export declare const startRest: (qqUserId: string) => Promise<{
     resting: boolean;
     message: string;
@@ -323,6 +325,8 @@ export declare const inventory: (qqUserId: string) => Promise<{
     movementSpeed: number;
     overloadPct: number;
     speedPenaltyPct: number;
+    mapSpeedPenaltyPct: number;
+    chargedMoveBonus: number;
 }>;
 export declare const movementProfile: (qqUserId: string) => Promise<{
     step: number;
@@ -396,6 +400,14 @@ export declare const itemCodex: (qqUserId: string, codexId: string) => Promise<R
     effect_json: unknown;
 }>;
 export declare const equipmentDetail: (qqUserId: string, instanceId: number) => Promise<{
+    enchantment: {
+        cardCode: string;
+        cardVersion: number;
+        cardName: string;
+        effectText: string;
+        effects: Record<string, unknown>;
+        allowedSlots: string[];
+    } | null;
     fusionEffects: {
         materialName: string;
         key: string;
@@ -416,8 +428,25 @@ export declare const equipmentDetail: (qqUserId: string, instanceId: number) => 
     effect_json: unknown;
     forge_primary_json: unknown;
     description: string;
+    enchant_card_code: string | null;
+    enchant_card_version: number | null;
+    enchant_card_name: string | null;
+    enchant_effect_text: string | null;
+    enchant_effects_json: unknown;
+    enchant_allowed_slots_json: unknown;
 }>;
-export declare const equippedEquipmentDetails: (qqUserId: string) => Promise<(RowDataPacket & {
+export declare const equippedEquipmentDetails: (qqUserId: string) => Promise<{
+    enchantment: {
+        cardCode: string;
+        cardVersion: number;
+        cardName: string;
+        effectText: string;
+        effects: Record<string, unknown>;
+        allowedSlots: string[];
+    } | null;
+    constructor: {
+        name: "RowDataPacket";
+    };
     slot: string;
     instance_id: number | null;
     name: string;
@@ -431,7 +460,13 @@ export declare const equippedEquipmentDetails: (qqUserId: string) => Promise<(Ro
     effect_json: unknown;
     forge_primary_json: unknown;
     description: string;
-})[]>;
+    enchant_card_code: string | null;
+    enchant_card_version: number | null;
+    enchant_card_name: string | null;
+    enchant_effect_text: string | null;
+    enchant_effects_json: unknown;
+    enchant_allowed_slots_json: unknown;
+}[]>;
 export declare const equipment: (qqUserId: string) => Promise<{
     appearanceName: string | undefined;
     constructor: {
@@ -447,6 +482,7 @@ export declare const equipmentCandidates: (qqUserId: string, slot: string) => Pr
     id: number;
     name: string;
     required_level: number;
+    allowed_slots_json: unknown;
 })[]>;
 export declare const unequip: (qqUserId: string, slot: string) => Promise<RowDataPacket & {
     name: string;
@@ -457,6 +493,7 @@ export declare const equip: (qqUserId: string, slot: string, instanceId: number)
     name: string;
     rarity: string;
     required_level: number;
+    allowed_slots_json: unknown;
 }>;
 export declare const skillList: (qqUserId: string) => Promise<{
     skillPoints: number;
@@ -643,6 +680,9 @@ export type NearbyPoint = {
     pvpAvailable?: boolean;
     wanted?: boolean;
     isTrialTarget?: boolean;
+    observedOnly?: boolean;
+    trackable?: boolean;
+    movementState?: '移动' | '静止';
 };
 export type MapLandmark = {
     code?: string;
@@ -656,6 +696,7 @@ export type MapLandmark = {
 export declare const nearbyPoints: (qqUserId: string) => Promise<{
     character: CharacterRow;
     range: number;
+    actionRange: number;
     perceptionObscured: boolean;
     points: any[];
     landmarks: {
@@ -671,6 +712,29 @@ export declare const nearbyPoints: (qqUserId: string) => Promise<{
     npcDetailsUnlocked: boolean;
     description: string;
 }>;
+export declare const trackMonster: (qqUserId: string, spawnId: number) => Promise<{
+    marked: import("./monster-card-exploration.service").TrackedMonster;
+    tracked: import("./monster-card-exploration.service").TrackedMonster[];
+    maxTargets: number;
+}>;
+export declare const trackedMonsters: (qqUserId: string) => Promise<{
+    tracked: import("./monster-card-exploration.service").TrackedMonster[];
+    maxTargets: number;
+    active: boolean;
+}>;
+export declare const untrackMonster: (qqUserId: string, spawnId: number) => Promise<import("./monster-card-exploration.service").TrackedMonster[]>;
+export declare const requireNpcForOrdinaryTalk: (qqUserId: string, code: string) => Promise<{
+    remoteTalk: boolean;
+    constructor: {
+        name: "RowDataPacket";
+    };
+    name: string;
+    description: string;
+    interaction_kind: "npc" | "building";
+    x: number;
+    y: number;
+    z: number;
+}>;
 export declare const requireNpcAtCurrentPosition: (qqUserId: string, code: string) => Promise<RowDataPacket & {
     name: string;
     description: string;
@@ -683,6 +747,14 @@ export declare const npcAffinityRank: (affinity: number) => {
     title: string;
 };
 export declare const addNpcAffinity: (qqUserId: string, code: string, interaction?: NpcAffinityInteraction) => Promise<{
+    affinity: number;
+    dailyInteractions: number;
+    rank: {
+        level: number;
+        title: string;
+    };
+}>;
+export declare const addNpcAffinityFor: (connection: PoolConnection, characterId: number, code: string, interaction?: NpcAffinityInteraction) => Promise<{
     affinity: number;
     dailyInteractions: number;
     rank: {
@@ -785,7 +857,12 @@ export declare const coordinateInteraction: (qqUserId: string, type: CoordinateI
 export declare const moveTo: (qqUserId: string, x: number, y: number, z: number, options?: {
     destinationKind?: "normal" | "home";
     destinationRegionId?: number;
+    confirmationToken?: string;
 }) => Promise<{
+    kind: "travel_confirmation";
+    token: `${string}-${string}-${string}-${string}-${string}`;
+    plan: import("./connected-travel.service").TravelPlan;
+} | {
     character: {
         enteredTown: boolean;
         debtCollection: {
@@ -1633,6 +1710,10 @@ export declare const moveToNearbyMonster: (qqUserId: string, spawnId: number) =>
     canAmbush: boolean;
 }>;
 export declare const moveToMap: (qqUserId: string, mapCode: string) => Promise<{
+    kind: "travel_confirmation";
+    token: `${string}-${string}-${string}-${string}-${string}`;
+    plan: import("./connected-travel.service").TravelPlan;
+} | {
     character: {
         enteredTown: boolean;
         debtCollection: {
@@ -2503,6 +2584,13 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
     arrivalActivity: "hunt";
     destinationKind: "normal" | "home";
 } | {
+    kind: "route_cancelled";
+    character: CharacterRow;
+    text: string;
+    arrivalActivity: "move";
+    destinationKind: "normal";
+} | {
+    routeNotices: string[];
     arrivalActivity: "move" | "hunt";
     destinationKind: "normal" | "home";
     character: {
@@ -2583,6 +2671,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
     discovery?: undefined;
     dungeon?: undefined;
 } | {
+    routeNotices: string[];
     arrivalActivity: "move" | "hunt";
     destinationKind: "normal" | "home";
     character: {
@@ -2663,6 +2752,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
     discovery?: undefined;
     dungeon?: undefined;
 } | {
+    routeNotices: string[];
     arrivalActivity: "move" | "hunt";
     destinationKind: "normal" | "home";
     character: {
@@ -2743,6 +2833,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
     discovery?: undefined;
     dungeon?: undefined;
 } | {
+    routeNotices: string[];
     arrivalActivity: "move" | "hunt";
     destinationKind: "normal" | "home";
     character: {
@@ -2832,6 +2923,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
     discovery?: undefined;
     dungeon?: undefined;
 } | {
+    routeNotices: string[];
     arrivalActivity: "move" | "hunt";
     destinationKind: "normal" | "home";
     character: {
@@ -2917,6 +3009,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
     discovery?: undefined;
     dungeon?: undefined;
 } | {
+    routeNotices: string[];
     arrivalActivity: "move" | "hunt";
     destinationKind: "normal" | "home";
     character: {
@@ -3011,6 +3104,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
     npc?: undefined;
     dungeon?: undefined;
 } | {
+    routeNotices: string[];
     arrivalActivity: "move" | "hunt";
     destinationKind: "normal" | "home";
     character: {
@@ -3115,6 +3209,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
     entrance?: undefined;
     discovery?: undefined;
 } | {
+    routeNotices: string[];
     arrivalActivity: "move" | "hunt";
     destinationKind: "normal" | "home";
     character: {
@@ -3195,6 +3290,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
     discovery?: undefined;
     dungeon?: undefined;
 } | {
+    routeNotices: string[];
     arrivalActivity: "move" | "hunt";
     destinationKind: "normal" | "home";
     character: {
@@ -3275,6 +3371,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
     discovery?: undefined;
     dungeon?: undefined;
 } | {
+    routeNotices: string[];
     arrivalActivity: "move" | "hunt";
     destinationKind: "normal" | "home";
     character: {
@@ -3397,6 +3494,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             text: string;
         } | null;
     };
+    routeNotices: string[];
     arrivalActivity: "move" | "hunt";
     destinationKind: "normal" | "home";
     character: {
@@ -3495,6 +3593,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             text: string;
         } | null;
     };
+    routeNotices: string[];
     arrivalActivity: "move" | "hunt";
     destinationKind: "normal" | "home";
     character: {
@@ -3593,6 +3692,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             text: string;
         } | null;
     };
+    routeNotices: string[];
     arrivalActivity: "move" | "hunt";
     destinationKind: "normal" | "home";
     character: {
@@ -3691,6 +3791,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             text: string;
         } | null;
     };
+    routeNotices: string[];
     arrivalActivity: "move" | "hunt";
     destinationKind: "normal" | "home";
     character: {
@@ -3798,6 +3899,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             text: string;
         } | null;
     };
+    routeNotices: string[];
     arrivalActivity: "move" | "hunt";
     destinationKind: "normal" | "home";
     character: {
@@ -3901,6 +4003,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             text: string;
         } | null;
     };
+    routeNotices: string[];
     arrivalActivity: "move" | "hunt";
     destinationKind: "normal" | "home";
     character: {
@@ -4013,6 +4116,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             text: string;
         } | null;
     };
+    routeNotices: string[];
     arrivalActivity: "move" | "hunt";
     destinationKind: "normal" | "home";
     character: {
@@ -4135,6 +4239,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             text: string;
         } | null;
     };
+    routeNotices: string[];
     arrivalActivity: "move" | "hunt";
     destinationKind: "normal" | "home";
     character: {
@@ -4233,6 +4338,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             text: string;
         } | null;
     };
+    routeNotices: string[];
     arrivalActivity: "move" | "hunt";
     destinationKind: "normal" | "home";
     character: {
@@ -4331,6 +4437,7 @@ export declare const completeTravel: (qqUserId: string) => Promise<{
             text: string;
         } | null;
     };
+    routeNotices: string[];
     arrivalActivity: "move" | "hunt";
     destinationKind: "normal" | "home";
     character: {
@@ -4727,6 +4834,10 @@ export declare const monsterDetail: (qqUserId: string, spawnId: number) => Promi
         perception: number;
     };
     passive: string | undefined;
+    highestResistanceReveal: {
+        element: string;
+        value: number;
+    } | undefined;
 }>;
 export declare const legacyCombatAction: (qqUserId: string, action: "attack" | "skill" | "item" | "escape", slot?: number) => Promise<{
     log: string;
@@ -4752,6 +4863,7 @@ export type TownArrivalStory = {
 };
 export declare const continueForestArrival: (qqUserId: string) => Promise<TownArrivalStory>;
 export declare const talkToNpc: (qqUserId: string, code: string) => Promise<string>;
+export declare const finalizeCombatCardGrants: <T>(result: T) => Promise<T>;
 export declare const combatAction: (qqUserId: string, action: Exclude<PendingAction["type"], "device_charge">, slot?: number, skillId?: number, itemId?: number, deviceSkillCode?: string, targetKind?: "member" | "target", targetId?: number, automaticChant?: boolean, hiddenTicket?: HiddenTicket, hiddenAutomatic?: boolean) => Promise<{
     ended: boolean;
     waiting: boolean;

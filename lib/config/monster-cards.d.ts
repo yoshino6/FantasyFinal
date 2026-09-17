@@ -1,0 +1,36 @@
+export type MonsterCardTier = 'normal' | 'large' | 'elite' | 'boss';
+export type EquipmentSlot = 'weapon' | 'offhand' | 'shoulder' | 'upper' | 'waist' | 'lower' | 'feet' | 'necklace' | 'bracelet' | 'ring';
+export type MonsterCardSourcePolicy = 'kill' | 'source_boss' | 'city_pursuit';
+export type MonsterCardEffects = Record<string, number | string | boolean>;
+export type MonsterCardDefinition = {
+    cardCode: string;
+    monsterCode: string;
+    monsterName: string;
+    name: string;
+    level: number;
+    minimumEquipmentLevel: number;
+    tier: MonsterCardTier;
+    allowedSlots: EquipmentSlot[];
+    effectText: string;
+    effects: MonsterCardEffects;
+    sourcePolicy: MonsterCardSourcePolicy;
+    pursuitRank?: string;
+    version: 2;
+    baseDropRate: number;
+};
+export declare const parseMonsterCardEffects: (effectText: string) => {
+    effects: MonsterCardEffects;
+    unknown: string[];
+};
+export declare const monsterCards: readonly MonsterCardDefinition[];
+export declare const monsterCardByCode: Map<string, MonsterCardDefinition>;
+export declare const normalMonsterCardByMonster: Map<string, MonsterCardDefinition>;
+export declare const pursuitMonsterCardByKey: Map<string, MonsterCardDefinition>;
+export declare const sourceBossMonsterCards: Readonly<Record<string, readonly string[]>>;
+export declare const nonDroppingMonsterTemplates: Set<string>;
+export declare const pursuitRank: (stars: number, skulls: number) => string;
+export declare const itemRarityForCard: (tier: MonsterCardTier) => "优秀" | "精良" | "稀有" | "史诗";
+export declare const cardEnchantFee: (card: Pick<MonsterCardDefinition, "level" | "tier">) => number;
+export declare const equipmentSlotFromCategory: (category: string) => EquipmentSlot | null;
+export declare const equipmentSlotsFromCategory: (category: string) => EquipmentSlot[];
+export declare const equipmentSlotName: (slot: EquipmentSlot) => "武器" | "上装" | "下装" | "头肩" | "副手" | "项链" | "手镯" | "戒指" | "腰带" | "鞋子";
