@@ -208,7 +208,7 @@ export const advanceOpening=async(user:string,revision:number,action:string):Pro
       if(row.route_code==='F03'){
         const flags=json(row.flags_json);flags.forestBattlePending=row.branch_code==='A'?'join':'depart';
         await connection.execute(`INSERT INTO player_story_progress (character_id,story_code,status,stage) VALUES (?,'forest_guide','met',5)
-          ON DUPLICATE KEY UPDATE status='met',stage=5`,[character.id]);
+          ON DUPLICATE KEY UPDATE stage=IF(status='met',5,stage)`,[character.id]);
         await connection.execute('UPDATE player_opening_stories SET flags_json=? WHERE character_id=?',[JSON.stringify(flags),character.id]);
       }else await settleArrival(connection,row);
     }

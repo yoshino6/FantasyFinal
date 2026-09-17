@@ -2583,12 +2583,22 @@ export const mineResource = async (qqUserId: string, resourceId: number) => with
 export const forestGuideChoice = async (qqUserId: string, choice: 'join' | 'depart') => withTransaction(async connection => {
   const character = await characterFor(qqUserId); ensureActionAvailable(character);
   const [progressRows] = await connection.execute<(RowDataPacket & { status: string; stage: number })[]>('SELECT status,stage FROM player_story_progress WHERE character_id=? AND story_code=\'forest_guide\' FOR UPDATE', [character.id]);
-  if (progressRows[0]?.status !== 'met' || Number(progressRows[0]?.stage) !== 5) throw new Error('这段林间相遇尚未推进到最终抉择。');
+  if (!['met', 'joined', 'declined'].includes(progressRows[0]?.status) || Number(progressRows[0]?.stage) !== 5) throw new Error('这段林间相遇尚未推进到最终抉择。');
   const [existingParty] = await connection.execute<RowDataPacket[]>('SELECT party_id FROM party_members WHERE character_id=? FOR UPDATE', [character.id]);
-  if (existingParty[0]) throw new Error('请先离开当前队伍，再接受这支冒险小队的邀请。');
+  if (existingParty[0]) {
+    // 重试开战时复用本人的剧情小队；不能仅凭“含剧情 NPC”接管其他玩家的队伍。
+    const [members] = await connection.execute<RowDataPacket[]>(`SELECT c.id,c.npc_code FROM party_members pm
+      JOIN characters c ON c.id=pm.character_id WHERE pm.party_id=? FOR UPDATE`, [existingParty[0].party_id]);
+    const companions = members.filter(member => Number(member.id) !== Number(character.id));
+    const expected = ['npc_forest_warrior', 'npc_forest_mage', 'npc_forest_priest'];
+    if (members.length !== 4 || !expected.every(code => companions.some(member => member.npc_code === code || member.npc_code === `${code}_${character.id}`))) {
+      throw new Error('请先离开当前队伍，再接受这支冒险小队的邀请。');
+    }
+  }
+  const partyId = existingParty[0]?.party_id ?? randomUUID();
+  if (!existingParty[0]) {
   const [companions] = await connection.execute<(RowDataPacket & { id: number })[]>(`SELECT c.id FROM characters c WHERE c.npc_code IN ('npc_forest_warrior','npc_forest_mage','npc_forest_priest') ORDER BY c.id FOR UPDATE`);
   if (companions.length !== 3) throw new Error('冒险小队尚未抵达密林，请重启机器人初始化数据。');
-  const partyId = randomUUID();
   await connection.execute('INSERT INTO parties (id,leader_character_id) VALUES (?,?)', [partyId, character.id]);
   await connection.execute('INSERT INTO party_members (party_id,character_id) VALUES (?,?)', [partyId, character.id]); recordAchievement(connection,Number(character.id),['ACH_G01']);
   for (const companion of companions) {
@@ -2613,6 +2623,7 @@ export const forestGuideChoice = async (qqUserId: string, choice: 'join' | 'depa
     await recalculateCharacterStats(connection, npcId);
     await connection.execute('INSERT INTO party_members (party_id,character_id) VALUES (?,?)', [partyId, npcId]); recordAchievement(connection,Number(character.id),['ACH_G01']);
     await connection.execute('UPDATE characters SET current_hp=hp_max,current_mp=mp_max,activity_status=\'active\' WHERE id=?', [npcId]);
+  }
   }
   const [templateRows] = await connection.execute<SpawnRow[]>('SELECT t.id AS template_id,t.code AS growth_template_code,t.name,t.monster_class,t.level,t.constitution,t.spirit,t.strength,t.intelligence,t.agility,t.perception,t.constitution_growth,t.spirit_growth,t.strength_growth,t.intelligence_growth,t.agility_growth,t.perception_growth,t.skill_sequence FROM monster_templates t WHERE t.code=\'forest_slime\' FOR UPDATE');
   const template = templateRows[0]; if (!template) throw new Error('森林史莱姆的数据尚未准备好。');
