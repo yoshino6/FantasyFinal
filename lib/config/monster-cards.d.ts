@@ -15,7 +15,7 @@ export type MonsterCardDefinition = {
     effects: MonsterCardEffects;
     sourcePolicy: MonsterCardSourcePolicy;
     pursuitRank?: string;
-    version: 2;
+    version: number;
     baseDropRate: number;
 };
 export declare const parseMonsterCardEffects: (effectText: string) => {

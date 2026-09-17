@@ -107,6 +107,8 @@ export declare const folioTargetView: (user: string, slot: number) => Promise<{
             remainingTurns: number;
         }[];
         targets: {
+            bossCode: string;
+            difficultyCode: import("./level32-boss-difficulty.config").Level32BossDifficultyCode | null;
             hideBossMechanics: boolean;
             encounterStatus: string | null;
             statusText: string;
@@ -152,6 +154,8 @@ export declare const folioTargetView: (user: string, slot: number) => Promise<{
         chanting: string | null;
         extraAction: boolean;
     } | {
+        bossCode: string;
+        difficultyCode: import("./level32-boss-difficulty.config").Level32BossDifficultyCode | null;
         hideBossMechanics: boolean;
         encounterStatus: string | null;
         statusText: string;

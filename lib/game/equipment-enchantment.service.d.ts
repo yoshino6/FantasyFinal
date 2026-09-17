@@ -51,7 +51,7 @@ export declare const previewEquipmentEnchantment: (qqUserId: string, instanceId:
         name: string;
         effectText: string;
         level: number;
-        version: 2;
+        version: number;
     };
     warning: string | null;
     fee: number;

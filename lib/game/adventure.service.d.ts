@@ -4778,6 +4778,8 @@ export declare const battleStatus: (qqUserId: string) => Promise<{
         remainingTurns: number;
     }[];
     targets: {
+        bossCode: string;
+        difficultyCode: import("./level32-boss-difficulty.config").Level32BossDifficultyCode | null;
         hideBossMechanics: boolean;
         encounterStatus: string | null;
         statusText: string;

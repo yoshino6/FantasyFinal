@@ -40,6 +40,15 @@ export type RegionalState = {
     revoltRetry: number;
     recastUsed: boolean;
     chainMarked: string[];
+    collapseAt: number;
+    rockArmorActive: boolean;
+    reflectionTurn: number;
+    reflectionTaken: Record<string, number>;
+    mechanismHealTurn: number;
+    mechanismHealed: number;
+    scorchAppliedTurn: Record<string, number>;
+    sealBlockedUntil: Record<string, number>;
+    coldRound: number;
 };
 export declare const newRegionalState: (code: RegionalV2Code) => RegionalState;
 export declare const readRegionalState: (cooldowns: Record<string, unknown>) => RegionalState | undefined;
@@ -47,8 +56,9 @@ export declare const pressureChange: (action: RegionalAction, weighted?: boolean
 export declare const obeysFurnaceOrder: (order: FurnaceOrder, action: RegionalAction) => boolean;
 export declare const nextFurnaceOrder: (previous: FurnaceOrder | undefined, canSkill: boolean, seed: number) => FurnaceOrder;
 export declare const regionalIncomingFactor: (state: RegionalState, turn: number) => number;
-export declare const regionalOutgoingFactor: (state: RegionalState, fire: boolean) => 1 | 1.15 | 1.3 | 0.9 | 1.2 | 0.85 | 1.35;
+export declare const regionalOutgoingFactor: (state: RegionalState, fire: boolean) => 1 | 1.15 | 1.3 | 0.9 | 1.2 | 1.35 | 0.85;
 export declare const installRegionalV2Damage: (rules: CombatRules, battles: RegionalBossBattle[]) => void;
+export declare const regionalHealingFactor: (rules: CombatRules, target: RuleUnit) => number;
 export declare const regionalStateSummary: (state: RegionalState, names?: Record<string, string>, turn?: number) => string;
 export type RegionalOrderResult = {
     effective: string[];
@@ -74,6 +84,11 @@ export declare class RegionalBossBattle {
     beginRound(): void;
     event(code: string, title: string, description: string, kind?: 'phase' | 'chant'): void;
     mechanism(unit: RuleUnit, fraction: number, title: string): Promise<void>;
+    healBoss(fraction: number, title: string, capped?: boolean): Promise<number>;
+    reflectDirect(source: RuleUnit, actualHpDamage: number): Promise<void>;
+    addScorch(unit: RuleUnit): void;
+    addHealSeal(unit: RuleUnit): void;
+    clearValkPressure(all?: boolean): Promise<void>;
     strike(targets: RuleUnit[], power: number, name: string, element?: string, magic?: boolean, factor?: number): Promise<Set<string>>;
     changePressure(delta: number): Promise<void>;
     playerAction(unit: RuleUnit, action: RegionalAction): Promise<void>;

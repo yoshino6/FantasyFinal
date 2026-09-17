@@ -22,6 +22,8 @@ export type RegionalAutoMember = {
     };
     preferredDamaging?: boolean;
     committed?: RegionalAction;
+    healingSuppressed?: boolean;
+    cleanse?: RegionalAutoAction;
 };
 export declare const regionalActionKind: (action: {
     type: string;

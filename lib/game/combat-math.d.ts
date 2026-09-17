@@ -3,6 +3,7 @@ export declare const opposedCritBonus: (critDamage: number, critReduction: numbe
 export type StrikeCorrections = {
     hitCorrectionPct?: number;
     evasionCorrectionPct?: number;
+    critRateCorrectionPct?: number;
     critAvoidanceCorrectionPct?: number;
     critDamageCorrectionPct?: number;
     actualHitRatePct?: number;
@@ -18,7 +19,7 @@ export declare const correctedCritChance: (chance: number, correction?: StrikeCo
 export declare const correctedCritBonus: (bonus: number, correction?: StrikeCorrections) => number;
 export declare const strikeCorrections: (source?: StrikeCorrectionSource, target?: StrikeCorrectionSource) => StrikeCorrections;
 export declare const bossControlChanceMultiplier = 0.4;
-export declare const tenacityContest: (tenacityPierce: number, targetTenacity: number, levelDifference: number, baseChancePct: number) => {
+export declare const tenacityContest: (tenacityPierce: number, targetTenacity: number, levelDifference: number, baseChancePct: number, positiveCorrectionPct?: number) => {
     coefficient: number;
     harmfulMultiplier: number;
     damageOverTimeMultiplier: number;

@@ -29,6 +29,12 @@ export type HiddenDevice = {
     max: number;
     skills: ActiveDeviceSkill[];
 };
+export type HiddenWeaponTrait = {
+    code: 'armor_shatter' | 'magic_shatter' | 'hidden_outgoing' | 'shield';
+    value: number;
+    duration: number;
+    self?: boolean;
+};
 export type HiddenTick = {
     turn: number;
     source: string;
@@ -57,7 +63,6 @@ export type HiddenState = {
     lastType?: string;
     lastCapability?: string;
     driverTurn?: number;
-    inheritance?: boolean;
     catalyst?: {
         mode: MixCatalyst;
         until: number;
@@ -69,6 +74,54 @@ export type HiddenState = {
         turn: number;
         side: string;
     };
+    observation?: {
+        primary: string;
+        until: number;
+    };
+    observationTurn?: number;
+    review?: {
+        primary?: string;
+        until: number;
+    };
+    reviewTurn?: number;
+    weaponSheath?: {
+        lastType: string;
+        trait?: HiddenWeaponTrait;
+        until: number;
+    };
+    weaponInheritanceTurn?: number;
+    inventorActions?: Array<{
+        key: string;
+        capabilities: string[];
+    }>;
+    inventorLink?: {
+        capabilities: string[];
+        until: number;
+    };
+    inventorProjectionTurn?: number;
+    inventorAcceptance?: {
+        devices: number[];
+        until: number;
+    };
+    inventorStandby?: {
+        device: number;
+        until: number;
+    };
+    inventorInheritanceTurn?: number;
+    prediction?: {
+        target: string;
+        actionType: string;
+        nextTarget?: string;
+        nextActionType?: string;
+        turn: number;
+    };
+    freePlan?: {
+        until: number;
+    };
+    remainder?: {
+        until: number;
+    };
+    tacticianInheritanceTurn?: number;
 };
 export declare const hiddenState: (unit: Pick<RuleUnit, "cooldowns">) => HiddenState;
 export declare const hiddenResourceView: (cooldowns: Record<string, unknown>) => {

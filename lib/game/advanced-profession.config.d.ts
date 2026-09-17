@@ -56,12 +56,18 @@ export declare const registeredAdvancedProfessionByCode: (code: string) => Advan
     passive: {
         code: string;
         name: "奇釜实验" | "百器共鸣" | "异械主脑" | "全局视野";
-        description: "十二粒子调配、风险与大成功" | "器阵组合、攻守与多器合击" | "异械驱动、供能与能力协同" | "公开信息、保护预案与行动次序";
+        description: string;
         effect: Record<string, number>;
     };
 } | undefined;
 export declare const isCachedAdvancedPassiveKey: (key: string) => boolean;
 export declare const cachedAdvancedPassiveEffectFor: (professionCode: string | null | undefined) => Record<string, number>;
+export declare const advancedElementMasteryBonusFor: (professionCode: string | null | undefined) => {
+    火: number;
+    冰: number;
+    风: number;
+    雷: number;
+};
 export declare const hasBattleOnlyAdvancedPassiveEffect: (professionCode: string | null | undefined) => boolean;
 export declare const advancedProfessionActiveSkillCodes: Record<string, string[]>;
 export declare const activeSkillCodesForAdvancedProfession: (professionCode: string) => string[];

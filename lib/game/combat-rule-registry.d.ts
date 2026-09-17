@@ -88,7 +88,12 @@ export type RuleHooks = {
     removeLegacy: (id: number) => Promise<void>;
     updateLegacy?: (effect: RuleStatus) => Promise<void>;
     transferLegacy?: (effect: RuleStatus, source: RuleUnit, target: RuleUnit) => Promise<boolean>;
-    strikeResolved?: (source: RuleUnit, target: RuleUnit, damage: number) => Promise<void>;
+    strikeResolved?: (source: RuleUnit, target: RuleUnit, damage: number, detail?: {
+        actualHpDamage: number;
+        extra: boolean;
+        skill: boolean;
+    }) => Promise<void>;
+    healingMultiplier?: (source: RuleUnit, target: RuleUnit) => number;
     directMultiplier?: (source: RuleUnit, target: RuleUnit, element: string, magic: boolean, single: boolean, damageType: string) => number;
     extraAction: (unit: RuleUnit) => void;
     swapThreat: (a: RuleUnit, b: RuleUnit) => Promise<void>;

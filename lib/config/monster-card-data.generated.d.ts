@@ -1116,7 +1116,7 @@ export declare const monsterCardData: readonly [{
     readonly level: 32;
     readonly tier: "boss";
     readonly allowedSlots: readonly ["weapon"];
-    readonly effectText: "攻击赋予火属性；火元素精通 +30";
+    readonly effectText: "攻击赋予火属性";
     readonly sourcePolicy: "kill";
 }, {
     readonly cardCode: "monster_card_mistalgae_mass";
