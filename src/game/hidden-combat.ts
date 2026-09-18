@@ -6,7 +6,7 @@ import { hiddenMix, rollHiddenMix } from './hidden-particles';
 import { inventorCapability, inventorProjection } from './hidden-device-protocol';
 import type { ActiveDeviceSkill } from './device.service';
 import { specializeTime, specializeEffectValue } from './skill-specialization';
-import { gainHiddenResource, hiddenActionKey, hiddenState, hiddenResourceShortage, type HiddenChoice, type HiddenDevice, type HiddenWeapon, type HiddenWeaponTrait } from './hidden-combat-state';
+import { gainHiddenResource, hiddenActionKey, hiddenState, hiddenResourceShortage, type HiddenChoice, type HiddenDevice, type HiddenWeapon } from './hidden-combat-state';
 
 export class HiddenBattleError extends Error {}
 export const hiddenDamageSource = (r: CombatRules, source: RuleUnit, target: RuleUnit, direct = false) => incoming.set(r, { source, target, direct });
@@ -38,6 +38,30 @@ const recordInventorCapabilities = (state: ReturnType<typeof hiddenState>, turn:
   state.inventorActions = [...(state.inventorActions ?? []).filter(entry => entry.key !== key), { key, capabilities: distinct }].slice(-2);
   const recent = [...new Set(state.inventorActions.flatMap(entry => entry.capabilities))];
   if (state.inventorActions.length === 2 && recent.length >= 2) state.inventorLink = { capabilities: recent, until: turn + 2 };
+};
+/** 四个隐藏二转的传承入口：由实际成功的特殊动作触发，按两回合冷却记录状态。 */
+const inherit = (r: CombatRules, u: RuleUnit) => {
+  const state = hiddenState(u);
+  if (state.profession === 'magical_scholar') {
+    if (state.reviewTurn === r.turn) return;
+    state.reviewTurn = r.turn;
+    state.review = { until: r.turn + 2 };
+    hiddenShield(r, u, u, u.hpMax * .08, 2);
+    u.mp = Math.min(u.mpMax, u.mp + 30);
+    r.log.push(`　➥善后笔记：${u.name}获得8%最大生命护盾并恢复30 MP。`);
+  } else if (state.profession === 'weapon_master') {
+    if (!twoTurnReady(state.weaponInheritanceTurn, r.turn)) return;
+    state.weaponInheritanceTurn = r.turn;
+    const lastType = state.lastType ?? '';
+    if (lastType) state.weaponSheath = { lastType, until: r.turn + 2 };
+    gainHiddenResource(u, r.turn, 15);
+    r.log.push(`　➥归鞘余响：${u.name}恢复15器鸣，下一次更换器类可继承器性。`);
+  } else if (state.profession === 'inventor') {
+    if (!twoTurnReady(state.inventorInheritanceTurn, r.turn)) return;
+    state.inventorInheritanceTurn = r.turn;
+    state.inventorAcceptance = { devices: [], until: r.turn + 2 };
+    r.log.push(`　➥验收合格：${u.name}的下一次单异械行动能源消耗降低25%。`);
+  }
 };
 const planSucceeded = async (r: CombatRules, owner: RuleUnit, target: RuleUnit, plan: RuleStatus, mode: 'guard' | 'rescue' | 'interrupt') => {
   const state = hiddenState(owner), data = metadata(plan);
