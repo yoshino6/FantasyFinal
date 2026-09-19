@@ -27,5 +27,7 @@ yarn-error.log*
 *.local
 alemon.config.yaml
 
+/packages
+
 # 玩家上传并压缩保存的机巧形象
 /.data/automaton-portraits/

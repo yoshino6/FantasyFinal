@@ -1,0 +1,15 @@
+{
+  "name": "@alemonjs/app",
+  "version": "0.1.0",
+  "description": "桌宠 App 独立进程平台标识：仅用于 AlemonJS 以 login=app 启动时不加载外部平台。",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package": "./package.json"
+  },
+  "peerDependencies": {
+    "alemonjs": "^2.1.0"
+  }
+}

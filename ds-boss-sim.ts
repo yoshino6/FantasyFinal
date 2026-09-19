@@ -134,10 +134,9 @@ const buildEpicPlayer = (armorType: string) => {
   flat.physicalDefense = armorPrimary;
   flat.magicDefense = armorPrimary;
   // 主手史诗武器 4 条 + 副手史诗武器 4 条（副手按 50%）
-  for (const affix of [...epicWeaponAffixes(), ...epicWeaponAffixes()]) {
-    const scale = flat.physicalAttack ? 1 : .5;
-    flat[affix.key] += affix.value * scale;
-  }
+  // 主手 4 条满值，副手按毕业专注满档（100%）计
+  for (const affix of epicWeaponAffixes()) flat[affix.key] += affix.value;
+  for (const affix of epicWeaponAffixes()) flat[affix.key] += affix.value;
   for (const slot of ['shoulder', 'upper', 'waist', 'lower', 'feet']) {
     for (const affix of epicArmorAffixes(slot)) flat[affix.key] += affix.value;
   }
