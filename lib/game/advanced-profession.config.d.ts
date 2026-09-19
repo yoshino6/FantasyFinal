@@ -2,7 +2,7 @@ import { type AdvancedProfessionRoute } from './advanced-profession-routes.confi
 export type AdvancedProfession = {
     code: string;
     name: string;
-    baseProfession: '战士' | '法师' | '盗贼' | '牧师';
+    baseProfession: '战士' | '法师' | '盗贼' | '牧师' | '射手';
     mentor: {
         code: string;
         name: string;

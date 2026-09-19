@@ -69,6 +69,7 @@ export type RuleUnit = {
     cardEffects?: Record<string, any>;
     castSpecialization?: SkillSpecializationResult;
     passiveSpecializations?: Record<string, number>;
+    mutationCodes?: string[];
     participating?: boolean;
     bossEffects?: string[];
 };
@@ -82,7 +83,7 @@ export type RuleHooks = {
     areaDamage?: (targets: RuleUnit[], hit: (target: RuleUnit) => Promise<void>) => Promise<void>;
     beforeAction?: (unit: RuleUnit) => Promise<void>;
     beforeHpDamage?: (unit: RuleUnit, damage: number) => Promise<number>;
-    afterDamage?: (unit: RuleUnit, damage: number, shieldBroken: boolean, originalShield?: RuleStatus, source?: RuleUnit) => Promise<void>;
+    afterDamage?: (unit: RuleUnit, damage: number, shieldBroken: boolean, originalShield?: RuleStatus, source?: RuleUnit, absorbed?: number) => Promise<void>;
     absorb: (unit: RuleUnit, damage: number) => Promise<number>;
     legacyEffects: (unit: RuleUnit) => RuleStatus[];
     removeLegacy: (id: number) => Promise<void>;
@@ -103,6 +104,7 @@ export declare const readRuleState: (value: unknown) => RuleState;
 export declare const displayedRuleName: (state: RuleState, code: string, actual: string, turn: number, ownView: boolean) => string;
 export declare const ruleStatusSummary: (state: RuleState, turn: number, ownView?: boolean) => string;
 export declare const visibleResidentBuff: (state: RuleState, skillCode: string, turn: number) => boolean;
+export declare const additivePercentFactor: (positive: number, negative?: number, low?: number, high?: number) => number;
 export declare const maskRuleBattleLog: (lines: string[], hiddenNames: string[], ownNames: string[]) => string[];
 export declare const ruleManaCost: (state: RuleState, passives: string[], base: number, turn: number) => number;
 export declare class CombatRules {
@@ -138,7 +140,7 @@ export declare class CombatRules {
     beforeAction(unit: RuleUnit): Promise<boolean>;
     redirect(source: RuleUnit, target: RuleUnit, harmful: boolean, areaHit?: boolean): RuleUnit;
     speed(unit: RuleUnit): number;
-    manaCost(unit: RuleUnit, base: number): number;
+    manaCost(unit: RuleUnit, base: number, skillCode?: string): number;
     paid(unit: RuleUnit, amount: number, skill: {
         category: string;
         cooldown: number;
@@ -181,6 +183,7 @@ export declare class CombatRules {
         hitFactor: number;
     }>;
     missed(source: RuleUnit, target: RuleUnit): Promise<void>;
+    revive(source: RuleUnit, target: RuleUnit, hp: number, mp?: number): Promise<boolean>;
     strike(source: RuleUnit, original: RuleUnit, power: number, element: string, magic: boolean, extra?: boolean, forceHit?: boolean, secondaryScale?: number, options?: {
         skill?: boolean;
         redirected?: boolean;

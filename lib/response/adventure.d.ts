@@ -1,6 +1,7 @@
 import { Format } from 'alemonjs';
 import { battleStatus, combatAction } from '../game/adventure.service';
 import type { BossPhaseTransition } from '../game/kingbeast.config';
+export declare const movementButtons: (qqUserId: string, resting?: boolean) => Promise<import("alemonjs").FormatButtonGroup>;
 export declare const appendBattleState: (markdown: ReturnType<typeof Format.createMarkdown>, battle: Awaited<ReturnType<typeof battleStatus>>) => import("alemonjs").FormatMarkDown;
 export declare const battleOperationFormat: (text: string, battle: Awaited<ReturnType<typeof battleStatus>>) => Format;
 export declare const battleStartFormat: (text: string, battle: Awaited<ReturnType<typeof battleStatus>>, reward?: string) => Format;
@@ -8,6 +9,7 @@ export declare const bossPhaseTransitionFormat: (transitions: BossPhaseTransitio
 export declare const scheduleTravelCompletion: (message: any, qqUserId: string, seconds: number) => void;
 export declare const sendCombatResult: (message: any, qqUserId: string, result: Awaited<ReturnType<typeof combatAction>>, options?: {
     omitFinalLog?: boolean;
+    inlineBossTransitions?: boolean;
 }) => Promise<void>;
 export declare const guildFrontDeskFormat: (qqUserId: string, text?: string, continuingChat?: boolean) => Promise<Format>;
 export declare const exploreHandler: () => Promise<void>;
@@ -22,6 +24,7 @@ export declare const dungeonPvpHandler: () => Promise<void>;
 export declare const playerPvpHandler: () => Promise<void>;
 export declare const confirmPlayerPvpHandler: () => Promise<void>;
 export declare const playerInteractionHandler: () => Promise<void>;
+export declare const movementPanel: (qqUserId: string, description: string) => Promise<Format>;
 export declare const coordinateInteractionHandler: () => Promise<void>;
 export declare const continueStoryHandler: () => Promise<void>;
 export declare const buildingHandler: (action: "enter" | "ignore" | "leave" | "area") => () => Promise<void>;

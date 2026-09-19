@@ -1,7 +1,7 @@
 export declare const professionTestOptions: ({
     code: string;
     name: string;
-    group: "战士" | "法师" | "盗贼" | "牧师";
+    group: "战士" | "法师" | "盗贼" | "牧师" | "射手";
     role: string;
 } | {
     code: "magical_scholar" | "weapon_master" | "inventor" | "tactician";

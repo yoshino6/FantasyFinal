@@ -45,7 +45,7 @@ export declare const completeAdvancedProfessionTrial: (connection: PoolConnectio
     };
     code: string;
     name: string;
-    baseProfession: "\u6218\u58EB" | "\u6CD5\u5E08" | "\u76D7\u8D3C" | "\u7267\u5E08";
+    baseProfession: "\u6218\u58EB" | "\u6CD5\u5E08" | "\u76D7\u8D3C" | "\u7267\u5E08" | "\u5C04\u624B";
     mentor: {
         code: string;
         name: string;

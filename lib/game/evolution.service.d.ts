@@ -70,6 +70,7 @@ export declare const evolutionInjectionMaterials: (level: number, code: Injectio
     medium: number;
     catalyst: number;
 };
+export declare const grantEvolutionItem: (connection: EvolutionConnection, characterId: number, code: string, quantity: number) => Promise<boolean>;
 export declare const evolutionStatBonuses: (connection: EvolutionConnection, characterId: number) => Promise<EvolutionBonus>;
 export declare const applyEvolutionBaseStats: (stats: DerivedStats, bonus: EvolutionBonus) => DerivedStats;
 export declare const injectEvolution: (qqUserId: string, code: InjectionCode, requestedPart?: BodyPart, requestedSymbiosisTrait?: SymbiosisTraitCode) => Promise<{
@@ -84,10 +85,11 @@ export declare const injectEvolution: (qqUserId: string, code: InjectionCode, re
         outcome: string;
         code: string;
         name: string;
-        part: BodyPart;
-        state: "stable" | "deviation" | "rare";
+        part: "eye" | "nerve" | "skin" | "chest" | "bone" | "organ";
+        state: import("./mutation.config").MutationState;
         description: string;
-        effect: EvolutionBonus;
+        effect: import("./mutation.config").MutationEffect;
+        negativeEffect: import("./mutation.config").MutationEffect;
     } | null;
     finalTraits: string[];
     symbiosisTrait: {
@@ -105,6 +107,7 @@ export declare const simulateEvolutionToLevel30: (connection: PoolConnection, qq
     level: number;
     injections: number;
 }>;
+export declare const evolutionBusinessDate: () => string;
 export declare const evolutionObservationDashboard: (qqUserId: string) => Promise<{
     claimed: number;
     remaining: number;
@@ -177,6 +180,7 @@ export declare const stabilizeMutation: (qqUserId: string, mutationId: number) =
     name: string;
     pressure: number;
     stability: number;
+    reverseEntropyRefund: boolean;
 }>;
 export declare const archiveMutation: (qqUserId: string, mutationId: number) => Promise<{
     characterId: number;

@@ -197,10 +197,10 @@ export declare const sendWebMail: (actor: {
     recipients: number;
     operationId: `${string}-${string}-${string}-${string}-${string}`;
     scope: string;
-    attachment: {
+    attachments: {
         name: string;
         quantity: number;
-    } | null;
+    }[];
 }>;
 export declare const adminWorldEvents: (keyword: unknown) => Promise<{
     scenes: {
