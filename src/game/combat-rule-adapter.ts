@@ -31,6 +31,11 @@ export const createCombatRules = async (connection: PoolConnection, sessionId: s
   const openingEffects = await openingCombatEffectsFor(connection, members.filter(member=>!member.npc_code).map(member=>Number(member.id)), openingPve);
   const [passives] = await connection.execute<(RowDataPacket & { character_id: number; code: string })[]>(`SELECT ps.character_id,s.code,s.tier,COALESCE(sp.level,1) AS potent_level FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id LEFT JOIN player_skill_specializations sp ON sp.character_id=ps.character_id AND sp.skill_id=s.id AND sp.specialization='potent' WHERE ps.character_id IN (${ids.map(() => '?').join(',')}) AND ps.passive_linked=1 AND s.code LIKE 'resident_%'`, ids);
   const [weapons] = await connection.execute<RowDataPacket[]>(`SELECT pe.character_id,COUNT(DISTINCT i.weapon_type) AS types FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id WHERE pe.character_id IN (${ids.map(() => '?').join(',')}) AND i.item_category IN ('武器','副手') GROUP BY pe.character_id`, ids);
+  const [mutationRows] = await connection.execute<RowDataPacket[]>(`SELECT character_id,mutation_code FROM player_mutations WHERE character_id IN (${ids.map(() => '?').join(',')}) AND mutation_state IN ('stable','deviation','rare')`, ids);
+  const mutationCodes = new Map<number, string[]>();
+  for (const row of mutationRows) {
+    const id = Number(row.character_id); const codes = mutationCodes.get(id) ?? []; codes.push(String(row.mutation_code)); mutationCodes.set(id, codes);
+  }
   const make = (row: CombatRow, kind: 'member' | 'target'): RuleUnit => {
     const cooldowns = record(row.cooldowns); row.cooldowns = cooldowns;
     const state = readRuleState(cooldowns.__rules); cooldowns.__rules = state;
@@ -50,6 +55,7 @@ export const createCombatRules = async (connection: PoolConnection, sessionId: s
       weaponsDifferent: Number(weapons.find(weapon => Number(weapon.character_id) === Number(row.id))?.types ?? 0) > 1,
       mastery: record(row.element_mastery_json), resistance: record(row.element_resistance_json), appraisal: kind === 'target' ? 0 : appraisal.get(Number(row.id)) ?? 0,
       passiveSpecializations: Object.fromEntries(passives.filter(passive => Number(passive.character_id) === Number(row.id) && kind === 'member').map(passive => [passive.code, passiveSpecializationFactor(passive.potent_level, String(passive.tier))])),
+      mutationCodes: kind === 'member' ? mutationCodes.get(Number(row.id)) ?? [] : [],
       armorSet: kind === 'member' ? armorSets.get(Number(row.id)) : profile?.armorSet ?? (Array.isArray(traits) ? traits.find(trait => trait.code === 'advanced_mentor_build')?.build?.armorSet : undefined),
       opening: kind === 'member' && !row.npc_code ? openingEffects.get(Number(row.id)) : undefined,
       modifiers: profile?.advancedEffect ?? {},

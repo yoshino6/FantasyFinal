@@ -4,7 +4,7 @@ import { tenacityContest } from './combat-math';
 import type { AutomatonState } from './automaton';
 import { automatonPanel } from './automaton';
 import { automatonSkills } from './automaton-skill-catalog';
-import { CombatRules, type RuleUnit, type RuleState } from './combat-rule-registry';
+import { additivePercentFactor, CombatRules, type RuleUnit, type RuleState } from './combat-rule-registry';
 import { canDispelCombatEffect } from './combat-dispel-policy';
 
 export type AutomatonBattleState = { pet: AutomatonState; rule: RuleState; cooldowns:Record<string,number>; sync:number; ultimateUsed:boolean; actionCount:number; channel?:string; exited:boolean; threat:Record<string,number>; manual?:string };
@@ -19,7 +19,9 @@ export const automatonRuleUnit=(id:number,battle:AutomatonBattleState):RuleUnit=
     get participating(){return !battle.exited;},
     get hp(){return battle.pet.hp;},set hp(v){battle.pet.hp=Math.max(0,Math.floor(v));},hpMax:p.hpMax!,get mp(){return battle.pet.mp;},set mp(v){battle.pet.mp=Math.max(0,Math.floor(v));},mpMax:p.mpMax!,
     attack:p.physicalAttack!,magic:p.magicAttack!,defense:p.physicalDefense!,magicDefense:p.magicDefense!,accuracy:p.accuracy!,evasion:p.evasion!,speed:p.speed!,crit:p.critRateBp!,critResist:p.critResistBp!,critDamage:p.critDamageBp!,critReduction:p.critDamageReductionBp!,pierce:p.tenacityPierce!,tenacity:p.tenacity!,state:battle.rule,cooldowns:battle.cooldowns,passives:[],resistance:{},mastery:{}};
-  const multiply=(key:'attack'|'magic'|'defense'|'magicDefense'|'speed'|'evasion'|'accuracy'|'tenacity',amount:number)=>{unit[key]*=1+amount/100;};
+  const baseStats={attack:unit.attack,magic:unit.magic,defense:unit.defense,magicDefense:unit.magicDefense,speed:unit.speed,evasion:unit.evasion,accuracy:unit.accuracy,tenacity:unit.tenacity};
+  const bonuses:Record<keyof typeof baseStats,number>={attack:0,magic:0,defense:0,magicDefense:0,speed:0,evasion:0,accuracy:0,tenacity:0};
+  const multiply=(key:keyof typeof baseStats,amount:number)=>{bonuses[key]+=amount;unit[key]=baseStats[key]*additivePercentFactor(bonuses[key]);};
   for(const skill of battle.pet.equipped){
     if(skill==='N010')multiply('attack',8);if(skill==='N022')multiply('magic',8);if(skill==='N034'){multiply('defense',8);multiply('magicDefense',8);}if(skill==='N058')multiply('speed',8);if(skill==='N059')multiply('accuracy',8);if(skill==='N071')multiply('tenacity',10);
     if(skill==='S001'){multiply('attack',22);multiply('magic',-12);}if(skill==='S002'){multiply('magic',22);multiply('attack',-12);}if(skill==='S003'){multiply('defense',22);multiply('magicDefense',22);multiply('speed',-10);}if(skill==='S004'){multiply('speed',18);multiply('evasion',18);multiply('defense',-10);multiply('magicDefense',-10);}
@@ -66,7 +68,9 @@ export const installAutomatonRules=(rules:CombatRules,pets:AutomatonCombatant[])
       if(effect.code.startsWith('automaton_mana_')&&unit.hp>0)await rules.restore(source,unit,0,unit.mpMax*effect.value*effect.stacks/100,true);
     }
   };
-  rules.hooks.afterDamage=async(unit,damage,broken,originalShield)=>{
+  const previousAfterDamage=rules.hooks.afterDamage;
+  rules.hooks.afterDamage=async(unit,damage,broken,originalShield,source,absorbed)=>{
+    await previousAfterDamage?.(unit,damage,broken,originalShield,source,absorbed);
     const pet=pets.find(p=>p.unit===unit);
     if(pet){
       if(unit.hp<=0&&equipped(pet,'S015')&&once(rules,pet,'immortal',true)){unit.hp=1;await rules.remove(unit,e=>hard.includes(e.code)&&canDispelCombatEffect(e.code,'ordinary'));await shield(rules,pet,unit,2*sumDefense(pet),1);}
@@ -87,10 +91,9 @@ export const installAutomatonRules=(rules:CombatRules,pets:AutomatonCombatant[])
   rules.incoming=async(source,target,raw,element,magic,skill,single=true,legacyResolved=false,playerDirect=true)=>{
     const pet=pets.find(p=>p.unit===target);
     if(pet){
-      raw*=1-rules.value(target,'automaton_defending')/100;
+      const automatonReduction=rules.value(target,'automaton_defending') + (equipped(pet,'S013')&&rules.shieldValue(target)>0?18:0) + (rules.status(target,'automaton_mirror')&&rules.shieldValue(target)>0&&magic?10:0);
+      raw*=additivePercentFactor(0, automatonReduction);
       if(raw>0&&equipped(pet,'N096')&&once(rules,pet,'adaptive',true))rules.add(target,magic?'magic_defense':'defense',15,999,target);
-      if(equipped(pet,'S013')&&rules.shieldValue(target)>0)raw*=.82;
-      if(rules.status(target,'automaton_mirror')&&rules.shieldValue(target)>0&&magic)raw*=.9;
     }
     const buffer=rules.status(target,'automaton_buffer');if(buffer){raw-=Math.min(raw*.25,buffer.value);await rules.consume(target,'automaton_buffer');}
     const amount=await incoming(source,target,raw*(source.state.memory.talentCommand&&!skill&&playerDirect?2:1),element,magic,skill,single,legacyResolved,playerDirect);

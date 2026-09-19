@@ -16,7 +16,7 @@ redis:
   user: root
   db: 6
 
-login: "qq-bot"
+login: "app"
 port: 17117
 
 FantasyFinal:

@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 320">
+  <defs>
+    <linearGradient id="hairGrad" x1="0" y1="0" x2="0.2" y2="1">
+      <stop offset="0%" stop-color="#ffe08a"/>
+      <stop offset="55%" stop-color="#ffc95c"/>
+      <stop offset="100%" stop-color="#f0a93e"/>
+    </linearGradient>
+    <linearGradient id="dressGrad" x1="0" y1="0" x2="0.1" y2="1">
+      <stop offset="0%" stop-color="#ffb38f"/>
+      <stop offset="100%" stop-color="#ff7f66"/>
+    </linearGradient>
+    <radialGradient id="cheekGrad" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#ff9d8f" stop-opacity="0.72"/>
+      <stop offset="100%" stop-color="#ff9d8f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="tailGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ffcf75"/>
+      <stop offset="100%" stop-color="#ffad55"/>
+    </linearGradient>
+  </defs>
+
+  <g class="pet-tail" transform-origin="176px 236px">
+    <path d="M166 224 C 150 214 140 226 147 240 C 152 251 171 256 182 249 C 190 244 190 232 180 229" fill="url(#tailGrad)"/>
+    <path d="M150 235 C 156 246 171 252 181 247 C 187 244 188 236 182 233" fill="#fff0c8" opacity="0.85"/>
+  </g>
+
+  <g class="pet-body">
+    <g class="pet-arm-left" transform-origin="92px 184px">
+      <path d="M88 176 C 74 182 68 198 77 210 C 83 217 95 212 96 200 L 96 186 Z" fill="url(#dressGrad)"/>
+      <ellipse cx="80" cy="211" rx="7" ry="5.6" fill="#ffd9c4"/>
+    </g>
+    <g class="pet-arm-right" transform-origin="148px 184px">
+      <path d="M152 176 C 166 182 172 198 163 210 C 157 217 145 212 144 200 L 144 186 Z" fill="url(#dressGrad)"/>
+      <ellipse cx="160" cy="211" rx="7" ry="5.6" fill="#ffd9c4"/>
+    </g>
+
+    <path d="M86 168 C 86 146 102 132 120 132 C 138 132 154 146 154 168 L 150 226 C 150 244 90 244 90 226 Z" fill="#fff0da"/>
+    <path d="M90 168 C 90 150 103 139 120 139 C 137 139 150 150 150 168 L 148 220 C 148 238 92 238 92 220 Z" fill="#fff8ec"/>
+
+    <path d="M88 194 C 78 199 80 222 91 228 C 108 237 136 236 151 226 C 158 221 158 204 148 199 Z" fill="url(#dressGrad)"/>
+    <path d="M88 194 C 102 190 138 190 151 199 C 154 209 152 220 151 226 C 135 235 108 236 92 228 C 82 221 80 204 88 194 Z" fill="#ff8f70"/>
+    <path d="M120 191 L 120 230" stroke="#ffd9c4" stroke-width="2.4" stroke-linecap="round" opacity="0.8"/>
+    <path d="M92 207 L 148 207" stroke="#ffd9c4" stroke-width="2" stroke-linecap="round" opacity="0.55"/>
+
+    <g class="pet-legs">
+      <path d="M101 232 C 101 244 98 254 104 264 C 109 272 122 271 120 260 L 116 232 Z" fill="#f8c98f"/>
+      <path d="M138 232 C 138 244 142 254 136 264 C 131 272 118 271 120 260 L 124 232 Z" fill="#f8c98f"/>
+      <ellipse cx="107" cy="265" rx="9" ry="5.5" fill="#ffb06a"/>
+      <ellipse cx="133" cy="265" rx="9" ry="5.5" fill="#ffb06a"/>
+    </g>
+
+    <path class="pet-bag" d="M116 150 L 124 150 L 124 184 L 116 184 Z" fill="#8a5a3b"/>
+    <path class="pet-bag" d="M116 156 L 124 156 L 124 184 L 116 184 Z" fill="#a9724c"/>
+    <path d="M120 156 L 120 184" stroke="#6f442b" stroke-width="1.6" stroke-dasharray="3 2.6" opacity="0.75"/>
+    <path class="pet-strap" d="M120 150 C 120 142 132 139 140 146 L 150 166" stroke="#8a5a3b" stroke-width="4" fill="none" stroke-linecap="round"/>
+  </g>
+
+  <g class="pet-head">
+    <path d="M96 118 C 86 106 90 80 104 72 C 118 64 126 70 126 70 C 126 70 134 62 148 68 C 162 74 166 92 158 104 C 168 112 170 126 166 138 C 160 156 144 166 124 166 C 104 166 86 158 82 142 C 79 132 86 122 96 118 Z" fill="url(#hairGrad)"/>
+    <path d="M104 72 C 100 80 96 92 98 102 C 100 90 104 80 110 74 Z" fill="#ffdf8d" opacity="0.9"/>
+    <path d="M144 66 C 148 76 152 90 150 102 C 148 90 144 80 139 74 Z" fill="#ffdf8d" opacity="0.9"/>
+
+    <path d="M104 72 C 110 64 122 61 130 64 C 130 54 121 49 111 53 C 104 56 101 63 104 72 Z" fill="#f2a83c"/>
+    <path d="M143 68 C 135 60 123 59 117 63 C 118 53 127 48 137 52 C 143 55 146 62 143 68 Z" fill="#f2a83c"/>
+    <path d="M112 58 C 114 65 117 70 121 72" stroke="#e08f2e" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.8"/>
+    <path d="M128 58 C 126 65 123 70 120 72" stroke="#e08f2e" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.8"/>
+
+    <g class="pet-ear-l" transform-origin="107px 66px">
+      <path d="M90 96 C 77 89 70 70 76 54 C 83 36 104 36 114 56 C 109 74 102 88 90 96 Z" fill="url(#hairGrad)"/>
+      <path d="M91 87 C 83 81 78 67 82 58 C 87 47 101 47 107 61 C 104 73 99 83 91 87 Z" fill="#ffc9d1"/>
+      <path d="M82 64 C 88 57 95 54 101 55" stroke="#e08f2e" stroke-width="1.6" fill="none" stroke-linecap="round" opacity="0.7"/>
+    </g>
+    <g class="pet-ear-r" transform-origin="133px 66px">
+      <path d="M150 96 C 163 89 170 70 164 54 C 157 36 136 36 126 56 C 131 74 138 88 150 96 Z" fill="url(#hairGrad)"/>
+      <path d="M149 87 C 157 81 162 67 158 58 C 153 47 139 47 133 61 C 136 73 141 83 149 87 Z" fill="#ffc9d1"/>
+      <path d="M158 64 C 152 57 145 54 139 55" stroke="#e08f2e" stroke-width="1.6" fill="none" stroke-linecap="round" opacity="0.7"/>
+    </g>
+
+    <path d="M86 112 C 85 120 90 128 97 129 C 104 130 108 124 105 117 C 102 111 91 107 86 112 Z" fill="#ffb8b1"/>
+    <path d="M154 112 C 155 120 150 128 143 129 C 136 130 132 124 135 117 C 138 111 149 107 154 112 Z" fill="#ffb8b1"/>
+
+    <g class="pet-eye pet-eye-l">
+      <ellipse cx="101" cy="112" rx="7.5" ry="9" fill="#4a2f46"/>
+      <circle cx="104" cy="108.5" r="2.8" fill="#fff"/>
+      <circle cx="99.5" cy="116" r="1.5" fill="#fff" opacity="0.75"/>
+    </g>
+    <g class="pet-eye pet-eye-r">
+      <ellipse cx="139" cy="112" rx="7.5" ry="9" fill="#4a2f46"/>
+      <circle cx="142" cy="108.5" r="2.8" fill="#fff"/>
+      <circle cx="137.5" cy="116" r="1.5" fill="#fff" opacity="0.75"/>
+    </g>
+    <ellipse class="pet-lid pet-lid-l" cx="101" cy="102" rx="8" ry="0" fill="#ffd98a"/>
+    <ellipse class="pet-lid pet-lid-r" cx="139" cy="102" rx="8" ry="0" fill="#ffd98a"/>
+
+    <path class="pet-mouth" d="M115 132 Q 120 138 125 132" stroke="#a95f5a" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+    <path d="M117 124 C 118 127 122 127 123 124" stroke="#d98f7a" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+    <circle class="pet-blush-l" cx="80" cy="126" r="8" fill="url(#cheekGrad)"/>
+    <circle class="pet-blush-r" cx="160" cy="126" r="8" fill="url(#cheekGrad)"/>
+
+    <g class="pet-fringe">
+      <path d="M98 102 C 105 93 114 92 121 97 C 128 93 136 93 142 102 C 141 91 134 84 123 84 C 111 84 100 91 98 102 Z" fill="#ffe08a"/>
+      <path d="M102 94 C 108 87 116 85 120 87" stroke="#ffd166" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.8"/>
+      <path d="M120 87 C 125 85 133 87 138 94" stroke="#ffd166" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.8"/>
+    </g>
+
+    <g class="pet-hairpin" transform-origin="120px 92px">
+      <path d="M101 92 C 108 84 133 84 140 92 C 133 96 108 96 101 92 Z" fill="#f4f7fb" stroke="#c9d4e0" stroke-width="1.2"/>
+      <path d="M108 92 C 110 95 114 96 120 96 C 126 96 130 95 133 92" stroke="#ff8f70" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+      <path d="M112 91 L 114 93 M 117 90 L 119 92 M 122 90 L 124 92 M 127 91 L 129 93" stroke="#e7edf4" stroke-width="1.6" stroke-linecap="round"/>
+      <circle cx="139" cy="90" r="3.2" fill="#ffb35c"/>
+      <path d="M139 86.8 L 139 89 M 139 91 L 139 93.2 M 135.8 90 L 138 90 M 140 90 L 142.2 90" stroke="#fff3c9" stroke-width="1" stroke-linecap="round"/>
+    </g>
+  </g>
+</svg>

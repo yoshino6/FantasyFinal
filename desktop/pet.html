@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>幻想桌宠</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-drag: none; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+body.dragging { cursor: grabbing; }
+
+.pet-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding-bottom: 18px;
+}
+
+.pet {
+  position: relative;
+  width: 172px;
+  height: 230px;
+  cursor: grab;
+  -webkit-app-region: no-drag;
+  filter: drop-shadow(0 14px 18px rgba(0, 0, 0, 0.35));
+  transition: transform 0.35s ease;
+}
+.pet:active { cursor: grabbing; }
+.pet svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  transition: transform 0.28s ease;
+}
+.pet .pet-face { transition: transform 0.25s ease; }
+.pet .shadow {
+  position: absolute;
+  left: 50%; bottom: 4px;
+  transform: translateX(-50%);
+  width: 58%; height: 12px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.22);
+  filter: blur(5px);
+  transition: width 0.3s ease, opacity 0.3s ease;
+}
+
+.pet.idle-breathe svg { animation: breathe 4.6s ease-in-out infinite; transform-origin: 50% 88%; }
+@keyframes breathe {
+  0%, 100% { transform: scale(1, 1); }
+  50% { transform: scale(1.03, 0.97); }
+}
+.pet.standing { transform: translateY(0); }
+.pet.walking {
+  animation: bob 0.5s ease-in-out infinite alternate;
+}
+.pet.walking .pet-body { animation: walkLegs 0.5s ease-in-out infinite alternate; }
+@keyframes bob { from { transform: translateY(0); } to { transform: translateY(-4px); } }
+@keyframes walkLegs {
+  from { transform: rotate(-2deg) translateY(1px); }
+  to { transform: rotate(2deg) translateY(-2px); }
+}
+.pet.sitting { transform: scale(0.92, 0.88) translateY(22px); }
+.pet.sitting .pet-body { animation: sitSway 3s ease-in-out infinite; transform-origin: 50% 90%; }
+@keyframes sitSway {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-3deg); }
+}
+.pet.sleeping { animation: sleepFloat 3.2s ease-in-out infinite; }
+@keyframes sleepFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+.pet.yawning svg { animation: yawnScale 2.4s ease-in-out; transform-origin: 50% 82%; }
+@keyframes yawnScale {
+  0% { transform: scale(1, 1); }
+  18% { transform: scale(1.05, 1.04); }
+  70% { transform: scale(1.05, 1.04); }
+  100% { transform: scale(1, 1); }
+}
+.pet.stretching svg { animation: stretch 2.2s ease-in-out; transform-origin: 50% 92%; }
+@keyframes stretch {
+  0% { transform: scale(1, 1); }
+  22% { transform: scale(1.06, 0.92) translateY(4px); }
+  55% { transform: scale(1.02, 0.98) translateY(1px); }
+  100% { transform: scale(1, 1); }
+}
+.pet.jump svg { animation: jump 0.55s cubic-bezier(0.34, 1.56, 0.64, 1); transform-origin: 50% 88%; }
+@keyframes jump {
+  0% { transform: translateY(0) scale(1, 1); }
+  32% { transform: translateY(-44px) scale(1.07, 0.9); }
+  62% { transform: translateY(8px) scale(0.96, 1.06); }
+  100% { transform: translateY(0) scale(1, 1); }
+}
+
+/* 状态外观 */
+.pet .pet-mouth { transition: d 0.18s ease; }
+.pet .pet-eye, .pet .pet-lid, .pet .pet-mouth, .pet .pet-ear-l, .pet .pet-ear-r, .pet .pet-tail, .pet .pet-arm-left, .pet .pet-arm-right { transition: transform 0.18s ease; }
+.pet .pet-ear-l { transform-origin: 107px 66px; }
+.pet .pet-ear-r { transform-origin: 133px 66px; }
+.pet .pet-tail { transform-origin: 176px 236px; }
+.pet .pet-arm-left { transform-origin: 92px 184px; }
+.pet .pet-arm-right { transform-origin: 148px 184px; }
+.pet .pet-eye-l { transform-origin: 101px 112px; }
+.pet .pet-eye-r { transform-origin: 139px 112px; }
+.pet .pet-legs { transform-origin: 120px 268px; }
+
+.pet .pet-lid { opacity: 0; }
+.pet .pet-lid { stroke: #ffd98a; fill: #ffd98a; }
+.pet.blink .pet-eye { transform: scaleY(0.12); }
+.pet.blink .pet-lid { opacity: 1; }
+.pet.happy .pet-eye { transform: scaleY(0.55) translateY(1px); }
+.pet.happy .pet-eye .pet-pupil { opacity: 0.4; }
+.pet.sad .pet-mouth { d: path("M115 136 Q 120 131 125 136"); }
+.pet.sad .pet-eye { transform: scaleY(0.85) translateY(2px); }
+.pet.yawning .pet-mouth { d: path("M112 134 Q 120 148 128 134"); }
+.pet.yawning .pet-eye { transform: scaleY(0.15); }
+.pet.sleeping .pet-eye { transform: scaleY(0.1); }
+.pet.sleeping .pet-mouth { d: path("M116 136 Q 120 140 124 136"); opacity: 0.6; }
+.pet.sitting .pet-legs { transform: translateY(8px) scale(1, 0.7); }
+.pet.stretching .pet-arm-left { transform: rotate(28deg) translate(2px, -4px); }
+.pet.stretching .pet-arm-right { transform: rotate(-28deg) translate(-2px, -4px); }
+.pet.walking .pet-ear-l { animation: earWiggle 0.5s ease-in-out infinite alternate; }
+.pet.walking .pet-ear-r { animation: earWiggle 0.5s ease-in-out infinite alternate-reverse; }
+@keyframes earWiggle { from { transform: rotate(-8deg); } to { transform: rotate(8deg); } }
+.pet.walking .pet-tail { animation: tailWag 0.5s ease-in-out infinite alternate; }
+.pet.happy .pet-tail { animation: tailWag 0.7s ease-in-out infinite; }
+@keyframes tailWag { from { transform: rotate(-12deg); } to { transform: rotate(12deg); } }
+.pet.sitting .pet-tail { transform: rotate(-20deg) translate(4px, 8px); }
+.pet.sleeping .pet-tail { transform: rotate(18deg) translate(-2px, 6px); animation: tailSlow 4s ease-in-out infinite; }
+@keyframes tailSlow { 0%, 100% { transform: rotate(18deg) translate(-2px, 6px); } 50% { transform: rotate(24deg) translate(-3px, 7px); } }
+
+.zzz {
+  position: absolute;
+  right: 4px; top: 8px;
+  font-size: 20px;
+  font-weight: 800;
+  color: rgba(90, 120, 190, 0.85);
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
+  display: none;
+  pointer-events: none;
+}
+.pet.sleeping .zzz { display: block; animation: zzzFloat 2.4s ease-in-out infinite; }
+@keyframes zzzFloat {
+  0% { transform: translate(0, 0) scale(0.8); opacity: 0; }
+  30% { opacity: 1; }
+  100% { transform: translate(10px, -22px) scale(1.2); opacity: 0; }
+}
+
+.bubble {
+  position: absolute;
+  left: 50%;
+  bottom: 218px;
+  transform: translateX(-50%);
+  width: 280px;
+  max-height: 190px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 250, 240, 0.97);
+  color: #3a2b3f;
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-line;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.3);
+  display: none;
+  border: 1px solid rgba(255, 233, 168, 0.6);
+}
+.bubble.show { display: block; animation: pop 0.22s ease; }
+@keyframes pop { from { opacity: 0; transform: translate(-50%, 8px) scale(0.96); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
+.bubble .pet-say {
+  display: inline-block;
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  background: #ffeecb;
+  color: #7a5a26;
+  font-size: 12px;
+}
+
+.quick {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  gap: 5px;
+}
+.quick.show { display: flex; }
+.quick button {
+  border: none;
+  background: rgba(38, 30, 64, 0.85);
+  color: #ffe9a8;
+  font-size: 11px;
+  padding: 5px 9px;
+  border-radius: 9px;
+  cursor: pointer;
+  border: 1px solid rgba(255, 233, 168, 0.25);
+}
+.quick button:hover { background: rgba(90, 70, 130, 0.9); }
+
+.chat {
+  position: absolute;
+  left: 50%;
+  bottom: 262px;
+  transform: translateX(-50%);
+  width: 280px;
+  display: none;
+  gap: 6px;
+  align-items: flex-end;
+}
+.chat.show { display: flex; }
+.chat textarea {
+  flex: 1;
+  resize: none;
+  height: 40px;
+  max-height: 90px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 233, 168, 0.35);
+  background: rgba(38, 30, 64, 0.92);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 8px 10px;
+  outline: none;
+  font-family: inherit;
+}
+.chat textarea::placeholder { color: rgba(255, 255, 255, 0.45); }
+.chat .send {
+  border: none;
+  height: 40px;
+  padding: 0 13px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #ffb35c, #ff7e6b);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.welcome {
+  position: absolute;
+  left: 50%;
+  bottom: 218px;
+  transform: translateX(-50%);
+  width: 290px;
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(38, 30, 64, 0.95);
+  border: 1px solid rgba(255, 233, 168, 0.3);
+  color: #fff;
+  display: none;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.4);
+}
+.welcome.show { display: block; animation: pop 0.22s ease; }
+.welcome h3 { font-size: 15px; color: #ffe9a8; margin-bottom: 10px; }
+.welcome input {
+  width: 100%;
+  border: 1px solid rgba(255, 233, 168, 0.3);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border-radius: 9px;
+  padding: 8px 10px;
+  font-size: 13px;
+  outline: none;
+  margin-bottom: 8px;
+  font-family: inherit;
+}
+.welcome input::placeholder { color: rgba(255, 255, 255, 0.4); }
+.welcome .row { display: flex; gap: 8px; margin-bottom: 8px; }
+.welcome .row button {
+  flex: 1;
+  border: 1px solid rgba(255, 233, 168, 0.3);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  border-radius: 9px;
+  padding: 7px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.welcome .row button.active { background: #ffb35c; color: #3a2b3f; font-weight: 700; }
+.welcome .go {
+  width: 100%;
+  border: none;
+  border-radius: 10px;
+  padding: 9px;
+  background: linear-gradient(135deg, #ffb35c, #ff7e6b);
+  color: #fff;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.welcome .err { margin-top: 6px; font-size: 11.5px; color: #ffb0a8; min-height: 14px; }
+.welcome .close {
+  position: absolute;
+  top: 8px; right: 10px;
+  border: none;
+  background: none;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+/* Q 版梨子喵 sprite 显示层：状态机只切换格子，保留窗口拖拽和交互逻辑 */
+.pet > svg { display: none; }
+.pet-sprite {
+  position: absolute; inset: 0;
+  background-image: url('./pear-cat.png');
+  background-repeat: no-repeat;
+  background-size: auto 100%;
+  background-position: 50% 100%;
+  transform-origin: 50% 88%;
+  transition: transform 0.22s ease;
+}
+.pet.idle-breathe .pet-sprite { animation: singleBreathe 4.6s ease-in-out infinite; }
+.pet.walking .pet-sprite { animation: singleWalkSway 0.52s ease-in-out infinite alternate; }
+.pet.blink .pet-sprite::after { content: ""; position: absolute; left: 36%; top: 28%; width: 28%; height: 3px; border-radius: 99px; background: rgba(83, 48, 49, 0.88); box-shadow: 0 0 0 1px rgba(255, 224, 206, 0.3); }
+.pet.stretching .pet-sprite { animation: singleStretch 2.2s ease-in-out; }
+.pet.yawning .pet-sprite { animation: singleYawn 2.4s ease-in-out; }
+.pet.sitting .pet-sprite { animation: singleSit 3s ease-in-out infinite; transform-origin: 50% 90%; }
+.pet.sleeping .pet-sprite { animation: singleSleep 3.2s ease-in-out infinite; }
+.pet.jump .pet-sprite { animation: jump 0.55s cubic-bezier(0.34, 1.56, 0.64, 1); }
+@keyframes singleBreathe { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.025, 0.975); } }
+@keyframes singleWalkSway { from { transform: scaleX(var(--walk-dir, 1)) rotate(-1.5deg) translateY(1px); } to { transform: scaleX(var(--walk-dir, 1)) rotate(1.5deg) translateY(-1px); } }
+@keyframes singleStretch { 0%, 100% { transform: scale(1, 1); } 20% { transform: scale(1.015, 0.99) translateY(2px); } 56% { transform: scale(1.02, 0.96) translateY(5px); } }
+@keyframes singleYawn { 0%, 100% { transform: scale(1, 1); } 28%, 72% { transform: scale(1.025, 0.98) translateY(2px); } }
+@keyframes singleSit { 0%, 100% { transform: translateY(0) scale(1, 1); } 50% { transform: translateY(2px) scale(0.98, 0.98); } }
+@keyframes singleSleep { 0%, 100% { transform: translateY(0) scale(1, 1); } 50% { transform: translateY(-3px) scale(1.02, 0.98); } }
+</style>
+</head>
+<body>
+<div class="pet-stage">
+  <div class="pet standing" id="pet">
+    <div class="pet-sprite" role="img" aria-label="pear cat Q sprite"></div>
+    <svg viewBox="0 0 240 320" xmlns="http://www.w3.org/2000/svg" aria-label="梨子喵桌宠">
+      <defs>
+        <linearGradient id="hairGrad" x1="0" y1="0" x2="0.2" y2="1">
+          <stop offset="0%" stop-color="#ffe08a"/>
+          <stop offset="55%" stop-color="#ffc95c"/>
+          <stop offset="100%" stop-color="#f0a93e"/>
+        </linearGradient>
+        <linearGradient id="dressGrad" x1="0" y1="0" x2="0.1" y2="1">
+          <stop offset="0%" stop-color="#ffb38f"/>
+          <stop offset="100%" stop-color="#ff7f66"/>
+        </linearGradient>
+        <radialGradient id="cheekGrad" cx="0.5" cy="0.5" r="0.5">
+          <stop offset="0%" stop-color="#ff9d8f" stop-opacity="0.72"/>
+          <stop offset="100%" stop-color="#ff9d8f" stop-opacity="0"/>
+        </radialGradient>
+        <linearGradient id="tailGrad" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="#ffcf75"/>
+          <stop offset="100%" stop-color="#ffad55"/>
+        </linearGradient>
+      </defs>
+
+      <g class="pet-tail">
+        <path d="M166 224 C 150 214 140 226 147 240 C 152 251 171 256 182 249 C 190 244 190 232 180 229" fill="url(#tailGrad)"/>
+        <path d="M150 235 C 156 246 171 252 181 247 C 187 244 188 236 182 233" fill="#fff0c8" opacity="0.85"/>
+      </g>
+
+      <g class="pet-body">
+        <g class="pet-arm-left">
+          <path d="M88 176 C 74 182 68 198 77 210 C 83 217 95 212 96 200 L 96 186 Z" fill="url(#dressGrad)"/>
+          <ellipse cx="80" cy="211" rx="7" ry="5.6" fill="#ffd9c4"/>
+        </g>
+        <g class="pet-arm-right">
+          <path d="M152 176 C 166 182 172 198 163 210 C 157 217 145 212 144 200 L 144 186 Z" fill="url(#dressGrad)"/>
+          <ellipse cx="160" cy="211" rx="7" ry="5.6" fill="#ffd9c4"/>
+        </g>
+
+        <path d="M86 168 C 86 146 102 132 120 132 C 138 132 154 146 154 168 L 150 226 C 150 244 90 244 90 226 Z" fill="#fff0da"/>
+        <path d="M90 168 C 90 150 103 139 120 139 C 137 139 150 150 150 168 L 148 220 C 148 238 92 238 92 220 Z" fill="#fff8ec"/>
+
+        <path d="M88 194 C 78 199 80 222 91 228 C 108 237 136 236 151 226 C 158 221 158 204 148 199 Z" fill="url(#dressGrad)"/>
+        <path d="M88 194 C 102 190 138 190 151 199 C 154 209 152 220 151 226 C 135 235 108 236 92 228 C 82 221 80 204 88 194 Z" fill="#ff8f70"/>
+        <path d="M120 191 L 120 230" stroke="#ffd9c4" stroke-width="2.4" stroke-linecap="round" opacity="0.8"/>
+        <path d="M92 207 L 148 207" stroke="#ffd9c4" stroke-width="2" stroke-linecap="round" opacity="0.55"/>
+
+        <g class="pet-legs">
+          <path d="M101 232 C 101 244 98 254 104 264 C 109 272 122 271 120 260 L 116 232 Z" fill="#f8c98f"/>
+          <path d="M138 232 C 138 244 142 254 136 264 C 131 272 118 271 120 260 L 124 232 Z" fill="#f8c98f"/>
+          <ellipse cx="107" cy="265" rx="9" ry="5.5" fill="#ffb06a"/>
+          <ellipse cx="133" cy="265" rx="9" ry="5.5" fill="#ffb06a"/>
+        </g>
+
+        <path d="M116 150 L 124 150 L 124 184 L 116 184 Z" fill="#8a5a3b"/>
+        <path d="M116 156 L 124 156 L 124 184 L 116 184 Z" fill="#a9724c"/>
+        <path d="M120 156 L 120 184" stroke="#6f442b" stroke-width="1.6" stroke-dasharray="3 2.6" opacity="0.75"/>
+        <path d="M120 150 C 120 142 132 139 140 146 L 150 166" stroke="#8a5a3b" stroke-width="4" fill="none" stroke-linecap="round"/>
+      </g>
+
+      <g class="pet-head pet-face">
+        <path d="M96 118 C 86 106 90 80 104 72 C 118 64 126 70 126 70 C 126 70 134 62 148 68 C 162 74 166 92 158 104 C 168 112 170 126 166 138 C 160 156 144 166 124 166 C 104 166 86 158 82 142 C 79 132 86 122 96 118 Z" fill="url(#hairGrad)"/>
+        <path d="M104 72 C 100 80 96 92 98 102 C 100 90 104 80 110 74 Z" fill="#ffdf8d" opacity="0.9"/>
+        <path d="M144 66 C 148 76 152 90 150 102 C 148 90 144 80 139 74 Z" fill="#ffdf8d" opacity="0.9"/>
+
+        <path d="M104 72 C 110 64 122 61 130 64 C 130 54 121 49 111 53 C 104 56 101 63 104 72 Z" fill="#f2a83c"/>
+        <path d="M143 68 C 135 60 123 59 117 63 C 118 53 127 48 137 52 C 143 55 146 62 143 68 Z" fill="#f2a83c"/>
+        <path d="M112 58 C 114 65 117 70 121 72" stroke="#e08f2e" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.8"/>
+        <path d="M128 58 C 126 65 123 70 120 72" stroke="#e08f2e" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.8"/>
+
+        <g class="pet-ear-l">
+          <path d="M90 96 C 77 89 70 70 76 54 C 83 36 104 36 114 56 C 109 74 102 88 90 96 Z" fill="url(#hairGrad)"/>
+          <path d="M91 87 C 83 81 78 67 82 58 C 87 47 101 47 107 61 C 104 73 99 83 91 87 Z" fill="#ffc9d1"/>
+          <path d="M82 64 C 88 57 95 54 101 55" stroke="#e08f2e" stroke-width="1.6" fill="none" stroke-linecap="round" opacity="0.7"/>
+        </g>
+        <g class="pet-ear-r">
+          <path d="M150 96 C 163 89 170 70 164 54 C 157 36 136 36 126 56 C 131 74 138 88 150 96 Z" fill="url(#hairGrad)"/>
+          <path d="M149 87 C 157 81 162 67 158 58 C 153 47 139 47 133 61 C 136 73 141 83 149 87 Z" fill="#ffc9d1"/>
+          <path d="M158 64 C 152 57 145 54 139 55" stroke="#e08f2e" stroke-width="1.6" fill="none" stroke-linecap="round" opacity="0.7"/>
+        </g>
+
+        <path d="M86 112 C 85 120 90 128 97 129 C 104 130 108 124 105 117 C 102 111 91 107 86 112 Z" fill="#ffb8b1"/>
+        <path d="M154 112 C 155 120 150 128 143 129 C 136 130 132 124 135 117 C 138 111 149 107 154 112 Z" fill="#ffb8b1"/>
+
+        <g class="pet-eye pet-eye-l">
+          <ellipse cx="101" cy="112" rx="7.5" ry="9" fill="#4a2f46"/>
+          <circle class="pet-pupil" cx="104" cy="108.5" r="2.8" fill="#fff"/>
+          <circle cx="99.5" cy="116" r="1.5" fill="#fff" opacity="0.75"/>
+        </g>
+        <g class="pet-eye pet-eye-r">
+          <ellipse cx="139" cy="112" rx="7.5" ry="9" fill="#4a2f46"/>
+          <circle class="pet-pupil" cx="142" cy="108.5" r="2.8" fill="#fff"/>
+          <circle cx="137.5" cy="116" r="1.5" fill="#fff" opacity="0.75"/>
+        </g>
+        <ellipse class="pet-lid pet-lid-l" cx="101" cy="102" rx="8" ry="0" fill="#ffd98a"/>
+        <ellipse class="pet-lid pet-lid-r" cx="139" cy="102" rx="8" ry="0" fill="#ffd98a"/>
+
+        <path class="pet-mouth" d="M115 132 Q 120 138 125 132" stroke="#a95f5a" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+        <path d="M117 124 C 118 127 122 127 123 124" stroke="#d98f7a" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+        <circle class="pet-blush-l" cx="80" cy="126" r="8" fill="url(#cheekGrad)"/>
+        <circle class="pet-blush-r" cx="160" cy="126" r="8" fill="url(#cheekGrad)"/>
+
+        <g class="pet-fringe">
+          <path d="M98 102 C 105 93 114 92 121 97 C 128 93 136 93 142 102 C 141 91 134 84 123 84 C 111 84 100 91 98 102 Z" fill="#ffe08a"/>
+          <path d="M102 94 C 108 87 116 85 120 87" stroke="#ffd166" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.8"/>
+          <path d="M120 87 C 125 85 133 87 138 94" stroke="#ffd166" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.8"/>
+        </g>
+
+        <g class="pet-hairpin">
+          <path d="M101 92 C 108 84 133 84 140 92 C 133 96 108 96 101 92 Z" fill="#f4f7fb" stroke="#c9d4e0" stroke-width="1.2"/>
+          <path d="M108 92 C 110 95 114 96 120 96 C 126 96 130 95 133 92" stroke="#ff8f70" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+          <path d="M112 91 L 114 93 M 117 90 L 119 92 M 122 90 L 124 92 M 127 91 L 129 93" stroke="#e7edf4" stroke-width="1.6" stroke-linecap="round"/>
+          <circle cx="139" cy="90" r="3.2" fill="#ffb35c"/>
+          <path d="M139 86.8 L 139 89 M 139 91 L 139 93.2 M 135.8 90 L 138 90 M 140 90 L 142.2 90" stroke="#fff3c9" stroke-width="1" stroke-linecap="round"/>
+        </g>
+      </g>
+    </svg>
+    <div class="shadow"></div>
+    <span class="zzz">Z z z</span>
+  </div>
+
+  <div class="bubble" id="bubble"></div>
+  <div class="quick" id="quickBar"></div>
+
+  <div class="chat" id="chat">
+    <textarea id="cmd" rows="1" placeholder="和梨子喵说点什么…"></textarea>
+    <button class="send" id="send">发送</button>
+  </div>
+
+  <div class="welcome" id="welcome">
+    <button class="close" id="wClose">×</button>
+    <h3>绑定你的旅伴</h3>
+    <input id="wName" maxlength="32" placeholder="旅伴昵称">
+    <div class="row">
+      <button id="tabNew" class="active">新建</button>
+      <button id="tabBind">绑定角色</button>
+    </div>
+    <input id="wCode" maxlength="6" placeholder="6 位绑定码" style="display:none">
+    <button class="go" id="wGo">开始旅程</button>
+    <div class="err" id="wErr"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var TOKEN_KEY = 'ff_token';
+  var API_KEY = 'ff_api';
+  var apiBase = (localStorage.getItem(API_KEY) || 'http://127.0.0.1:17117').replace(/\/+$/, '');
+  var pet = document.getElementById('pet');
+  var sprite = pet.querySelector('.pet-sprite');
+  var bubble = document.getElementById('bubble');
+  var quickBar = document.getElementById('quickBar');
+  var chat = document.getElementById('chat');
+  var cmd = document.getElementById('cmd');
+  var welcome = document.getElementById('welcome');
+
+  var dragging = false;
+  var startX = 0, startY = 0, moved = false;
+
+  /* ---------- 自动行为状态机 ---------- */
+  var MODES = ['walk', 'walk', 'idle', 'idle', 'yawn', 'blink', 'stretch', 'sit', 'sleep'];
+  var modeTimer = null;
+  var walkTimer = null;
+  var currentMode = 'idle';
+  var userBusy = false;
+  var walkDir = 1;
+
+  function setMode(mode, holdMs) {
+    var prev = currentMode;
+    if (modeTimer) clearTimeout(modeTimer);
+    if (walkTimer) { clearInterval(walkTimer); walkTimer = null; }
+
+    pet.className = 'pet';
+    sprite.style.transform = '';
+    sprite.style.setProperty('--walk-dir', walkDir);
+    void pet.offsetWidth;
+    pet.classList.add(mode);
+    currentMode = mode;
+    if (mode === 'idle') pet.classList.add('idle-breathe');
+
+    if (mode === 'walk') {
+      if (uiBusy()) {
+        mode = 'idle';
+        pet.className = 'pet idle idle-breathe';
+        currentMode = mode;
+      } else {
+        pet.classList.add('walking');
+        sprite.style.setProperty('--walk-dir', walkDir);
+        walkTimer = setInterval(function () {
+          if (userBusy || dragging || uiBusy()) return;
+          window.fantasyPetDesktop.moveWindow(4 * walkDir, 0).then(function (r) {
+            if (r && r.clamped) {
+              walkDir = -walkDir;
+              sprite.style.setProperty('--walk-dir', walkDir);
+            }
+          }).catch(function () {});
+        }, 320);
+      }
+    }
+
+    var hold = holdMs || 0;
+    if (mode === 'yawn') hold = 2600;
+    if (mode === 'stretch') hold = 2400;
+    if (mode === 'blink') hold = 520;
+    if (mode === 'sit') hold = 6500;
+    if (mode === 'sleep') hold = 9000;
+    if (mode === 'walk') hold = 3200 + Math.floor(Math.random() * 2600);
+    if (mode === 'idle') hold = 1800 + Math.floor(Math.random() * 2600);
+
+    modeTimer = setTimeout(function () {
+      if (userBusy || dragging || uiBusy()) { scheduleNext(800); return; }
+      var next = MODES[Math.floor(Math.random() * MODES.length)];
+      setMode(next);
+    }, hold);
+  }
+
+  function scheduleNext(delay) {
+    if (modeTimer) clearTimeout(modeTimer);
+    modeTimer = setTimeout(function () {
+      if (userBusy || dragging || uiBusy()) { scheduleNext(800); return; }
+      setMode(MODES[Math.floor(Math.random() * MODES.length)]);
+    }, delay || 600);
+  }
+
+  function uiBusy() {
+    return welcome.classList.contains('show') || chat.classList.contains('show');
+  }
+
+  function pauseAuto() {
+    userBusy = true;
+    if (modeTimer) { clearTimeout(modeTimer); modeTimer = null; }
+    if (walkTimer) { clearInterval(walkTimer); walkTimer = null; }
+    pet.className = 'pet idle-breathe';
+    currentMode = 'idle';
+  }
+
+  function resumeAuto() {
+    userBusy = false;
+    setMode(MODES[Math.floor(Math.random() * MODES.length)]);
+  }
+
+  /* ---------- 拖拽与点击 ---------- */
+  pet.addEventListener('mousedown', function (e) {
+    if (e.button !== 0) return;
+    dragging = true;
+    moved = false;
+    startX = e.screenX;
+    startY = e.screenY;
+    document.body.classList.add('dragging');
+    if (modeTimer) { clearTimeout(modeTimer); modeTimer = null; }
+    if (walkTimer) { clearInterval(walkTimer); walkTimer = null; }
+  });
+
+  window.addEventListener('mousemove', function (e) {
+    if (!dragging) return;
+    var dx = e.screenX - startX;
+    var dy = e.screenY - startY;
+    if (Math.abs(dx) + Math.abs(dy) > 4) moved = true;
+    if (moved) window.fantasyPetDesktop.moveWindow(dx, dy);
+    startX = e.screenX;
+    startY = e.screenY;
+  });
+
+  window.addEventListener('mouseup', function () {
+    if (!dragging) return;
+    dragging = false;
+    document.body.classList.remove('dragging');
+    if (!moved) {
+      onPetClick();
+    } else {
+      resumeAuto();
+    }
+  });
+
+  pet.addEventListener('contextmenu', function (e) {
+    e.preventDefault();
+    window.fantasyPetDesktop.showContextMenu();
+  });
+
+  /* ---------- 指令与面板 ---------- */
+  function api(path, opts) {
+    var options = opts || {};
+    var headers = { 'Content-Type': 'application/json' };
+    var token = localStorage.getItem(TOKEN_KEY);
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    var init = { method: options.method || 'GET', headers: headers };
+    if (options.body !== undefined) init.body = JSON.stringify(options.body);
+    return fetch(apiBase + path, init).then(function (res) {
+      return res.json().then(function (data) {
+        if (!res.ok) throw new Error(data.message || '请求失败');
+        return data;
+      });
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function say(text, petReply) {
+    var html = '';
+    if (petReply) html += '<span class="pet-say">' + escapeHtml(petReply) + '</span>';
+    if (text) html += escapeHtml(text);
+    bubble.innerHTML = html || '梨子喵在发呆…';
+    bubble.classList.add('show');
+    bubble.scrollTop = 0;
+  }
+
+  function hideBubble() { bubble.classList.remove('show'); }
+
+  function renderButtons(buttons) {
+    quickBar.innerHTML = '';
+    var list = Array.isArray(buttons) && buttons.length ? buttons : [
+      { label: '角色', command: '/角色' },
+      { label: '背包', command: '/背包' },
+      { label: '状态', command: '/状态' },
+      { label: '探索', command: '/探索' }
+    ];
+    list.slice(0, 6).forEach(function (b) {
+      var btn = document.createElement('button');
+      btn.textContent = b.label || b.command;
+      btn.addEventListener('click', function () { runCommand(b.command); });
+      quickBar.appendChild(btn);
+    });
+    quickBar.classList.add('show');
+  }
+
+  function onPetClick() {
+    if (welcome.classList.contains('show')) return;
+    pauseAuto();
+    chat.classList.toggle('show');
+    if (chat.classList.contains('show')) {
+      hideBubble();
+      cmd.focus();
+    } else {
+      resumeAuto();
+    }
+  }
+
+  function closeChat() {
+    chat.classList.remove('show');
+  }
+
+  function runCommand(command) {
+    closeChat();
+    pauseAuto();
+    pet.classList.remove('jump');
+    void pet.offsetWidth;
+    pet.classList.add('jump');
+    api('/app-api/v1/command', { method: 'POST', body: { command: command } })
+      .then(function (data) {
+        renderButtons(data.buttons);
+        say(data.text, data.petReply);
+        setTimeout(resumeAuto, 2200);
+      })
+      .catch(function (err) {
+        say('出错了：' + err.message);
+        setTimeout(resumeAuto, 1800);
+      });
+  }
+
+  document.getElementById('send').addEventListener('click', send);
+  cmd.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+
+  function send() {
+    var value = cmd.value.trim();
+    if (!value) return;
+    if (value.indexOf('/') !== 0) value = '/' + value;
+    runCommand(value);
+  }
+
+  function loadPanel() {
+    api('/app-api/v1/panel').then(function (data) {
+      renderButtons(data.buttons);
+      say(data.text, data.petReply);
+    }).catch(function (err) {
+      if (String(err.message).indexOf('登录') >= 0 || String(err.message).indexOf('失效') >= 0) {
+        localStorage.removeItem(TOKEN_KEY);
+        showWelcome();
+      } else {
+        say('出错了：' + err.message);
+      }
+    });
+  }
+
+  function showWelcome() {
+    welcome.classList.add('show');
+  }
+
+  document.getElementById('wClose').addEventListener('click', function () { welcome.classList.remove('show'); });
+
+  var bindMode = false;
+  var tabNew = document.getElementById('tabNew');
+  var tabBind = document.getElementById('tabBind');
+  var wCode = document.getElementById('wCode');
+  document.getElementById('tabNew').addEventListener('click', function () {
+    bindMode = false;
+    tabNew.classList.add('active');
+    tabBind.classList.remove('active');
+    wCode.style.display = 'none';
+  });
+  document.getElementById('tabBind').addEventListener('click', function () {
+    bindMode = true;
+    tabBind.classList.add('active');
+    tabNew.classList.remove('active');
+    wCode.style.display = 'block';
+  });
+
+  document.getElementById('wGo').addEventListener('click', function () {
+    var name = document.getElementById('wName').value.trim();
+    var code = wCode.value.trim();
+    var err = document.getElementById('wErr');
+    if (!name) { err.textContent = '请填写昵称。'; return; }
+    if (bindMode && !/^\d{6}$/.test(code)) { err.textContent = '绑定码需要 6 位数字。'; return; }
+    api('/app-api/v1/register', { method: 'POST', body: { displayName: name } })
+      .then(function (reg) {
+        localStorage.setItem(TOKEN_KEY, reg.accessToken);
+        if (bindMode) {
+          return api('/app-api/v1/bind', { method: 'POST', body: { code: code } });
+        }
+      })
+      .then(function () {
+        welcome.classList.remove('show');
+        err.textContent = '';
+        loadPanel();
+      })
+      .catch(function (e) { err.textContent = e.message; });
+  });
+
+  if (localStorage.getItem(TOKEN_KEY)) {
+    loadPanel();
+  } else {
+    showWelcome();
+  }
+
+  setMode('idle', 1400);
+})();
+</script>
+</body>
+</html>

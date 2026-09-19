@@ -118,6 +118,13 @@ export const openingGuildHandler=(mode:'view'|'enter'|'leave'|'service'|'keepsak
   try{
     let returnArea=String(route.param('area')??'大厅');
     if(mode==='enter'||mode==='leave')await enterOpeningGuild(event.current.UserId,mode==='enter');
+    if(mode==='leave'){
+      const adventure=await import('./adventure');
+      const panel=await adventure.movementPanel(event.current.UserId,'你离开了冒险者公会，回到门前的街道。');
+      const nearby=await nearbyPoints(event.current.UserId);
+      await message.send({format:panel.addButtonGroup(await adventure.movementButtons(event.current.UserId,nearby.character.activity_status!=='active'))});
+      return;
+    }
     if(mode==='service'){
       const action=String(route.param('action')),value=String(route.param('value')??'');
       const text=await openingGuildAction(event.current.UserId,action,value);

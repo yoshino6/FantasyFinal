@@ -7,7 +7,7 @@ type MasteryBonuses = Record<MasteryKey, number> & { details: string[]; offhandA
 /** 未学习或随心Lv.1均为50%；Lv.2—6为60%—100%。仅用于属性词条，不缩放装备特殊效果。 */
 export const offhandAttributeMultiplier = (focus: unknown = 1) => (5 + Math.min(6, Math.max(1, Math.floor(Number(focus) || 1))) - 1) / 10;
 
-const masteryCodes = ['longsword_mastery', 'shield_mastery', 'staff_mastery', 'spellbook_mastery', 'orb_mastery', 'dagger_mastery', 'fistblade_mastery'];
+const masteryCodes = ['longsword_mastery', 'shield_mastery', 'staff_mastery', 'spellbook_mastery', 'orb_mastery', 'dagger_mastery', 'fistblade_mastery', 'bow_crossbow_mastery', 'gun_mastery'];
 const masteryLabels: Record<MasteryKey, string> = { physicalAttackPct: '物攻', magicAttackPct: '魔攻', physicalDefensePct: '物防', magicDefensePct: '魔防', accuracyPct: '命中', critRatePct: '暴击', critDamagePct: '暴伤', critResistPct: '暴免', critDamageReductionPct: '暴抗', mpPct: '魔力上限', chantSpeedPct: '吟唱速度' };
 const masteryKeys = Object.keys(masteryLabels) as MasteryKey[];
 const jsonRecord = (value: unknown): Record<string, unknown> => {
@@ -31,7 +31,8 @@ export const weaponMasteryBonusesFor = async (connection: Pool | PoolConnection,
   const bonuses: MasteryBonuses = { physicalAttackPct: 0, magicAttackPct: 0, physicalDefensePct: 0, magicDefensePct: 0, accuracyPct: 0, critRatePct: 0, critDamagePct: 0, critResistPct: 0, critDamageReductionPct: 0, mpPct: 0, chantSpeedPct: 0, details: [], offhandAttributeMultiplier: offhandAttributeMultiplier(offhandMastery?.focus) };
   for (const skill of skillRows) {
     const effect = jsonRecord(skill.passive_effect_json); const weaponType = String(effect.weaponType ?? '');
-    const matched = equipmentRows.filter(item => item.weapon_type === weaponType && (item.slot === 'weapon' || item.slot === 'offhand'));
+    const accepts = weaponType === '弓弩' ? ['弓', '弩'] : weaponType === '枪炮' ? ['枪', '枪炮'] : [weaponType];
+    const matched = equipmentRows.filter(item => accepts.includes(String(item.weapon_type)) && (item.slot === 'weapon' || item.slot === 'offhand'));
     if (!matched.length) continue;
     const proficiency = Math.min(5, Math.max(1, Number(skill.proficiency)));
     const focus = Math.min(6, Math.max(1, Number(skill.focus)));

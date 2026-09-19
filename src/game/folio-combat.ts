@@ -10,9 +10,10 @@ export const resolveFolioStrike = (rules: CombatRules | undefined, source: RuleU
         args[1] = folioStat(target, magic ? 'magic_defense' : 'defense', args[1], rules.turn);
         args[2] = folioStat(source, 'accuracy', args[2], rules.turn);
         args[3] = folioStat(target, 'evasion', args[3], rules.turn);
-        args[12] = (args[12] ?? 1) * (1 - folioValue(source, 'hit_down', rules.turn) / 100);
+        // 命中抑制与其它命中修正同池加算，避免多个减益相乘后过度压低命中。
+        args[12] = Math.max(0, (args[12] ?? 1) - folioValue(source, 'hit_down', rules.turn) / 100);
         const correction = args[13] ?? {};
-        args[13] = { ...correction, hitCorrectionPct: 100 * (1 - (1 - (correction.hitCorrectionPct ?? 0) / 100) * (1 - folioCorrection(source, target, rules.turn) / 100)) };
+        args[13] = { ...correction, hitCorrectionPct: Math.min(100, (correction.hitCorrectionPct ?? 0) + folioCorrection(source, target, rules.turn)) };
         source.state.statuses = source.state.statuses.filter(e => e.code !== 'folio_accuracy');
     }
     return resolveStrike(...args);
@@ -26,7 +27,7 @@ export const folioStat = (unit: RuleUnit, stat: 'attack' | 'magic' | 'defense' |
         return Math.max(0, base + folioValue(unit, 'evasion', turn) - folioValue(unit, 'evasion_down', turn));
     return base * (1 + (folioValue(unit, stat, turn) - folioValue(unit, stat === 'speed' ? 'slow' : stat + '_down', turn)) / 100);
 };
-export const folioCorrection = (source: RuleUnit, target: RuleUnit, turn: number) => Math.max(folioValue(source, 'hit', turn), folioValue(target, 'exposed_hit', turn));
+export const folioCorrection = (source: RuleUnit, target: RuleUnit, turn: number) => Math.min(100, folioValue(source, 'hit', turn) + folioValue(target, 'exposed_hit', turn));
 export const folioDuration = (source: RuleUnit, turns: number) => Math.min(4, Math.max(1, Math.floor(turns * (source.castSpecialization?.effectFactor ?? 1) + 1e-9)));
 export const folioBenefit = (source: RuleUnit, value: number, cap: number) => Math.min(cap, value * (source.castSpecialization?.effectFactor ?? 1));
 /** 不把强值短时和弱值长时拼成超长强效果。 */

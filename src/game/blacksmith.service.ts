@@ -241,6 +241,7 @@ export const tierForgeMaterial = (category: string, subtype: string | null | und
     if (subtype === '匕首') return 'duskvein_crystal';
     if (subtype === '法杖' || subtype === '法书' || subtype === '法球') return 'marsh_heart';
     if (subtype === '拳刃') return 'fire_crystal';
+    if (subtype === '弓弩' || subtype === '枪炮') return 'living_wood';
     return 'ridge_core'; // 长剑、盾牌
   }
   if (subtype === '布甲') return 'marsh_heart';
@@ -248,7 +249,7 @@ export const tierForgeMaterial = (category: string, subtype: string | null | und
   if (subtype === '重甲') return 'fire_crystal';
   return 'ridge_core'; // 轻甲、板甲
 };
-const weaponCraftMaterial = (subtype: string | null | undefined, equipmentLevel: number) => subtype === '匕首' ? purifiedCraftMaterialCode('gel_skin', equipmentLevel) : subtype === '法杖' || subtype === '法书' || subtype === '法球' ? purifiedCraftMaterialCode('hair', equipmentLevel) : subtype === '盾牌' ? purifiedCraftMaterialCode('shell', equipmentLevel) : purifiedCraftMaterialCode('bone', equipmentLevel);
+const weaponCraftMaterial = (subtype: string | null | undefined, equipmentLevel: number) => subtype === '匕首' ? purifiedCraftMaterialCode('gel_skin', equipmentLevel) : subtype === '法杖' || subtype === '法书' || subtype === '法球' ? purifiedCraftMaterialCode('hair', equipmentLevel) : subtype === '盾牌' ? purifiedCraftMaterialCode('shell', equipmentLevel) : subtype === '弓弩' || subtype === '枪炮' ? purifiedCraftMaterialCode('hair', equipmentLevel) : purifiedCraftMaterialCode('bone', equipmentLevel);
 /** 同一 20 级循环使用同一套材料；循环内每提升 5 级，需求数量增加 20%。 */
 const normalForgeQuantity = (baseQuantity: number, level: number) => Math.ceil(baseQuantity * (1 + (((level - 5) % 20 + 20) % 20) / 5 * .2));
 export const forgeRequirements = (category: string, subtype: string | null | undefined, level: number): ForgeRequirement[] => {
@@ -269,7 +270,7 @@ const refinementMaterialCode = (level: number) => level <= 20 ? 'living_wood' : 
 const forgeMaterialNames: Record<string, string> = { living_wood: '活纹木胚', ridge_core: '岩脊核心', fire_crystal: '炉心赤晶', marsh_heart: '雾沼心', duskvein_crystal: '幽纹黑晶', meteor_iron: '陨铁锻锭', star_copper: '星铜锻锭', moon_silver: '月银锻锭', sun_gold: '曜金合锭', beast_core: '兽核', beast_bone: '兽骨', beast_hide: '兽皮', beast_tendon: '兽筋', magic_wool: '魔力绒毛', magic_scale: '魔力鳞片' };
 const forgeMaterialName = (code: string) => forgeMaterialNames[code] ?? purifiedCraftMaterialDisplayName(code) ?? code;
 const forgeCategories = new Set(['武器', '头肩', '上装', '腰部', '下装', '脚部']);
-const weaponTypes = new Set(['长剑', '法杖', '法书', '法球', '匕首', '拳刃', '盾牌']); const armorTypes = new Set(['布甲', '皮甲', '轻甲', '重甲', '板甲']);
+const weaponTypes = new Set(['长剑', '法杖', '法书', '法球', '匕首', '拳刃', '盾牌', '弓弩', '枪炮']); const armorTypes = new Set(['布甲', '皮甲', '轻甲', '重甲', '板甲']);
 export const forgeRarityWeights = (blacksmithLevel: number): Array<[string, number]> => {
   const level = Math.max(1, Math.floor(blacksmithLevel));
   const chances: Record<number, [number, number, number, number, number]> = {

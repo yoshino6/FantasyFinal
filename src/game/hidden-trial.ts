@@ -56,7 +56,7 @@ export const advanceHiddenTrial = async (profession: HiddenProfessionCode, previ
   trial.log=lines;trial.turn++;
   trial.won=round===last;
   if(trial.won) {
-    const valid=profession==='magical_scholar'?student.mp===145&&trial.particles===5:profession==='weapon_master'?student.mp===90&&hiddenState(student).resource===20:profession==='inventor'?student.mp===190&&trial.devices.map(d=>d.energy).join(',')==='30,40,20':student.mp===310&&trial.events.includes('调度实际前移')&&trial.events.includes('预案实际触发');
+    const valid=profession==='magical_scholar'?student.mp===175&&trial.particles===5:profession==='weapon_master'?student.mp===90&&hiddenState(student).resource===20:profession==='inventor'?student.mp===190&&trial.devices.map(d=>d.energy).join(',')==='30,40,20':student.mp===310&&trial.events.includes('调度实际前移')&&trial.events.includes('预案实际触发');
     if(!valid) throw new Error('演练账目与验收条件不一致，尚不能交回记录。');
     trial.log.push(`验收：MP ${student.mp} · ${hiddenState(student).resource}专属资源 · 药偶 ${dummy.hp}/${dummy.hpMax} HP。`);
   }

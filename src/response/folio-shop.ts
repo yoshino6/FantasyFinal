@@ -5,7 +5,7 @@ import { folioSkillByCode } from '../game/active-folio-skills.config';
 import { messageFormat } from '../game/message';
 export const folioShopFormat = async (user: string, shop: string, page = 1, filter = '全部', tier = '全部') => {
     const data = await folioShopCatalog(user, shop, page, filter, tier);
-    const md = Format.createMarkdown().addTitle(data.name).addNewline().addNewline().addText(`铜币 ${data.copper}｜${data.page}/${data.pages}页\n研读仅领悟；学习另耗SP。绑定书籍，库存不限。\n\n`);
+    const md = Format.createMarkdown().addTitle(`${data.name}·我要买`).addNewline().addNewline().addText(`铜币 ${data.copper}｜${data.page}/${data.pages}页\n研读仅领悟；学习另耗SP。绑定书籍，库存不限。\n\n`);
     for (const category of ['全部', '物理', '魔法', '净化', '增益'])
         md.addButton(category, { data: `/战技商店 ${shop} 1 ${category} ${tier}`, autoEnter: false }).addText(' ');
     md.addNewline();
@@ -34,7 +34,7 @@ export const detail = async () => {
         if (!s)
             throw Error('找不到这本战技书。');
         const md = Format.createMarkdown().addTitle(s.name).addNewline().addNewline().addText(`${s.tier}｜${s.category === 'physical' ? '物理' : s.category === 'magic' ? '魔法' : '辅助'}｜${s.targetCount ? `${s.targetCount}目标` : '全体'}\n威力：${s.category === 'utility' ? '—' : s.power}${s.parts.length > 1 ? '（' + s.parts.join('+') + '）' : ''}\n蓝耗：${s.mana}\n冷却：${s.cooldown}回合\n吟唱：${s.chant}回合\n效果：${s.description}\n\n学习条件：Lv.${s.learnLevel}，${s.tier === '基础' ? 1 : s.tier === '下位' ? 2 : 3}SP\n售价：${s.price}铜币｜${folioShopNames[s.shop]}\n等级不足可提前购买、研读，但不能学习。\n\n`)
-            .addButton('确认购买', { data: `/购买战技书 ${s.code} 确认`, autoEnter: false }).addText('　').addButton('使用150抵用券', { data: `/购买战技书 ${s.code} 抵用券`, autoEnter: false }).addNewline().addButton('返回目录', { data: `/战技商店 ${s.shop}`, autoEnter: false });
+            .addButton('确认购买', { data: `/购买战技书 ${s.code} 确认`, autoEnter: false }).addText('　').addButton('使用150抵用券', { data: `/购买战技书 ${s.code} 抵用券`, autoEnter: false }).addNewline().addButton('返回我要买', { data: `/战技商店 ${s.shop}`, autoEnter: false });
         await message.send({ format: Format.create().addMarkdown(md) });
     }
     catch (e) {

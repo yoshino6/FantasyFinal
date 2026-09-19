@@ -6,7 +6,7 @@ import { hiddenMix, rollHiddenMix } from './hidden-particles';
 import { inventorCapability, inventorProjection } from './hidden-device-protocol';
 import type { ActiveDeviceSkill } from './device.service';
 import { specializeTime, specializeEffectValue } from './skill-specialization';
-import { gainHiddenResource, hiddenActionKey, hiddenState, hiddenResourceShortage, type HiddenChoice, type HiddenDevice, type HiddenWeapon } from './hidden-combat-state';
+import { gainHiddenResource, hiddenActionKey, hiddenState, hiddenResourceShortage, type HiddenChoice, type HiddenDevice, type HiddenWeapon, type HiddenWeaponTrait } from './hidden-combat-state';
 
 export class HiddenBattleError extends Error {}
 export const hiddenDamageSource = (r: CombatRules, source: RuleUnit, target: RuleUnit, direct = false) => incoming.set(r, { source, target, direct });
@@ -40,7 +40,7 @@ const recordInventorCapabilities = (state: ReturnType<typeof hiddenState>, turn:
   if (state.inventorActions.length === 2 && recent.length >= 2) state.inventorLink = { capabilities: recent, until: turn + 2 };
 };
 /** 四个隐藏二转的传承入口：由实际成功的特殊动作触发，按两回合冷却记录状态。 */
-const inherit = (r: CombatRules, u: RuleUnit) => {
+const inherit = (r: CombatRules, u: RuleUnit, options: { trait?: HiddenWeaponTrait; devices?: number[] } = {}) => {
   const state = hiddenState(u);
   if (state.profession === 'magical_scholar') {
     if (state.reviewTurn === r.turn) return;
@@ -53,13 +53,13 @@ const inherit = (r: CombatRules, u: RuleUnit) => {
     if (!twoTurnReady(state.weaponInheritanceTurn, r.turn)) return;
     state.weaponInheritanceTurn = r.turn;
     const lastType = state.lastType ?? '';
-    if (lastType) state.weaponSheath = { lastType, until: r.turn + 2 };
-    gainHiddenResource(u, r.turn, 15);
+    if (lastType) state.weaponSheath = { lastType, trait: options.trait, until: r.turn + 2 };
+    reward(r, u, 15);
     r.log.push(`　➥归鞘余响：${u.name}恢复15器鸣，下一次更换器类可继承器性。`);
   } else if (state.profession === 'inventor') {
     if (!twoTurnReady(state.inventorInheritanceTurn, r.turn)) return;
     state.inventorInheritanceTurn = r.turn;
-    state.inventorAcceptance = { devices: [], until: r.turn + 2 };
+    state.inventorAcceptance = { devices: options.devices ?? [], until: r.turn + 2 };
     r.log.push(`　➥验收合格：${u.name}的下一次单异械行动能源消耗降低25%。`);
   }
 };
@@ -245,7 +245,7 @@ export const executeHiddenCombat = async (r: CombatRules, u: RuleUnit, code: str
   const ally = r.allies(u).find(t => t.key === choice.target) ?? u;
   const spec = u.castSpecialization, fixed = ['hidden_overclock','hidden_transfer','hidden_debug'].includes(code), support = fixed ? 1 : spec?.supportFactor ?? 1, potency = fixed ? 1 : spec?.effectFactor ?? 1;
   let mix = code === 'hidden_mix' || code === 'hidden_kettle' ? hiddenMix(choice.particles ?? [], 'success', code === 'hidden_kettle') : undefined;
-  let mana = r.manaCost(u, Math.ceil((mix?.mana ?? definition.mana) * (spec?.manaFactor ?? 1))), cooldown = mix?.cooldown ?? definition.cooldown;
+  let mana = r.manaCost(u, Math.ceil((mix?.mana ?? definition.mana) * (spec?.manaFactor ?? 1)), code), cooldown = mix?.cooldown ?? definition.cooldown;
   cooldown = Math.max(0, specializeTime(cooldown, spec?.timeChange ?? 0));
   if (u.mp < mana) throw new HiddenBattleError(`MP不足，需要${mana}。`);
   const ownedPlans = r.units.flatMap(target => r.effects(target).filter(item => item.code === 'hidden_plan' && item.source === u.key).map(item => ({ target, item })));
@@ -276,7 +276,8 @@ export const executeHiddenCombat = async (r: CombatRules, u: RuleUnit, code: str
     return { device, skill, capability };
   });
   const donor = ctx.devices.find(d => d.id === choice.donor);
-  const deviceEnergyCost = (device: HiddenDevice, skill: ActiveDeviceSkill) => state.inventorStandby?.device === device.id && state.inventorStandby.until >= r.turn
+  const acceptanceReady = (device: HiddenDevice) => !['hidden_transfer', 'hidden_debug', 'hidden_synergy'].includes(code) && selected.length === 1 && state.inventorAcceptance?.until !== undefined && state.inventorAcceptance.until >= r.turn && state.inventorAcceptance.devices.includes(device.id);
+  const deviceEnergyCost = (device: HiddenDevice, skill: ActiveDeviceSkill) => (acceptanceReady(device) || state.inventorStandby?.device === device.id && state.inventorStandby.until >= r.turn)
     ? Math.max(Math.ceil(skill.energyCost * .6), Math.ceil(skill.energyCost * .75))
     : skill.energyCost;
   if (definition.profession === 'inventor') {
@@ -323,7 +324,7 @@ export const executeHiddenCombat = async (r: CombatRules, u: RuleUnit, code: str
   else if (definition.profession === 'weapon_master') {
     const chosen = weapons as HiddenWeapon[], aoe = code === 'hidden_weapon_finale';
     const power = hiddenWeaponAttackPower(code, chosen.length);
-    let effective = false; const seenTypes=new Set<string>();
+    let effective = false; let allEffective = true; let lastWeaponTrait: HiddenWeaponTrait | undefined; let sheathConsumed = false; const seenTypes=new Set<string>();
     for (let index = 0; index < chosen.length; index++) {
       const weapon = chosen[index], firstType=!seenTypes.has(weapon.type), magic = ['法杖','法书','魔导书','法球','staff','book','orb'].includes(weapon.type), a = magic ? u.magic : u.attack, b = magic ? weapon.magic : weapon.attack;
       seenTypes.add(weapon.type);
@@ -333,12 +334,27 @@ export const executeHiddenCombat = async (r: CombatRules, u: RuleUnit, code: str
         const traitAllowed=firstType&&(!aoe||index===0&&target===targets[0]);
         const hit = await r.strike(u, target, power * ratio, weapon.element, magic, index > 0, false, 1, { skill: true, single: !aoe, hitPenalty: traitAllowed&&['匕首','dagger'].includes(weapon.type) ? -10 : 0, finalMultiplier: traitAllowed&&['法杖','staff'].includes(weapon.type) ? 1.05 : 1 });
         effective ||= hit;
-        if (hit && traitAllowed) await weaponTrait(r, u, target, weapon, potency);
+        allEffective &&= hit;
+        if (hit && traitAllowed) {
+          const trait = await weaponTrait(r, u, target, weapon, potency);
+          if (trait) lastWeaponTrait = trait;
+        }
+        if (hit && !sheathConsumed && state.weaponSheath && state.weaponSheath.until >= r.turn && state.weaponSheath.lastType !== weapon.type && state.weaponSheath.trait) {
+          await applyInheritedWeaponTrait(r, u, target, state.weaponSheath.trait);
+          delete state.weaponSheath;
+          sheathConsumed = true;
+          r.log.push(`　➥归鞘余响：${u.name}以${weapon.type}继承了上一器性60%的效果。`);
+        }
       };
       if (aoe) await r.areaDamage(targets, hitTarget); else for (const target of targets) await hitTarget(target);
     }
     if (effective && code === 'hidden_weapon_strike') { gainHiddenResource(u, r.turn, 20 + (state.lastType && state.lastType !== chosen[0].type ? 10 : 0)); state.lastType = chosen[0].type; }
-    if (effective && code === 'hidden_weapon_combo') inherit(r, u);
+    if (effective && code === 'hidden_weapon_combo') {
+      if (allEffective) {
+        state.lastType = chosen[chosen.length - 1]?.type ?? state.lastType;
+        if (new Set(chosen.map(weapon => weapon.type)).size >= 2) inherit(r, u, { trait: lastWeaponTrait });
+      }
+    }
   } else if (definition.profession === 'inventor') {
     state.driverTurn = r.turn;
     if (donor && code === 'hidden_transfer') { donor.energy -= 40; selected[0].device!.energy += 30; }
@@ -347,10 +363,13 @@ export const executeHiddenCombat = async (r: CombatRules, u: RuleUnit, code: str
       for (const skill of device.skills) { const key = `device_${device.id}_${skill.code}`; u.cooldowns[key] = Math.max(0, Number(u.cooldowns[key] ?? 0) - 2); }
     }
     const budget = { control: false, dispel: 0 }, results: boolean[] = [];
+    let projected = false;
+    let acceptedDevice: number | undefined;
     for (const selection of selected) {
       if (!r.enemies(u).length || u.hp <= 0) break;
       const device = selection.device!, skill = selection.skill!, capability = code === 'hidden_synergy' ? inventorProjection(selection.capability!) : selection.capability!;
-      device.energy -= skill.energyCost; u.cooldowns[`device_${device.id}_${skill.code}`] = skill.cooldownTurns + 1;
+      const energyCost = deviceEnergyCost(device, skill);
+      device.energy -= energyCost; u.cooldowns[`device_${device.id}_${skill.code}`] = skill.cooldownTurns + 1;
       if (capability.selfHpCost) u.hp = Math.max(1, u.hp - Math.floor(u.hp * capability.selfHpCost / 100));
       const active=ctx.activeCodes??[];
       const numeric = code === 'hidden_synergy' ? .9 : code === 'hidden_overclock' ? 1.2 : code === 'hidden_debug' ? 1.25 : 1;
@@ -363,10 +382,24 @@ export const executeHiddenCombat = async (r: CombatRules, u: RuleUnit, code: str
         const limit = (negative ? allEnemies : allAllies) ? code === 'hidden_synergy' ? 3 : targets.length : 1;
         for (const target of targets.slice(0, limit)) {
           if (fragment.kind === 'damage') effective = await r.strike(u, target, fragment.power*(1+(active.includes('rail_stabilizer')?.12:0)+(fragment.element==='雷'&&active.includes('electromagnetic_coil_cannon')?.12:0)), fragment.element ?? '', fragment.magic ?? false, false, false, 1, { skill: true, single: !allEnemies, accuracyMultiplier: active.includes('precision_scope')?1.1:1, specializedPower: fixed, finalMultiplier: numeric, damageCap: code === 'hidden_synergy' ? (2*(fragment.magic?u.magic:u.attack))**2/(2*(fragment.magic?u.magic:u.attack)+Math.max(1,fragment.magic?target.magicDefense:target.defense)) : undefined }) || effective;
-          else if (fragment.kind === 'heal') { const before = target.hp; await r.restore(u, target, Math.min(target.hpMax * fragment.percent / 100 * numeric * support, code === 'hidden_synergy' ? .2*target.hpMax/Math.max(.01,r.healingMultiplier(u,target,true,true)) : Infinity), 0, true, code==='hidden_synergy'?.2*target.hpMax:Infinity, true); effective ||= target.hp > before; }
+          else if (fragment.kind === 'heal') {
+            const amount = Math.min(target.hpMax * fragment.percent / 100 * numeric * support, code === 'hidden_synergy' ? .2*target.hpMax/Math.max(.01,r.healingMultiplier(u,target,true,true)) : Infinity);
+            const before = target.hp; await r.restore(u, target, amount, 0, true, code==='hidden_synergy'?.2*target.hpMax:Infinity, true); effective ||= target.hp > before;
+            if (!projected && state.inventorLink && state.inventorLink.until >= r.turn && !state.inventorLink.capabilities.includes(capability.primary) && target.side === u.side) {
+              const other = r.allies(u).filter(candidate => candidate !== target && candidate.hp > 0).sort((a,b) => a.hp/a.hpMax - b.hp/b.hpMax)[0];
+              if (other) { const beforeOther = other.hp; await r.restore(u, other, amount * .6, 0, true); projected = other.hp > beforeOther; }
+            }
+          }
           else if (fragment.kind === 'shield') effective = hiddenShield(r, u, target, Math.min(target.hpMax * fragment.percent / 100 * numeric * support,code==='hidden_synergy'?.2*target.hpMax:Infinity)) > 0 || effective;
           else if (fragment.kind === 'control' && !budget.control) { budget.control = true; effective = await r.control(u, target, 'hidden_' + fragment.code, code === 'hidden_synergy' ? Math.min(50,fragment.chance*(spec?.controlChanceFactor??1)) : fragment.chance, 1, false) || effective; }
-          else if (fragment.kind === 'status') { effect(r, target, fragment.code, specializeEffectValue(fragment.code,fragment.value,stateScale*potency), fragment.duration+(code!=='hidden_synergy'&&skill.effect==='fold_barrier'&&active.includes('fold_barrier_generator')?1:0), u, fragment.debuff, { untilHit: fragment.untilHit }); effective = true; }
+          else if (fragment.kind === 'status') {
+            const duration = fragment.duration+(code!=='hidden_synergy'&&skill.effect==='fold_barrier'&&active.includes('fold_barrier_generator')?1:0);
+            effect(r, target, fragment.code, specializeEffectValue(fragment.code,fragment.value,stateScale*potency), duration, u, fragment.debuff, { untilHit: fragment.untilHit }); effective = true;
+            if (!projected && state.inventorLink && state.inventorLink.until >= r.turn && !state.inventorLink.capabilities.includes(capability.primary) && !fragment.untilHit && !['slow', 'bind', 'stun', 'freeze', 'sleep', 'petrify', 'charm', 'fear'].includes(fragment.code)) {
+              const projectionTarget = target.side === u.side ? r.allies(u).filter(candidate => candidate !== target && candidate.hp > 0).sort((a,b) => a.hp/a.hpMax - b.hp/b.hpMax)[0] : target;
+              if (projectionTarget) { effect(r, projectionTarget, fragment.code, specializeEffectValue(fragment.code, fragment.value, stateScale * potency * .6), duration, u, fragment.debuff, { projected: true }); projected = true; }
+            }
+          }
           else if (fragment.kind === 'cleanse' || fragment.kind === 'dispel') {
             if (code !== 'hidden_synergy' || budget.dispel < 1) { const removed = await r.dispel(u, target, fragment.kind === 'cleanse', 1); effective ||= removed.length > 0; budget.dispel += removed.length; if (!removed.length && skill.effect === 'counter_spider') { effect(r,target,'exposed',15*stateScale*potency,2,u,true);effective=true; } }
           } else if (fragment.kind === 'evade' || fragment.kind === 'reduce_once') { effect(r, target, fragment.kind==='evade'?'hidden_evade':'hidden_once', fragment.kind === 'reduce_once' ? fragment.value * stateScale : 100, 2, u); effective = true; }
@@ -385,9 +418,24 @@ export const executeHiddenCombat = async (r: CombatRules, u: RuleUnit, code: str
           }
         }
       }
-      results.push(effective); if (effective) { gainHiddenResource(u, r.turn, 20 + (state.lastCapability && state.lastCapability !== capability.primary ? 10 : 0)); state.lastCapability = capability.primary; }
+      results.push(effective); if (effective) { gainHiddenResource(u, r.turn, 20 + (state.lastCapability && state.lastCapability !== capability.primary ? 10 : 0)); state.lastCapability = capability.primary; if (acceptanceReady(device)) acceptedDevice = device.id; }
     }
-    await ctx.saveDevices(); if (code === 'hidden_synergy' && results.length === 2 && results.every(Boolean)) inherit(r, u);
+    if (projected) { delete state.inventorLink; r.log.push(`　➥主脑链路：第三种能力的附属效果以60%投影。`); }
+    if (acceptedDevice !== undefined) {
+      const other = state.inventorAcceptance?.devices.find(deviceId => deviceId !== acceptedDevice);
+      delete state.inventorAcceptance;
+      if (other !== undefined) { state.inventorStandby = { device: other, until: r.turn + 2 }; r.log.push(`　➥验收合格：异械${other}进入待机，下次能耗降低25%。`); }
+    }
+    if (code === 'hidden_synergy' && results.length === 2 && results.every(Boolean)) {
+      const lowest = [...selected].sort((a, b) => a.device!.energy - b.device!.energy)[0]?.device;
+      if (lowest) { lowest.energy = Math.min(lowest.max, lowest.energy + 20); r.log.push(`　➥验收合格：${lowest.name}恢复20点能量。`); }
+      for (const selection of selected) {
+        const key = `device_${selection.device!.id}_${selection.skill!.code}`;
+        u.cooldowns[key] = Math.max(0, Number(u.cooldowns[key] ?? 0) - 1);
+      }
+      inherit(r, u, { devices: selected.map(selection => selection.device!.id) });
+    }
+    await ctx.saveDevices();
   } else if (code === 'hidden_order') {
     state.order = { target: orderTarget!.key, delta: choice.mode === 'delay' ? 2 : -2, turn: r.turn + 1, side: u.side };
     const friend = choice.mode === 'delay' ? u : ally; hiddenShield(r, u, friend, friend.hpMax * Math.min(.12, .08 * support), 1);
@@ -404,16 +452,32 @@ export const executeHiddenCombat = async (r: CombatRules, u: RuleUnit, code: str
   return true;
 };
 
-const weaponTrait = async (r: CombatRules, u: RuleUnit, target: RuleUnit, weapon: HiddenWeapon, potency: number) => {
+const weaponTraitDefinition = (weapon: HiddenWeapon, potency: number): HiddenWeaponTrait | undefined => {
   const duration = Math.min(3, Math.floor(2 * potency));
-  if (['剑','长剑','单手剑','双手剑','sword'].includes(weapon.type) && await r.control(u,target,'armor_shatter',100,duration)) effect(r, target, 'armor_shatter', Math.min(20, 10 * potency), duration, u, true);
-  if (['拳刃','拳套','fist'].includes(weapon.type) && await r.control(u,target,'hidden_outgoing',100,1)) effect(r, target, 'hidden_outgoing', Math.min(16, 8 * potency), 1, u, true,{allActions:true});
-  if (['法书','魔导书','book'].includes(weapon.type) && await r.control(u,target,'magic_shatter',100,duration)) effect(r, target, 'magic_shatter', Math.min(20, 10 * potency), duration, u, true);
-  if (['法球','orb'].includes(weapon.type)) hiddenShield(r, u, u, u.hpMax * Math.min(.08, .04 * potency));
+  if (['剑','长剑','单手剑','双手剑','sword'].includes(weapon.type)) return { code: 'armor_shatter', value: Math.min(20, 10 * potency), duration };
+  if (['拳刃','拳套','fist'].includes(weapon.type)) return { code: 'hidden_outgoing', value: Math.min(16, 8 * potency), duration: 1 };
+  if (['法书','魔导书','book'].includes(weapon.type)) return { code: 'magic_shatter', value: Math.min(20, 10 * potency), duration };
+  if (['法球','orb'].includes(weapon.type)) return { code: 'shield', value: Math.min(.08, .04 * potency), duration: 2, self: true };
+  return undefined;
+};
+const applyInheritedWeaponTrait = async (r: CombatRules, u: RuleUnit, target: RuleUnit, trait: HiddenWeaponTrait) => {
+  const value = trait.value * .6;
+  if (trait.code === 'shield') { hiddenShield(r, u, u, u.hpMax * value, trait.duration); return; }
+  effect(r, target, trait.code, value, trait.duration, u, true, trait.code === 'hidden_outgoing' ? { allActions: true } : {});
+};
+const weaponTrait = async (r: CombatRules, u: RuleUnit, target: RuleUnit, weapon: HiddenWeapon, potency: number): Promise<HiddenWeaponTrait | undefined> => {
+  const trait = weaponTraitDefinition(weapon, potency); if (!trait) return undefined;
+  if (trait.code === 'shield') return hiddenShield(r, u, u, u.hpMax * trait.value, trait.duration) > 0 ? trait : undefined;
+  if (!await r.control(u, target, trait.code, 100, trait.duration)) return undefined;
+  effect(r, target, trait.code, trait.value, trait.duration, u, true, trait.code === 'hidden_outgoing' ? { allActions: true } : {});
+  return trait;
 };
 
 const executeMix = async (r: CombatRules, u: RuleUnit, mix: ReturnType<typeof hiddenMix>, ally: RuleUnit, enemy?: RuleUnit) => {
   const failed = mix.outcome === 'failure', great = mix.outcome === 'great', state = hiddenState(u), spec = u.castSpecialization;
+  const reviewReady = !failed && Boolean(state.review && state.review.until >= r.turn && state.review.primary !== mix.primary);
+  let reviewUsed = false;
+  const reviewedDuration = (duration: number) => { if (reviewReady && !reviewUsed) { reviewUsed = true; return duration + 1; } return duration; };
   r.log.push(`　➥调配·${failed ? '失败！事故波及己方' : great ? '大成功！' : '成功'} · ${mix.particles.length}颗粒子 · ${mix.targets}目标 · ${mix.duration}回合`);
   const enemies = (failed ? priority(r.allies(u), u) : priority(r.enemies(u), enemy)).slice(0, mix.targets), friends = priority(r.allies(u), ally).slice(0, mix.targets);
   const budgets = new Map<string, { heal: number; shield: number }>(); let cleanse = 0;
@@ -446,9 +510,14 @@ const executeMix = async (r: CombatRules, u: RuleUnit, mix: ReturnType<typeof hi
     }
     for (const target of friends) {
       const total = allocation(target, 'heal', target.hpMax * (branch.heal + branch.regeneration) / 100 * healScale);
-      if (branch.regeneration) queue(target, 'heal', total, mix.duration, '木相再生', great && mix.primary === branch.code ? allocation(target, 'shield', .06 * target.hpMax * branch.stateScale * common) : undefined);
+      if (branch.regeneration) queue(target, 'heal', total, reviewedDuration(mix.duration), '木相再生', great && mix.primary === branch.code ? allocation(target, 'shield', .06 * target.hpMax * branch.stateScale * common) : undefined);
       else if (total) { const immediate = total * (mix.counts.energy_ember ? .6 : 1), overflow = Math.max(0, immediate * r.healingMultiplier(u, target, true, true) - (target.hpMax - target.hp)); await r.restore(u, target, immediate, 0, true, immediate * r.healingMultiplier(u, target, true, true), true); if (mix.counts.energy_ember) queue(target, 'heal', total * .4, mix.duration - 1, '余烬复苏'); if (great && branch.code === mix.primary && ['water_element_dust','blood_residue'].includes(branch.code)) hiddenShield(r,u,target,allocation(target,'shield',Math.min(overflow,.15*target.hpMax*common))); }
-      if (branch.shield) hiddenShield(r, u, target, allocation(target, 'shield', target.hpMax * branch.shield / 100 * common * branch.stateScale * mix.numericScale * (spec?.supportFactor ?? 1)), mix.duration, great && mix.primary === 'metal_element_dust' ? { earth: .08 * target.hpMax * common } : {});
+      if (branch.shield) {
+        const shield = allocation(target, 'shield', target.hpMax * branch.shield / 100 * common * branch.stateScale * mix.numericScale * (spec?.supportFactor ?? 1));
+        const wasReviewed = reviewUsed;
+        const applied = hiddenShield(r, u, target, shield, reviewedDuration(mix.duration), great && mix.primary === 'metal_element_dust' ? { earth: .08 * target.hpMax * common } : {});
+        if (!wasReviewed && reviewUsed && applied <= 0) reviewUsed = false;
+      }
       if (!failed && branch.code === 'light_element_dust' && cleanse < (great && mix.primary === branch.code ? 2 : 1)) { const removed = await r.dispel(u,target,true,(great && mix.primary === branch.code ? 2 : 1)-cleanse); cleanse += removed.length; }
     }
   }
@@ -461,7 +530,7 @@ const executeMix = async (r: CombatRules, u: RuleUnit, mix: ReturnType<typeof hi
     if (['ice_element_dust','energy_ember'].includes(mix.primary)) hiddenShield(r,u,u,allocation(u,'shield',u.hpMax*(mix.primary==='ice_element_dust'?.12:.08)*scale));
     if (mix.primary === 'wind_element_dust') for (const friend of friends) effect(r,friend,'hidden_once',Math.min(30,20*scale),mix.duration,u);
     if (mix.primary === 'dark_element_dust' && enemy) effect(r,enemy,'hidden_outgoing',Math.min(35,25*primary.stateScale*primary.weight),mix.duration,u,true);
-    if (mix.primary === 'light_element_dust') effect(r,ally,'hidden_light',1,mix.duration,u);
+    if (mix.primary === 'light_element_dust') effect(r,ally,'hidden_light',1,reviewedDuration(mix.duration),u);
     if (mix.primary === 'blood_residue' && !cleanse) await r.dispel(u,ally,true,1,e=>['poison','burn','bleed','bleeding'].includes(e.code));
   }
   if (failed) {
@@ -480,5 +549,9 @@ const executeMix = async (r: CombatRules, u: RuleUnit, mix: ReturnType<typeof hi
         for(const [code,value] of accidents)effect(r,target,code,value*scale,mix.duration,u,true,{accident:true});
       }
     }
+  }
+  if (reviewUsed) {
+    delete state.review;
+    if (great) { const gained = reward(r, u, 10); if (gained > 0) r.log.push(`　➥复盘回收：大成功额外获得${gained}实验值。`); }
   }
 };

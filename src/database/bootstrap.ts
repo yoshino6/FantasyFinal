@@ -60,6 +60,8 @@ const blacksmithShopStock: BlacksmithStock[] = [5, 10, 15, 20].flatMap(level => 
     { code: `shop_orb_${level}`, name: `${prefix}法球`, category: '武器', weaponType: '法球', level, price, effect: { magicAttack: weaponBase } },
     { code: `shop_dagger_${level}`, name: `${prefix}匕首`, category: '武器', weaponType: '匕首', level, price, effect: { physicalAttack: weaponBase * .9, magicAttack: weaponBase * .9 } },
     { code: `shop_fistblade_${level}`, name: `${prefix}拳刃`, category: '武器', weaponType: '拳刃', level, price, effect: { physicalAttack: weaponBase } },
+    { code: `shop_bow_crossbow_${level}`, name: `${prefix}弓弩`, category: '武器', weaponType: '弓弩', level, price, effect: { physicalAttack: weaponBase } },
+    { code: `shop_gun_${level}`, name: `${prefix}枪炮`, category: '武器', weaponType: '枪炮', level, price, effect: { physicalAttack: weaponBase * .95, accuracy: weaponBase * .3 } },
     { code: `shop_shield_${level}`, name: `${prefix}盾牌`, category: '副手', weaponType: '盾牌', level, price, effect: { physicalDefense: weaponBase, magicDefense: weaponBase * .5 } },
     ...armorItems
   ];
@@ -1186,6 +1188,28 @@ const schemaStatements = [
     CONSTRAINT fk_home_offer_output FOREIGN KEY (output_item_id) REFERENCES item_definitions(id),
     CONSTRAINT fk_home_offer_input FOREIGN KEY (input_item_id) REFERENCES item_definitions(id)
   ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS app_users (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, app_user_id VARCHAR(64) NOT NULL, display_name VARCHAR(32) NOT NULL,
+    status ENUM('active','disabled') NOT NULL DEFAULT 'active',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id), UNIQUE KEY uk_app_users_app_id (app_user_id)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS app_sessions (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, app_user_id VARCHAR(64) NOT NULL, token_hash CHAR(64) NOT NULL,
+    expires_at DATETIME NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id), UNIQUE KEY uk_app_sessions_token (token_hash), KEY idx_app_sessions_user (app_user_id,expires_at)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS app_binding_codes (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, qq_user_id VARCHAR(32) NOT NULL, code CHAR(6) NOT NULL,
+    expires_at DATETIME NOT NULL, used_by_app_user VARCHAR(64) NULL, used_at DATETIME NULL,
+    PRIMARY KEY (id), UNIQUE KEY uk_binding_codes_code (code), KEY idx_binding_codes_user (qq_user_id)
+  ) ENGINE=InnoDB`
+  , `CREATE TABLE IF NOT EXISTS player_app_bindings (
+    player_id BIGINT UNSIGNED NOT NULL, app_user_id VARCHAR(64) NOT NULL,
+    bound_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (player_id), UNIQUE KEY uk_player_app_binding_app (app_user_id),
+    CONSTRAINT fk_app_binding_player FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB`
 ];
 
 const seedWorldSurfaceRegions = async (pool: Pool) => {
@@ -1674,7 +1698,8 @@ export const initializeSchema = async (pool: Pool) => {
     ('warrior','战士','以长剑与盾牌守住前线的职业。',JSON_OBJECT('constitution',1.2,'strength',1.2),JSON_ARRAY('longsword_mastery','shield_mastery')),
     ('mage','法师','以法杖与法书编织术式的职业。',JSON_OBJECT('spirit',1.2,'intelligence',1.2),JSON_ARRAY('staff_mastery','spellbook_mastery')),
     ('rogue','盗贼','以匕首与拳刃撕开破绽的职业。',JSON_OBJECT('agility',1.2,'perception',1.2),JSON_ARRAY('dagger_mastery','fistblade_mastery')),
-    ('priest','牧师','以法书与法球守望同伴的职业。',JSON_OBJECT('constitution',1.2,'spirit',1.2),JSON_ARRAY('spellbook_mastery','orb_mastery'))
+    ('priest','牧师','以法书与法球守望同伴的职业。',JSON_OBJECT('constitution',1.2,'spirit',1.2),JSON_ARRAY('spellbook_mastery','orb_mastery')),
+    ('archer','射手','以弓弩在安全距离精准打击敌人的职业。',JSON_OBJECT('agility',1.2,'perception',1.2),JSON_ARRAY('bow_crossbow_mastery','gun_mastery'))
     ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),growth_json=VALUES(growth_json),skill_codes_json=VALUES(skill_codes_json)`);
   // 旧版本已转职角色曾写入 +2 成长；此迁移只执行一次，将既有加成同步为 +1.2。
   await pool.query('CREATE TABLE IF NOT EXISTS game_data_migrations (code VARCHAR(64) NOT NULL PRIMARY KEY, applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB');
@@ -2411,15 +2436,17 @@ export const initializeSchema = async (pool: Pool) => {
     ('orb_mastery','法球精通','passive','无','精通','无','自身',0,0,0,99,99,10,0,'装备法球类武器时魔力上限提高40%至80%，副手装备时可减免衰减。',JSON_OBJECT('weaponType','法球','mpPct',40,'masteryStepPct',10)),
     ('dagger_mastery','匕首精通','passive','无','精通','无','自身',0,0,0,99,99,10,0,'装备匕首类武器时命中提高40%至80%，副手装备时可减免衰减。',JSON_OBJECT('weaponType','匕首','accuracyPct',40,'masteryStepPct',10)),
     ('fistblade_mastery','拳刃精通','passive','无','精通','无','自身',0,0,0,99,99,10,0,'装备拳刃类武器时暴击、暴伤各提高20%至40%，副手装备时可减免衰减。',JSON_OBJECT('weaponType','拳刃','critRatePct',20,'critDamagePct',20,'masteryStepPct',5)),
+    ('bow_crossbow_mastery','弓弩精通','passive','无','精通','无','自身',0,0,0,99,99,10,0,'装备弓弩类武器时命中、暴击各提高20%至40%，副手装备时可减免衰减。',JSON_OBJECT('weaponType','弓弩','accuracyPct',20,'critRatePct',20,'masteryStepPct',5)),
+    ('gun_mastery','枪炮精通','passive','无','精通','无','自身',0,0,0,99,99,10,0,'装备枪炮类武器时命中、暴伤各提高20%至40%，副手装备时可减免衰减。',JSON_OBJECT('weaponType','枪炮','accuracyPct',20,'critDamagePct',20,'masteryStepPct',5)),
     ('craftsmanship','匠心','passive','无','技艺','无','自身',0,0,0,5,99,1,0,'随副职业等级发挥不同效果：锻造师降低耐久损耗，炼金师提高药品效果。',JSON_OBJECT('secondaryProfessionScaling','craftsmanship'))
     ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),max_level=VALUES(max_level),passive_effect_json=VALUES(passive_effect_json)`);
   await pool.query(`DELETE ps FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE s.code IN ('sword_shield_mastery','warrior_counter','warrior_taunt_player','shield_bash_player','arcane_mastery','fire_lance','frost_barrier','shadow_step','backstab','smoke_screen','holy_prayer','healing_light','blessing_hymn')`);
   await pool.query(`INSERT IGNORE INTO player_skills (character_id,skill_id)
     SELECT c.id,s.id FROM characters c JOIN profession_definitions p ON p.code=c.profession_code JOIN skill_definitions s ON JSON_CONTAINS(p.skill_codes_json,JSON_QUOTE(s.code))`);
   await pool.query(`INSERT IGNORE INTO player_skill_specializations (character_id,skill_id,specialization)
-    SELECT ps.character_id,ps.skill_id,'overcharge' FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE s.code IN ('longsword_mastery','shield_mastery','staff_mastery','spellbook_mastery','orb_mastery','dagger_mastery','fistblade_mastery')`);
+    SELECT ps.character_id,ps.skill_id,'overcharge' FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE s.code IN ('longsword_mastery','shield_mastery','staff_mastery','spellbook_mastery','orb_mastery','dagger_mastery','fistblade_mastery','bow_crossbow_mastery','gun_mastery')`);
   await pool.query(`INSERT IGNORE INTO player_skill_specializations (character_id,skill_id,specialization)
-    SELECT ps.character_id,ps.skill_id,'instant' FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE s.code IN ('longsword_mastery','shield_mastery','staff_mastery','spellbook_mastery','orb_mastery','dagger_mastery','fistblade_mastery')`);
+    SELECT ps.character_id,ps.skill_id,'instant' FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE s.code IN ('longsword_mastery','shield_mastery','staff_mastery','spellbook_mastery','orb_mastery','dagger_mastery','fistblade_mastery','bow_crossbow_mastery','gun_mastery')`);
   const [weaponMasteryLinearMigration] = await pool.query("INSERT IGNORE INTO game_data_migrations (code) VALUES ('weapon_mastery_linear_effects_v2')") as unknown as [{ affectedRows: number }];
   if (Number(weaponMasteryLinearMigration.affectedRows) > 0) {
     const [characters] = await pool.query('SELECT id FROM characters') as unknown as [[{ id: number }]];
@@ -2449,7 +2476,7 @@ export const initializeSchema = async (pool: Pool) => {
     ELSE passive_effect_json END
     WHERE code IN ('growth_blessing','mana_affinity','lucky_favor','war_god_favor','arcane_revelation','crimson_recovery','seer_instinct','hunter_blessing')`);
   await pool.query(`UPDATE skill_definitions SET category='bound',skill_kind='绑定',range_type='自身',learn_cost=0,upgrade_cost=1,max_level=13,power_per_level=0,passive_effect_json=JSON_OBJECT('revealMonsterTraits',true,'unlockMonsterDetail',true),description='降临异世界时由女神授予的通用绑定能力，初始 Lv.1，无需学习。后续须自行消耗技能点升级慧眼与识珠：慧眼每升一级可额外鉴识高于自身 3 级的目标；识珠可逐步解锁更多情报。' WHERE code='appraisal'`);
-  await pool.query(`UPDATE skill_definitions SET category='bound',skill_kind='绑定',range_type='自身' WHERE code IN ('longsword_mastery','shield_mastery','staff_mastery','spellbook_mastery','orb_mastery','dagger_mastery','fistblade_mastery','craftsmanship')`);
+  await pool.query(`UPDATE skill_definitions SET category='bound',skill_kind='绑定',range_type='自身' WHERE code IN ('longsword_mastery','shield_mastery','staff_mastery','spellbook_mastery','orb_mastery','dagger_mastery','fistblade_mastery','bow_crossbow_mastery','gun_mastery','craftsmanship')`);
   await pool.query(`UPDATE player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id SET ps.passive_linked=0,ps.quick_slot=NULL WHERE s.category='bound'`);
   // 初始天赋只由 player_blessings 保存并由各结算服务读取；清理旧版技能镜像，避免它出现在技能栏或未学习列表。
   await pool.query(`DELETE ps FROM player_skills ps JOIN skill_definitions s ON s.id=ps.skill_id WHERE s.code LIKE CONCAT('talent',CHAR(95),'%')`);
@@ -2482,6 +2509,7 @@ export const initializeSchema = async (pool: Pool) => {
     ,('phase_decoy','相位诱饵','stat_modifier',80,99,1,1,0,'下一次受到的直接伤害降低80%，随后移除。')
     ,('shield_guard','盾击守势','stat_modifier',50,1,1,1,0,'下次出手前受到的伤害降低50%。')
     ,('sprint','冲刺','stat_modifier',20,2,1,1,0,'自身速度提高。')
+    ,('accuracy','精准','stat_modifier',15,2,1,1,0,'自身命中提高。')
     ,('armor_shatter','碎甲','stat_modifier',5,2,1,1,0,'降低目标物理防御。')
     ,('magic_shatter','破障','stat_modifier',5,2,1,1,0,'降低目标魔法防御。')
     ,('bind','束缚','stat_modifier',5,2,1,1,0,'降低目标速度与闪避。')
@@ -3612,7 +3640,19 @@ export const initializeSchema = async (pool: Pool) => {
     ('dawn_morning_mark','晨星烙印','magic','中位','魔法','元素','光','远程','单体',60,1,125,99,99,1,0,'以晨星烙印照向目标，造成125%光魔法伤害并施加易伤20% 2回合。'),
     ('dawn_exorcism_word','驱邪裁词','magic','中位','魔法','元素','光','远程','单体',190,3,135,99,99,1,0,'以驱邪裁词轰击目标，造成135%光魔法伤害并降低其20%速度2回合。'),
     ('dawn_judgment_litany','审判连祷','magic','中位','魔法','元素','光','远程','单体',300,4,165,99,99,1,0,'以审判连祷裁定目标，造成165%光魔法伤害并施加易伤25% 2回合。'),
-    ('dawn_daybreak_decree','破晓宣告','magic','中位','魔法','元素','光','远程','全体',650,7,100,99,99,1,0,'宣告破晓，对全体敌人造成100%光魔法伤害。')
+    ('dawn_daybreak_decree','破晓宣告','magic','中位','魔法','元素','光','远程','全体',650,7,100,99,99,1,0,'宣告破晓，对全体敌人造成100%光魔法伤害。'),
+    ('sharpshoot_snipe','致命狙击','physical','中位','刺击','射击','无','远程','单体',110,2,150,99,99,1,0,'屏息瞄准目标要害，造成150%物理伤害；命中率修正+25%。'),
+    ('sharpshoot_volley','连珠箭雨','physical','中位','刺击','射击','无','远程','全体',190,3,80,99,99,1,0,'向敌阵连射箭雨，对全体敌人造成80%物理伤害并降低其命中15% 2回合。'),
+    ('sharpshoot_wind_arrow','追风箭','physical','中位','刺击','射击','风','远程','单体',60,1,125,99,99,1,0,'射出追风箭，造成125%物理伤害并使自身速度提高20% 2回合。'),
+    ('sharpshoot_headshot','一击贯心','physical','中位','刺击','射击','无','远程','单体',650,8,240,99,99,1,0,'瞄准要害发动致命一击，造成240%物理伤害；目标生命高于60%时命中率修正+30%。'),
+    ('gunner_cluster','散射爆弹','physical','中位','打击','爆破','火','远程','全体',110,2,90,99,99,1,0,'发射散射爆弹，对全体敌人造成90%物理伤害并施加灼烧5% 2回合。'),
+    ('gunner_minefield','雷火雷区','utility','中位','无','爆破','雷','远程','全体',190,3,0,99,99,1,0,'布设雷火雷区，使全体敌人闪避降低20%并进入20%易伤状态，持续2回合。'),
+    ('gunner_artillery','重炮轰击','physical','中位','打击','爆破','火','远程','单体',300,4,185,99,99,1,0,'以重炮轰击目标，造成185%物理伤害并令目标眩晕。'),
+    ('gunner_smoke_bomb','爆烟弹','utility','中位','无','机关','无','自身','全体',300,4,0,99,99,1,0,'投出爆烟弹，全队获得20%闪避与15%伤害减免，持续2回合。'),
+    ('ranger_hunters_mark','雾枭·巡林','physical','中位','刺击','射击','无','远程','单体',120,3,105,99,99,1,0,'召唤夜巡者·雾枭并造成105%物理伤害，施加雾标3回合；雾枭在场时林巡命中+40%、感知+30%。'),
+    ('ranger_trap_barrage','栗影·穿林','physical','中位','刺击','机关','无','远程','单体',190,3,80,99,99,1,0,'召唤松梢客·栗影并造成80%物理伤害，以60%基础概率束缚1回合（首领降级为30%减速）；栗影在场时林巡速度+25%、闪避+15%。'),
+    ('ranger_flanking_shot','青鳞·缠猎','physical','中位','刺击','射击','风','远程','单体',110,2,130,99,99,1,0,'召唤藤下客·青鳞并造成130%物理伤害，施加1层青鳞毒；青鳞在场时林巡对带标记或中毒目标伤害+12%。'),
+    ('ranger_eagle_eye','林野同契','utility','中位','无','侦察','无','自身','全体',300,4,0,99,99,1,0,'消耗50侦察，三只林伴分别回应：雾枭全队命中+20%、速度+15%（2回合）并对全体敌人施加雾标；栗影全队闪避+12%、速度+15%（2回合）并减速全体敌人15%；青鳞对全体敌人施加1层青鳞毒与15%易伤。在场林伴恢复30%最大生命；三伴在场时效果提升50%。')
     ON DUPLICATE KEY UPDATE name=VALUES(name),category=VALUES(category),tier=VALUES(tier),damage_type=VALUES(damage_type),skill_kind=VALUES(skill_kind),element=VALUES(element),range_type=VALUES(range_type),target_scope=VALUES(target_scope),mana_cost=VALUES(mana_cost),cooldown_turns=VALUES(cooldown_turns),power=VALUES(power),learn_cost=VALUES(learn_cost),upgrade_cost=VALUES(upgrade_cost),max_level=VALUES(max_level),power_per_level=VALUES(power_per_level),description=VALUES(description)`);
   // 旧版岩印记在重启时原地迁移为雷印记，确保现有数据库与正在持续的效果记录一并切换。
   await pool.query(`UPDATE effect_definitions SET code='element_mark_thunder',name='雷印记',description='持续4回合；可由天穹序列引爆为破障。' WHERE code='element_mark_earth'`);
@@ -3626,6 +3666,7 @@ export const initializeSchema = async (pool: Pool) => {
     ('element_mark_thunder','雷印记','stat_modifier',0,4,1,1,0,'持续4回合；可由天穹序列引爆为破障。'),
     ('advanced_hunt','追猎','stat_modifier',20,3,1,1,0,'下一次来自施加者的攻击获得额外伤害。'),
     ('advanced_mapping','测绘','stat_modifier',15,2,1,1,0,'全队对目标的命中提高15%，暴击提高8%。'),
+    ('warden_snake_venom','青鳞毒','damage_over_time',3,3,1,3,1,'每回合损失最大生命值一定比例；普通目标每层3%，上限3层；首领每层1%，上限2层。'),
     ('advanced_formation','破阵窗口','stat_modifier',12,2,1,1,0,'下一次来自队友的技能直击伤害提高。'),
     ('advanced_light_mark','晨星印记','stat_modifier',20,2,1,1,0,'下一次元素反应伤害提高。'),
     ('advanced_prayer','祷言','stat_modifier',1,3,1,3,1,'治疗或壁垒会叠加，供圣愈者转化为急救。'),
@@ -3666,7 +3707,20 @@ export const initializeSchema = async (pool: Pool) => {
     ((SELECT id FROM skill_definitions WHERE code='aegis_shared_vow'),(SELECT id FROM effect_definitions WHERE code='barrier'),1,15,2,'ally','on_cast'),
     ((SELECT id FROM skill_definitions WHERE code='aegis_undying_dome'),(SELECT id FROM effect_definitions WHERE code='barrier'),1,20,2,'ally','on_cast'),
     ((SELECT id FROM skill_definitions WHERE code='aegis_undying_dome'),(SELECT id FROM effect_definitions WHERE code='regeneration'),1,10,2,'ally','on_cast'),
-    ((SELECT id FROM skill_definitions WHERE code='dawn_judgment_litany'),(SELECT id FROM effect_definitions WHERE code='exposed'),1,25,2,'enemy','on_hit')
+    ((SELECT id FROM skill_definitions WHERE code='dawn_judgment_litany'),(SELECT id FROM effect_definitions WHERE code='exposed'),1,25,2,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='sharpshoot_volley'),(SELECT id FROM effect_definitions WHERE code='accuracy_down'),1,15,2,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='sharpshoot_wind_arrow'),(SELECT id FROM effect_definitions WHERE code='sprint'),1,20,2,'self','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='gunner_cluster'),(SELECT id FROM effect_definitions WHERE code='burn'),1,5,2,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='gunner_minefield'),(SELECT id FROM effect_definitions WHERE code='evasion_down'),1,20,2,'enemy','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='gunner_minefield'),(SELECT id FROM effect_definitions WHERE code='exposed'),1,20,2,'enemy','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='gunner_artillery'),(SELECT id FROM effect_definitions WHERE code='stun'),1,60,1,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='gunner_smoke_bomb'),(SELECT id FROM effect_definitions WHERE code='alchemy_evasion'),1,20,2,'ally','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='gunner_smoke_bomb'),(SELECT id FROM effect_definitions WHERE code='barrier'),1,15,2,'ally','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='ranger_trap_barrage'),(SELECT id FROM effect_definitions WHERE code='bind'),1,60,1,'enemy','on_hit'),
+    ((SELECT id FROM skill_definitions WHERE code='ranger_eagle_eye'),(SELECT id FROM effect_definitions WHERE code='accuracy'),1,20,2,'ally','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='ranger_eagle_eye'),(SELECT id FROM effect_definitions WHERE code='sprint'),1,15,2,'ally','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='ranger_eagle_eye'),(SELECT id FROM effect_definitions WHERE code='slow'),1,15,1,'enemy','on_cast'),
+    ((SELECT id FROM skill_definitions WHERE code='ranger_eagle_eye'),(SELECT id FROM effect_definitions WHERE code='exposed'),1,15,1,'enemy','on_cast')
     ON DUPLICATE KEY UPDATE effect_level=VALUES(effect_level),value_override=VALUES(value_override),duration_override=VALUES(duration_override),target_scope=VALUES(target_scope),trigger_timing=VALUES(trigger_timing)`);
   // 自动出招属于玩家的持久选择：启动初始化只能补齐当前二转技能，不能删除技能记录、
   // 清空快捷栏或将任一出招改写成普通攻击。二转替换与洗点会在各自的玩家事务中处理

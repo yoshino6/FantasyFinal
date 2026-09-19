@@ -30,7 +30,7 @@ export default async () => {
       await message.send({ format: battleStartFormat(`与【${profile.name}】切磋 · Lv.${profile.level}\n手动出招｜不消耗体力与道具｜结束后恢复 HP、MP`, await battleStatus(event.current.UserId)) }); return;
     }
     const { profile, used } = await npcSparringView(event.current.UserId, code);
-    const professions: Record<string, string> = { warrior: '战士', mage: '法师', rogue: '盗贼', priest: '牧师' };
+    const professions: Record<string, string> = { warrior: '战士', mage: '法师', rogue: '盗贼', priest: '牧师', archer: '射手' };
     const md = Format.createMarkdown().addTitle(`切磋 · ${profile.name}`).addNewline().addNewline()
       .addText(`Lv.${profile.level}｜${profile.advancedName || professions[profile.profession] || '未转职'}\n今日次数 ${used ? 1 : 0}/1`).addNewline().addNewline()
       .addBlockquote('详细战斗属性可在切磋中使用鉴识查看。').addNewline().addNewline()

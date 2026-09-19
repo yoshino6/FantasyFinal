@@ -33,7 +33,7 @@ export const repairClaimedOpeningPack = async (c: PoolConnection, id: number) =>
   return pack ? grantOpeningPackExtras(c, id, pack) : false;
 };
 
-export const openingProfessionWeapons: Record<string, string> = { warrior: 'sword', rogue: 'dagger', mage: 'staff', priest: 'book' };
+export const openingProfessionWeapons: Record<string, string> = { warrior: 'sword', rogue: 'dagger', mage: 'staff', priest: 'book', archer: 'bow_crossbow' };
 export const grantOpeningProfessionWeapon = async (c: PoolConnection, id: number, profession: string) => {
   const weapon = openingProfessionWeapons[profession];
   if (!weapon) return null;

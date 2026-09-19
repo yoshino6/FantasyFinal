@@ -1,0 +1,20 @@
+import { residentSkills } from '../src/game/resident-skill.config';
+import { folioSkills } from '../src/game/active-folio-skills.config';
+
+const all = [...residentSkills.map(s => ({ ...s, src: 'resident' })), ...folioSkills.map(s => ({ ...s, src: 'folio' }))];
+console.log('RESIDENT_TOTAL=' + residentSkills.length);
+console.log('FOLIO_TOTAL=' + folioSkills.length);
+console.log('TOTAL=' + all.length);
+const scopeCount: Record<string, number> = {};
+for (const s of all) scopeCount[s.scope] = (scopeCount[s.scope] ?? 0) + 1;
+console.log('SCOPE=' + JSON.stringify(scopeCount));
+const debuffKeys = /减速|失准|闪避|易伤|破甲|降魔|物攻-|魔攻-|物防-|魔防-|双防|脆弱|虚弱|中毒|灼烧|流血|目盲|沉默|眩晕|束缚|冻结|恐惧|魅惑|石化|沉睡|混乱|封疗|驱散|伤害降低|命中降低|暴击降低|速度降低|防御降低|攻击降低/;
+const buffKeys = /命中|闪避|速度|暴击|攻击|防御|减伤|护盾|再生|净化|易伤|增伤/;
+const notCovered = all.filter(s => !(s.scope === 'enemies' || s.scope === 'allies'));
+const withDebuff = notCovered.filter(s => debuffKeys.test(s.description));
+const withBuff = notCovered.filter(s => buffKeys.test(s.description));
+console.log('NOT_ALL_MISSING=' + notCovered.length);
+console.log('NOT_ALL_WITH_DEBUFF=' + withDebuff.length);
+console.log('NOT_ALL_WITH_BUFF=' + withBuff.length);
+console.log('SAMPLE_DEBUFF=' + withDebuff.slice(0, 80).map(s => `${s.src}:${s.code}:${s.name}`).join('\n'));
+console.log('ALL=' + JSON.stringify(all.map(s => ({ src: s.src, code: s.code, name: s.name, tier: s.tier, scope: s.scope, mana: s.mana, cd: s.cooldown, chant: s.chant, power: s.power, desc: s.description })), null, 0));

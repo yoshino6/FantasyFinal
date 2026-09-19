@@ -24,7 +24,7 @@ const validMaterialQuantity = (quantity: number) => {
   return quantity;
 };
 
-const weaponShopTypes = ['长剑', '法杖', '法书', '法球', '匕首', '拳刃', '盾牌'];
+const weaponShopTypes = ['长剑', '法杖', '法书', '法球', '匕首', '拳刃', '盾牌', '弓弩', '枪炮'];
 const armorShopCategories = ['头肩', '上装', '腰部', '下装', '脚部'];
 const armorShopTypes = ['布甲', '皮甲', '轻甲', '重甲', '板甲'];
 const shopCategoryFilter = (category: string) => {

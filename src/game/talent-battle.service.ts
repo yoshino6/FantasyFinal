@@ -65,10 +65,10 @@ export const loadTalentBattle=async(c:PoolConnection,rules:CombatRules,members:R
     const adjusted=await before?.(unit,amount)??amount,threshold=Number(unit.state.memory.talentPacifyThreshold??0);
     return threshold?Math.min(adjusted,Math.max(0,unit.hp-threshold)):adjusted;
   };
-  rules.hooks.afterDamage=async(unit,damage,broken,shield)=>{
+  rules.hooks.afterDamage=async(unit,damage,broken,shield,source,absorbed)=>{
     const threshold=Number(unit.state.memory.talentPacifyThreshold??0);
     if(threshold&&unit.hp<=threshold&&!unit.state.memory.talentPacified){unit.state.memory.talentPacified=1;unit.participating=false;const row=targets.find(t=>unit.key===`target:${t.id}`);if(row)row.is_defeated=1;for(const m of members.filter(m=>!m.npc_code))recordAchievement(c,Number(m.id),['ACH_L20'],'pacify:'+unit.key);rules.log.push(`　➥${unit.name}放下敌意，已被降服。`);}
-    await after?.(unit,damage,broken,shield);
+    await after?.(unit,damage,broken,shield,source,absorbed);
   };
 };
 export const persistTalentBattle=async(c:PoolConnection,rules:CombatRules,members:Record<string,any>[],targets:Record<string,any>[])=>{

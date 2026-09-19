@@ -2,6 +2,9 @@
 # yarn lockfile v1
 
 
+"@alemonjs/app@file:packages/app-platform":
+  version "0.1.0"
+
 "@alemonjs/qq-bot@^2.1.32":
   version "2.1.32"
   resolved "https://registry.npmmirror.com/@alemonjs/qq-bot/-/qq-bot-2.1.32.tgz#b60e98e3ae4d631c4b7539dda906c4df15eff178"

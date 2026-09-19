@@ -11,12 +11,17 @@ const injectionCodes: InjectionCode[] = ['conservative', 'aggressive', 'harmonic
 const injectionLabels: Record<InjectionCode, string> = { conservative: '保守', aggressive: '激进', harmonic: '调和', perception: '感知', symbiosis: '共生', metamorphosis: '蜕变', shaping: '定型' };
 const bodyPartCodes = Object.keys(bodyPartNames) as BodyPart[];
 const fail = async (message: any, error: unknown, title = '演化研究失败') => message.send({ format: messageFormat(title, error instanceof Error ? error.message : '请稍后重试。') });
-const effectLabels: Record<string, string> = { hpPct: '生命', mpPct: '魔力', physicalAttackPct: '物攻', magicAttackPct: '魔攻', physicalDefensePct: '物防', magicDefensePct: '魔防', accuracyPct: '命中', evasionPct: '闪避', critRatePct: '暴击', critDamagePct: '暴伤', critResistPct: '暴抗', critDamageReductionPct: '暴免', tenacityPct: '韧性', tenacityPiercePct: '破韧', speedPct: '速度', damageReductionPct: '减伤', hpRegenPct: '回生', mpRegenPct: '回魔' };
+const effectLabels: Record<string, string> = { hpPct: '生命', mpPct: '魔力', physicalAttackPct: '物攻', magicAttackPct: '魔攻', accuracyPct: '命中', evasionPct: '闪避', critRatePct: '暴击', critDamagePct: '暴伤', critResistPct: '暴抗', critDamageReductionPct: '暴免', tenacityPct: '韧性', tenacityPiercePct: '破韧', speedPct: '速度', damageBonusPct: '造成伤害', damageReductionPct: '受到伤害降低', healingBonusPct: '治疗效果', healingReceivedPct: '受到治疗', hpRegenPct: '回生', mpRegenPct: '回魔', dropBonusPct: '普通产出', manaCostReductionPct: '耗魔降低', recoveryEffectPct: '恢复品效果', miningCostPct: '采矿资源消耗', externalBonusPct: '外来增益强度' };
 const effectText = (raw: unknown) => {
   let effect: Record<string, unknown> = {};
   try { effect = typeof raw === 'string' ? JSON.parse(raw) : raw as Record<string, unknown> ?? {}; } catch { effect = {}; }
   const entries = Object.entries(effect).filter(([, value]) => Number(value));
   return entries.length ? entries.map(([key, value]) => `${effectLabels[key] ?? key} ${Number(value) > 0 ? '+' : ''}${Number(value)}%`).join('｜') : '当前未提供额外战斗属性。';
+};
+const hasNegativeEffect = (raw: unknown) => {
+  let effect: Record<string, unknown> = {};
+  try { effect = typeof raw === 'string' ? JSON.parse(raw) : raw as Record<string, unknown> ?? {}; } catch { return false; }
+  return Object.values(effect).some(value => Number(value) < 0);
 };
 
 const injectionPreview = (code: InjectionCode, professionCode: string | null, pressure: number) => {
@@ -236,7 +241,7 @@ export const evolutionMutationHandler = async () => {
     await requireNpcAtCurrentPosition(event.current.UserId, 'evolution_lab'); const mutationId = Number(route.param('id') ?? 0);
     if (!mutationId) {
       const panel = await evolutionPanel(event.current.UserId); if (!panel) throw new Error('研究室尚未向你开放。');
-      const markdown = Format.createMarkdown().addTitle('变异观测档案').addNewline().addNewline().addBlockquote('偏差可以随时暂停；稳定处理会消耗稳定介质×2，并仅保留正向表型；封存不会删除记录。').addNewline().addNewline();
+      const markdown = Format.createMarkdown().addTitle('变异观测档案').addNewline().addNewline().addBlockquote('偏差可以随时暂停；稳定处理会消耗稳定介质×2并清除附带负面，正面效果不削弱；封存不会删除记录。').addNewline().addNewline();
       if (!panel.mutations.length) markdown.addText('尚未形成可管理的变异记录。');
       else panel.mutations.forEach(mutation => markdown.addText(`${bodyPartNames[mutation.body_part as BodyPart]}：`).addButton(mutation.mutation_name, { data: `/进化变异 ${mutation.id}`, autoEnter: false }).addText(`（${mutation.mutation_state === 'stable' ? '稳定' : mutation.mutation_state === 'deviation' ? '偏差' : mutation.mutation_state === 'rare' ? '稀有观测' : mutation.mutation_state === 'paused' ? '已暂停' : '已封存'}）`).addNewline().addNewline());
       await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('返回 研究室', '/进化研究室', { type: 'command', autoEnter: true })) });
@@ -247,6 +252,7 @@ export const evolutionMutationHandler = async () => {
     const buttons = Format.createButtonGroup();
     if (mutation.mutation_state === 'deviation') buttons.addRow().addButton('暂停', `/进化变异操作 ${mutation.id} pause`, { type: 'command', autoEnter: true, style: 'blue' }).addButton('稳定', `/进化变异操作 ${mutation.id} stabilize`, { type: 'command', autoEnter: true, style: 'blue' });
     if (mutation.mutation_state === 'paused') buttons.addRow().addButton('恢复', `/进化变异操作 ${mutation.id} resume`, { type: 'command', autoEnter: true, style: 'blue' }).addButton('稳定', `/进化变异操作 ${mutation.id} stabilize`, { type: 'command', autoEnter: true, style: 'blue' });
+    if (['stable', 'rare'].includes(mutation.mutation_state) && hasNegativeEffect(mutation.effect_json)) buttons.addRow().addButton('清除负面', `/进化变异操作 ${mutation.id} stabilize`, { type: 'command', autoEnter: true, style: 'blue' });
     if (mutation.mutation_state !== 'archived') buttons.addRow().addButton('封存', `/进化变异操作 ${mutation.id} archive`, { type: 'command', autoEnter: true });
     buttons.addRow().addButton('返回 档案', '/进化变异', { type: 'command', autoEnter: true });
     await message.send({ format: Format.create().addMarkdown(markdown).addButtonGroup(buttons) });

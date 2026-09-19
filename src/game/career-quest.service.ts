@@ -24,7 +24,7 @@ const guildCareerQuestFor = async (pool: Pool, character: CareerCharacter): Prom
   const local=openingHubs[character.region_code as OpeningHubCode];
   if(local&&character.region_code!=='baina_town')return{
     title:Number(character.adventurer_registered)?'【主线·选择主职业】':'【主线·成为冒险者】',
-    description:Number(character.adventurer_registered)?`${local.host}把四份职业介绍摆到你面前：“要怎么往前走，由你自己决定。”\n\n在${local.guildName}查看战士、法师、盗贼与牧师的介绍，再确认一个主职业。登记后领取普通适配武器。`:`${local.description}\n\n${local.host}替你翻开登记簿。到${local.guildName}登记姓名，领取冒险者卡，让这段旅途有一个正式的开始。`,
+    description:Number(character.adventurer_registered)?`${local.host}把五份职业介绍摆到你面前：“要怎么往前走，由你自己决定。”\n\n在${local.guildName}查看战士、法师、盗贼、牧师与射手的介绍，再确认一个主职业。登记后领取普通适配武器。`:`${local.description}\n\n${local.host}替你翻开登记簿。到${local.guildName}登记姓名，领取冒险者卡，让这段旅途有一个正式的开始。`,
     action:{label:'[当地公会]',command:'/初行公会'}
   };
   const [guilds] = await pool.execute<(RowDataPacket & { region_id: number; pos_x: number; pos_y: number; pos_z: number })[]>(`
@@ -44,7 +44,7 @@ const guildCareerQuestFor = async (pool: Pool, character: CareerCharacter): Prom
   };
   return {
     title: '【主线·选择主职业】',
-    description: '冒险者卡上已经写下你的名字。莫妮卡将四份职业介绍摆到面前，等待你决定今后以怎样的方式面对这片世界。\n\n在冒险者公会前台打开【职业选择】，查看战士、法师、盗贼与牧师的介绍，再确认一个主职业。\n\n目标：完成主职业选择。',
+    description: '冒险者卡上已经写下你的名字。莫妮卡将四份职业介绍摆到面前，等待你决定今后以怎样的方式面对这片世界。\n\n在冒险者公会前台打开【职业选择】，查看战士、法师、盗贼、牧师与射手的介绍，再确认一个主职业。\n\n目标：完成主职业选择。',
     action: atGuild ? { label: '[选择 主职业]', command: '/职业选择' } : action
   };
 };

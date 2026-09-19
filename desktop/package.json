@@ -1,0 +1,33 @@
+{
+  "name": "fantasy-pet-desktop",
+  "version": "0.1.0",
+  "description": "幻想桌宠 Windows 桌面端",
+  "main": "main.js",
+  "author": "FantasyFinal",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --win portable",
+    "dist": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^44.4.3",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.fantasyfinal.pet.desktop",
+    "productName": "幻想桌宠",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "pet.html",
+      "pear-cat.png"
+    ],
+    "win": {
+      "target": "portable"
+    }
+  }
+}

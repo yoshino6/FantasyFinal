@@ -56,18 +56,19 @@ test('三组装备基准与八档双防、暴免、暴抗、韧性完整配置',
 
 test('八档双攻、双防、命闪、暴击与暴伤使用平缓校准值，其他属性总倍率保持不变', () => {
   const expected = {
-    infernal: { attack: 1.45, defense: 1.65, accuracy: 1.60, evasion: 1.55, critRate: 1.40, critDamage: 1.40, general: 1.60 },
-    abyssal: { attack: 1.55, defense: 1.80, accuracy: 1.80, evasion: 1.70, critRate: 1.50, critDamage: 1.50, general: 1.85 },
-    crimson: { attack: 1.85, defense: 2.05, accuracy: 2.25, evasion: 2.00, critRate: 1.90, critDamage: 2.00, general: 2.50 },
-    corrupted: { attack: 1.65, defense: 2.45, accuracy: 2.10, evasion: 2.00, critRate: 1.55, critDamage: 1.55, general: 2.15 },
-    holy: { attack: 1.70, defense: 2.20, accuracy: 2.25, evasion: 2.55, critRate: 1.60, critDamage: 1.60, general: 2.25 },
-    golden: { attack: 1.85, defense: 2.60, accuracy: 2.55, evasion: 2.60, critRate: 1.70, critDamage: 1.70, general: 2.70 },
-    brilliant: { attack: 2.00, defense: 3.10, accuracy: 3.00, evasion: 3.15, critRate: 1.85, critDamage: 1.85, general: 3.10 },
-    dreamlike: { attack: 2.15, defense: 3.60, accuracy: 3.40, evasion: 3.50, critRate: 2.00, critDamage: 2.00, general: 3.60 }
-  } satisfies Record<Level32BossDifficultyCode, { attack: number; defense: number; accuracy: number; evasion: number; critRate: number; critDamage: number; general: number }>;
+    infernal: { hp: 8, attack: 1.45, defense: 1.65, accuracy: 1.60, evasion: 1.55, critRate: 1.40, critDamage: 1.40, general: 1.60 },
+    abyssal: { hp: 12, attack: 1.55, defense: 1.80, accuracy: 1.80, evasion: 1.70, critRate: 1.50, critDamage: 1.50, general: 1.85 },
+    crimson: { hp: 14, attack: 2.00, defense: 2.05, accuracy: 2.25, evasion: 2.00, critRate: 1.90, critDamage: 2.00, general: 2.50 },
+    corrupted: { hp: 25, attack: 1.65, defense: 2.45, accuracy: 2.10, evasion: 2.00, critRate: 1.55, critDamage: 1.55, general: 2.15 },
+    holy: { hp: 20, attack: 1.70, defense: 2.20, accuracy: 2.25, evasion: 2.55, critRate: 1.60, critDamage: 1.60, general: 2.25 },
+    golden: { hp: 24, attack: 1.85, defense: 2.60, accuracy: 2.55, evasion: 2.60, critRate: 1.70, critDamage: 1.70, general: 2.70 },
+    brilliant: { hp: 30, attack: 2.00, defense: 3.10, accuracy: 3.00, evasion: 3.15, critRate: 1.85, critDamage: 1.85, general: 3.10 },
+    dreamlike: { hp: 38, attack: 2.15, defense: 3.60, accuracy: 3.40, evasion: 3.50, critRate: 2.00, critDamage: 2.00, general: 3.60 }
+  } satisfies Record<Level32BossDifficultyCode, { hp: number; attack: number; defense: number; accuracy: number; evasion: number; critRate: number; critDamage: number; general: number }>;
 
   for (const [code, values] of Object.entries(expected) as Array<[Level32BossDifficultyCode, typeof expected[Level32BossDifficultyCode]]>) {
     const trait = level32BossDifficultyTraits[code];
+    assert.equal(trait.statMultipliers.hp, values.hp, `${code}/hp`);
     assert.equal(trait.statMultipliers.physicalAttack, values.attack, `${code}/physicalAttack`);
     assert.equal(trait.statMultipliers.magicAttack, values.attack, `${code}/magicAttack`);
     assert.equal(trait.statMultipliers.physicalDefense, values.defense, `${code}/physicalDefense`);
@@ -82,8 +83,8 @@ test('八档双攻、双防、命闪、暴击与暴伤使用平缓校准值，�
 
 test('八档经验与掉落奖励随难度提高', () => {
   const expected: Record<Level32BossDifficultyCode, [number, number]> = {
-    infernal: [70, 60], abyssal: [110, 90], crimson: [170, 140], corrupted: [180, 150],
-    holy: [190, 160], golden: [280, 220], brilliant: [450, 400], dreamlike: [900, 800]
+    infernal: [70, 200], abyssal: [110, 300], crimson: [170, 500], corrupted: [180, 500],
+    holy: [190, 500], golden: [280, 900], brilliant: [450, 1400], dreamlike: [900, 1900]
   };
   for (const [code, [experiencePct, dropPct]] of Object.entries(expected) as Array<[Level32BossDifficultyCode, [number, number]]>) {
     assert.equal(level32BossDifficultyTraits[code].experiencePct, experiencePct, `${code}/experiencePct`);
@@ -91,7 +92,7 @@ test('八档经验与掉落奖励随难度提高', () => {
   }
   const staleDreamlike = [{ code: 'dreamlike', name: '梦幻的', experiencePct: 600, dropPct: 600 }];
   assert.equal(applyLevel32BossDifficultyTraits('necromancer_uz', staleDreamlike)[0]?.experiencePct, 900);
-  assert.equal(applyLevel32BossDifficultyTraits('necromancer_uz', staleDreamlike)[0]?.dropPct, 800);
+  assert.equal(applyLevel32BossDifficultyTraits('necromancer_uz', staleDreamlike)[0]?.dropPct, 1900);
   assert.equal(applyLevel32BossDifficultyTraits('shadow_wolf_king', staleDreamlike)[0], staleDreamlike[0]);
 });
 

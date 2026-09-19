@@ -72,7 +72,7 @@ const leaveHomeForMovement = async (message: any, qqUserId: string) => {
   await message.send({ format: messageFormat('百纳镇·我的家园', '你离开了家园。') });
 };
 const moveButtons = panelButtons;
-const movementButtons = async (qqUserId: string, resting = false) => {
+export const movementButtons = async (qqUserId: string, resting = false) => {
   const [config, blockedDirections] = await Promise.all([autoBattleConfig(qqUserId), blockedDungeonDirections(qqUserId)]);
   return panelButtons(resting, Boolean(config.settings.enabled), blockedDirections);
 };
@@ -89,7 +89,10 @@ const advancedBattleSkillLabels: Record<string, string> = {
   ranger_grapple_trap: '钩索', ranger_weakness_survey: '测绘', ranger_guiding_smoke: '烟幕', ranger_hundred_hunt: '协猎',
   saint_healer_mending_prayer: '愈合', saint_healer_absolution_hand: '净罪', saint_healer_resonant_mass: '弥撒', saint_healer_revival_sanctuary: '复苏',
   aegis_watch_bastion: '守望', aegis_shared_vow: '分担', aegis_luminous_echo: '光幕', aegis_undying_dome: '穹顶',
-  dawn_morning_mark: '烙印', dawn_exorcism_word: '驱邪', dawn_judgment_litany: '连祷', dawn_daybreak_decree: '破晓'
+  dawn_morning_mark: '烙印', dawn_exorcism_word: '驱邪', dawn_judgment_litany: '连祷', dawn_daybreak_decree: '破晓',
+  sharpshoot_snipe: '狙击', sharpshoot_volley: '箭雨', sharpshoot_wind_arrow: '追风', sharpshoot_headshot: '贯心',
+  gunner_cluster: '散射', gunner_minefield: '雷区', gunner_artillery: '重炮', gunner_smoke_bomb: '爆烟',
+  ranger_hunters_mark: '雾枭', ranger_trap_barrage: '栗影', ranger_flanking_shot: '青鳞', ranger_eagle_eye: '同契'
 };
 const addAdvancedBattleButton = (row: ReturnType<typeof Format.createButtonGroup>, label: string, command: string, ready: boolean, autoEnter = true) => row.addButton(label, command, {
   type: 'command', autoEnter, style: ready ? 'blue' : 'gray'
@@ -443,12 +446,15 @@ const scheduleStoryNpcBattle = (message: any, qqUserId: string) => {
 type CombatResultPresentation = { log: string; manualLog?: string; bossTransitions?: BossPhaseTransition[] };
 const combatResultPresentation = (result: { log: string }) => result as CombatResultPresentation;
 const hasBossPhaseTransitions = (result: { log: string }) => Boolean(combatResultPresentation(result).bossTransitions?.length);
-export const sendCombatResult = async (message: any, qqUserId: string, result: Awaited<ReturnType<typeof combatAction>>, options: { omitFinalLog?: boolean } = {}) => {
+export const sendCombatResult = async (message: any, qqUserId: string, result: Awaited<ReturnType<typeof combatAction>>, options: { omitFinalLog?: boolean; inlineBossTransitions?: boolean } = {}) => {
   const presentation = combatResultPresentation(result);
+  const inlineTransitions = options.inlineBossTransitions && presentation.bossTransitions?.length
+    ? `\n${presentation.bossTransitions.map(transition => `${transition.kind === 'phase' ? '$阶段转换' : '$战况'}·${transition.title}$${transition.description}`).join('\n')}`
+    : '';
   const sendBossTransitions = async () => {
-    if (presentation.bossTransitions?.length) await message.send({ format: bossPhaseTransitionFormat(presentation.bossTransitions) });
+    if (!options.inlineBossTransitions && presentation.bossTransitions?.length) await message.send({ format: bossPhaseTransitionFormat(presentation.bossTransitions) });
   };
-  const displayedLog = presentation.manualLog ?? result.log;
+  const displayedLog = `${presentation.manualLog ?? result.log}${inlineTransitions}`;
   if (result.ended) {
     if (!options.omitFinalLog) await message.send({ format: finalBattleFormat(displayedLog) });
     await sendBossTransitions();
@@ -535,7 +541,7 @@ const resolveRemainingAutoBattle = async (qqUserId: string, initial?: Awaited<Re
   for (let round = 0; round < 200; round += 1) {
     const result = pending ?? await resolvePartyAutoBattleActions(qqUserId); pending = undefined;
     // 阶段转换不能随普通回合一起被省略；将该轮交回展示层后，再继续静默计算。
-    if (!result || result.ended || result.waiting || hasBossPhaseTransitions(result)) return result;
+    if (!result || result.ended || result.waiting) return result;
   }
   return null;
 };
@@ -544,9 +550,9 @@ const resolveFullAutoBattle = async (qqUserId: string) => {
   for (let round = 0; round < 100; round += 1) {
     const result = await resolvePartyAutoBattleActions(qqUserId);
     if (!result) return { result: null, log: logs.join('\n\n') };
-    if (result.log) logs.push(combatResultPresentation(result).manualLog ?? result.log);
-    // 转场/吟唱是分批边界：先发截至触发回合的正文，再额外提示，不能静默越过。
-    if (result.ended || result.waiting || hasBossPhaseTransitions(result)) return { result, log: logs.join('\n\n') };
+    if (result.log) logs.push(result.log);
+    // 自动战斗把形态切换保留在本回合正文中，不因转场额外打断批处理。
+    if (result.ended || result.waiting) return { result, log: logs.join('\n\n') };
     // 分批让出事件循环，避免长战斗连续排队时延迟其他玩家的消息处理。
     if ((round + 1) % 10 === 0) await new Promise<void>(resolve => setImmediate(resolve));
   }
@@ -572,9 +578,7 @@ const scheduleAutoBattle = (message: any, qqUserId: string, omitted = false) => 
         if (omitted) {
           const preserved = await resolveRemainingAutoBattle(qqUserId, result);
           if (!preserved) { stopAutoBattle(qqUserId); return; }
-          const preservesTransition = hasBossPhaseTransitions(preserved);
-          if (preserved.ended) await sendCombatResult(message, qqUserId, preserved, { omitFinalLog: !preservesTransition });
-          else if (preservesTransition) await sendCombatResult(message, qqUserId, preserved);
+          if (preserved.ended) await sendCombatResult(message, qqUserId, preserved, { omitFinalLog: true, inlineBossTransitions: true });
           if (preserved.ended || preserved.waiting) { stopAutoBattle(qqUserId); return; }
           advance();
           return;
@@ -583,15 +587,15 @@ const scheduleAutoBattle = (message: any, qqUserId: string, omitted = false) => 
         if (!result.ended && !result.waiting && visibleRounds >= AUTO_BATTLE_VISIBLE_ROUND_LIMIT) {
           await message.send({ format: messageFormat('战斗过长，已省略', '后续回合战斗已省略，正在计算战斗结果。') });
           const finalResult = await resolveRemainingAutoBattle(qqUserId, result);
-          if (finalResult?.ended) await sendCombatResult(message, qqUserId, finalResult, { omitFinalLog: !hasBossPhaseTransitions(finalResult) });
+          if (finalResult?.ended) await sendCombatResult(message, qqUserId, finalResult, { omitFinalLog: !hasBossPhaseTransitions(finalResult), inlineBossTransitions: true });
           else if (finalResult && !finalResult.waiting) {
-            await sendCombatResult(message, qqUserId, finalResult);
+            await sendCombatResult(message, qqUserId, finalResult, { inlineBossTransitions: true });
             scheduleAutoBattle(message, qqUserId, true);
           }
           else stopAutoBattle(qqUserId);
           return;
         }
-        await sendCombatResult(message, qqUserId, result);
+        await sendCombatResult(message, qqUserId, result, { inlineBossTransitions: true });
         if (!result.ended && !result.waiting) autoBattleVisibleRounds.set(qqUserId, visibleRounds + 1);
         if (result.ended || result.waiting) { stopAutoBattle(qqUserId); return; }
         advance();
@@ -611,17 +615,15 @@ const startAutoBattle = async (message: any, qqUserId: string, openingText = '')
     const full = await resolveFullAutoBattle(qqUserId);
     const fullLog = [openingText, full.log].filter(Boolean).join('\n\n');
     if (fullLog) await message.send({ format: fullAutoBattleFormat(fullLog) });
-    if (full.result?.ended) await sendCombatResult(message, qqUserId, full.result, { omitFinalLog: true });
+    if (full.result?.ended) await sendCombatResult(message, qqUserId, full.result, { omitFinalLog: true, inlineBossTransitions: true });
     else if (full.result && !full.result.waiting) {
-      const transitions = combatResultPresentation(full.result).bossTransitions;
-      if (transitions?.length) await message.send({ format: bossPhaseTransitionFormat(transitions) });
       scheduleAutoBattle(message, qqUserId, true);
     }
     return Boolean(full.result);
   }
   const result = await resolvePartyAutoBattleActions(qqUserId);
   if (!result) return false;
-  await sendCombatResult(message, qqUserId, result);
+  await sendCombatResult(message, qqUserId, result, { inlineBossTransitions: true });
   if (!result.ended && !result.waiting) scheduleAutoBattle(message, qqUserId);
   return true;
 };
@@ -781,9 +783,10 @@ const professionDetails: Record<string, { name: string; blessing: string; skills
   warrior: { name: '战士', blessing: '体质成长+1.2，力量成长+1.2', skills: [{ name: '长剑精通', description: '（被动）装备长剑类武器时，暴击提高40%至80%。副手效果由50%随专精提升至100%。' }, { name: '盾牌精通', description: '（被动）装备盾牌类武器时，暴免、暴抗各提高20%至40%。副手效果由50%随专精提升至100%。' }] },
   mage: { name: '法师', blessing: '精神成长+1.2，智力成长+1.2', skills: [{ name: '法杖精通', description: '（被动）装备法杖类武器时，暴伤提高40%至80%。副手效果由50%随专精提升至100%。' }, { name: '法书精通', description: '（被动）装备法书类武器时，吟唱速度提高40%至80%。副手效果由50%随专精提升至100%。' }] },
   priest: { name: '牧师', blessing: '体质成长+1.2，精神成长+1.2', skills: [{ name: '法书精通', description: '（被动）装备法书类武器时，吟唱速度提高40%至80%。副手效果由50%随专精提升至100%。' }, { name: '法球精通', description: '（被动）装备法球类武器时，魔力上限提高40%至80%。副手效果由50%随专精提升至100%。' }] },
-  rogue: { name: '盗贼', blessing: '敏捷成长+1.2，感知成长+1.2', skills: [{ name: '匕首精通', description: '（被动）装备匕首类武器时，命中提高40%至80%。副手效果由50%随专精提升至100%。' }, { name: '拳刃精通', description: '（被动）装备拳刃类武器时，暴击、暴伤各提高20%至40%。副手效果由50%随专精提升至100%。' }] }
+  rogue: { name: '盗贼', blessing: '敏捷成长+1.2，感知成长+1.2', skills: [{ name: '匕首精通', description: '（被动）装备匕首类武器时，命中提高40%至80%。副手效果由50%随专精提升至100%。' }, { name: '拳刃精通', description: '（被动）装备拳刃类武器时，暴击、暴伤各提高20%至40%。副手效果由50%随专精提升至100%。' }] },
+  archer: { name: '射手', blessing: '敏捷成长+1.2，感知成长+1.2', skills: [{ name: '弓弩精通', description: '（被动）装备弓弩类武器时，命中、暴击各提高20%至40%。副手效果由50%随专精提升至100%。' }, { name: '枪炮精通', description: '（被动）装备枪炮类武器时，命中、暴伤各提高20%至40%。副手效果由50%随专精提升至100%。' }] }
 };
-const professionCodeByName: Record<string, string> = { 战士: 'warrior', 法师: 'mage', 盗贼: 'rogue', 牧师: 'priest' };
+const professionCodeByName: Record<string, string> = { 战士: 'warrior', 法师: 'mage', 盗贼: 'rogue', 牧师: 'priest', 射手: 'archer' };
 const timeGreeting = (morning: string, afternoon: string, evening: string) => {
   const hour = new Date().getHours();
   return hour < 11 ? morning : hour < 18 ? afternoon : evening;
@@ -832,9 +835,10 @@ const professionSelectFormat = async (qqUserId: string) => {
   const context=await (await import('../game/guild-context')).requireCurrentGuild(qqUserId);
   const profile = await adventurerProfile(qqUserId); if (!profile.adventurer_registered) throw new Error('完成冒险者注册后才能选择职业。');
   const affinity = profile.level >= 8 ? '综合素质' : '当前的潜力';
-  const markdown = Format.createMarkdown().addTitle('职业选择').addNewline().addNewline().addBlockquote(context.code==='baina_town'?`“我看你${affinity}不错，适合选择自己最喜欢的道路哦~”`:`${context.hub.host}把四份职业介绍摆到你面前：“先读一读，选能让自己踏实走下去的路。”`).addNewline().addBlockquote(context.code==='baina_town'?'莫妮卡一脸正经，“不过终究还是看你的喜好。后天的努力比先天更重要！”':'“这次登记与其他分会互相认可。后面的本领，要靠你慢慢练习。”');
+  const markdown = Format.createMarkdown().addTitle('职业选择').addNewline().addNewline().addBlockquote(context.code==='baina_town'?`“我看你${affinity}不错，适合选择自己最喜欢的道路哦~”`:`${context.hub.host}把五份职业介绍摆到你面前：“先读一读，选能让自己踏实走下去的路。”`).addNewline().addBlockquote(context.code==='baina_town'?'莫妮卡一脸正经，“不过终究还是看你的喜好。后天的努力比先天更重要！”':'“这次登记与其他分会互相认可。后面的本领，要靠你慢慢练习。”');
   const buttons = Format.createButtonGroup().addRow().addButton('查看 战士', '/职业查看 战士', { type: 'command', autoEnter: true, style: 'blue' }).addButton('查看 法师', '/职业查看 法师', { type: 'command', autoEnter: true, style: 'blue' })
     .addRow().addButton('查看 盗贼', '/职业查看 盗贼', { type: 'command', autoEnter: true, style: 'blue' }).addButton('查看 牧师', '/职业查看 牧师', { type: 'command', autoEnter: true, style: 'blue' })
+    .addRow().addButton('查看 射手', '/职业查看 射手', { type: 'command', autoEnter: true, style: 'blue' })
     .addRow().addButton('返回前台', context.code==='baina_town'?'/建筑区域 guild_counter 前台':'/初行公会 前台', { type: 'command', autoEnter: true });
   return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
@@ -886,7 +890,7 @@ export const confirmPlayerPvpHandler = async () => {
   catch (error) { await fail(message, error, '攻击失败'); }
 };
 export const playerInteractionHandler = async () => { const [event] = useEvent(); const [route] = useRoute(); const [message] = useMessage(); try { const targetGameId = Number(route.param('id')); const result = await interactDungeonPlayer(event.current.UserId, targetGameId); await message.send({ format: playerInteractionFormat({ type: '玩家', id: String(targetGameId), name: result.name, description: '', gameId: targetGameId }, result.isFriend) }); } catch (error) { await fail(message, error, '互动失败'); } };
-const movementPanel = async (qqUserId: string, description: string) => { const [nearby, movement, trackingHint, surfaceTrace] = await Promise.all([nearbyPoints(qqUserId), movementProfile(qqUserId), dungeonTrackingHint(qqUserId), omniscientTraces(qqUserId)]); const resting = nearby.character.activity_status !== 'active'; const trace = [surfaceTrace, trackingHint ? `【地宫识踪】${trackingHint}` : ''].filter(Boolean).join('\n'); return outsidePanel('行动', movedLocationText(nearby.character), movement.step, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), description, nearby.points, resting, nearby.landmarks, trace, movement.maximum, nearby.perceptionObscured, movement.showLandmarks, movement.showPlayers, nearby.mapUnlocked, nearby.character.activity_status, true); };
+export const movementPanel = async (qqUserId: string, description: string) => { const [nearby, movement, trackingHint, surfaceTrace] = await Promise.all([nearbyPoints(qqUserId), movementProfile(qqUserId), dungeonTrackingHint(qqUserId), omniscientTraces(qqUserId)]); const resting = nearby.character.activity_status !== 'active'; const trace = [surfaceTrace, trackingHint ? `【地宫识踪】${trackingHint}` : ''].filter(Boolean).join('\n'); return outsidePanel('行动', movedLocationText(nearby.character), movement.step, nearby.range, Number(nearby.character.pos_x), Number(nearby.character.pos_y), description, nearby.points, resting, nearby.landmarks, trace, movement.maximum, nearby.perceptionObscured, movement.showLandmarks, movement.showPlayers, nearby.mapUnlocked, nearby.character.activity_status, true); };
 const interactionTypeLabel: Record<CoordinateInteractionTarget['type'], string> = { 玩家: '玩家', 域民: '域民', NPC: '域民', 建筑: '建筑', 资源: '资源', 入口: '入口', 地标: '地标' };
 const playerInteractionFormat = (target: CoordinateInteractionTarget, isFriend = false) => {
   const targetGameId = Number(target.gameId ?? target.id);
@@ -1128,6 +1132,12 @@ export const buildingHandler = (action: 'enter' | 'ignore' | 'leave' | 'area') =
     if(Object.values((await import('../game/opening-world.config')).openingHubs).some(hub=>hub.guild===code)){
       const guild=await import('../game/opening-guild.service');
       if(action==='enter'||action==='leave'||action==='ignore')await guild.enterOpeningGuild(event.current.UserId,action==='enter');
+      if(action==='leave'||action==='ignore'){
+        const panel=await movementPanel(event.current.UserId,action==='leave'?`你离开了${building.name}，回到门前的街道。`:'你暂时没有进入冒险者公会。');
+        const nearby=await nearbyPoints(event.current.UserId);
+        await message.send({format:panel.addButtonGroup(await movementButtons(event.current.UserId,nearby.character.activity_status!=='active'))});
+        return;
+      }
       if(action==='area'){
         const area=String(route.param('area'));
         if(area==='餐厅'){await(await import('./guild-restaurant')).default();return;}

@@ -32,6 +32,8 @@ export type RuleUnit = {
   cardEffects?: Record<string, any>;
   castSpecialization?: SkillSpecializationResult;
   passiveSpecializations?: Record<string, number>;
+  /** 开战时固化的进化词条代码，用于条件型词条的战斗结算。 */
+  mutationCodes?: string[];
   participating?: boolean;
   /** 生成时固化的首领随机效果代码；不进入普通状态列表，也不能被驱散。 */
   bossEffects?: string[];
@@ -43,7 +45,7 @@ export type RuleHooks = {
   areaDamage?: (targets: RuleUnit[], hit: (target: RuleUnit) => Promise<void>) => Promise<void>;
   beforeAction?: (unit: RuleUnit) => Promise<void>;
   beforeHpDamage?: (unit: RuleUnit, damage: number) => Promise<number>;
-  afterDamage?: (unit: RuleUnit, damage: number, shieldBroken: boolean, originalShield?:RuleStatus, source?: RuleUnit) => Promise<void>;
+  afterDamage?: (unit: RuleUnit, damage: number, shieldBroken: boolean, originalShield?:RuleStatus, source?: RuleUnit, absorbed?: number) => Promise<void>;
   absorb: (unit: RuleUnit, damage: number) => Promise<number>;
   legacyEffects: (unit: RuleUnit) => RuleStatus[];
   removeLegacy: (id: number) => Promise<void>;
@@ -84,6 +86,13 @@ export const visibleResidentBuff = (state: RuleState, skillCode: string, turn: n
   return state.statuses.some(e => e.until >= turn && displayedRuleName(state, e.code, names[e.code] ?? e.code, turn, true).replace('？', '') === names[wanted]);
 };
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value));
+/**
+ * 战斗中的同类百分比统一先求和再换算倍率。
+ * 例如 +20%增伤与-10%减伤得到1.10，而不是1.20×0.90。
+ * 上下限只负责防止异常状态把伤害推到不可控范围，不改变状态本身的加算语义。
+ */
+export const additivePercentFactor = (positive: number, negative = 0, low = -80, high = 150) =>
+  1 + clamp(positive - negative, low, high) / 100;
 /** 日志按敌方姓名屏蔽；不修改原始状态，也不隐藏观察者自身面板。 */
 export const maskRuleBattleLog = (lines: string[], hiddenNames: string[], ownNames: string[]) => {
   let hiddenActor = false;
@@ -97,7 +106,8 @@ export const maskRuleBattleLog = (lines: string[], hiddenNames: string[], ownNam
 export const ruleManaCost = (state: RuleState, passives: string[], base: number, turn: number) => {
   const value = (code: string) => state.statuses.filter(e => e.code === code && e.until >= turn).reduce((sum, e) => sum + e.value * e.stacks, 0);
   const overload = passives.includes('resident_d02') ? 1 : state.memory.copy === 'D02' && Number(state.memory.copyUntil) >= turn ? .4 : 0;
-  let factor = (1 + overload * .5 + value('mana_tax') / 100) * (1 - value('mana_discount') / 100);
+  // 蓝耗惩罚与折扣同属一个百分比池，统一加算；最低保留10%基础蓝耗。
+  let factor = additivePercentFactor(overload * 50 + value('mana_tax'), value('mana_discount'), -90, 300);
   if (state.memory.focus === turn) factor *= .8;
   return Math.max(0, Math.ceil(base * Math.max(.1, factor) - 1e-9));
 };
@@ -137,6 +147,16 @@ export class CombatRules {
     unit.state.memory[key] = stamp; return true;
   }
   add(unit: RuleUnit, code: string, value: number, duration: number, source: RuleUnit, debuff = false, data?: string): RuleStatus {
+    // 镜湖皮只反射一次真正可普通驱散的非硬控减益；反射状态本身不再递归触发镜湖皮。
+    if (debuff && source.key !== unit.key && source.side !== unit.side && unit.mutationCodes?.includes('mutation_skin_rare_5')
+      && !isHardControlEffect(code) && canDispelCombatEffect(code, 'ordinary') && !unit.state.memory.mutationMirrorReflecting
+      && this.once(unit, 'mutationMirrorSkin', true)) {
+      unit.state.memory.mutationMirrorReflecting = 1;
+      try { this.add(source, code, value, duration, unit, true, data); }
+      finally { delete unit.state.memory.mutationMirrorReflecting; }
+      this.log.push(`　&镜湖皮&${combatUnitLabel(unit)}反射了${names[code] ?? code}，自身未承受该减益。`);
+      return { code, value, until: this.turn, source: unit.key, debuff: true, stacks: 0, data };
+    }
     if (!debuff) talentSupport(source, unit);
     if(!debuff&&hasTalent(unit,'I07')&&['attack','magic','defense','magic_defense','speed','accuracy','shield','reduction'].includes(code)&&!data)value*=1.5;
     if(debuff&&hasTalent(unit,'G05')&&!isHardControlEffect(code)&&!this.effects(unit).some(e=>e.code===code))this.log.push(`　➥${unit.name}受到${source.name}施加的${names[code]??code}。`);
@@ -179,6 +199,10 @@ export class CombatRules {
   async consume(unit: RuleUnit, code: string) { const effect = this.status(unit, code); if (effect) await this.removeEffect(unit, effect); return effect; }
   async control(source: RuleUnit, target: RuleUnit, code: string, chance: number, duration: number, specialized = true) {
     if (['blind','silence'].includes(code) && this.status(target, 'hidden_light')) { await this.consume(target, 'hidden_light'); return false; }
+    if (hard.includes(code) && canDispelCombatEffect(code, 'ordinary') && target.mutationCodes?.includes('mutation_nerve_rare_4') && this.once(target, 'mutationDreamTentacles', true)) {
+      this.log.push(`　&梦境触须&${combatUnitLabel(target)}抵挡了本场第一次可驱散硬控。`);
+      return false;
+    }
     if (specialized) chance = specializeControlChance(chance, source.castSpecialization?.controlChanceFactor);
     if (target.boss && code === 'charm') return false;
     if (target.boss && code === 'fear') { this.add(target, 'slow', 20, 1, source, true); return true; }
@@ -188,9 +212,14 @@ export class CombatRules {
     const resistance = (code === 'blind' ? this.value(target, 'blind_resist') : 0)
       + Number(target.modifiers?.controlResistancePct ?? 0)
       + this.value(target, 'inheritance_control_resist');
+    const mutationLightningResist = target.mutationCodes?.includes('mutation_nerve_stable_13') && target.state.memory.mutationLightningControl ? 20 : 0;
+    if (mutationLightningResist) delete target.state.memory.mutationLightningControl;
+    const mutationTenacity = (target.mutationCodes?.includes('mutation_nerve_stable_8') && target.hp / Math.max(1, target.hpMax) <= .30 ? 18 : 0)
+      + (target.mutationCodes?.includes('mutation_chest_deviation_6') && target.mp / Math.max(1, target.mpMax) <= .30 ? 20 : 0)
+      + (target.mutationCodes?.includes('mutation_bone_stable_10') && this.status(target, 'defense') ? 20 : 0);
     const randomEffectControl = target.bossEffects?.includes('steadfast_soul') ? .5 : 1;
     const boneFormationControl = target.bossEffects?.includes('bone_formation') && this.shieldValue(target) > 0 ? .5 : 1;
-    const probability = tenacityContest(pierce, target.tenacity * (1 + this.value(target, 'tenacity') / 100), source.level - target.level, chance, Number(source.modifiers?.statusHitCorrectionPct ?? 0)).controlChance * (this.expansionScale < 1 ? .5 : 1) * (target.boss ? bossControlChanceMultiplier : 1) * (1 - Math.min(80, resistance) / 100) * randomEffectControl * boneFormationControl;
+    const probability = tenacityContest(pierce, target.tenacity * (1 + (this.value(target, 'tenacity') + mutationLightningResist + mutationTenacity) / 100), source.level - target.level, chance, Number(source.modifiers?.statusHitCorrectionPct ?? 0)).controlChance * (this.expansionScale < 1 ? .5 : 1) * (target.boss ? bossControlChanceMultiplier : 1) * (1 - Math.min(80, resistance) / 100) * randomEffectControl * boneFormationControl;
     if (this.random() >= probability) { this.log.push(`　➥${combatUnitLabel(target)}抵抗了${names[code] ?? code}。`); return false; }
     if (hard.includes(code) && this.effects(target).some(effect => hard.includes(effect.code) && !canDispelCombatEffect(effect.code, 'ordinary', Boolean(effect.mechanism)))) return false;
     if (hard.includes(code)) await this.remove(target, effect => hard.includes(effect.code));
@@ -209,7 +238,10 @@ export class CombatRules {
     // 转移/增层到规则状态的持续伤害每轮只结算一次；额外行动不重复结算，也不唤醒沉睡。
     if (unit.hp > 0 && this.once(unit, 'ruleDot')) for (const effect of unit.state.statuses.filter(e => e.until >= this.turn && ['poison', 'burn', 'bleed', 'bleeding'].includes(e.code))) {
       const percent = unit.boss ? Math.min(1.5, effect.value * effect.stacks) : effect.value * effect.stacks;
-      const damage = Math.max(1, Math.floor(unit.hpMax * percent / 100 * (hasTalent(unit,'G07') && canDispelCombatEffect(effect.code,'ordinary',Boolean(effect.mechanism)) ? .35 : 1)));
+      const mutationDotFactor = (effect.code === 'poison' && unit.mutationCodes?.includes('mutation_skin_stable_6') ? .80 : 1)
+        * (['bleed', 'bleeding'].includes(effect.code) && unit.mutationCodes?.includes('mutation_skin_stable_12') ? .80 : 1)
+        * (unit.mutationCodes?.includes('mutation_chest_stable_5') ? .90 : 1);
+      const damage = Math.max(1, Math.floor(unit.hpMax * percent / 100 * mutationDotFactor * (hasTalent(unit,'G07') && canDispelCombatEffect(effect.code,'ordinary',Boolean(effect.mechanism)) ? .35 : 1)));
       const owner=this.units.find(u=>u.key===effect.source);if(owner)hiddenDamageSource(this,owner,unit);
       const hpBefore=unit.hp;
       const absorbed = await this.take(unit, damage, 1, owner);
@@ -233,11 +265,26 @@ export class CombatRules {
     }
     return areaHit ? target : taunter ?? target;
   }
-  speed(unit: RuleUnit) { return folioStat(unit,'speed',unit.speed,this.turn) * (1 + (this.value(unit, 'speed') - this.value(unit, 'slow')) / 100); }
-  manaCost(unit: RuleUnit, base: number) {
-    return openingManaCost(unit, ruleManaCost(unit.state, unit.passives, base, this.turn));
+  speed(unit: RuleUnit) {
+    const mutationBonus = (unit.mutationCodes?.includes('mutation_nerve_rare_3') && unit.state.memory.mutation雷痕 ? 10 : 0)
+      + (unit.mutationCodes?.includes('mutation_bone_rare_3') && unit.state.memory.mutationCloudStep ? 10 : 0);
+    const slow = this.value(unit, 'slow') * (unit.mutationCodes?.includes('mutation_nerve_stable_14') ? .5 : 1);
+    return folioStat(unit,'speed',unit.speed,this.turn) * (1 + (this.value(unit, 'speed') - slow + mutationBonus) / 100);
+  }
+  manaCost(unit: RuleUnit, base: number, skillCode?: string) {
+    let cost = openingManaCost(unit, ruleManaCost(unit.state, unit.passives, base, this.turn));
+    const usedSkills = typeof unit.state.memory.mutationUsedSkills === 'string' ? (() => { try { const parsed = JSON.parse(unit.state.memory.mutationUsedSkills as string); return Array.isArray(parsed) ? parsed : []; } catch { return []; } })() : [];
+    if (skillCode && unit.mutationCodes?.includes('mutation_eye_stable_15') && usedSkills.includes(skillCode)) cost *= .92;
+    if (skillCode && usedSkills.length && unit.mutationCodes?.includes('mutation_nerve_stable_1') && usedSkills[usedSkills.length - 1] !== skillCode) cost *= .92;
+    if (skillCode && unit.mutationCodes?.includes('mutation_nerve_stable_6') && unit.state.memory.mutationInterruptedSkill === skillCode) { cost *= .85; delete unit.state.memory.mutationInterruptedSkill; }
+    if (skillCode && usedSkills.length && unit.mutationCodes?.includes('mutation_nerve_deviation_6')) cost *= usedSkills[usedSkills.length - 1] === skillCode ? .90 : 1.03;
+    if (unit.mutationCodes?.includes('mutation_nerve_rare_5') && Object.keys(unit.cooldowns).some(code => isSkillCooldown(code) && Number(unit.cooldowns[code]) > 0) === false) cost *= .88;
+    if (unit.mutationCodes?.includes('mutation_chest_deviation_2') && unit.mp / Math.max(1, unit.mpMax) < .50) cost *= .90;
+    if (unit.mutationCodes?.includes('mutation_nerve_stable_11') && base >= unit.mpMax * .10) cost *= .90;
+    return Math.max(base > 0 ? 1 : 0, Math.ceil(cost));
   }
   async paid(unit: RuleUnit, amount: number, skill: { category: string; cooldown: number }) {
+    unit.state.memory.mutationLastPaid = amount;
     if(!unit.state.memory.talentPreparing)openingPaid(this,unit,amount);
     await this.consume(unit, 'mana_discount'); await this.consume(unit, 'mana_tax'); delete unit.state.memory.focus;
     if (!unit.state.memory.talentPreparing && amount >= 40 && this.passive(unit, 'D07') && this.once(unit, 'warmth')) await this.restore(unit, unit, 0, Math.min(unit.mpMax * .06, amount * .4));
@@ -248,19 +295,36 @@ export class CombatRules {
   }
   healingMultiplier(source: RuleUnit, target: RuleUnit, equipment = true, activeHealing = false) {
     const sourceFactor = equipment ? activeHealingMultiplier(Number(source.modifiers?.healingBonusPct ?? 0), activeHealing ? Number(source.cardEffects?.activeHealingBonusPct ?? 0) : 0) : 1;
-    let healing = sourceFactor * (equipment ? 1 + Number(target.modifiers?.healingReceivedPct ?? 0) / 100 : 1) * (1 + (this.partyCount(target) === 1 ? this.passive(target, 'H08') * .2 : 0));
-    if (source.mp / source.mpMax < .25) healing *= 1 - this.passive(source, 'D08') * .25;
-    if (target.hp / target.hpMax < .25) healing *= 1 - this.passive(target, 'I08') * .2;
-    return healing * (1-folioValue(source,'healing_down',this.turn)/100) * alchemyHealingFactor(this, target) * hiddenHealingFactor(this, target) * talentReceiveHealing(source, target) * (this.hooks.healingMultiplier?.(source, target) ?? 1);
+    let bonus = (sourceFactor - 1) * 100
+      + (equipment ? Number(target.modifiers?.healingReceivedPct ?? 0) : 0)
+      + (this.partyCount(target) === 1 ? this.passive(target, 'H08') * 20 : 0);
+    let penalty = 0;
+    if (source.mp / source.mpMax < .25) penalty += this.passive(source, 'D08') * 25;
+    if (target.hp / target.hpMax < .25) penalty += this.passive(target, 'I08') * 20;
+    if (target.mutationCodes?.includes('mutation_skin_stable_2') && /雨|湿|潮/.test(this.weather)) bonus += 12;
+    if (target.mutationCodes?.includes('mutation_chest_stable_6') && target.state.memory.mutationIceHit) bonus += 10;
+    if (target.mutationCodes?.includes('mutation_chest_stable_10') && this.effects(target).some(effect => ['bleed', 'bleeding'].includes(effect.code))) bonus += 15;
+    if (target.mutationCodes?.includes('mutation_nerve_deviation_5') && this.effects(target).some(effect => ['silence', 'confusion'].includes(effect.code))) bonus += 18;
+    if (target.mutationCodes?.includes('mutation_organ_stable_7') && source.key !== target.key && source.side === target.side) bonus += 8;
+    if (source.mutationCodes?.includes('mutation_chest_stable_8') && source.key !== target.key && source.side === target.side) bonus += 6;
+    return additivePercentFactor(bonus, penalty) * (1-folioValue(source,'healing_down',this.turn)/100) * alchemyHealingFactor(this, target) * hiddenHealingFactor(this, target) * talentReceiveHealing(source, target) * (this.hooks.healingMultiplier?.(source, target) ?? 1);
   }
   async restore(source: RuleUnit, target: RuleUnit, hp: number, mp = 0, echo = false, maxHealing = Infinity, activeHealing = false) {
     if (target.hp <= 0 || target.participating === false) return;
     let healing = this.healingMultiplier(source, target, true, activeHealing && hp > 0);
     if (!echo && source.castSpecialization) healing *= talentSpellHealing(source, target);
-    if (hp > 0 && this.status(source, 'beat')) { healing *= 1 + this.value(source, 'beat') / 100; await this.consume(source, 'beat'); }
+    if (hp > 0 && this.status(source, 'beat')) { healing *= additivePercentFactor(this.value(source, 'beat')); await this.consume(source, 'beat'); }
     if (!echo) healing *= source.castSpecialization?.supportFactor ?? 1;
     const oldHp = target.hp; const oldMp = target.mp;
-    target.hp = Math.min(target.hpMax, target.hp + Math.max(0, Math.floor(Math.min(maxHealing, hp * healing)))); target.mp = Math.min(target.mpMax, target.mp + Math.max(0, Math.floor(mp)));
+    const potentialHp = Math.max(0, Math.floor(Math.min(maxHealing, hp * healing)));
+    target.hp = Math.min(target.hpMax, target.hp + potentialHp); target.mp = Math.min(target.mpMax, target.mp + Math.max(0, Math.floor(mp)));
+    const healedHp = target.hp - oldHp; const overflowHp = Math.max(0, potentialHp - healedHp);
+    if (!echo && healedHp > 0 && target.mutationCodes?.includes('mutation_skin_stable_10')) await this.shield(target, target, healedHp * .04, 9999);
+    if (!echo && healedHp > 0 && source.mutationCodes?.includes('mutation_chest_stable_2')) await this.shield(source, target, healedHp * .04, 9999);
+    if (!echo && overflowHp > 0 && target.mutationCodes?.includes('mutation_skin_rare_1')) await this.shield(target, target, overflowHp * .20, 9999);
+    if (!echo && overflowHp > 0 && target.mutationCodes?.includes('mutation_chest_rare_1')) target.mp = Math.min(target.mpMax, target.mp + Math.floor(overflowHp * .20));
+    if (!echo && overflowHp > 0 && target.mutationCodes?.includes('mutation_organ_rare_2')) target.state.memory.mutationTidalSack = Math.min(target.mpMax * .05, Number(target.state.memory.mutationTidalSack ?? 0) + overflowHp * .20);
+    if (!echo && healedHp > 0 && source.key !== target.key && source.side === target.side && source.mutationCodes?.includes('mutation_nerve_rare_2')) source.mp = Math.min(source.mpMax, source.mp + Math.floor(healedHp * .05));
     if(target.hp>oldHp&&source.key!==target.key&&source.side===target.side&&!echo){const evidence=achievementBattleEvidence(source);evidence.healed+=target.hp-oldHp;if(target.key.startsWith('member:')&&!target.companion)evidence.playerSupport=Number(evidence.playerSupport??0)+1;if(oldHp<target.hpMax*.3&&source.castSpecialization)evidence.lowHeal=true;}
     if(target.hp>oldHp&&source.side===target.side&&Number(source.state.memory.achievementSupportAction??0)===Number(source.state.memory.achievementAction??0))achievementBattleContribution(source,'support');
     if(target.hp>oldHp&&hasTalent(source,'F05')&&source.key!==target.key)target.state.memory.talentRestMark=Date.now()+1800000;
@@ -281,6 +345,7 @@ export class CombatRules {
     if(target.hp<=0||target.participating===false)return;
     if (this.status(source, 'beat')) { amount *= 1 + this.value(source, 'beat') / 100; await this.consume(source, 'beat'); }
     amount *= source.castSpecialization?.supportFactor ?? 1;
+    if (target.mutationCodes?.includes('mutation_skin_stable_4') || target.mutationCodes?.includes('mutation_chest_deviation_8')) amount *= 1.05;
     const previousShield=this.shieldValue(target);
     this.add(target, 'shield', Math.min(target.hpMax, amount), specializeEffectDuration('shield', duration, source.castSpecialization?.durationChange), source);if(source.key!==target.key&&source.side===target.side&&target.key.startsWith('member:')&&!target.companion&&this.shieldValue(target)>previousShield){const evidence=achievementBattleEvidence(source);evidence.playerSupport=Number(evidence.playerSupport??0)+1;} if(source.side===target.side&&this.shieldValue(target)>previousShield&&Number(source.state.memory.achievementSupportAction??0)===Number(source.state.memory.achievementAction??0))achievementBattleContribution(source,'support'); await this.rootEcho(source);
   }
@@ -365,7 +430,7 @@ export class CombatRules {
     target.hp = Math.max(0, target.hp - hpDamage);
     target.state.memory.opening_actual_damage=hpBefore-target.hp;
     talentRecordEnemyDamage(source, target, hpBefore - target.hp);
-    await this.hooks.afterDamage?.(target, hpBefore - target.hp, Boolean(shield && !this.status(target, 'shield')),shield,source);
+    await this.hooks.afterDamage?.(target, hpBefore - target.hp, Boolean(shield && !this.status(target, 'shield')),shield,source,absorbed + legacyAbsorbed);
     if (aliveBefore && target.hp <= 0 && this.status(target, 'feign')) { target.hp = 1; await this.consume(target, 'feign'); this.add(target, 'blind', 1, 1, target, true); }
     if (target.hp <= 0 && this.passive(target, 'M07') && this.allies(target).length && this.once(target, 'lastTorch', true)) {
       for (const ally of this.allies(target)) { this.add(ally, 'reduction', 20 * this.passive(target, 'M07'), 1, target); this.add(ally, 'damage', 15 * this.passive(target, 'M07'), 1, target); }
@@ -399,6 +464,26 @@ export class CombatRules {
     if (this.partyCount(target) === 1) reduction += 15 * this.passive(target, 'H08');
     if (this.status(target, 'blind') && this.passive(target, 'L07') && this.once(target, 'blur')) reduction += 20 * this.passive(target, 'L07');
     if (this.passive(target, 'F08') && this.turn > 2 && this.turn - Number(target.state.memory.lastDamage ?? 0) >= 2) reduction += 25 * this.passive(target, 'F08');
+    let mutationIncomingFactor = 1;
+    if (target.mutationCodes?.includes('mutation_nerve_deviation_9') && raw > target.hpMax * .20) raw = target.hpMax * .20 + (raw - target.hpMax * .20) * .75;
+    if (target.mutationCodes?.includes('mutation_skin_stable_1') && element && target.state.memory.mutationLastElement === element) mutationIncomingFactor *= .92;
+    if (target.mutationCodes?.includes('mutation_skin_stable_5') && element && target.state.memory.mutationLastElement && target.state.memory.mutationLastElement !== element) mutationIncomingFactor *= .90;
+    if (target.mutationCodes?.includes('mutation_skin_deviation_1') && element && element !== '无' && element !== '奥术') mutationIncomingFactor *= target.state.memory.mutationLastElement === element ? .85 : 1.05;
+    if (target.mutationCodes?.includes('mutation_skin_deviation_8') && /夜|晚/.test(this.weather)) mutationIncomingFactor *= .90;
+    if (target.mutationCodes?.includes('mutation_chest_stable_7') && raw <= target.hpMax * .05) mutationIncomingFactor *= .85;
+    if (target.mutationCodes?.includes('mutation_chest_deviation_1') && target.hp / Math.max(1, target.hpMax) <= .30) mutationIncomingFactor *= .88;
+    if (target.mutationCodes?.includes('mutation_skin_rare_4') && target.hp >= target.hpMax) mutationIncomingFactor *= .88;
+    if (target.mutationCodes?.includes('mutation_skin_rare_6') && target.speed > source.speed) mutationIncomingFactor *= .90;
+    if (target.mutationCodes?.includes('mutation_nerve_stable_15') && this.status(target, 'sleep')) mutationIncomingFactor *= .80;
+    if (target.mutationCodes?.includes('mutation_bone_stable_8') && this.effects(target).some(effect => ['stun', 'fear', 'bind', 'petrify', 'sleep'].includes(effect.code))) mutationIncomingFactor *= .88;
+    if (target.mutationCodes?.includes('mutation_skin_deviation_5') && this.status(target, 'defense')) mutationIncomingFactor *= .88;
+    if (target.mutationCodes?.includes('mutation_chest_stable_13') && !single) mutationIncomingFactor *= .90;
+    if (target.mutationCodes?.includes('mutation_chest_deviation_9') && single) {
+      const hasPlayerAlly = this.allies(target).some(ally => ally.key !== target.key && ally.key.startsWith('member:') && !ally.companion);
+      mutationIncomingFactor *= hasPlayerAlly ? .95 : 1.03;
+    }
+    if (this.allies(target).some(ally => ally.key !== target.key && ally.mutationCodes?.includes('mutation_chest_stable_15') && ally.hp / Math.max(1, ally.hpMax) <= .30)) mutationIncomingFactor *= .95;
+    if (target.mutationCodes?.includes('mutation_skin_stable_14') && element === '冰') mutationIncomingFactor *= .85;
     const phase = await this.consume(target, 'phase'); if (phase) { reduction += 60; if (raw * .6 > target.hpMax * .1) await this.restore(target, target, 0, target.mpMax * .1); }
     if (single && await this.consume(target, 'false_shadow')) reduction += 45;
     const refraction = element && element !== '无' && element !== '奥术' ? await this.consume(target, 'refraction') : undefined;
@@ -408,7 +493,10 @@ export class CombatRules {
       raw*=talentDirectFactor(source,target,magic,skill,element);
       if(!skill&&hasOpeningWeapon(source,'dawn_knuckle')&&source.state.memory.opening_dawn_knuckle_ready){raw*=1.1;delete source.state.memory.opening_dawn_knuckle_ready;}
     }
-    let dealt = Math.floor(raw * talentIncomingFactor(source,target,element) * (1 + clamp(bonus, -80, 150) / 100) * (1 + exposed / 100) * (1 - clamp(reduction, 0, 80) / 100) * cardIncomingDamageMultiplier(target.cardEffects, magic, element));
+    // 增伤、易伤与减伤属于同一最终伤害池，数值先合并再换算倍率。
+    let dealt = Math.floor(raw * talentIncomingFactor(source,target,element)
+      * additivePercentFactor(bonus + exposed, reduction, -80, 150)
+      * mutationIncomingFactor * cardIncomingDamageMultiplier(target.cardEffects, magic, element));
     if (magic && await this.consume(target, 'mirror')) await this.secondary(target, source, raw * .75 * (source.state.memory.forgeReflect === this.turn ? 1.25 : 1), '法镜返照');
     if (this.status(target, 'sleep') && !this.status(target, 'sleep')?.mechanism) await this.consume(target, 'sleep');
     const stone = this.status(target, 'petrify');
@@ -429,6 +517,20 @@ export class CombatRules {
     if (source.side === target.side && String((source.cooldowns.__hidden as { active?: string } | undefined)?.active ?? '').match(/^hidden_(mix|kettle)$/)) return;
     if (damage > 0 || absorbed > 0) await hiddenAfterHit(this, source, target, skill, extra);
     await alchemyAfterHit(this,source,target,damage,element);
+    if (!extra && actualDamage > 0 && source.mutationCodes?.includes('mutation_eye_rare_4') && source.mp / Math.max(1, source.mpMax) <= .30) await this.restore(source, source, 0, actualDamage * .03, true);
+    if (!extra && source.mutationCodes?.includes('mutation_eye_rare_6')) delete source.state.memory.mutationLastPaid;
+    if (!extra && actualDamage > 0 && critical && source.mutationCodes?.includes('mutation_eye_rare_2')) await this.shield(source, source, actualDamage * .08, 9999);
+    if (!extra && actualDamage > 0 && source.mutationCodes?.includes('mutation_eye_deviation_8')) await this.secondary(source, target, actualDamage * .04, '断片裂隙');
+    if (!extra && actualDamage > 0 && source.mutationCodes?.includes('mutation_bone_rare_5') && critical) await this.restore(source, source, 0, actualDamage * .02, true);
+    if (!extra && actualDamage > 0 && source.mutationCodes?.includes('mutation_chest_deviation_3') && this.speed(source) > this.speed(target)) await this.restore(source, source, actualDamage * .03, 0, true);
+    if (!extra && target.hp <= 0 && source.mutationCodes?.includes('mutation_chest_stable_14')) await this.restore(source, source, source.hpMax * .05, 0, true);
+    if (!extra && actualDamage > 0 && target.mutationCodes?.includes('mutation_organ_deviation_8') && critical) await this.restore(target, target, 0, actualDamage * .10, true);
+    if (!extra && actualDamage > 0 && target.mutationCodes?.includes('mutation_nerve_rare_3') && element === '雷') target.state.memory.mutation雷痕 = 1;
+    if (!extra && source.side !== target.side && (actualDamage > 0 || absorbed > 0) && target.mutationCodes?.includes('mutation_bone_rare_3') && !target.state.memory.mutationCloudStep) target.state.memory.mutationCloudStep = 1;
+    if (!extra && actualDamage > 0 && target.mutationCodes?.includes('mutation_nerve_stable_13') && element === '雷') target.state.memory.mutationLightningControl = 1;
+    if (!extra && actualDamage > 0 && target.mutationCodes?.includes('mutation_skin_stable_8') && element === '雷') target.state.memory.mutationLightningSource = source.key;
+    if (!extra && actualDamage > 0 && target.mutationCodes?.includes('mutation_chest_stable_6') && element === '冰') target.state.memory.mutationIceHit = 1;
+    if (!extra && element && element !== '无' && element !== '奥术' && (damage > 0 || absorbed > 0)) target.state.memory.mutationLastElement = element;
     if (this.sparLevelBand && target.side === 'target' && damage > 0 && this.elementFactor(source, target, element) > 1) source.state.memory.sparWeakness = 1;
     if (absorbed && this.passive(target, 'F07') && this.once(target, `shard${source.key}`)) { this.add(source, 'armor_shatter', 8 * this.passive(target, 'F07'), 1, target, true); this.add(source, 'magic_shatter', 8 * this.passive(target, 'F07'), 1, target, true); }
     target.state.memory.lastHitTurn = this.turn; target.state.memory.lastHitter = source.key;
@@ -467,15 +569,33 @@ export class CombatRules {
     if (skill && this.passive(source, 'C08') && this.speed(source) < this.speed(target) && this.once(source, 'rearHit')) hitBonus += .15 * this.passive(source, 'C08');
     if (this.status(target, 'flank') && target.state.memory.lastHitTurn === this.turn && target.state.memory.lastHitter !== source.key && Number(target.state.memory.flankHits ?? 0) < 2) hitBonus += .1;
     if (this.status(target, 'shadow_mark')?.source === source.key && ['blind', 'silence', 'nightmare'].some(code => this.status(target, code))) hitBonus += .2;
-    if (skill && ranged && await this.consume(source, 'aim')) { forceHit = true; if (target.hp === target.hpMax) powerFactor *= 1.18; }
-    if (skill && !magic && !ranged && await this.consume(source, 'blade_line')) { forceHit = true; powerFactor *= .9; }
-    if (this.passive(source, 'L08') && (target.appraisal ?? 0) < 3 && this.once(source, 'paradox', true)) forceHit = true;
+    if (skill && ranged && await this.consume(source, 'aim')) { hitBonus += .30; if (target.hp === target.hpMax) powerFactor *= 1.18; }
+    if (skill && !magic && !ranged && await this.consume(source, 'blade_line')) { hitBonus += .20; powerFactor *= .9; }
+    if (this.passive(source, 'L08') && (target.appraisal ?? 0) < 3 && this.once(source, 'paradox', true)) hitBonus += .30;
     if (this.passive(source, 'H07') && target.state.memory.lastHitTurn === this.turn && target.state.memory.lastHitter !== source.key) this.add(source, 'crit_bonus', Math.min(15 * this.passive(source, 'H07'), this.value(source, 'crit_bonus') + 5 * this.passive(source, 'H07')), 0, source);
-    return { forceHit, powerFactor, hitBonus, hitFactor: this.status(source, 'blind') ? .5 : 1 };
+    return { forceHit, powerFactor, hitBonus, hitFactor: this.status(source, 'blind') && !source.mutationCodes?.includes('mutation_eye_stable_11') ? .5 : 1 };
   }
   async missed(source: RuleUnit, target: RuleUnit) {
     if(source.side!==target.side)achievementBattleEvidence(target).dodged=true;
+    const paid = Number(source.state.memory.mutationLastPaid ?? 0);
+    if (paid > 0 && source.mutationCodes?.includes('mutation_eye_rare_6')) { await this.restore(source, source, 0, paid * .50, true); this.log.push(`　&闭环瞳&${combatUnitLabel(source)}攻击未命中，返还 ${Math.floor(paid * .50)} MP。`); }
+    delete source.state.memory.mutationLastPaid;
     if (this.status(target, 'false_shadow')) await this.control(target, source, 'blind', 100, 1, false);
+  }
+  /** 统一处理战斗中的队友复苏，并触发回声心的护盾反馈。 */
+  async revive(source: RuleUnit, target: RuleUnit, hp: number, mp = 0) {
+    void source;
+    if (target.participating === false || target.hp > 0) return false;
+    target.hp = Math.min(target.hpMax, Math.max(1, Math.floor(hp)));
+    target.mp = Math.min(target.mpMax, Math.max(0, Math.floor(mp)));
+    target.state.memory.lastRevivedTurn = this.turn;
+    const recipients = this.allies(target).filter(ally => ally.key !== target.key && ally.key.startsWith('member:') && !ally.companion);
+    for (const ally of recipients) {
+      if (!ally.mutationCodes?.includes('mutation_chest_rare_5') || !this.once(ally, 'mutationEchoHeart', true)) continue;
+      await this.shield(ally, ally, ally.hpMax * .10, 9999);
+    }
+    this.log.push(`　&复苏&${combatUnitLabel(target)}恢复至 ${target.hp}/${target.hpMax} HP。`);
+    return true;
   }
   async strike(source: RuleUnit, original: RuleUnit, power: number, element: string, magic: boolean, extra = false, forceHit = false, secondaryScale = 1,
     options: { skill?: boolean; redirected?: boolean; single?: boolean; damageType?: string; ranged?: boolean; hitPenalty?: number; accuracyMultiplier?: number; accuracyFlat?: number; hitCorrection?: number; specializedPower?: boolean; penetration?: number; finalMultiplier?: number; shieldMultiplier?: number; damageCap?: number; deferFraction?: number; onResolved?: (amount: number) => void } = {}) {
@@ -487,15 +607,19 @@ export class CombatRules {
     if (this.passive(source, 'G01')) attack = Math.max(source.magic, source.attack);
     const swap = isSkill && this.status(source, magic ? 'swap_magic' : 'swap_physical'); if (swap) { attack = magic ? Math.min(source.magic, source.attack) : Math.max(source.magic, source.attack); await this.consume(source, swap.code); }
     attack = folioStat(source,magic?'magic':'attack',attack,this.turn);
-    if (this.passive(source, 'G08') && !source.weaponsDifferent) attack *= 1 + .05 * this.passive(source, 'G08');
-    attack *= 1 + (this.statBonus(source, [magic ? 'magic' : 'attack', 'battle_cry', 'power_surge']) - this.value(source, magic ? 'magic_down' : 'attack_down') - this.value(source, 'uzz_weakness')) / 100;
-    const defense = folioStat(target,magic?'magic_defense':'defense',magic?target.magicDefense:target.defense,this.turn) * (1 - clamp(this.value(target, magic ? 'magic_shatter' : 'armor_shatter') + (!magic ? this.value(target, 'vulnerability') : 0), 0, 80) / 100) * (1 + this.value(target, magic ? 'magic_defense' : 'defense') / 100) * (1 - clamp(options.penetration ?? 0, 0, 50) / 100);
+    const attackBonus = this.statBonus(source, [magic ? 'magic' : 'attack', 'battle_cry', 'power_surge'])
+      - this.value(source, magic ? 'magic_down' : 'attack_down') - this.value(source, 'uzz_weakness')
+      + (this.passive(source, 'G08') && !source.weaponsDifferent ? 5 * this.passive(source, 'G08') : 0);
+    attack *= additivePercentFactor(attackBonus);
+    const defenseDown = this.value(target, magic ? 'magic_shatter' : 'armor_shatter') + (!magic ? this.value(target, 'vulnerability') : 0) + (options.penetration ?? 0);
+    const defense = folioStat(target,magic?'magic_defense':'defense',magic?target.magicDefense:target.defense,this.turn)
+      * additivePercentFactor(this.value(target, magic ? 'magic_defense' : 'defense'), defenseDown, -90, 250);
     const setup = await this.attackSetup(source, target, magic, isSkill, options.ranged ?? magic);
     let hit = opposedChance((folioStat(source,'accuracy',source.accuracy,this.turn)+(options.accuracyFlat??0)) * (options.accuracyMultiplier ?? 1) * (1 + (this.statBonus(source, ['accuracy', 'precision']) - this.value(source, 'accuracy_down') - this.value(source, 'imbalance')) / 100 + (source.weaponsDifferent ? .08 * this.passive(source, 'G08') : 0)), folioStat(target,'evasion',target.evasion,this.turn) * (1 + this.value(target,'evasion') / 100 + (target.weaponsDifferent ? .08 * this.passive(target, 'G08') : 0)) * (1 - Math.min(90, this.value(target, 'bind') + this.value(target, 'evasion_down')) / 100));
     const correction = strikeCorrections(source,target);
     const folioHit=Math.max(folioCorrection(source,target,this.turn),options.hitCorrection??0);
-    correction.hitCorrectionPct=100*(1-(1-(correction.hitCorrectionPct??0)/100)*(1-folioHit/100));
-    hit*=1-folioValue(source,'hit_down',this.turn)/100;
+    correction.hitCorrectionPct=Math.min(100, (correction.hitCorrectionPct ?? 0) + folioHit);
+    hit=Math.max(0, hit - folioValue(source,'hit_down',this.turn)/100);
     await this.consume(source,'folio_accuracy');
     hit = resolvedHitChance(hit + setup.hitBonus - Number(options.hitPenalty ?? 0) / 100, 0, setup.hitFactor, Number(source.modifiers?.minimumHitRatePct ?? 1), correction);
     if (!(forceHit || setup.forceHit) && this.random() >= hit) { this.log.push(`　➥${combatUnitLabel(target)}闪避了攻击。`); await this.missed(source, target); return false; }
@@ -625,7 +749,7 @@ export class CombatRules {
       case 'L01': break; // 永久被动由 start 生效。
       case 'L02': buff('false_shadow', 45, 3); break;
       case 'L03': await attack(foe && (this.status(source, 'nightmare') || (foe.appraisal ?? 0) < 3) ? 120 : 85); break;
-      case 'L04': if (foe) { if (foe.state.cast) { foe.mp = Math.min(foe.mpMax, foe.mp + Math.floor(foe.state.cast.paid / 2)); delete foe.state.cast; achievementBattleEvidence(source).interrupted=true; this.log.push(`　&打断&${combatUnitLabel(foe)}的吟唱中断，返还一半已支付 MP。`); } await this.control(source, foe, 'silence', 60, 2); } break;
+      case 'L04': if (foe) { if (foe.state.cast) { const paidCast = foe.state.cast.paid; foe.mp = Math.min(foe.mpMax, foe.mp + Math.floor(paidCast / 2)); if (foe.mutationCodes?.includes('mutation_chest_rare_6')) foe.mp = Math.min(foe.mpMax, foe.mp + Math.floor(paidCast / 2)); foe.state.memory.mutationInterruptedSkill = foe.state.cast.code; delete foe.state.cast; achievementBattleEvidence(source).interrupted=true; this.log.push(`　&打断&${combatUnitLabel(foe)}的吟唱中断，返还${foe.mutationCodes?.includes('mutation_chest_rare_6') ? '全部' : '一半'}已支付 MP。`); } await this.control(source, foe, 'silence', 60, 2); } break;
       case 'L05': if (foe) { debuff('accuracy_down', 10, 2); const effect = this.pick(this.effects(foe).filter(e => !e.debuff)); if (effect) this.add(foe, 'false_compass', 1, 2, source, true, effect.code + '|' + this.pick(['法镜', '临锻回火', '生命护盾', '三相附锋'].filter(name => name !== names[effect.code]))); } break;
       case 'L06': if (await attack()) debuff('shadow_mark', 20, 2); break;
       case 'M02': for (const friend of friends) buff('echo', 75, 3, friend); break;
@@ -634,6 +758,23 @@ export class CombatRules {
       case 'M05': buff('roots', 4, 3); break;
       case 'M06': if (foe) { const removed = await this.remove(foe, e => !e.mechanism && e.debuff && ['poison', 'burn', 'bleed', 'bleeding', 'armor_shatter', 'magic_shatter'].includes(e.code)); const scale = 1 + Math.min(.9, removed.reduce((n, e) => n + e.stacks, 0) * .18); await this.strike(source, foe, 165, '暗', true, extra, false, scale, { redirected, single: !expandedHit }); } break;
       default: throw new Error(`未注册主动规则：${id}`);
+    }
+    if (skill.power <= 0) delete source.state.memory.mutationLastPaid;
+    if (!extra && paid > 0 && source.mutationCodes?.includes('mutation_organ_stable_8')) await this.restore(source, source, 0, paid * .05, true);
+    if (!extra && paid > 0 && source.mutationCodes?.includes('mutation_chest_stable_9')) await this.shield(source, source, paid * .08, 9999);
+    if (!extra && paid > 0 && source.mutationCodes?.includes('mutation_nerve_rare_6')) {
+      const recipient = this.allies(source).filter(unit => unit.hp > 0).sort((left, right) => left.mp / Math.max(1, left.mpMax) - right.mp / Math.max(1, right.mpMax))[0];
+      if (recipient) await this.restore(source, recipient, 0, paid * .05, true);
+    }
+    if (!extra) {
+      const usedSkills = typeof source.state.memory.mutationUsedSkills === 'string' ? (() => { try { const parsed = JSON.parse(source.state.memory.mutationUsedSkills as string); return Array.isArray(parsed) ? parsed.map(String) : []; } catch { return []; } })() : [];
+      if (!usedSkills.includes(skill.code)) usedSkills.push(skill.code);
+      source.state.memory.mutationUsedSkills = JSON.stringify(usedSkills.slice(-64));
+    }
+    const mutationCooldown = Number(source.cooldowns[skill.code] ?? 0);
+    if (!extra && skill.cooldown > 1 && mutationCooldown > 1 && source.mutationCodes?.includes('mutation_nerve_rare_1') && this.once(source, 'mutationTimeSlot', true)) {
+      source.cooldowns[skill.code] = mutationCooldown - 1;
+      this.log.push(`　&时隙突触&${combatUnitLabel(source)}将「${skill.name}」冷却缩短 1。`);
     }
     if (supportBefore) await this.echoSupport(source, ally, supportBefore);
     for (const unit of this.units) for (const effect of unit.state.statuses.filter(item => item.until >= this.turn)) {

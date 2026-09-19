@@ -32,7 +32,10 @@ export const advancedResourceDefinitions: Record<string, AdvancedResourceDefinit
   trickster_ranger: { professionCode: 'trickster_ranger', code: 'chips', name: '筹码', summary: '追猎目标被命中、敌人被减速或束缚会积攒；用于烟幕与协猎。' },
   saint_healer: { professionCode: 'saint_healer', code: 'faith', name: '信念', summary: '救治低血队友、净化控制会积攒；用于群体急救。' },
   aegis_priest: { professionCode: 'aegis_priest', code: 'faith', name: '信念', summary: '壁垒承伤与守护转移会积攒；用于团队屏障。' },
-  dawn_inquisitor: { professionCode: 'dawn_inquisitor', code: 'faith', name: '信念', summary: '光术命中暗蚀或驱散增益、队友获得祷言会积攒；用于审判。' }
+  dawn_inquisitor: { professionCode: 'dawn_inquisitor', code: 'faith', name: '信念', summary: '光术命中暗蚀或驱散增益、队友获得祷言会积攒；用于审判。' },
+  sharpshooter: { professionCode: 'sharpshooter', code: 'focus', name: '专注', summary: '远程直击命中、暴击与命中高血目标会积攒；用于一击贯心。' },
+  gunner: { professionCode: 'gunner', code: 'shell', name: '弹片', summary: '技能命中、暴击与范围技能命中会积攒；用于重炮轰击。' },
+  ranger_warden: { professionCode: 'ranger_warden', code: 'scout', name: '侦察', summary: '林伴技能命中、暴击与林伴压制命中会积攒；用于林野同契。' }
 };
 
 export const advancedSkillResourceRequirements: Record<string, AdvancedSkillResourceRequirement> = {
@@ -58,7 +61,11 @@ export const advancedSkillResourceRequirements: Record<string, AdvancedSkillReso
   aegis_luminous_echo: { professionCode: 'aegis_priest', amount: 50 },
   aegis_undying_dome: { professionCode: 'aegis_priest', amount: 100 },
   dawn_judgment_litany: { professionCode: 'dawn_inquisitor', amount: 50 },
-  dawn_daybreak_decree: { professionCode: 'dawn_inquisitor', amount: 100 }
+  dawn_daybreak_decree: { professionCode: 'dawn_inquisitor', amount: 100 },
+  sharpshoot_headshot: { professionCode: 'sharpshooter', amount: 100 },
+  gunner_artillery: { professionCode: 'gunner', amount: 60 },
+  gunner_smoke_bomb: { professionCode: 'gunner', amount: 50 },
+  ranger_eagle_eye: { professionCode: 'ranger_warden', amount: 50 }
 };
 /** 群星契约仅将攻击灵改为群攻，普通与过载均为82%魔攻，直接计算防御。 */
 export const spiritEmberAttackScale = (_overload: boolean) => .82;
@@ -118,7 +125,19 @@ export const advancedSkillDescriptions: Record<string, string> = {
   dawn_morning_mark: '125%光系魔法伤害并施加晨星印记；目标下一次元素反应伤害提高20%。',
   dawn_exorcism_word: '135%光系魔法伤害，驱散目标一个可驱散增益或壁垒；成功时全队回复4%最大MP。',
   dawn_judgment_litany: '消耗50信念。165%光系魔法伤害并施加两层易伤；目标带暗性标记时额外净化全队一个负面状态。',
-  dawn_daybreak_decree: '消耗100信念。对全体造成100%光系魔法伤害，逐个驱散一个增益；每次成功驱散都会为全队提供短暂壁垒。'
+  dawn_daybreak_decree: '消耗100信念。对全体造成100%光系魔法伤害，逐个驱散一个增益；每次成功驱散都会为全队提供短暂壁垒。',
+  sharpshoot_snipe: '造成150%物理伤害，命中率修正+25%；远程直击命中获得12专注，命中高血目标额外获得20专注。',
+  sharpshoot_volley: '对全体敌人造成80%物理伤害并降低其命中15% 2回合；命中高血目标时获得20专注。',
+  sharpshoot_wind_arrow: '造成125%物理伤害并使自身速度提高20% 2回合；远程直击命中获得12专注。',
+  sharpshoot_headshot: '消耗100专注。对单体造成240%物理伤害；目标生命高于60%时命中率修正+30%，击杀返还30 MP。',
+  gunner_cluster: '对全体敌人造成90%物理伤害并施加灼烧5% 2回合；每命中一个敌人获得8弹片，暴击额外获得15弹片。',
+  gunner_minefield: '使全体敌人闪避降低20%并进入20%易伤状态，持续2回合；布设成功获得15弹片。',
+  gunner_artillery: '消耗60弹片。对单体造成185%物理伤害并令目标眩晕；技能命中获得12弹片。',
+  gunner_smoke_bomb: '消耗50弹片。全队获得2回合20%闪避与15%伤害减免。',
+  ranger_hunters_mark: '召唤雾枭并造成105%物理伤害，施加雾标3回合；林伴技能命中获得15侦察，暴击额外获得10侦察。',
+  ranger_trap_barrage: '召唤栗影并造成80%物理伤害，以60%基础概率束缚1回合（首领降级为30%减速）；林伴技能命中获得15侦察。',
+  ranger_flanking_shot: '召唤青鳞并造成130%物理伤害，施加1层青鳞毒；林伴压制命中额外获得10侦察。',
+  ranger_eagle_eye: '消耗50侦察。三只林伴分别回应并恢复在场林伴30%最大生命；三伴在场时效果提升50%。'
 };
 
 export const advancedResourceForProfession = (professionCode: string | null | undefined) => professionCode ? advancedResourceDefinitions[professionCode] : undefined;

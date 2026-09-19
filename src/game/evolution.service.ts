@@ -6,6 +6,7 @@ import type { DerivedStats } from './types';
 import { recordSkillPointChange } from './skill-point-ledger.service';
 import { createHeartQuestionsForLevels } from './heart-question.service';
 import { recordCharacterOperation } from './character-operation.service';
+import { dynamicDamageMutationCodes, dynamicDamageReductionMutationCodes, mutationCatalog as redesignedMutationCatalog, mutationByCode } from './mutation.config';
 
 type EvolutionConnection = Pool | PoolConnection;
 export type BodyPart = 'eye' | 'nerve' | 'skin' | 'chest' | 'bone' | 'organ';
@@ -67,6 +68,8 @@ const mergeBonus = (...bonuses: EvolutionBonus[]) => bonuses.reduce<EvolutionBon
   for (const [key, value] of Object.entries(bonus)) result[key] = Number(result[key] ?? 0) + Number(value ?? 0);
   return result;
 }, {});
+const conditionalMutationText = /夜间|风天|雨天|晴天|雾天|白昼|生命不|生命低|生命高|魔力不|魔力低|MP不|MP低|目标|本场|对带|对处于|处于|带普通|护盾|群体|队友|其他玩家|高于自身|低于自身|没有|未|已使用|使用过|攻击未命中|击杀|资源|挖矿|消耗|主攻击|原始耗魔|每损失|每有|不同|当前|忽略|被沉默|被目盲|有效治疗|PvE|PVE|费用|产物|奖励|快捷槽|存活敌方|受过|较低项|攻击方式|参战伙伴/;
+const isConditionalMutation = (description: string) => conditionalMutationText.test(description);
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const randomItem = <T>(items: readonly T[]) => items[Math.floor(Math.random() * items.length)];
 
@@ -85,7 +88,7 @@ const partBlueprints = (part: BodyPart, stable: readonly string[], deviation: re
 ];
 
 // 文档中的六部位各 30 项候选：15 稳定、9 偏差、6 稀有观测。特殊交互由面板文案保留，基础战斗收益在 effect 中结算。
-const mutationCatalog: MutationBlueprint[] = [
+const legacyMutationCatalog: MutationBlueprint[] = [
   ...partBlueprints('eye',
     ['叶脉瞳', '棱镜虹膜', '暗适瞳', '深焦晶体', '追迹瞳', '风纹角膜', '矿脉视', '静水晶体', '星屑瞳孔', '余晖反射', '微光腺', '双焦瞳', '灵压视', '雾透膜', '记忆虹膜'],
     ['余像症', '畏光', '色温错位', '焦距迟滞', '强迫标记', '盲点游移', '视觉过饱和', '断片视界', '梦视'],
@@ -129,6 +132,9 @@ const mutationCatalog: MutationBlueprint[] = [
     [{ hpPct: -2, mpPct: 3 }, { mpPct: -3, hpPct: 3 }, { speedPct: 3, hpPct: -2 }],
     [{ hpPct: 3 }, { mpPct: 4 }, { tenacityPct: 4 }])
 ];
+void legacyMutationCatalog;
+// 词条正文由第三版设计目录逐条定义；旧模板保留仅用于兼容历史构建，不再参与抽取。
+const mutationCatalog = redesignedMutationCatalog;
 const mutationsFor = (part: BodyPart, state: MutationBlueprint['state']) => mutationCatalog.filter(item => item.part === part && item.state === state);
 
 const injectionRules: Record<InjectionCode, { unlockLevel: number; parts: readonly BodyPart[]; chance: number; stableChance: number; pressure: number; stability: number; cost?: number }> = {
@@ -157,6 +163,22 @@ const createProfile = (connection: EvolutionConnection, characterId: number) => 
   VALUES (?,20,0,0,0,50,JSON_OBJECT(),JSON_OBJECT(),JSON_ARRAY())`, [characterId]);
 export const activateEvolutionProfile = (connection: EvolutionConnection, characterId: number) => createProfile(connection, characterId);
 
+/** 将旧版按模板写入的词条懒迁移到第三版目录；已迁移记录以“效果：”开头，重复读取不会重复写入。 */
+const migrateMutationCatalog = async (connection: EvolutionConnection, characterId: number) => {
+  const [rows] = await connection.execute<MutationRow[]>(`SELECT * FROM player_mutations
+    WHERE character_id=? AND description NOT LIKE '效果：%'`, [characterId]);
+  for (const mutation of rows) {
+    const configured = mutationByCode.get(mutation.mutation_code);
+    if (!configured) continue;
+    const activeNegative = ['deviation', 'paused', 'rare'].includes(mutation.mutation_state);
+    const effect = activeNegative ? mergeBonus(configured.effect, configured.negativeEffect) : configured.effect;
+    const description = activeNegative
+      ? configured.description
+      : configured.description.replace(/负面：[^。]+。?$/, '负面：无。');
+    await connection.execute('UPDATE player_mutations SET effect_json=?,description=?,updated_at=NOW() WHERE id=?', [JSON.stringify(effect), description, mutation.id]);
+  }
+};
+
 /** 为使用过进化之种的旧角色补建档案；种子尚未感悟的角色不会被提前开启。 */
 export const ensureEvolutionProfile = async (connection: EvolutionConnection, character: Pick<CharacterEvolutionRow, 'id' | 'realm_stage' | 'evolution_stage'>, lock = false) => {
   let profile = await profileFor(connection, Number(character.id), lock);
@@ -164,6 +186,7 @@ export const ensureEvolutionProfile = async (connection: EvolutionConnection, ch
     await createProfile(connection, Number(character.id));
     profile = await profileFor(connection, Number(character.id), lock);
   }
+  if (profile) await migrateMutationCatalog(connection, Number(character.id));
   return profile;
 };
 
@@ -199,6 +222,13 @@ const consumeItems = async (connection: PoolConnection, characterId: number, cos
 };
 const addItem = (connection: EvolutionConnection, characterId: number, code: string, quantity: number) => connection.execute(`INSERT INTO player_inventory (character_id,item_id,quantity)
   SELECT ?,id,? FROM item_definitions WHERE code=? ON DUPLICATE KEY UPDATE quantity=quantity+VALUES(quantity),acquired_at=NOW()`, [characterId, quantity, code]);
+/** 独立业务结算使用的进化材料发放入口；调用方必须处于已有事务中。 */
+export const grantEvolutionItem = async (connection: EvolutionConnection, characterId: number, code: string, quantity: number) => {
+  const amount = Math.max(0, Math.floor(quantity));
+  if (!amount) return false;
+  const [result] = await addItem(connection, characterId, code, amount);
+  return Number((result as ResultSetHeader).affectedRows ?? 0) > 0;
+};
 const itemQuantity = async (connection: EvolutionConnection, characterId: number, code: string, lock = false) => {
   const [rows] = await connection.execute<(RowDataPacket & { quantity: number; item_id: number })[]>(`SELECT pi.quantity,pi.item_id FROM player_inventory pi JOIN item_definitions i ON i.id=pi.item_id
     WHERE pi.character_id=? AND i.code=? LIMIT 1${lock ? ' FOR UPDATE' : ''}`, [characterId, code]);
@@ -213,11 +243,21 @@ const consumeItem = async (connection: PoolConnection, characterId: number, code
 export const evolutionStatBonuses = async (connection: EvolutionConnection, characterId: number): Promise<EvolutionBonus> => {
   const profile = await profileFor(connection, characterId);
   if (!profile) return {};
-  const [rows] = await connection.execute<(RowDataPacket & { effect_json: unknown; tier: number })[]>(`SELECT effect_json,tier FROM player_mutations
+  const [rows] = await connection.execute<(RowDataPacket & { mutation_code: string; effect_json: unknown; tier: number })[]>(`SELECT mutation_code,effect_json,tier FROM player_mutations
     WHERE character_id=? AND mutation_state IN ('stable','deviation','rare')`, [characterId]);
   return mergeBonus(jsonObject(profile.fixed_bonus_json), ...rows.map(row => {
     const multiplier = Number(row.tier) >= 2 ? 1.5 : 1;
-    return Object.fromEntries(Object.entries(jsonObject(row.effect_json)).map(([key, value]) => [key, value * multiplier]));
+    const configured = mutationByCode.get(String((row as RowDataPacket & { mutation_code?: string }).mutation_code ?? ''));
+    const effect = jsonObject(row.effect_json);
+    if (configured && isConditionalMutation(configured.description) && !dynamicDamageMutationCodes.has(configured.code) && !dynamicDamageReductionMutationCodes.has(configured.code)) {
+      for (const key of Object.keys(configured.effect)) delete effect[key];
+    }
+    if (configured && dynamicDamageMutationCodes.has(configured.code)) delete effect.damageBonusPct;
+    if (configured && dynamicDamageReductionMutationCodes.has(configured.code)) {
+      delete effect.damageReductionPct;
+      delete effect.damageBonusPct;
+    }
+    return Object.fromEntries(Object.entries(effect).map(([key, value]) => [key, value * multiplier]));
   }));
 };
 export const applyEvolutionBaseStats = (stats: DerivedStats, bonus: EvolutionBonus): DerivedStats => {
@@ -252,11 +292,11 @@ const drawMutation = async (connection: PoolConnection, characterId: number, cod
       return { ...blueprint, outcome: '强化为 II 阶' };
     }
     await connection.execute(`INSERT IGNORE INTO player_mutations (character_id,body_part,mutation_code,mutation_name,mutation_state,tier,source_injection,effect_json,description)
-      VALUES (?,?,?,?, 'archived',1,?,?,?)`, [characterId, part, blueprint.code, blueprint.name, code, JSON.stringify(blueprint.effect), blueprint.description]);
+      VALUES (?,?,?,?, 'archived',1,?,?,?)`, [characterId, part, blueprint.code, blueprint.name, code, JSON.stringify(mergeBonus(blueprint.effect, blueprint.negativeEffect)), blueprint.description]);
     return { ...blueprint, outcome: '已封存为观察样本' };
   }
   await connection.execute(`INSERT INTO player_mutations (character_id,body_part,mutation_code,mutation_name,mutation_state,tier,source_injection,effect_json,description)
-    VALUES (?,?,?,?,?,1,?,?,?)`, [characterId, part, blueprint.code, blueprint.name, state, code, JSON.stringify(blueprint.effect), blueprint.description]);
+    VALUES (?,?,?,?,?,1,?,?,?)`, [characterId, part, blueprint.code, blueprint.name, state, code, JSON.stringify(mergeBonus(blueprint.effect, blueprint.negativeEffect)), blueprint.description]);
   return { ...blueprint, outcome: state === 'deviation' ? '形成偏差' : state === 'rare' ? '形成稀有观测' : '形成稳定变异' };
 };
 
@@ -282,7 +322,10 @@ const injectEvolutionOnConnection = async (connection: PoolConnection, qqUserId:
     if (Number((await itemQuantity(connection, Number(character.id), injectionItemCodes[code], true))?.quantity ?? 0) > 0) await consumeItem(connection, Number(character.id), injectionItemCodes[code]);
     else {
       const materials = materialsForLevel(currentCap, code === 'shaping');
-      await consumeItems(connection, Number(character.id), { evolution_active_sample: materials.active, evolution_stable_medium: materials.medium, evolution_catalyst: materials.catalyst });
+      const [enzymeRows] = await connection.execute<RowDataPacket[]>(`SELECT 1 FROM player_mutations
+        WHERE character_id=? AND mutation_code='mutation_organ_stable_11' AND mutation_state IN ('stable','deviation','rare') LIMIT 1`, [character.id]);
+      const activeCost = Math.max(1, materials.active - (enzymeRows[0] ? 1 : 0));
+      await consumeItems(connection, Number(character.id), { evolution_active_sample: activeCost, evolution_stable_medium: materials.medium, evolution_catalyst: materials.catalyst });
     }
   }
   const chosenPart = requestedPart && rule.parts.includes(requestedPart) ? requestedPart : rule.parts.length ? randomItem(rule.parts) : null;
@@ -339,10 +382,15 @@ export const simulateEvolutionToLevel30 = async (connection: PoolConnection, qqU
   return { fromLevel: startingLevel, level: 30, injections: 30-cap };
 };
 
-const businessDate = () => {
+export const evolutionBusinessDate = () => {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
   const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
   return `${values.year}-${values.month}-${values.day}`;
+};
+const businessDate = evolutionBusinessDate;
+const evolutionShanghaiNight = () => {
+  const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', hourCycle: 'h23' }).format(new Date()));
+  return hour >= 19 || hour < 6;
 };
 const observationDefinitions: Record<EvolutionObservationType, { name: string; objective: string; target: number; items: Record<string, number> }> = {
   // 每项观察有明确的材料路线；每天最多两项，因此催化剂总量始终不超过 2。
@@ -398,12 +446,22 @@ const advanceActiveObservation = async (connection: PoolConnection, characterId:
 };
 
 /** 战斗胜利只为体力正常的真实玩家推进；NPC 同伴不构成共鸣。 */
-export const advanceEvolutionObservationBattle = (connection: PoolConnection, characterId: number, context: { eliteOrBossDefeats: number; playerPartySize: number }) => advanceActiveObservation(connection, characterId, row => {
-  if (row.observation_type === 'behavior' || row.observation_type === 'containment') return context.eliteOrBossDefeats;
-  if (row.observation_type === 'adaptation') return 1;
-  if (row.observation_type === 'resonance') return context.playerPartySize >= 2 ? Number(row.target_count) : 1;
-  return 0;
-});
+export const advanceEvolutionObservationBattle = async (connection: PoolConnection, characterId: number, context: { eliteOrBossDefeats: number; playerPartySize: number }) => {
+  const result = await advanceActiveObservation(connection, characterId, row => {
+    if (row.observation_type === 'behavior' || row.observation_type === 'containment') return context.eliteOrBossDefeats;
+    if (row.observation_type === 'adaptation') return 1;
+    if (row.observation_type === 'resonance') return context.playerPartySize >= 2 ? Number(row.target_count) : 1;
+    return 0;
+  });
+  if (result?.type === 'resonance' && context.playerPartySize >= 2) {
+    const [profiles] = await connection.execute<(RowDataPacket & { lineage_marks_json: unknown })[]>(`SELECT lineage_marks_json FROM player_evolution_profiles WHERE character_id=? FOR UPDATE`, [characterId]);
+    if (profiles[0]) {
+      const marks = jsonStringObject(profiles[0].lineage_marks_json); marks.mutationObservationGroupDate = Number(businessDate().replace(/-/g, ''));
+      await connection.execute('UPDATE player_evolution_profiles SET lineage_marks_json=?,updated_at=NOW() WHERE character_id=?', [JSON.stringify(marks), characterId]);
+    }
+  }
+  return result;
+};
 
 export const advanceEvolutionObservationMining = (connection: PoolConnection, characterId: number) => advanceActiveObservation(connection, characterId, row => row.observation_type === 'sample' ? 1 : 0);
 
@@ -417,11 +475,33 @@ export const claimEvolutionObservation = async (qqUserId: string) => withTransac
   if (!row) throw new Error('没有可提交的观察记录。');
   if (row.status !== 'completed') throw new Error(`观察尚未完成：${row.objective_text}（${row.progress}/${row.target_count}）。`);
   const items = jsonObject(row.reward_json);
-  for (const [code, quantity] of Object.entries(items)) await addItem(connection, Number(character.id), code, quantity);
+  const codes = Object.keys(items);
+  const [ordinaryRows] = codes.length
+    ? await connection.execute<(RowDataPacket & { code: string; item_type: string; rarity: string })[]>(`SELECT code,item_type,rarity FROM item_definitions WHERE code IN (${codes.map(() => '?').join(',')})`, codes)
+    : [[] as (RowDataPacket & { code: string; item_type: string; rarity: string })[]];
+  const ordinaryCodes = new Set(ordinaryRows.filter(item => item.item_type === 'material' && item.rarity === '普通').map(item => String(item.code)));
+  const [mutationRows] = await connection.execute<(RowDataPacket & { mutation_code: string })[]>(`SELECT mutation_code FROM player_mutations WHERE character_id=? AND mutation_state IN ('stable','deviation','rare')`, [character.id]);
+  const mutationCodes = new Set(mutationRows.map(item => String(item.mutation_code)));
+  const lineageMarks = jsonStringObject(profile.lineage_marks_json);
+  let remainder = Math.max(0, Number(lineageMarks.mutationObservationRemainder ?? 0));
+  const ordinaryBonusPct = (mutationCodes.has('mutation_organ_stable_14') ? 5 : 0)
+    + (mutationCodes.has('mutation_organ_rare_3') && evolutionShanghaiNight() ? 10 : 0)
+    + (mutationCodes.has('mutation_organ_rare_5') && row.observation_type === 'resonance' && Number(lineageMarks.mutationObservationGroupDate ?? 0) === Number(key.replace(/-/g, '')) ? 8 : 0);
+  const grantedItems: Record<string, number> = {};
+  for (const [code, rawQuantity] of Object.entries(items)) {
+    const baseQuantity = Math.max(0, Math.floor(Number(rawQuantity)));
+    const exactQuantity = ordinaryCodes.has(code) && ordinaryBonusPct ? baseQuantity * (1 + ordinaryBonusPct / 100) + remainder : baseQuantity;
+    const quantity = Math.max(0, Math.floor(exactQuantity));
+    if (ordinaryCodes.has(code) && ordinaryBonusPct) remainder = Math.max(0, exactQuantity - quantity);
+    if (!quantity) continue;
+    await addItem(connection, Number(character.id), code, quantity);
+    grantedItems[code] = quantity;
+  }
+  lineageMarks.mutationObservationRemainder = remainder;
   await connection.execute("UPDATE player_evolution_observations SET status='claimed',claimed_at=NOW(),updated_at=NOW() WHERE id=?", [row.id]);
-  await connection.execute('UPDATE player_evolution_profiles SET daily_key=?,daily_claims=?,updated_at=NOW() WHERE character_id=?', [key, claimed + 1, character.id]);
-  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'evolution.observation_claimed',source:{system:'evolution_observation',id:Number(row.id),step:'claimed'},outcome:'领取',summary:`交付${observationDefinitions[row.observation_type].name}并领取报酬`,detail:{observationId:Number(row.id),type:row.observation_type,rewards:items}});
-  return { name: observationDefinitions[row.observation_type].name, items, remaining: Math.max(0, 1 - claimed) };
+  await connection.execute('UPDATE player_evolution_profiles SET daily_key=?,daily_claims=?,lineage_marks_json=?,updated_at=NOW() WHERE character_id=?', [key, claimed + 1, JSON.stringify(lineageMarks), character.id]);
+  await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'evolution.observation_claimed',source:{system:'evolution_observation',id:Number(row.id),step:'claimed'},outcome:'领取',summary:`交付${observationDefinitions[row.observation_type].name}并领取报酬`,detail:{observationId:Number(row.id),type:row.observation_type,rewards:grantedItems,ordinaryBonusPct}});
+  return { name: observationDefinitions[row.observation_type].name, items: grantedItems, remaining: Math.max(0, 1 - claimed) };
 });
 
 const mutationFor = async (connection: PoolConnection, characterId: number, mutationId: number, lock = false) => {
@@ -453,17 +533,28 @@ export const stabilizeMutation = async (qqUserId: string, mutationId: number) =>
   const character = await characterFor(connection, qqUserId, true); const profile = await ensureEvolutionProfile(connection, character, true);
   if (!profile) throw new Error('研究室尚未向你开放。');
   const mutation = await mutationFor(connection, Number(character.id), mutationId, true);
-  if (!['deviation', 'paused'].includes(mutation.mutation_state)) throw new Error('只有偏差型变异需要稳定处理。');
+  const configured = mutationByCode.get(mutation.mutation_code);
+  const hasClearableNegative = Boolean(configured && Object.keys(configured.negativeEffect).some(key => Number(jsonObject(mutation.effect_json)[key] ?? 0) < 0));
+  if (!['deviation', 'paused'].includes(mutation.mutation_state) && !hasClearableNegative) throw new Error('这份变异没有可清除的附带负面。');
   const [occupied] = await connection.execute<(RowDataPacket & { id: number })[]>(`SELECT id FROM player_mutations WHERE character_id=? AND body_part=? AND mutation_state IN ('stable','rare') AND id<>? LIMIT 1 FOR UPDATE`, [character.id, mutation.body_part, mutation.id]);
   if (occupied[0]) throw new Error(`${bodyPartNames[mutation.body_part]}已有稳定观测，请先封存其中一项。`);
   await consumeItems(connection, Number(character.id), { evolution_stable_medium: 2 });
-  const stabilizedEffect = Object.fromEntries(Object.entries(jsonObject(mutation.effect_json)).filter(([, value]) => Number(value) > 0));
-  await connection.execute(`UPDATE player_mutations SET mutation_state='stable',effect_json=?,description=?,updated_at=NOW() WHERE id=?`, [JSON.stringify(stabilizedEffect), `经稳定介质校正后的${mutation.mutation_name}。它保留可利用的表型，不再携带偏差代价。`, mutation.id]);
+  const stabilizedEffect = configured ? configured.effect : Object.fromEntries(Object.entries(jsonObject(mutation.effect_json)).filter(([, value]) => Number(value) > 0));
+  const stabilizedDescription = configured ? `${configured.description.replace(/负面：[^。]+。?$/, '负面：无。')}（已稳定，附带负面已消除）` : `经稳定介质校正后的${mutation.mutation_name}。它保留可利用的表型，不再携带偏差代价。`;
+  const nextState = mutation.mutation_state === 'rare' ? 'rare' : 'stable';
+  await connection.execute(`UPDATE player_mutations SET mutation_state=?,effect_json=?,description=?,updated_at=NOW() WHERE id=?`, [nextState, JSON.stringify(stabilizedEffect), stabilizedDescription, mutation.id]);
+  const lineageMarks = jsonStringObject(profile.lineage_marks_json);
+  const reverseEntropyRefund = configured?.code === 'mutation_organ_rare_6' && !lineageMarks.mutation_reverse_entropy_used;
+  if (reverseEntropyRefund) {
+    lineageMarks.mutation_reverse_entropy_used = 1;
+    await addItem(connection, Number(character.id), 'evolution_stable_medium', 1);
+    await connection.execute('UPDATE player_evolution_profiles SET lineage_marks_json=? WHERE character_id=?', [JSON.stringify(lineageMarks), character.id]);
+  }
   const pressure = clamp(Number(profile.adaptation_pressure) - 1, 0, 8); const stability = clamp(Number(profile.stability) + 10, 0, 100);
   await connection.execute(`UPDATE player_evolution_profiles SET adaptation_pressure=?,stability=?,updated_at=NOW() WHERE character_id=?`, [pressure, stability, character.id]);
   const [mutationEvent]=await connection.execute<ResultSetHeader>(`INSERT INTO player_events (player_id,event_type,payload) SELECT player_id,'evolution.mutation_stabilized',? FROM characters WHERE id=?`, [JSON.stringify({ mutationId, code: mutation.mutation_code }), character.id]);
   await recordCharacterOperation(connection,{characterId:Number(character.id),kind:'evolution.mutation_stabilized',existingEventId:Number(mutationEvent.insertId),source:{system:'player_mutations',id:mutationId,step:'stabilized'},outcome:'稳定',summary:`稳定变异「${mutation.mutation_name}」`,detail:{mutationId,mutationCode:mutation.mutation_code,mutationName:mutation.mutation_name,spentStableMedium:2,pressure,stability}});
-  return { characterId: Number(character.id), name: mutation.mutation_name, pressure, stability };
+  return { characterId: Number(character.id), name: mutation.mutation_name, pressure, stability, reverseEntropyRefund: Boolean(reverseEntropyRefund) };
 });
 
 /** 封存只是停止当前效果，记录会保留在档案中，永不删除角色的演化历史。 */

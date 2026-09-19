@@ -19,7 +19,6 @@ const bookshopFormat = async (user: string, text?: string, chatting = false) => 
   const markdown = Format.createMarkdown().addTitle('百纳镇·百味书屋').addNewline().addNewline().addText('【洛文·赫斯特】｜全知者 Lv.3').addNewline().addNewline().addBlockquote(text ?? scene());
   if (chatting) return Format.create().addMarkdown(markdown).addButtonGroup(Format.createButtonGroup().addRow().addButton('切磋', '/切磋 bookshop', { type: 'command', autoEnter: true, style: 'blue' }).addButton('继续闲聊', '/书屋闲聊', { type: 'command', autoEnter: true, style: 'blue' }));
   const buttons = Format.createButtonGroup()
-    .addRow().addButton('战技书目录', '/战技商店 bookshop', { type: 'command', autoEnter: false, style: 'blue' })
     .addRow().addButton('我要买', '/书屋购买', { type: 'command', autoEnter: true, style: 'blue' }).addButton('我要卖', '/书屋出售', { type: 'command', autoEnter: true, style: 'blue' })
     .addRow().addButton('切磋', '/切磋 bookshop', { type: 'command', autoEnter: true, style: 'blue' }).addButton('闲聊', '/书屋闲聊', { type: 'command', autoEnter: true, style: 'blue' }).addButton('关于 全知者', '/关于全知者', { type: 'command', autoEnter: true })
     .addRow().addButton('明鉴','/店铺全知者明鉴',{type:'command',autoEnter:true,style:'blue'}).addButton('识踪','/店铺全知者识踪',{type:'command',autoEnter:true,style:'blue'}).addButton('巧思','/店铺全知者巧思',{type:'command',autoEnter:true,style:'blue'})
@@ -36,7 +35,10 @@ const buyFormat = async (qqUserId: string, page = 1, keyword = '') => {
   const shop = await bookshopCatalog(qqUserId, page, keyword); const markdown = Format.createMarkdown().addTitle('百味书屋·购买').addNewline().addNewline().addBlockquote('洛文扶正老花镜，慈和地笑了笑：“知识不分年纪，也不该只躺在书架上。挑一本合眼缘的，慢慢读。”').addNewline().addNewline();
   if (!shop.items.length) markdown.addText('没有找到符合条件的书籍。');
   for (const [index, item] of shop.items.entries()) markdown.addText(`${'①②③④⑤'.charAt(index)}【${item.category}】`).addButton(item.name, { data: `/物品图鉴 ${item.codexId}`, autoEnter: false }).addText(' ').addButton('[购买]', { data: `/购买书屋物品 ${item.id} `, autoEnter: false }).addNewline().addBlockquote(`价格：铜币×${item.price}｜剩余：${item.stockQuantity}｜${item.ownedQuantity ? `已拥有${item.ownedQuantity}` : '未拥有'}`).addNewline().addBlockquote(`简介：${item.description}`).addNewline().addNewline();
-  markdown.addText(`当前第（${shop.page}/${shop.totalPages}）页｜持有铜币：${shop.copper}`); return Format.create().addMarkdown(markdown).addButtonGroup(pageButtons(shop.page, shop.totalPages, '书屋购买页', '书屋购买搜索', shop.keyword));
+  markdown.addText(`当前第（${shop.page}/${shop.totalPages}）页｜持有铜币：${shop.copper}`);
+  const buttons = pageButtons(shop.page, shop.totalPages, '书屋购买页', '书屋购买搜索', shop.keyword)
+    .addRow().addButton('购买技能书', '/战技商店 bookshop', { type: 'command', autoEnter: true, style: 'blue' });
+  return Format.create().addMarkdown(markdown).addButtonGroup(buttons);
 };
 const sellFormat = async (qqUserId: string, page = 1, keyword = '') => {
   const shop = await bookshopSellCatalog(qqUserId, page, keyword); const markdown = Format.createMarkdown().addTitle('百味书屋·出售').addNewline().addNewline().addBlockquote('洛文轻轻拂去柜台上的纸屑：“书籍、卷宗与手札我都收。它们或许会在下一位读者手里，继续找到新的答案。”').addNewline().addNewline();

@@ -1,6 +1,7 @@
 {
   "description": "template code",
   "devDependencies": {
+    "@alemonjs/app": "file:packages/app-platform",
     "@alemonjs/qq-bot": "^2.1.32",
     "@types/node": "^22",
     "alemonjs": "^2.1.95",
@@ -21,6 +22,7 @@
   },
   "scripts": {
     "app": "node index.js",
+    "server": "tsx app-server.ts",
     "admin:hash": "node scripts/create-admin-password-hash.mjs",
     "build": "lvy build",
     "dev": "lvy app.ts",

@@ -27,7 +27,7 @@ import { isInHome } from './home.service';
 import { isFriendRelation } from './social.service';
 import { directDamageVariance, strikeCorrections } from './combat-math';
 import { createPvpCombatRules } from './pvp-combat-rule-adapter';
-import { ruleStatusSummary, maskRuleBattleLog, readRuleState } from './combat-rule-registry';
+import { additivePercentFactor, ruleStatusSummary, maskRuleBattleLog, readRuleState } from './combat-rule-registry';
 import { residentSkillByCode } from './resident-skill.config';
 import { activeDeviceSkillByCode, combatDeviceSlotsFor, initializeCombatDeviceEnergy, restoreCombatDeviceEnergy, type ActiveDeviceSkill } from './device.service';
 import { isAdvancedProfessionSkillCode } from './advanced-profession.config';
@@ -529,8 +529,8 @@ const resolveAction = async (connection: PoolConnection, actor: PvpCharacter, ta
     if (context!.rule.passive(sourceUnit, 'G01')) attack = Math.max(sourceUnit.attack, sourceUnit.magic);
     const swap = skill && await context!.rule.consume(sourceUnit, magic ? 'swap_magic' : 'swap_physical');
     if (swap) attack = magic ? Math.min(sourceUnit.attack, sourceUnit.magic) : Math.max(sourceUnit.attack, sourceUnit.magic);
-    attack *= 1 + (context!.rule.statBonus(sourceUnit, [magic ? 'magic' : 'attack','battle_cry','power_surge']) - context!.rule.value(sourceUnit, magic ? 'magic_down' : 'attack_down')) / 100;
-    defense *= (1 - Math.min(80, context!.rule.value(targetUnit, magic ? 'magic_shatter' : 'armor_shatter')) / 100) * (1 + context!.rule.value(targetUnit, magic ? 'magic_defense' : 'defense') / 100);
+    attack *= additivePercentFactor(context!.rule.statBonus(sourceUnit, [magic ? 'magic' : 'attack','battle_cry','power_surge']) - context!.rule.value(sourceUnit, magic ? 'magic_down' : 'attack_down'));
+    defense *= additivePercentFactor(context!.rule.value(targetUnit, magic ? 'magic_defense' : 'defense'), context!.rule.value(targetUnit, magic ? 'magic_shatter' : 'armor_shatter'), -90, 250);
   }
   // 精准瞄准在“下次受到攻击”时失效；命中、暴击仅影响状态拥有者在这之前的出手。
   delete targetCooldowns?.device_precision_aim;
@@ -543,16 +543,16 @@ const resolveAction = async (connection: PoolConnection, actor: PvpCharacter, ta
   const deviceDamageBonus = isDeviceDamage ? (actorDevices.has('rail_stabilizer') ? 12 : 0) + (skill?.code === 'device_electromagnetic_coil_fire' && actorDevices.has('electromagnetic_coil_cannon') ? 12 : 0) : 0;
   const battleCryBonus = !sourceUnit && Number(actorCooldowns?.device_battle_cry ?? 0) > 0 ? 20 : 0;
   const accuracyBonus=sourceUnit?context!.rule.statBonus(sourceUnit,['accuracy','precision'])-context!.rule.value(sourceUnit,'accuracy_down'):(Number(actorCooldowns?.device_precision_aim??0)>0?100:0);
-  const accuracy = Number(actor.accuracy) * (1 + accuracyBonus / 100) * (1 + (isDeviceDamage && actorDevices.has('precision_scope') ? .1 : 0));
-  const evasion = Number(target.evasion) * (1 - (Number(targetCooldowns?.device_evasion_down ?? 0) > 0 ? .3 : 0));
+  const accuracy = Number(actor.accuracy) * additivePercentFactor(accuracyBonus + (isDeviceDamage && actorDevices.has('precision_scope') ? 10 : 0));
+  const evasion = Number(target.evasion) * additivePercentFactor(0, Number(targetCooldowns?.device_evasion_down ?? 0) > 0 ? 30 : 0);
   const critRate = Math.max(Number(actor.crit_rate_bp), Number(actorCooldowns?.device_precision_aim ?? 0) > 0 ? 10000 : 0, !magic && actorDevices.has('critical_glove') ? 10000 : 0);
   const setup = sourceUnit && targetUnit ? await context!.rule.attackSetup(sourceUnit, targetUnit, Boolean(magic), Boolean(skill)) : { forceHit: false, powerFactor: 1, hitBonus: 0, hitFactor: 1 };
   const armorSets = sourceUnit && targetUnit ? undefined : await armorSetsFor(connection,[Number(actor.id),Number(target.id)]);
-  const strike = resolveFolioStrike(context?.rule, sourceUnit, targetUnit, Boolean(magic), attack * (skill ? skill.power / 100 : 1) * (1 + (deviceDamageBonus + battleCryBonus) / 100), defense, accuracy, evasion*(1+(targetUnit?context!.rule.value(targetUnit,'evasion')-context!.rule.value(targetUnit,'evasion_down'):0)/100), critRate*(1+(sourceUnit?context!.rule.value(sourceUnit,'crit_bonus'):0)/100), Number(target.crit_resist_bp), Number(actor.crit_damage_bp), Number(target.crit_damage_reduction_bp), setup.forceHit, false, 0, setup.hitBonus * 100, setup.hitFactor, strikeCorrections(sourceUnit ?? {armorSet:armorSets?.get(Number(actor.id))},targetUnit ?? {armorSet:armorSets?.get(Number(target.id))}));
+  const strike = resolveFolioStrike(context?.rule, sourceUnit, targetUnit, Boolean(magic), attack * (skill ? skill.power / 100 : 1) * additivePercentFactor(deviceDamageBonus + battleCryBonus), defense, accuracy, evasion * additivePercentFactor(targetUnit ? context!.rule.value(targetUnit,'evasion') : 0, targetUnit ? context!.rule.value(targetUnit,'evasion_down') : 0), critRate * additivePercentFactor(sourceUnit ? context!.rule.value(sourceUnit,'crit_bonus') : 0), Number(target.crit_resist_bp), Number(actor.crit_damage_bp), Number(target.crit_damage_reduction_bp), setup.forceHit, false, 0, setup.hitBonus * 100, setup.hitFactor, strikeCorrections(sourceUnit ?? {armorSet:armorSets?.get(Number(actor.id))},targetUnit ?? {armorSet:armorSets?.get(Number(target.id))}));
   if (!strike.hit) { await recordPvpAttack(connection, actor, target, label, 0, 'miss'); return { text: `【${actor.name}】${label}，但【${target.name}】闪避了攻击。`, defeated: false }; }
   const exposed = Number(targetCooldowns?.device_exposed ?? 0) > 0 ? .15 : 0; const barrier = Number(targetCooldowns?.device_barrier ?? 0) > 0 ? .15 : 0; const phase = Number(targetCooldowns?.device_phase_decoy ?? 0) > 0 ? .8 : 0;
   if (phase) delete targetCooldowns!.device_phase_decoy;
-  const [elementRows]=skill&&skill.id>0?await connection.execute<RowDataPacket[]>('SELECT element FROM skill_definitions WHERE id=?',[skill.id]):[[] as RowDataPacket[]];
+  const [elementRows]=skill&&skill.id>0?await connection.execute<(RowDataPacket & { element: string; range_type: string; target_scope: string })[]>('SELECT element,range_type,target_scope FROM skill_definitions WHERE id=?',[skill.id]):[[] as RowDataPacket[]];
   const [weaponRows]=!skill?await connection.execute<RowDataPacket[]>(`SELECT COALESCE(ii.effect_json,i.effect_json) AS effect_json
     FROM player_equipment pe JOIN item_definitions i ON i.id=pe.item_id
     LEFT JOIN player_item_instances ii ON ii.id=pe.instance_id AND ii.character_id=pe.character_id
@@ -560,7 +560,9 @@ const resolveAction = async (connection: PoolConnection, actor: PvpCharacter, ta
   const element=resolveDirectAttackElement({skill:Boolean(skill),skillElement:skill?.element ?? elementRows[0]?.element,weaponElement:record(weaponRows[0]?.effect_json).element,cardElement:sourceCardEffects.attackElement});
   const cardElementDamage = cardElementDamageMultiplier(sourceCardEffects, element);
   const cardReduction = sourceUnit && targetUnit ? 1 : cardIncomingDamageMultiplier(targetCardEffects, Boolean(magic), element);
-  let damage = directDamageVariance(Math.max(1, Math.floor(strike.damage * (skill?.specialized?.damageFactor ?? 1) * (1 + exposed) * (1 - barrier) * (1 - phase) * setup.powerFactor * cardElementDamage * cardReduction * (sourceUnit&&targetUnit?context!.rule.elementFactor(sourceUnit,targetUnit,element):1))));
+  const rangedBonus = sourceUnit && String(elementRows[0]?.range_type ?? '') === '远程' ? Number(sourceUnit.modifiers?.rangedSkillDamagePct ?? 0) / 100 : 0;
+  const aoeBonus = sourceUnit && String(elementRows[0]?.target_scope ?? '') === '全体' ? Number(sourceUnit.modifiers?.aoeSkillDamagePct ?? 0) / 100 : 0;
+  let damage = directDamageVariance(Math.max(1, Math.floor(strike.damage * (1 + rangedBonus + aoeBonus) * (skill?.specialized?.damageFactor ?? 1) * additivePercentFactor(exposed * 100, barrier * 100 + phase * 100) * setup.powerFactor * cardElementDamage * cardReduction * (sourceUnit&&targetUnit?context!.rule.elementFactor(sourceUnit,targetUnit,element):1))));
   if (sourceUnit && targetUnit) { damage = await context!.rule.incoming(sourceUnit, targetUnit, damage, element, Boolean(magic), Boolean(skill), true, true); const absorbed = await context!.rule.take(targetUnit, damage); await context!.rule.afterHit(sourceUnit, targetUnit, damage - absorbed, element, Boolean(skill), absorbed, Boolean(actorCooldowns?.__extraTurn), Boolean(magic)); }
   const hp = targetUnit ? targetUnit.hp : Math.max(0, Number(target.current_hp) - damage); const defeated = hp <= 0; const critText = strike.crit ? '暴击' : '';
   if (context && (defeated || Number(actor.current_hp) <= 0)) { target.current_hp = hp; await recordPvpAttack(connection, actor, target, label, damage, 'defeat'); return { text: `【${actor.name}】${label}，造成 ${damage} 点伤害。`, defeated: true }; }
@@ -864,7 +866,7 @@ export const pvpCombatAction = async (qqUserId: string, type: 'attack' | 'skill'
       }
       const blocked = context.rule.status(unit, 'silence') || residentSkillByCode(rawAction.code)?.category === 'passive';
       if (blocked) { if (!turn.automatic) throw new Error('沉默期间不能使用技能，或所选技能为被动。'); rawAction = { type: 'attack' }; }
-      else rawAction = { ...rawAction, manaCost: context.rule.manaCost(unit, Math.ceil(rawAction.manaCost * (unit.state.memory.debtSkill === rawAction.code ? 1.4 : 1))) };
+      else rawAction = { ...rawAction, manaCost: context.rule.manaCost(unit, Math.ceil(rawAction.manaCost * (unit.state.memory.debtSkill === rawAction.code ? 1.4 : 1)), rawAction.code) };
     }
     let hiddenExecuted = false;
     if (rawAction?.type === 'skill' && isHiddenSkill(rawAction.code)) {

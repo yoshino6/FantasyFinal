@@ -9,7 +9,7 @@ import { messageFormat } from '../game/message';
 import { durationText } from '../game/time-format';
 
 const fail = async (message: any, error: unknown, title = '二转试炼') => message.send({ format: messageFormat(title, error instanceof Error ? error.message : '请稍后重试。') });
-const baseName = (code: string) => ({ warrior: '战士', mage: '法师', rogue: '盗贼', priest: '牧师' } as Record<string, string>)[code] ?? code;
+const baseName = (code: string) => ({ warrior: '战士', mage: '法师', rogue: '盗贼', priest: '牧师', archer: '射手' } as Record<string, string>)[code] ?? code;
 
 /** 初见导师只给出社交入口；职业说明和任务进度均通过独立按键进入。 */
 export const advancedMentorFormat = async (qqUserId: string, mentorCode: string) => {

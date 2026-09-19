@@ -11,7 +11,7 @@ export const opposedCritBonus = (critDamage: number, critReduction: number) => {
 };
 
 export type StrikeCorrections = { hitCorrectionPct?: number; evasionCorrectionPct?: number; critRateCorrectionPct?: number; critAvoidanceCorrectionPct?: number; critDamageCorrectionPct?: number; actualHitRatePct?: number; actualCritRatePct?: number };
-export type StrikeCorrectionSource = StrikeCorrections & { armorSet?: StrikeCorrections | null; cardEffects?: StrikeCorrections | null };
+export type StrikeCorrectionSource = StrikeCorrections & { armorSet?: StrikeCorrections | null; cardEffects?: StrikeCorrections | null; modifiers?: StrikeCorrections | null };
 const correctionRate = (value = 0) => Math.max(0,Math.min(100,value))/100;
 const combineCorrectionPct = (...values: Array<number | undefined>) => (1-values.reduce<number>((remaining,value)=>remaining*(1-correctionRate(value)),1))*100;
 /** 对抗概率先结算其余修正，再补足未命中部分，最后由防守方削减命中率。 */
@@ -33,30 +33,29 @@ export const correctedCritChance = (chance: number, correction: StrikeCorrection
 };
 export const correctedCritBonus = (bonus: number, correction: StrikeCorrections = {}) => bonus*(1-correctionRate(correction.critDamageCorrectionPct));
 export const strikeCorrections = (source?: StrikeCorrectionSource, target?: StrikeCorrectionSource): StrikeCorrections => ({
-  hitCorrectionPct:combineCorrectionPct(source?.armorSet?.hitCorrectionPct,source?.hitCorrectionPct,source?.cardEffects?.hitCorrectionPct),
-  evasionCorrectionPct:combineCorrectionPct(target?.armorSet?.evasionCorrectionPct,target?.evasionCorrectionPct,target?.cardEffects?.evasionCorrectionPct),
-  critRateCorrectionPct:combineCorrectionPct(source?.armorSet?.critRateCorrectionPct,source?.critRateCorrectionPct,source?.cardEffects?.critRateCorrectionPct),
-  critAvoidanceCorrectionPct:combineCorrectionPct(target?.armorSet?.critAvoidanceCorrectionPct,target?.critAvoidanceCorrectionPct,target?.cardEffects?.critAvoidanceCorrectionPct),
-  critDamageCorrectionPct:combineCorrectionPct(target?.armorSet?.critDamageCorrectionPct,target?.critDamageCorrectionPct,target?.cardEffects?.critDamageCorrectionPct),
+  hitCorrectionPct:combineCorrectionPct(source?.armorSet?.hitCorrectionPct,source?.hitCorrectionPct,source?.modifiers?.hitCorrectionPct,source?.cardEffects?.hitCorrectionPct),
+  evasionCorrectionPct:combineCorrectionPct(target?.armorSet?.evasionCorrectionPct,target?.evasionCorrectionPct,target?.modifiers?.evasionCorrectionPct,target?.cardEffects?.evasionCorrectionPct),
+  critRateCorrectionPct:combineCorrectionPct(source?.armorSet?.critRateCorrectionPct,source?.critRateCorrectionPct,source?.modifiers?.critRateCorrectionPct,source?.cardEffects?.critRateCorrectionPct),
+  critAvoidanceCorrectionPct:combineCorrectionPct(target?.armorSet?.critAvoidanceCorrectionPct,target?.critAvoidanceCorrectionPct,target?.modifiers?.critAvoidanceCorrectionPct,target?.cardEffects?.critAvoidanceCorrectionPct),
+  critDamageCorrectionPct:combineCorrectionPct(target?.armorSet?.critDamageCorrectionPct,target?.critDamageCorrectionPct,target?.modifiers?.critDamageCorrectionPct,target?.cardEffects?.critDamageCorrectionPct),
   actualHitRatePct:Number(source?.armorSet?.actualHitRatePct??0)+Number(source?.actualHitRatePct??0)+Math.min(12,Math.max(0,Number(source?.cardEffects?.actualHitRatePct??0))),
   actualCritRatePct:Number(source?.armorSet?.actualCritRatePct??0)+Number(source?.actualCritRatePct??0)+Math.min(12,Math.max(0,Number(source?.cardEffects?.actualCritRatePct??0)))
 });
 
 /** 首领承受控制时的命中系数，技能与药剂共用。 */
 export const bossControlChanceMultiplier = .4;
-/** 技能负面状态按破韧与韧性对抗；命中、暴击只参与直击结算。 */
-export const tenacityContest = (tenacityPierce: number, targetTenacity: number, levelDifference: number, baseChancePct: number, positiveCorrectionPct = 0) => {
+/** 技能负面状态按破韧与韧性对抗；命中、暴击只参与直击结算。等级差参数仅为兼容旧调用保留，不再参与计算。 */
+export const tenacityContest = (tenacityPierce: number, targetTenacity: number, _levelDifference: number, baseChancePct: number, positiveCorrectionPct = 0) => {
   const pierce = Math.max(0, Number(tenacityPierce));
   const tenacity = Math.max(0, Number(targetTenacity));
   // 同级破韧等于韧性时 K=1；更高破韧不再提高本次状态效果。
   const opposedCoefficient = Math.min(1, 2 * pierce / Math.max(1, pierce + tenacity));
   const coefficient = opposedCoefficient + (1 - opposedCoefficient) * correctionRate(positiveCorrectionPct);
-  const levelMultiplier = levelDifference >= 0 ? Math.pow(1.1, levelDifference) : Math.pow(.9, -levelDifference);
   return {
     coefficient,
     harmfulMultiplier: .5 + coefficient * .5,
-    damageOverTimeMultiplier: Math.min(1, coefficient * levelMultiplier),
-    controlChance: Math.min(1, Number(baseChancePct) / 100 * coefficient * levelMultiplier)
+    damageOverTimeMultiplier: Math.min(1, coefficient),
+    controlChance: Math.min(1, Number(baseChancePct) / 100 * coefficient)
   };
 };
 

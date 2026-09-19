@@ -23,7 +23,7 @@ const object = (value: unknown): Record<string,unknown> => {
   try {const parsed=JSON.parse(String(value??'{}'));return parsed && typeof parsed==='object' && !Array.isArray(parsed)?parsed:{};} catch {return {};}
 };
 
-const baseCodes: Record<string,string> = { '战士':'warrior','法师':'mage','盗贼':'rogue','牧师':'priest' };
+const baseCodes: Record<string,string> = { '战士':'warrior','法师':'mage','盗贼':'rogue','牧师':'priest','射手':'archer' };
 const slotNames: Record<string,string> = { '头肩':'shoulder','上装':'upper','腰部':'waist','下装':'lower','脚部':'feet' };
 const equipmentProfiles: Record<string,{set:string;weapons:string[]}> = {
   warrior:{set:'valk_forge_regalia',weapons:['epic_zhenling_longsword','epic_mountaingate_shield']},

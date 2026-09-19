@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>幻想桌宠</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="world">
+  <div class="moon"></div>
+  <div class="stars" id="stars"></div>
+  <div class="ridge">
+    <svg viewBox="0 0 1440 200" preserveAspectRatio="none">
+      <path d="M0,200 L0,150 C240,96 420,60 660,104 C900,148 1120,40 1440,118 L1440,200 Z" fill="#3b3060" opacity="0.55"/>
+      <path d="M0,200 L0,178 C320,120 620,150 900,128 C1160,108 1320,148 1440,128 L1440,200 Z" fill="#2c2450" opacity="0.8"/>
+    </svg>
+  </div>
+  <div class="island"></div>
+  <div class="tree t1"><div class="leaf"></div><div class="trunk"></div></div>
+  <div class="tree t2"><div class="leaf"></div><div class="trunk"></div></div>
+</div>
+
+<div class="conn" id="conn"><span class="dot"></span><span id="connText">正在连接后端…</span></div>
+
+<div class="pet-zone">
+  <div class="pet" id="pet">
+    <div class="pet-tag">小梦</div>
+    <img class="pet-img" src="pet.svg" alt="桌宠">
+    <div class="shadow"></div>
+  </div>
+</div>
+
+<div class="bubble" id="bubble" style="display:none"></div>
+
+<div class="quick" id="quickBar"></div>
+
+<div class="overlay" id="chatOverlay" style="display:none">
+  <div class="sheet">
+    <div class="grip"></div>
+    <div class="row">
+      <textarea id="commandInput" placeholder="和小梦说点什么… 例如 /角色" rows="1"></textarea>
+      <button class="send" id="sendBtn">发送</button>
+    </div>
+    <div class="hint">输入命令发送给幻想世界，例如 /角色、/背包、/探索</div>
+  </div>
+</div>
+
+<div class="welcome" id="welcome">
+  <img class="logo" src="pet.svg" alt="幻想桌宠">
+  <h1>幻想桌宠</h1>
+  <div class="sub">异世界的旅伴 · 随时陪在你身边</div>
+  <div class="card">
+    <div class="tabs">
+      <button id="tabNew" class="active">新建旅伴</button>
+      <button id="tabBind">绑定角色</button>
+    </div>
+    <div class="field">
+      <label for="wName">旅伴昵称</label>
+      <input id="wName" maxlength="32" placeholder="给小梦起个名字">
+    </div>
+    <div class="field" id="bindField" style="display:none">
+      <label for="wCode">绑定码（6 位）</label>
+      <input id="wCode" maxlength="6" inputmode="numeric" placeholder="QQ 里发送 /App绑定 获取">
+    </div>
+    <button class="primary" id="wGo">开始旅程</button>
+    <div class="error" id="wErr"></div>
+  </div>
+  <button class="setting-link" id="openSettings">⚙ 服务器设置</button>
+</div>
+
+<div class="modal" id="settingsModal">
+  <div class="box">
+    <h3>服务器设置</h3>
+    <div class="field">
+      <label for="apiInput">后端地址</label>
+      <input id="apiInput" placeholder="http://127.0.0.1:17117">
+    </div>
+    <div class="actions">
+      <button class="ghost" id="cancelSettings">取消</button>
+      <button class="save" id="saveSettings">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

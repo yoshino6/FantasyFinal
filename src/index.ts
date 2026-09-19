@@ -10,8 +10,14 @@ import { refreshShopStocks } from './game/shop-stock.service';
 import { refreshDungeons } from './game/dungeon.service';
 import { installGroupReplyMention } from './middleware/group-reply-mention';
 import { registerAdminWebRoutes } from './admin-web/router';
+import { registerAppApiRoutes } from './app-api/router';
 import { startAdminWebServer } from './admin-web/server';
+import { startAppApiServer } from './app-api/server';
 import { evaluateMonitoring, runMonitoredJob } from './game/monitor.service';
+
+// 桌宠 App 后台开关：AlemonJS 会按所选 login 设置 process.env.login，
+// 只有 login=app 时才启动桌宠 App 网关，其他平台（如 qq-bot）不加载。
+const isAppMode = () => process.env.login === 'app';
 
 installGroupReplyMention();
 
@@ -27,6 +33,10 @@ r.get('/api/ping', (ctx) => {
   ctx.body = 'pong';
 });
 registerAdminWebRoutes(r);
+if (isAppMode()) {
+  // App 独立进程专属路由：仅桌宠 App 模式注册，避免 QQ 模式暴露 App 网关。
+  registerAppApiRoutes(r);
+}
 
 const router = Router.create({
   events: ['message.create', 'private.message.create', 'interaction.create', 'private.interaction.create']
@@ -95,6 +105,7 @@ appGroup.use({ path: '恩赐分页', schema: { usage: '/恩赐分页 <神器|天
 appGroup.use({ path: '恩赐搜索', schema: { usage: '/恩赐搜索 <神器|天赋> <关键词>', args: [{ name: 'category', rules: [{ required: true, type: 'enum', enum: ['神器', '天赋'] }] }, { name: 'keyword', rules: [{ required: true, type: 'rest' }] }] } }, () => import('./response/gift-catalog').then(module => ({ default: module.giftSearchHandler })))
 appGroup.use({ path: '选择恩赐', schema: { usage: '/选择恩赐 <代号>', args: [{ name: 'gift', rules: [{ required: true, type: 'string' }] }] } }, () => import('./response/gift-select'))
 appGroup.use('冒险者登记', () => import('./response/adventurer-register'))
+appGroup.use('App绑定', () => import('./response/app-bind'))
 appGroup.use('角色', () => import('./response/character'))
 appGroup.use({ path: '行迹', schema: { usage: '/行迹 [游标]', args: [{ name: 'cursor', rules: [{ type: 'number', min: 1 }] }] } }, () => import('./response/character-operation').then(module => ({ default: module.characterOperationsHandler })))
 appGroup.use({ path: '行迹详情', schema: { usage: '/行迹详情 <编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/character-operation').then(module => ({ default: module.characterOperationDetailHandler })))
@@ -656,8 +667,8 @@ appGroup.use('商店闲聊', () => import('./response/guild-shop').then(module =
 appGroup.use({ path: '接取悬赏', schema: { usage: '/接取悬赏 <编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/bounty').then(module => ({ default: module.acceptBountyHandler })))
 appGroup.use({ path: '领取悬赏', schema: { usage: '/领取悬赏 <编号>', args: [{ name: 'id', rules: [{ required: true, type: 'number', min: 1 }] }] } }, () => import('./response/bounty').then(module => ({ default: module.claimBountyHandler })))
 appGroup.use('职业选择', () => import('./response/adventure').then(module => ({ default: module.professionHandler('select') })))
-appGroup.use({ path: '职业查看', schema: { usage: '/职业查看 <职业>', args: [{ name: 'name', rules: [{ required: true, type: 'enum', enum: ['战士', '法师', '盗贼', '牧师'] }] }] } }, () => import('./response/adventure').then(module => ({ default: module.professionHandler('detail') })))
-appGroup.use({ path: '选择职业', schema: { usage: '/选择职业 <职业>', args: [{ name: 'name', rules: [{ required: true, type: 'enum', enum: ['战士', '法师', '盗贼', '牧师'] }] }] } }, () => import('./response/adventure').then(module => ({ default: module.professionHandler('choose') })))
+appGroup.use({ path: '职业查看', schema: { usage: '/职业查看 <职业>', args: [{ name: 'name', rules: [{ required: true, type: 'enum', enum: ['战士', '法师', '盗贼', '牧师', '射手'] }] }] } }, () => import('./response/adventure').then(module => ({ default: module.professionHandler('detail') })))
+appGroup.use({ path: '选择职业', schema: { usage: '/选择职业 <职业>', args: [{ name: 'name', rules: [{ required: true, type: 'enum', enum: ['战士', '法师', '盗贼', '牧师', '射手'] }] }] } }, () => import('./response/adventure').then(module => ({ default: module.professionHandler('choose') })))
 appGroup.use('前台闲聊', () => import('./response/adventure').then(module => ({ default: module.guildChatHandler })))
 appGroup.use('卡片', () => import('./response/adventure').then(module => ({ default: module.adventurerCardHandler })))
 appGroup.use({ path: '梨子喵预览', schema: { usage: '/梨子喵预览 [图片URL]', args: [{ name: 'url', rules: [{ type: 'rest' }] }] } }, () => import('./response/adventure').then(module => ({ default: module.pearGuidePreviewHandler })))
@@ -729,6 +740,11 @@ export default defineChildren({
     void startAdminWebServer().catch(error => {
       logger.error(error, '管理后台启动失败');
     });
+    if (isAppMode()) {
+      void startAppApiServer().catch(error => {
+        logger.error(error, 'App 网关启动失败');
+      });
+    }
     void runMonitoredJob('system.startup.initialize', async () => {
       const pool = await getPool();
       // 重启时保留所有现有小怪坐标，只补足缺失数量；整点任务才执行完整数量校正与 Boss 刷新。
